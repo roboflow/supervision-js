@@ -1,5 +1,5 @@
 import type { MaskDrawInstruction } from "#types/mask-style";
-import { decodeCompressedRleMask } from "#utils/detection-frames";
+import { decodeDetectionMask } from "#utils/detection-frames";
 
 export const MAX_ID_MASK_PALETTE_ENTRIES = 64;
 export const MAX_ID_MASK_STROKE_WIDTH = 16;
@@ -75,7 +75,7 @@ export function createIdMaskFrame(
       );
     }
 
-    const decodedMask = decodeCompressedRleMask(instruction.mask);
+    const decodedMask = decodeDetectionMask(instruction.mask);
 
     for (let y = 0; y < decodedMask.height; y += 1) {
       for (let x = 0; x < decodedMask.width; x += 1) {

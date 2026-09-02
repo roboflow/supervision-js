@@ -210,8 +210,12 @@ const expectedReactNativeRuntimeExports = [
   "createReactNativePreparedFramePacket",
   "createReactNativeVideoFrameSource",
   "decodeCompressedRleMask",
+  "decodeDenseBitmapMask",
+  "decodeDetectionMask",
   "getReactNativeVideoFilePlatformAvailability",
   "isReactNativeLiveIdMaskNativeBuilderAvailable",
+  "isSyncMediaFrameProcessor",
+  "isSyncMediaRendererAdapter",
   "loadReactNativeLiveIdMaskNativeBuilder",
   "normalizeDetectionClassName",
   "pickDetectionAtPoint",
@@ -405,7 +409,9 @@ test("built React Native subpath entries ship and resolve", async () => {
     "EXECUTORCH_COCO_SKELETON_EDGES",
     "createDetectionFrameFromExecutorchCocoPoses",
     "createExecutorchLivePoseProcessor",
+    "createExecutorchLivePoseProducer",
     "createExecutorchLiveSegmentationProcessor",
+    "createExecutorchLiveSegmentationProducer",
     "createExecutorchPoseKeypointInstructions",
     "createExecutorchVideoFrameSerializer",
     "unrotateExecutorchUpBbox",
@@ -429,6 +435,8 @@ test("built React Native subpath entries ship and resolve", async () => {
     "MediaSessionMode",
     "MediaSessionStatus",
     "createMediaSession",
+    "isSyncMediaFrameProcessor",
+    "isSyncMediaRendererAdapter",
   ]);
 
   // The legacy Skia and sessions entries require optional native peers, so

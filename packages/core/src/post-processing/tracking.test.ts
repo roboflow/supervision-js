@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DetectionMaskEncoding } from "../types/detections";
+import {
+  DetectionMaskEncoding,
+  type DetectionFrame,
+} from "../types/detections";
 import { TrackingGeometry } from "../types/post-processing";
 import {
   detectionPostProcessors,
@@ -84,7 +87,7 @@ describe("detectionPostProcessors.tracking", () => {
   });
 
   it("projects only the selected geometry without copying heavy payloads", () => {
-    const frame = {
+    const frame: DetectionFrame = {
       detections: [
         {
           className: "person",

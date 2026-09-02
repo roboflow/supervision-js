@@ -1,5 +1,5 @@
 import {
-  decodeCompressedRleMask,
+  decodeDetectionMask,
   encodeBinaryMaskWithBounds,
   type DetectionMask,
   type Point,
@@ -120,7 +120,7 @@ export function createMaskBrushEditor(options: {
       updateCursor();
     },
     seed(mask) {
-      const decoded = decodeCompressedRleMask(mask);
+      const decoded = decodeDetectionMask(mask);
       if (decoded.width !== canvas.width || decoded.height !== canvas.height) {
         throw new Error("Seed mask dimensions must match the brush canvas.");
       }

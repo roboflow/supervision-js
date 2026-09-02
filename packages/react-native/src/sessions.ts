@@ -25,18 +25,27 @@ import { Skia, type SkImage } from "@shopify/react-native-skia";
 import {
   createEmptyReactNativeLiveIdMaskUniforms,
   type ReactNativeIdMaskUniforms,
+  type ReactNativeLiveIdMaskBuildResult,
   type ReactNativeLiveIdMaskNativeBuilderHandle,
   type ReactNativeLiveSerializedDetection,
   type TopLeftRect,
 } from "./index";
 import {
-  createReactNativeSkiaMaskFrame,
+  buildReactNativeSkiaMaskArtifact,
+  createReactNativeSkiaMaskFrameFromArtifact,
   disposeReactNativeSkiaImage,
   type ReactNativeSkiaMaskFrame,
 } from "./skia";
 import { loadReactNativeLiveIdMaskNativeBuilder } from "./native-id-mask-builder";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
+import {
+  advanceMediaClockBudget,
+  createMediaClockBudget,
+  resolveMediaClockDecision,
+  resolveMediaClockDueAt,
+} from "./sessions/media-clock-policy";
+import type { ReactNativeVideoClock } from "./types/media-clock";
 import { createMediaSessionStateSnapshot } from "./sessions/media-session-state";
 import {
   MediaSessionError,
@@ -100,8 +109,15 @@ type ReactNativeWorkletRuntimeHandle = object;
 export const REACT_NATIVE_VIDEO_SESSION_DEFAULTS =
   REACT_NATIVE_FILE_SESSION_DEFAULTS;
 
-/** Saved-video playback processes every decoded frame as quickly as inference allows. */
+/**
+ * @deprecated The pacing is now a session option, so a single constant
+ * cannot describe it. Read `session.playbackMode`, which reflects the
+ * `clock` that session was created with.
+ */
 export const REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE = "analysis-paced";
+
+/** Pacing a saved-video session reports, one per {@link ReactNativeVideoClock}. */
+export type ReactNativeVideoPlaybackMode = "analysis-paced" | "media-paced";
 
 /**
  * The current native file source supports start, pause/resume, and stop. It
@@ -205,6 +221,12 @@ export interface ReactNativeVideoSessionPresentationOptions {
 }
 
 export interface ReactNativeVideoSessionOptions {
+  /**
+   * What paces playback. Defaults to `analysis`, which processes every frame
+   * as fast as the pipeline allows and therefore plays at inference speed.
+   * Use `media` to play the clip on its own timeline.
+   */
+  readonly clock?: ReactNativeVideoClock;
   readonly fileUri: string;
   /** Canvas-space rect the video is drawn into; update via `setMediaRect`. */
   readonly mediaRect: TopLeftRect;
@@ -243,7 +265,8 @@ export interface ReactNativeVideoSession extends MediaSession {
   readonly frameHeight: number;
   readonly frameWidth: number;
   readonly nominalFrameRate: number;
-  readonly playbackMode: typeof REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE;
+  /** Reflects the `clock` this session was created with. */
+  readonly playbackMode: ReactNativeVideoPlaybackMode;
   /** Updates dynamic canvas-space geometry used by the private Skia stage. */
   setMediaRect(rect: TopLeftRect): void;
   /** @deprecated Use the common `play()` control. */
@@ -395,6 +418,7 @@ export function createReactNativeVideoFileSession(
   });
 
   const presentation = options.presentation ?? {};
+  const clock = options.clock ?? "analysis";
   const fullResMaskMaxPixels =
     presentation.fullResMaskMaxPixels ??
     REACT_NATIVE_FILE_SESSION_DEFAULTS.fullResMaskMaxPixels;
@@ -535,6 +559,23 @@ export function createReactNativeVideoFileSession(
     let processedFrames = 0;
     let endReason = "";
     let failureStage: MediaSessionErrorStage = "source";
+    // Media-clock state. `mediaAnchorMs` pins the wall clock to the first
+    // frame's presentation time so every later frame has a due date.
+    const isMediaClock = clock === "media";
+    let mediaAnchorMs = 0;
+    let mediaAnchorPts = 0;
+    let mediaBudget = createMediaClockBudget();
+    let heldDetections: ReactNativeLiveSerializedDetection[] = [];
+    // The overlay shape the last inferred frame produced. A held frame reuses
+    // it for its packet rather than rebuilding an identical array.
+    let heldOverlayDetections: ReactNativeVideoSessionDetection[] = [];
+    // The ID-mask fill for the detections it was built from. Keyed by array
+    // identity, which the media clock preserves across held frames.
+    let maskArtifactCache:
+      | (ReactNativeLiveIdMaskBuildResult & {
+          readonly detections: readonly ReactNativeLiveSerializedDetection[];
+        })
+      | null = null;
 
     try {
       while (playingShared.value) {
@@ -545,28 +586,121 @@ export function createReactNativeVideoFileSession(
           break;
         }
 
-        const tickStartedAt = Date.now();
-        failureStage = "processor";
-        const detections = serializeFrame(
-          handle,
-          returnMasksAtOriginalResolution,
-        );
-        const segmentationMs = Date.now() - tickStartedAt;
+        let shouldInfer = true;
+        let waitedMs = 0;
 
-        const overlayDetections: ReactNativeVideoSessionDetection[] = [];
+        if (isMediaClock) {
+          if (processedFrames === 0) {
+            mediaAnchorMs = Date.now();
+            mediaAnchorPts = handle.timestampMs;
+          }
 
-        for (let index = 0; index < detections.length; index += 1) {
-          const detection = detections[index]!;
+          const decision = resolveMediaClockDecision({
+            anchorMs: mediaAnchorMs,
+            anchorPts: mediaAnchorPts,
+            budget: mediaBudget,
+            nowMs: Date.now(),
+            timestampMs: handle.timestampMs,
+          });
 
-          overlayDetections[index] = {
-            bbox: detection.bbox,
-            color: detection.color,
-            label: detection.label ?? "object",
-            score: detection.score ?? 0,
-          };
+          if (decision.shouldDrop) {
+            handle.release();
+            continue;
+          }
+
+          shouldInfer = decision.shouldInfer;
+
+          // Ahead of this frame's moment, so wait for it. The wait is also the
+          // only slack this session ever has, so it is measured and banked:
+          // inference is paid for out of it rather than fired whenever the
+          // schedule happens to be caught up.
+          //
+          // The wait spins, and that is a structural choice rather than a
+          // missing capability. This runtime does have `setTimeout`:
+          // `createWorkletRuntimeForThread()` delegates to worklets'
+          // `createWorkletRuntime()`, whose `enableEventLoop` defaults to
+          // true and installs the timer polyfills. What it cannot do is fire
+          // one from in here — `runPump` is a single synchronous loop that
+          // never returns to the run loop, so no queued task can run until it
+          // exits.
+          //
+          // Removing the spin therefore means restructuring the pump into a
+          // per-frame continuation, which also moves pause, resume, teardown,
+          // and source close off the guarantee that loop exit currently
+          // provides. That belongs with Phase 3, where both lanes converge on
+          // one core. Until then this still costs less than the analysis
+          // clock, which never waits and never stops inferring.
+          const dueAtMs = resolveMediaClockDueAt({
+            anchorMs: mediaAnchorMs,
+            anchorPts: mediaAnchorPts,
+            timestampMs: handle.timestampMs,
+          });
+          const waitStartedAt = Date.now();
+
+          while (Date.now() < dueAtMs && playingShared.value) {
+            // Spin until this frame is due.
+          }
+
+          // The wait also ends when pause, stop, or destroy clears the flag.
+          // Falling through would start a full model run after cancellation,
+          // present one more frame, and make destroy wait for both.
+          if (!playingShared.value) {
+            handle.release();
+            break;
+          }
+
+          waitedMs = Date.now() - waitStartedAt;
         }
 
-        scheduleOnRN(reportDetections, overlayDetections);
+        const tickStartedAt = Date.now();
+        failureStage = "processor";
+        const detections = shouldInfer
+          ? serializeFrame(handle, returnMasksAtOriginalResolution)
+          : heldDetections;
+        const inferenceMs = shouldInfer ? Date.now() - tickStartedAt : 0;
+
+        if (shouldInfer) {
+          heldDetections = detections;
+        }
+
+        if (isMediaClock) {
+          mediaBudget = advanceMediaClockBudget({
+            budget: mediaBudget,
+            inferenceMs,
+            inferred: shouldInfer,
+            waitedMs,
+          });
+        }
+
+        // Same measurement the budget was charged, so the HUD and the pacing
+        // rule can never disagree about what a model run cost.
+        const segmentationMs = inferenceMs;
+
+        // Only an inferred frame has new detections to report. A held frame
+        // would rebuild an identical array and hand React a new identity to
+        // re-render for nothing — 30 times a second under the media clock,
+        // against roughly 1.4 under the analysis clock, which is why this was
+        // invisible before pacing existed. Under `analysis`, `shouldInfer` is
+        // always true, so that lane is unchanged.
+        if (shouldInfer) {
+          const overlayDetections: ReactNativeVideoSessionDetection[] = [];
+
+          for (let index = 0; index < detections.length; index += 1) {
+            const detection = detections[index]!;
+
+            overlayDetections[index] = {
+              bbox: detection.bbox,
+              color: detection.color,
+              label: detection.label ?? "object",
+              score: detection.score ?? 0,
+            };
+          }
+
+          heldOverlayDetections = overlayDetections;
+          scheduleOnRN(reportDetections, overlayDetections);
+        }
+
+        const overlayDetections = heldOverlayDetections;
 
         const effects = resolveMaskEffects
           ? resolveMaskEffects(detections)
@@ -577,28 +711,60 @@ export function createReactNativeVideoFileSession(
         failureStage = "renderer";
 
         try {
-          preparedMask = createReactNativeSkiaMaskFrame({
-            borderWidth: presentation.borderWidth,
-            detections,
-            edgeSmoothing: presentation.edgeSmoothing,
-            fillOpacity: presentation.fillOpacity,
-            frameHeight: handle.height,
-            frameWidth: handle.width,
-            maxPixels: presentation.maxPixels,
-            maxSide: presentation.maxSide,
-            mediaRect: {
-              height: mediaRect.height,
-              width: mediaRect.width,
-              x: mediaRect.x,
-              y: mediaRect.y,
-            },
-            mosaicCellPx: presentation.mosaicCellPx,
-            mosaicMaskIds: effects?.mosaicMaskIds,
-            nativeBuilder,
-            spotlightMaskIds: effects?.spotlightMaskIds,
-          });
+          // The fill is the whole cost here (~15ms per frame with the JS
+          // builder on a Pixel 10 Pro, against ~0ms for the upload), and it
+          // depends only on the detections and the frame size — never on the
+          // media rect or the effect selection, which the uniforms own. Held
+          // frames therefore share one artifact, keyed on the detections array
+          // the media clock already reuses by reference.
+          //
+          // This matters beyond the saved cycles: under the media clock those
+          // milliseconds come out of the wait time the pacing budget banks, so
+          // refilling an identical artifact directly lowers how often the
+          // session can afford to infer.
+          const reusedMaskArtifact =
+            maskArtifactCache !== null &&
+            maskArtifactCache.detections === detections;
+
+          if (!reusedMaskArtifact) {
+            const build = buildReactNativeSkiaMaskArtifact({
+              borderWidth: presentation.borderWidth,
+              detections,
+              fillOpacity: presentation.fillOpacity,
+              frameHeight: handle.height,
+              frameWidth: handle.width,
+              maxPixels: presentation.maxPixels,
+              maxSide: presentation.maxSide,
+              nativeBuilder,
+            });
+
+            maskArtifactCache = build ? { ...build, detections } : null;
+          }
+
+          preparedMask = maskArtifactCache
+            ? createReactNativeSkiaMaskFrameFromArtifact({
+                artifact: maskArtifactCache.artifact,
+                // A reused artifact did no work on this frame, so report no
+                // fill time. Repeating the original would tell the readout a
+                // cost was paid twice.
+                diagnostics: reusedMaskArtifact
+                  ? { ...maskArtifactCache.diagnostics, fillMs: 0 }
+                  : maskArtifactCache.diagnostics,
+                edgeSmoothing: presentation.edgeSmoothing,
+                mediaRect: {
+                  height: mediaRect.height,
+                  width: mediaRect.width,
+                  x: mediaRect.x,
+                  y: mediaRect.y,
+                },
+                mosaicCellPx: presentation.mosaicCellPx,
+                mosaicMaskIds: effects?.mosaicMaskIds,
+                spotlightMaskIds: effects?.spotlightMaskIds,
+              })
+            : null;
         } catch {
           preparedMask = null;
+          maskArtifactCache = null;
         }
 
         // Skia's Metal context is thread-local: a texture image created on
@@ -787,7 +953,7 @@ export function createReactNativeVideoFileSession(
     frameHeight,
     frameWidth,
     nominalFrameRate,
-    playbackMode: REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE,
+    playbackMode: clock === "media" ? "media-paced" : "analysis-paced",
     timeline,
     destroy() {
       if (destroyed) {

@@ -31,6 +31,7 @@ export {
   type ChunkedDetectionFrameSourceOptions,
   type CompositeDetectionFrameSourceEntry,
   type CompositeDetectionFrameSourceOptions,
+  type DenseBitmapDetectionMask,
   type Detection,
   type DetectionBufferOptions,
   type DetectionCoordinateSpace,

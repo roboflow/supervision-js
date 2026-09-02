@@ -1,5 +1,7 @@
 import { createMediaSession } from "./media-session-core";
 import { MediaSessionError } from "../types/media-session";
+import { isSyncMediaFrameProcessor } from "../types/frame-processor";
+import { isSyncMediaRendererAdapter } from "../types/renderer";
 import type {
   MediaFrameProcessor,
   MediaFrameProcessorResult,
@@ -7,6 +9,7 @@ import type {
 import {
   FakeMediaFrameSource,
   FakeMediaRenderer,
+  FakeSyncMediaRenderer,
   type FakePreparedPacket,
 } from "../testing/fakes";
 import {
@@ -451,6 +454,220 @@ function expectMediaSessionError(
 
   throw new Error(`Expected MediaSessionError with code ${code}.`);
 }
+
+describe("synchronous frame processors", () => {
+  const syncProcess = (
+    next: PlatformMediaFrame<FakeFrame>,
+  ): MediaFrameProcessorResult => ({
+    detectionFrame: {
+      detections: [{ id: next.payload.id }],
+      frameIndex: next.metadata.frameIndex ?? undefined,
+      mediaTime: next.metadata.mediaTime,
+    },
+    diagnostics: { producer: "fake-sync" },
+  });
+
+  it("narrows only processors that declare the sync contract", () => {
+    const asyncProcessor: MediaFrameProcessor<FakeFrame> = processor;
+    const syncProcessor: MediaFrameProcessor<FakeFrame> = {
+      sync: true,
+      process: syncProcess,
+    };
+
+    expect(isSyncMediaFrameProcessor(asyncProcessor)).toBe(false);
+    expect(isSyncMediaFrameProcessor(syncProcessor)).toBe(true);
+    expect(
+      isSyncMediaFrameProcessor({ sync: false, process: syncProcess }),
+    ).toBe(false);
+  });
+
+  it("calls a sync processor inline, with no microtask before the renderer", async () => {
+    const order: string[] = [];
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const prepare = renderer.prepare.bind(renderer);
+
+    renderer.prepare = (options) => {
+      order.push("prepare");
+      return prepare(options);
+    };
+
+    const session = await createMediaSession<FakeFrame, FakePreparedPacket>({
+      processor: {
+        sync: true,
+        process(next) {
+          order.push("process");
+          void Promise.resolve().then(() => order.push("microtask"));
+          return syncProcess(next);
+        },
+      },
+      renderer,
+      source,
+    });
+
+    await source.emit(frame("sync-1"));
+
+    // The queued microtask cannot run between the two: nothing awaited.
+    expect(order).toEqual(["process", "prepare", "microtask"]);
+
+    await session.destroy();
+  });
+
+  it("still awaits a processor that does not declare the sync contract", async () => {
+    const order: string[] = [];
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const prepare = renderer.prepare.bind(renderer);
+
+    renderer.prepare = (options) => {
+      order.push("prepare");
+      return prepare(options);
+    };
+
+    const session = await createMediaSession<FakeFrame, FakePreparedPacket>({
+      processor: {
+        process(next) {
+          order.push("process");
+          void Promise.resolve().then(() => order.push("microtask"));
+          return processor.process(next);
+        },
+      },
+      renderer,
+      source,
+    });
+
+    await source.emit(frame("async-1"));
+
+    // The await on process() yields, so the queued microtask lands first.
+    expect(order).toEqual(["process", "microtask", "prepare"]);
+
+    await session.destroy();
+  });
+
+  it("presents a sync processor result through the normal packet lifecycle", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const session = await createMediaSession<FakeFrame, FakePreparedPacket>({
+      processor: { sync: true, process: syncProcess },
+      renderer,
+      source,
+    });
+
+    await source.emit(frame("sync-packet"));
+
+    expect(renderer.presentedPacketIds).toEqual([0]);
+    expect(session.getState()).toMatchObject({
+      renderer: {
+        activeDetectionFrame: { detections: [{ id: "sync-packet" }] },
+        presentedFrames: 1,
+      },
+    });
+
+    await session.destroy();
+  });
+});
+
+describe("synchronous renderer adapters", () => {
+  const syncProcess = (
+    next: PlatformMediaFrame<FakeFrame>,
+  ): MediaFrameProcessorResult => ({
+    detectionFrame: {
+      detections: [{ id: next.payload.id }],
+      mediaTime: next.metadata.mediaTime,
+    },
+  });
+
+  it("narrows only adapters that declare the sync contract", () => {
+    expect(isSyncMediaRendererAdapter(new FakeMediaRenderer<FakeFrame>())).toBe(
+      false,
+    );
+    expect(
+      isSyncMediaRendererAdapter(new FakeSyncMediaRenderer<FakeFrame>()),
+    ).toBe(true);
+  });
+
+  it("runs the whole frame path with no microtask when both halves are sync", async () => {
+    const order: string[] = [];
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeSyncMediaRenderer<FakeFrame>();
+
+    renderer.onPrepare = () => order.push("prepare");
+    renderer.onPresent = () => order.push("present");
+
+    const session = await createMediaSession<FakeFrame, FakePreparedPacket>({
+      processor: {
+        sync: true,
+        process(next) {
+          order.push("process");
+          void Promise.resolve().then(() => order.push("microtask"));
+          return syncProcess(next);
+        },
+      },
+      renderer,
+      source,
+    });
+
+    await source.emit(frame("sync-all"));
+
+    // Nothing on the frame path awaits, so the queued microtask lands last.
+    expect(order).toEqual(["process", "prepare", "present", "microtask"]);
+
+    await session.destroy();
+  });
+
+  it("uses the async path when only the renderer is sync", async () => {
+    const order: string[] = [];
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeSyncMediaRenderer<FakeFrame>();
+
+    renderer.onPresent = () => order.push("present");
+
+    const session = await createMediaSession<FakeFrame, FakePreparedPacket>({
+      processor: {
+        process(next) {
+          order.push("process");
+          void Promise.resolve().then(() => order.push("microtask"));
+          return syncProcess(next);
+        },
+      },
+      renderer,
+      source,
+    });
+
+    await source.emit(frame("mixed"));
+
+    // The processor is still awaited; only its microtask intervenes.
+    expect(order).toEqual(["process", "microtask", "present"]);
+    expect(renderer.presentedPacketIds).toEqual([0]);
+
+    await session.destroy();
+  });
+
+  it("releases retired packets synchronously through the store", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeSyncMediaRenderer<FakeFrame>();
+    const session = await createMediaSession<FakeFrame, FakePreparedPacket>({
+      processor: { sync: true, process: syncProcess },
+      renderer,
+      source,
+    });
+
+    // PreparedFrameStore.presentNow() throws on an async disposer, so three
+    // presentations passing at all proves the session wired a sync disposer.
+    await source.emit(frame("one"));
+    await source.emit(frame("two"));
+    await source.emit(frame("three"));
+
+    expect(renderer.presentedPacketIds).toEqual([0, 1, 2]);
+    // One-packet grace period: packet 0 is released once packet 2 promotes.
+    expect(renderer.disposedPacketIds).toEqual([0]);
+
+    // Teardown releases the active packet before the retired one, so assert
+    // the set: every packet released exactly once is the contract here.
+    await session.destroy();
+    expect([...renderer.disposedPacketIds].sort()).toEqual([0, 1, 2]);
+  });
+});
 
 function deferred<TValue>() {
   let resolve!: (value: TValue) => void;

@@ -49,6 +49,9 @@ describe("React Native media session defaults", () => {
 
 describe("saved-video session capabilities", () => {
   it("declares analysis pacing and the absence of seek support", () => {
+    // The constant is deprecated: pacing became a session option, so a session
+    // created with `clock: "media"` reports "media-paced" instead. The constant
+    // stays only as the historical default for consumers still reading it.
     expect(REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE).toBe("analysis-paced");
     expect(REACT_NATIVE_VIDEO_SESSION_CAPABILITIES).toEqual({
       live: false,

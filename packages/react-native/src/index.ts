@@ -46,6 +46,8 @@ export {
   DEFAULT_DETECTION_COLOR_SEQUENCE,
   DetectionMaskEncoding,
   decodeCompressedRleMask,
+  decodeDenseBitmapMask,
+  decodeDetectionMask,
   LabelPlacement,
   MaskRenderMode,
   MAX_ID_MASK_PALETTE_ENTRIES,
@@ -74,6 +76,7 @@ export type {
   BoxStyle,
   CompressedRleDetectionMask,
   DecodedDetectionMask,
+  DenseBitmapDetectionMask,
   Detection,
   DetectionClassColorStyle,
   DetectionFrame,
@@ -151,21 +154,28 @@ export type {
   MediaSessionState,
   MediaSessionStateListener,
 } from "./types/media-session";
+export type { ReactNativeLiveDetectionProducer } from "./types/live-producer";
+export { isSyncMediaFrameProcessor } from "./types/frame-processor";
 export type {
+  AsyncMediaFrameProcessor,
   MediaFrameProcessor,
   MediaFrameProcessorResult,
+  SyncMediaFrameProcessor,
 } from "./types/frame-processor";
 export type {
   MediaFrameSource,
   MediaFrameSourceConsumer,
   MediaSessionCapabilities,
 } from "./types/frame-source";
+export { isSyncMediaRendererAdapter } from "./types/renderer";
 export type {
+  AsyncMediaRendererAdapter,
   MediaRendererAdapter,
   MediaRendererPrepareOptions,
   MediaSessionRendererState,
   MediaSessionRenderPreparationState,
   PreparedMediaFramePacket,
+  SyncMediaRendererAdapter,
 } from "./types/renderer";
 export {
   createReactNativeAnnotationGestureAdapter,

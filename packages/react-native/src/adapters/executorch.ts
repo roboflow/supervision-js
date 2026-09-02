@@ -1,12 +1,13 @@
 import {
-  KeypointMarkerShape,
+  DetectionMaskEncoding,
   KeypointVisibility,
   resolveDetectionClassColorStyle,
   type Detection,
   type DetectionFrame,
-  type KeypointDrawInstruction,
 } from "supervision-js-core";
 import type { ReactNativeLiveSerializedDetection } from "../index";
+import { createReactNativeKeypointDrawInstructions } from "../renderers/keypoint-draw-instructions";
+import type { ReactNativeLiveDetectionProducer } from "../types/live-producer";
 import type { ReactNativeVideoFrameHandle } from "../video-frame-source";
 
 /**
@@ -190,6 +191,114 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
   };
 }
 
+/**
+ * Live segmentation producer: the vendor-neutral form of
+ * {@link createExecutorchLiveSegmentationProcessor}.
+ *
+ * Returns a `DetectionFrame` instead of the package's flat serialized shape,
+ * so nothing downstream needs to know ExecuTorch produced it. Every quirk is
+ * repaired here:
+ *
+ * - bboxes are un-rotated out of ExecuTorch's "portrait screen space" mapping
+ *   and converted to core's center-based `Rect`;
+ * - masks are published as `DenseBitmapDetectionMask` without an upright
+ *   copy, carrying `rotatedCw` so the fill loops keep sampling the buffer in
+ *   place;
+ * - class color is deliberately absent. Core detections carry no styling;
+ *   presentation resolves color from `className`.
+ */
+export function createExecutorchLiveSegmentationProducer<TRunOnFrame>(
+  options: ExecutorchLiveSegmentationProcessorOptions<TRunOnFrame>,
+): ReactNativeLiveDetectionProducer {
+  const runOnFrame =
+    options.runOnFrame as ExecutorchInstanceSegmentationRunner | null;
+  const confidenceThreshold = options.confidenceThreshold ?? 0.45;
+  const framePixelsAreUpright = options.framePixelsAreUpright ?? false;
+  const maxInstances = options.maxInstances ?? 6;
+  const mirrorFrame = options.mirrorFrame ?? false;
+  const returnMasksAtOriginalResolution =
+    options.returnMasksAtOriginalResolution ?? true;
+  const toUprightFrame = createExecutorchUprightFrame;
+  const getUprightFrameHeight = readExecutorchFrameHeight;
+  const unrotateBbox = unrotateExecutorchUpBbox;
+  const readTimestampSeconds = readExecutorchFrameTimestampSeconds;
+
+  return {
+    process(frame) {
+      "worklet";
+
+      const mediaTime = readTimestampSeconds(frame);
+
+      if (runOnFrame === null) {
+        return { detections: [], mediaTime };
+      }
+
+      const uprightFrameHeight = framePixelsAreUpright
+        ? getUprightFrameHeight(frame)
+        : null;
+      const rawDetections = runOnFrame(
+        framePixelsAreUpright
+          ? toUprightFrame(frame)
+          : (frame as Parameters<ExecutorchInstanceSegmentationRunner>[0]),
+        mirrorFrame,
+        {
+          confidenceThreshold,
+          maxInstances,
+          returnMaskAtOriginalResolution: returnMasksAtOriginalResolution,
+        },
+      );
+      const detections: Detection[] = [];
+
+      for (let index = 0; index < rawDetections.length; index += 1) {
+        const raw = rawDetections[index]!;
+        const bbox =
+          uprightFrameHeight === null
+            ? raw.bbox
+            : unrotateBbox(raw.bbox, uprightFrameHeight);
+        // ExecuTorch rotates mask output 90° clockwise for "up" frames, so the
+        // reported dims describe the rotated buffer and the logical dims swap.
+        const rotatedCw = uprightFrameHeight !== null;
+
+        detections[index] = {
+          className: typeof raw.label === "string" ? raw.label : "",
+          confidence: raw.score,
+          mask: {
+            data: raw.mask,
+            // The literal, not the imported enum object: capturing an
+            // enum in VisionCamera's isolated runtime is unreliable.
+            encoding: "denseBitmap" as DetectionMaskEncoding.DenseBitmap,
+            height: rotatedCw ? raw.maskWidth : raw.maskHeight,
+            rotatedCw,
+            width: rotatedCw ? raw.maskHeight : raw.maskWidth,
+          },
+          rect: {
+            height: bbox.y2 - bbox.y1,
+            width: bbox.x2 - bbox.x1,
+            x: (bbox.x1 + bbox.x2) / 2,
+            y: (bbox.y1 + bbox.y2) / 2,
+          },
+        };
+      }
+
+      return { detections, mediaTime };
+    },
+  };
+}
+
+/**
+ * VisionCamera reports frame timestamps in nanoseconds; core detection frames
+ * are on a seconds media timeline.
+ */
+function readExecutorchFrameTimestampSeconds(frame: unknown): number {
+  "worklet";
+
+  const timestamp = (frame as { readonly timestamp?: unknown }).timestamp;
+
+  return typeof timestamp === "number" && Number.isFinite(timestamp)
+    ? timestamp / 1_000_000_000
+    : 0;
+}
+
 export interface ExecutorchLivePoseRunnerOptions {
   readonly detectionThreshold: number;
   readonly inputSize: number;
@@ -354,6 +463,27 @@ export function createExecutorchVideoFrameSerializer<TRunOnFrame>(
 
     return serialized;
   };
+}
+
+/**
+ * Live pose producer: the vendor-neutral form of
+ * {@link createExecutorchLivePoseProcessor}.
+ *
+ * Returns the processor itself rather than wrapping it, and that is load
+ * bearing. `react-native-live-rendering.md` records that a JSI runner hidden
+ * inside a second processor worklet can serialize successfully while the
+ * recursively captured HostFunction becomes non-callable in the isolated
+ * runtime. One worklet layer over the runner is the proven depth; adding a
+ * pass-through worklet here would make two.
+ *
+ * This works without adaptation because the pose path already returned a
+ * `DetectionFrame` — the shared contract only needed a named entry point,
+ * symmetric with {@link createExecutorchLiveSegmentationProducer}.
+ */
+export function createExecutorchLivePoseProducer<TRunOnFrame>(
+  options: ExecutorchLivePoseConfiguration<TRunOnFrame>,
+): ReactNativeLiveDetectionProducer {
+  return createExecutorchLivePoseProcessor(options);
 }
 
 /**
@@ -577,66 +707,14 @@ export function createDetectionFrameFromExecutorchCocoPoses(
 }
 
 /**
- * Resolves pose detections into renderer-neutral keypoint draw instructions.
- * This is worklet-safe so live producers never need to recreate Skia-oriented
- * pose geometry in an application callback.
+ * @deprecated Renamed to `createReactNativeKeypointDrawInstructions` and moved
+ * to `renderers/`. Keypoint drawing reads only core types, so nothing about it
+ * was ever specific to ExecuTorch; the vendor name here was an artifact of
+ * pose support having been written in this adapter first.
+ *
+ * Kept as a forwarding alias so the rename does not break an import. The
+ * replacement additionally resolves color per detection instead of taking a
+ * single color for the whole frame.
  */
-export function createExecutorchPoseKeypointInstructions(
-  frame: DetectionFrame,
-  color = 0x22c55e,
-): KeypointDrawInstruction[] {
-  "worklet";
-
-  const instructions: KeypointDrawInstruction[] = [];
-  const notLabeledVisibility = 0 as KeypointVisibility;
-
-  for (
-    let detectionIndex = 0;
-    detectionIndex < frame.detections.length;
-    detectionIndex += 1
-  ) {
-    const detection = frame.detections[detectionIndex]!;
-    const geometry = detection.keypoints;
-
-    if (!geometry) {
-      continue;
-    }
-
-    const edges: Array<KeypointDrawInstruction["edges"][number]> = [];
-    const markers: Array<KeypointDrawInstruction["markers"][number]> = [];
-
-    for (let edgeIndex = 0; edgeIndex < geometry.edges.length; edgeIndex += 1) {
-      const edge = geometry.edges[edgeIndex]!;
-      edges[edges.length] = {
-        from: geometry.points[edge[0]]!,
-        stroke: { alpha: 0.98, color, width: 3 },
-        to: geometry.points[edge[1]]!,
-      };
-    }
-
-    for (
-      let pointIndex = 0;
-      pointIndex < geometry.points.length;
-      pointIndex += 1
-    ) {
-      if (geometry.visibility?.[pointIndex] === notLabeledVisibility) {
-        continue;
-      }
-
-      markers[markers.length] = {
-        fill: { alpha: 1, color },
-        index: pointIndex,
-        point: geometry.points[pointIndex]!,
-        radius: 5,
-        // Avoid capturing an imported enum object in VisionCamera's isolated
-        // runtime. The literal is the stable renderer-neutral contract value.
-        shape: "circle" as KeypointMarkerShape,
-        stroke: { alpha: 1, color, width: 2 },
-      };
-    }
-
-    instructions[instructions.length] = { edges, markers };
-  }
-
-  return instructions;
-}
+export const createExecutorchPoseKeypointInstructions =
+  createReactNativeKeypointDrawInstructions;

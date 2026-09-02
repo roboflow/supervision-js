@@ -3,7 +3,7 @@ import type { PreparedRegionMaskCoverageFrame } from "#render-preparation/mask-f
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
-  decodeCompressedRleMask,
+  decodeDetectionMask,
   encodeBinaryMask,
   rasterizePolygonToMask,
   type IdMaskInstruction,
@@ -62,7 +62,7 @@ export function createRegionMaskCoverageFrame(
   const entries: PreparedRegionMaskCoverageFrame["entries"][number][] = [];
 
   for (const instruction of coverageInstructions) {
-    const decodedMask = decodeCompressedRleMask(instruction.regionCoverageMask);
+    const decodedMask = decodeDetectionMask(instruction.regionCoverageMask);
     let minX = decodedMask.width;
     let minY = decodedMask.height;
     let maxX = -1;
@@ -154,7 +154,7 @@ function compositeInstruction(
   canvasWidth: number,
   instruction: IdMaskInstruction,
 ) {
-  const decodedMask = decodeCompressedRleMask(instruction.mask);
+  const decodedMask = decodeDetectionMask(instruction.mask);
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
 
   compositeMaskFill(rgba, canvasWidth, decodedMask, fill);
@@ -274,7 +274,11 @@ function isBoundaryPixel(mask: DecodedMaskPixels, x: number, y: number) {
 }
 
 function isMaskPixel(mask: DecodedMaskPixels, x: number, y: number) {
-  return mask.data[y * mask.width + x] === 1;
+  // Non-zero, not `=== 1`. A decoded mask used to always come from the RLE
+  // decoder, which writes a literal 1, so equality happened to be safe. A
+  // dense mask hands over the producer's bytes untouched, and models commonly
+  // emit 255, so equality would fill the shape and silently drop its stroke.
+  return mask.data[y * mask.width + x] !== 0;
 }
 
 function isOutsideMaskBounds(mask: DecodedMaskPixels, x: number, y: number) {

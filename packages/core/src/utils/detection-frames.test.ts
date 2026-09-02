@@ -5,6 +5,7 @@ import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 import {
   copySortedDetectionFrames,
   decodeCompressedRleMask,
+  decodeDetectionMask,
   encodeCompressedRleCounts,
   filterDetectionFramesForRange,
   selectDetectionFrame,
@@ -412,6 +413,90 @@ describe("detection frame utilities", () => {
       height: 2,
       width: 3,
     });
+  });
+
+  it("returns upright dense mask bytes without copying them", () => {
+    const data = new Uint8Array([0, 1, 0, 1, 0, 0]);
+    const decoded = decodeDetectionMask({
+      data,
+      encoding: DetectionMaskEncoding.DenseBitmap,
+      height: 2,
+      width: 3,
+    });
+
+    expect(decoded).toEqual({ data, height: 2, width: 3 });
+    // The hot path depends on this staying copy-free.
+    expect(decoded.data).toBe(data);
+  });
+
+  it("un-rotates a clockwise-rotated dense mask into row-major order", () => {
+    // Logical 3x2 mask [[0, 1, 0], [1, 0, 0]] stored rotated 90° clockwise.
+    // The stored buffer is 2 wide and 3 tall, and logical (x, y) lives at
+    // stored[x * 2 + (1 - y)] — the same sampling the React Native ID-mask
+    // fill loops already use for maskRotatedCw buffers.
+    const decoded = decodeDetectionMask({
+      data: new Uint8Array([1, 0, 0, 1, 0, 0]),
+      encoding: DetectionMaskEncoding.DenseBitmap,
+      height: 2,
+      rotatedCw: true,
+      width: 3,
+    });
+
+    expect(decoded).toEqual({
+      data: new Uint8Array([0, 1, 0, 1, 0, 0]),
+      height: 2,
+      width: 3,
+    });
+  });
+
+  it("decodes both encodings to the same bytes through the union decoder", () => {
+    const rle = decodeDetectionMask({
+      counts: encodeCompressedRleCounts([1, 2, 3]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 3,
+    });
+    const dense = decodeDetectionMask({
+      data: new Uint8Array([0, 1, 0, 1, 0, 0]),
+      encoding: DetectionMaskEncoding.DenseBitmap,
+      height: 2,
+      width: 3,
+    });
+
+    expect(dense).toEqual(rle);
+  });
+
+  it("rejects dense mask data whose length does not match its dimensions", () => {
+    expect(() =>
+      decodeDetectionMask({
+        data: new Uint8Array([0, 1, 0]),
+        encoding: DetectionMaskEncoding.DenseBitmap,
+        height: 2,
+        width: 3,
+      }),
+    ).toThrow("Dense detection mask data must have 6 bytes, received 3.");
+  });
+
+  it("validates dense mask length on detection frames", () => {
+    expect(() =>
+      copySortedDetectionFrames([
+        {
+          detections: [
+            {
+              mask: {
+                data: new Uint8Array([0, 1, 0]),
+                encoding: DetectionMaskEncoding.DenseBitmap,
+                height: 2,
+                width: 3,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ]),
+    ).toThrow(
+      "frames[0].detections[0].mask.data must have 6 bytes, received 3.",
+    );
   });
 });
 

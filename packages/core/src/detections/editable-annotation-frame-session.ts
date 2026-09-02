@@ -229,7 +229,16 @@ function createSnapshot(frame: DetectionFrame): DetectionFrame {
 }
 
 function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+  // Typed arrays are skipped, not frozen: `Object.freeze()` throws on any
+  // array buffer view that has elements. A dense mask nests its bytes in one,
+  // and `DenseBitmapDetectionMask` already documents `data` as immutable and
+  // shared rather than copied, so there is nothing here left to protect.
+  if (
+    value &&
+    typeof value === "object" &&
+    !ArrayBuffer.isView(value) &&
+    !Object.isFrozen(value)
+  ) {
     Object.freeze(value);
 
     for (const nested of Object.values(value)) {

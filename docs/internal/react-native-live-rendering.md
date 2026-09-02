@@ -208,6 +208,10 @@ Same-day iPhone 15 comparison (debug build, same code, same Basketball
 sample, 6 masks, CoreML INT8, native mask prep): SEG 72ms, FILL 1ms, TICK
 88ms (~7.8 fps) — consistent with the pre-extraction 46-58ms baseline plus
 dev-mode overhead. The cross-platform gap is entirely the detection
-producer's backend (ANE INT8 vs CPU fp32); both platforms are strict-sync
-analysis-paced by design, so file playback intentionally runs at inference
-speed rather than media speed.
+producer's backend (ANE INT8 vs CPU fp32).
+
+Both figures above were measured under the analysis clock, where playback runs
+at inference speed by design. Saved-video sessions now also accept
+`clock: "media"`, which holds the clip to its real duration and infers on the
+subset that fits; the presented-frame ratio under that clock is the number to
+record here next, per device.

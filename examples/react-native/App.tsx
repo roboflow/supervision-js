@@ -72,7 +72,8 @@ import {
   createDemoPolygonStyle,
 } from "./src/demo-presentation";
 import {
-  createExecutorchLiveSegmentationProcessor,
+  createExecutorchLivePoseProducer,
+  createExecutorchLiveSegmentationProducer,
   createExecutorchVideoFrameSerializer,
 } from "supervision-js-react-native/adapters/executorch";
 import {
@@ -1421,19 +1422,31 @@ function LiveCameraProof(props: {
     });
   }, []);
 
-  const segmentationProcessor = useMemo(
+  // The demo still has a mode toggle, but that is now a demo concern: it picks
+  // which producer to build. The package is never told which task is running.
+  const liveProducer = useMemo(
     () =>
-      createExecutorchLiveSegmentationProcessor({
-        // useVisionCameraFrameOutput physically rotates this buffer. Normalize
-        // ExecuTorch's camera-centric `orientation: "up"` result back into
-        // that same upright pixel space before the renderer sees it.
-        framePixelsAreUpright: true,
-        maxInstances: LIVE_MAX_INSTANCES,
-        returnMasksAtOriginalResolution:
-          LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
-        runOnFrame: stableSegmentationRunner,
-      }),
-    [stableSegmentationRunner],
+      props.inferenceMode === "pose"
+        ? createExecutorchLivePoseProducer({
+            // The output buffer has already been physically oriented by the
+            // VisionCamera adapter; a second front-camera mirror would make
+            // pose geometry diverge from the rendered pixels.
+            framePixelsAreUpright: true,
+            mirrorFrame: false,
+            runOnFrame: stablePoseRunner,
+          })
+        : createExecutorchLiveSegmentationProducer({
+            // useVisionCameraFrameOutput physically rotates this buffer.
+            // Normalize ExecuTorch's camera-centric `orientation: "up"` result
+            // back into that same upright pixel space before the renderer
+            // sees it.
+            framePixelsAreUpright: true,
+            maxInstances: LIVE_MAX_INSTANCES,
+            returnMasksAtOriginalResolution:
+              LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
+            runOnFrame: stableSegmentationRunner,
+          }),
+    [props.inferenceMode, stablePoseRunner, stableSegmentationRunner],
   );
   const liveExtension = useMemo(
     () => ({
@@ -1448,28 +1461,19 @@ function LiveCameraProof(props: {
     classEffects:
       !isInstantCv || instantRecipe === "privacy" ? classEffects : {},
     extension: liveExtension,
-    inferenceMode: props.inferenceMode,
     mediaRect: liveLayout.mediaRect,
     onDetections: reportLiveDetections,
     onError: reportLiveError,
     onInteraction: reportInstantCvPick,
     onReadout: reportLiveFrame,
     onRuleRuntime: reportInstantCvRuntime,
-    pose: {
-      // The output buffer has already been physically oriented by the
-      // VisionCamera adapter; supplying a second front-camera mirror would
-      // make pose geometry diverge from the rendered pixels.
-      framePixelsAreUpright: true,
-      mirrorFrame: false,
-      runOnFrame: stablePoseRunner,
-    },
     presentation: {
       fillOpacity: DEMO_MASK_FILL_OPACITY,
       maskBorderWidth: DEMO_MASK_BORDER_WIDTH,
       mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
       privacyContourWidth: LIVE_PRIVACY_CONTOUR_WIDTH,
     },
-    segmentationProcessor,
+    producer: liveProducer,
     showMasks: showRawMaskLayer,
     targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
   });
@@ -1913,6 +1917,11 @@ function VideoFileProof(props: {
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const [videoStatus, setVideoStatus] = useState<VideoStatus>("idle");
+  // Which clock paces playback. Analysis is the historical behaviour:
+  // every frame inferred, so the clip runs at inference speed.
+  const [videoClock, setVideoClock] = useState<"analysis" | "media">(
+    "analysis",
+  );
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoStats, setVideoStats] = useState<VideoStats | null>(null);
   const [videoDims, setVideoDims] = useState<{
@@ -2033,6 +2042,7 @@ function VideoFileProof(props: {
 
       try {
         const session = createReactNativeVideoFileSession({
+          clock: videoClock,
           fileUri,
           mediaRect: videoLayout.mediaRect,
           onDetections: setVideoDetections,
@@ -2074,6 +2084,7 @@ function VideoFileProof(props: {
       handleVideoEnded,
       resolveVideoMaskEffects,
       serializeVideoFrame,
+      videoClock,
       videoLayout.mediaRect,
     ],
   );
@@ -2216,9 +2227,27 @@ function VideoFileProof(props: {
               {videoStatus === "error"
                 ? (videoError ?? "unknown error")
                 : modelReady
-                  ? "Run RF-DETR on every decoded frame, rendered in strict sync."
+                  ? videoClock === "analysis"
+                    ? "Analysis clock: RF-DETR on every decoded frame, so the clip runs at inference speed."
+                    : "Media clock: the clip plays on its own timeline, inferring on whatever subset fits."
                   : modelStatus}
             </Text>
+            <View style={styles.videoActionsRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  setVideoClock((current) =>
+                    current === "analysis" ? "media" : "analysis",
+                  );
+                }}
+                style={styles.detectionMenuAction}
+              >
+                <Text style={styles.detectionMenuActionText}>
+                  {videoClock === "analysis"
+                    ? "Clock: analysis"
+                    : "Clock: media"}
+                </Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.videoActionsRow}>
               <TouchableOpacity
                 disabled={!modelReady}

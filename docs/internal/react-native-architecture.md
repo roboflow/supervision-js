@@ -157,8 +157,16 @@ serialization/preparation worklets, and shared file/live defaults.
 controls, state subscription, and capability surface while its strict-sync
 native-pointer pump and Skia presentation lanes remain package-private.
 `createReactNativeVideoSession()` is retained only as a deprecated forwarding
-alias. File sessions are analysis-paced, support pause/play/stop, and report
-seeking as unsupported.
+alias. File sessions support pause/play/stop and report seeking as unsupported.
+
+Pacing is a session option, not a fixed property. `clock: "analysis"` remains
+the default and infers on every decoded frame, so playback runs at inference
+speed — correct for producing a fully annotated video. `clock: "media"`
+presents frames on their own timeline, so a ten second clip takes ten seconds,
+inferring on whatever subset the measured model cost affords and holding the
+most recent detections across the frames in between. See
+[`react-native-unified-session-plan.md`](react-native-unified-session-plan.md)
+for the pacing policy and what remains.
 
 Android saved-video decoding is implemented (experimental) as a Nitro C++
 `VideoFrameSource` under `packages/react-native/android/`: `AMediaExtractor`

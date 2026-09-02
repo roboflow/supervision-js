@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   KeypointMarkerShape,
-  resolveDetectionClassColorStyle,
   type DetectionFrame,
   type KeypointDrawInstruction,
   type PolygonDrawInstruction,
 } from "supervision-js-core";
 
-import {
-  createDetectionFrameFromExecutorchCocoPoses,
-  createExecutorchPoseKeypointInstructions,
-  type ExecutorchLivePoseConfiguration,
-  type ExecutorchLivePoseRunner,
-  type ExecutorchLiveSegmentationProcessor,
-} from "../adapters/executorch";
+import { createReactNativeKeypointDrawInstructions } from "../renderers/keypoint-draw-instructions";
 import {
   createInstantCvGoldenPoseBaseline,
   createInstantCvRuleVectorInstructions,
@@ -33,6 +26,8 @@ import {
   type VisionCameraOutputFrame,
 } from "../adapters/vision-camera";
 import type { ReactNativeLiveSerializedDetection } from "../index";
+import { serializeReactNativeLiveDetectionFrame } from "../renderers/live-serialized-detections";
+import type { ReactNativeLiveDetectionProducer } from "../types/live-producer";
 import {
   createReactNativeWorkletFrameDebugArgs,
   serializeDebugError,
@@ -45,7 +40,6 @@ import {
 import { useReactNativeSharedValue } from "./worklet-bridge";
 import { scheduleReactNativeOnJs } from "./worklet-scheduler";
 
-export type ReactNativeLiveInferenceMode = "segmentation" | "pose";
 export type ReactNativeLiveClassEffect = "redact" | "spotlight";
 export type ReactNativeLiveClassEffects = Readonly<
   Record<string, ReactNativeLiveClassEffect>
@@ -74,6 +68,12 @@ export interface ReactNativeLiveInferenceReadout {
   readonly segmentationMs: number;
   readonly serializationMs: number;
   readonly shaderActive: boolean;
+  /**
+   * Detections whose mask the producer published RLE-encoded. Only dense masks
+   * reach the fill loops, so a non-zero value here means masks were produced
+   * but nothing was drawn for them.
+   */
+  readonly skippedRleMaskCount: number;
   readonly syncMode: "synced";
   readonly timestamp: number;
   readonly visibleKeypointCount: number;
@@ -140,10 +140,9 @@ export interface ReactNativeLiveInferenceExtensionOptions {
   readonly rules: readonly InstantCvRule[];
 }
 
-export interface UseReactNativeLiveInferenceOptions<TPoseRunOnFrame = unknown> {
+export interface UseReactNativeLiveInferenceOptions {
   readonly classEffects: ReactNativeLiveClassEffects;
   readonly extension?: ReactNativeLiveInferenceExtensionOptions;
-  readonly inferenceMode: ReactNativeLiveInferenceMode;
   readonly mediaRect: {
     readonly height: number;
     readonly width: number;
@@ -160,18 +159,22 @@ export interface UseReactNativeLiveInferenceOptions<TPoseRunOnFrame = unknown> {
   readonly onReadout?: (readout: ReactNativeLiveInferenceReadout) => void;
   readonly onRuleRuntime?: (runtime: readonly InstantCvRuleRuntime[]) => void;
   /**
-   * The package-owned VisionCamera worklet captures this structural runner
-   * directly. Do not wrap it in another worklet function: JSI HostFunctions
-   * are not recursively serializable across isolated worklet closures.
+   * The detection producer for this session. One producer replaces the old
+   * task enum: the renderer draws whatever geometry the returned
+   * `DetectionFrame` carries, so a segmentation model and a pose model enter
+   * through the same door.
+   *
+   * The package-owned VisionCamera worklet captures this object directly. Do
+   * not wrap it in another worklet function: JSI HostFunctions are not
+   * recursively serializable across isolated worklet closures.
    */
-  readonly pose: ExecutorchLivePoseConfiguration<TPoseRunOnFrame> | null;
+  readonly producer: ReactNativeLiveDetectionProducer | null;
   readonly presentation?: {
     readonly fillOpacity?: number;
     readonly maskBorderWidth?: number;
     readonly mosaicCellPx?: number;
     readonly privacyContourWidth?: number;
   };
-  readonly segmentationProcessor: ExecutorchLiveSegmentationProcessor | null;
   readonly showMasks: boolean;
   readonly targetResolution: {
     readonly height: number;
@@ -218,6 +221,29 @@ const EMPTY_EXTENSION_RESULT = {
   ruleEvalMs: 0,
   runtime: [] as readonly InstantCvRuleRuntime[],
 };
+
+/**
+ * True when any detection carries keypoints.
+ *
+ * This is what replaces `inferenceMode`: the hook no longer needs the host to
+ * declare what a model does, because the published geometry already says so.
+ *
+ * A frame carrying both keypoints and masks currently renders only the
+ * keypoints. That is a real limit of a single branch, kept because the two
+ * lanes still evaluate different extension rules; unifying them is separate
+ * work from removing the enum.
+ */
+function detectionFrameHasKeypoints(detectionFrame: DetectionFrame): boolean {
+  "worklet";
+
+  for (let index = 0; index < detectionFrame.detections.length; index += 1) {
+    if (detectionFrame.detections[index]!.keypoints) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function prepareLiveInferenceMask(options: {
   readonly classEffects: ReactNativeLiveClassEffects;
@@ -665,6 +691,7 @@ function reportLiveInference(
     segmentationMs: metrics.segmentationMs.value,
     serializationMs: metrics.serializationMs.value,
     shaderActive: metrics.shaderActive.value,
+    skippedRleMaskCount: metrics.skippedRleMaskCount.value,
     syncMode: "synced",
     timestamp: frame.timestamp,
     visibleKeypointCount: metrics.visibleKeypointCount.value,
@@ -677,12 +704,11 @@ function reportLiveInference(
  * mutable state. Consumers provide serializable configuration and receive
  * throttled semantic readouts only; they never define a camera worklet.
  */
-export function useReactNativeLiveInference<TPoseRunOnFrame>(
-  options: UseReactNativeLiveInferenceOptions<TPoseRunOnFrame>,
+export function useReactNativeLiveInference(
+  options: UseReactNativeLiveInferenceOptions,
 ): ReactNativeLiveInferenceBinding {
   const presentation = useReactNativeLiveSkiaPresentation();
   const mediaRect = useReactNativeSharedValue(options.mediaRect);
-  const inferenceMode = useReactNativeSharedValue(options.inferenceMode);
   const classEffects = useReactNativeSharedValue(options.classEffects);
   const showMasks = useReactNativeSharedValue(options.showMasks);
   const extension =
@@ -704,10 +730,11 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
     mediaRect.value = options.mediaRect;
   }, [mediaRect, options.mediaRect]);
   useEffect(() => {
-    inferenceMode.value = options.inferenceMode;
+    // Swapping producers changes what is on screen, so drop stale picks and
+    // clear presented layers exactly as switching modes used to.
     interaction.value = null;
     presentation.clear();
-  }, [inferenceMode, interaction, options.inferenceMode, presentation]);
+  }, [interaction, options.producer, presentation]);
   useEffect(() => {
     classEffects.value = options.classEffects;
   }, [classEffects, options.classEffects]);
@@ -724,26 +751,47 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
   const reportError = useLatestReporter(options.onError);
   const reportRuntime = useLatestReporter(options.onRuleRuntime);
   const reportInteraction = useLatestReporter(options.onInteraction);
-  const segmentationProcessor = options.segmentationProcessor;
-  const configuredPoseRunner = options.pose?.runOnFrame as
-    ExecutorchLivePoseRunner | null | undefined;
-  const poseRunner =
-    typeof configuredPoseRunner === "function" ? configuredPoseRunner : null;
-  const poseClassName = options.pose?.className;
-  const poseDetectionThreshold = options.pose?.detectionThreshold ?? 0.4;
-  const poseFramePixelsAreUpright =
-    options.pose?.framePixelsAreUpright ?? false;
-  const poseInputSize = options.pose?.inputSize ?? 384;
-  const poseKeypointThreshold = options.pose?.keypointThreshold ?? 0.35;
-  const poseMirrorFrame = options.pose?.mirrorFrame ?? false;
-  const poseMinimumVisibleKeypoints = options.pose?.minimumVisibleKeypoints;
-  const poseInstructionColor = resolveDetectionClassColorStyle(
-    poseClassName ?? "person",
-  ).fill;
-  // Capture an initialized worklet function before the callback is serialized.
+  const producer = options.producer;
+  // Swapping producers necessarily rebuilds `onFrame`, and VisionCamera has to
+  // re-serialize and install that callback on the camera thread. Until it
+  // lands, the camera keeps invoking the previous closure, which captured the
+  // previous producer — so a mode switch used to keep inferring with the old
+  // model for a moment.
+  //
+  // Each closure captures its own generation and compares it against the
+  // shared value, which the effect below writes on commit — ahead of the
+  // camera's own effect reinstalling `onFrame`, which is the ordering that
+  // matters. A superseded closure sees the mismatch and skips the frame
+  // instead of running a stale model.
+  //
+  // The obvious simplification — put `producer` itself in a shared value and
+  // compare identity — is deliberately avoided. A shared value serializes what
+  // it holds, and a producer closes over a JSI HostFunction; that is exactly
+  // the recursive-capture case `react-native-live-rendering.md` records as
+  // serializing successfully and then being non-callable on the worklet
+  // runtime. An integer carries no such risk.
+  //
+  // Incrementing inside `useMemo` is a render-phase write, which a StrictMode
+  // double render inflates. That is harmless here because only equality is
+  // ever tested, and a recomputed memo rebuilds `onFrame` and republishes the
+  // shared value together.
+  const producerGenerationRef = useRef(0);
+  const producerGeneration = useMemo(() => {
+    producerGenerationRef.current += 1;
+    return producerGenerationRef.current;
+  }, [producer]);
+  const activeProducerGeneration =
+    useReactNativeSharedValue(producerGeneration);
+
+  useEffect(() => {
+    activeProducerGeneration.value = producerGeneration;
+  }, [activeProducerGeneration, producerGeneration]);
+
+  // Capture initialized worklet functions before the callback is serialized.
   // Worklets' Babel transform does not preserve normal function hoisting.
-  const createPoseDetectionFrame = createDetectionFrameFromExecutorchCocoPoses;
-  const createPoseInstructions = createExecutorchPoseKeypointInstructions;
+  const createPoseInstructions = createReactNativeKeypointDrawInstructions;
+  const serializeDetections = serializeReactNativeLiveDetectionFrame;
+  const hasKeypointGeometry = detectionFrameHasKeypoints;
   const maskBorderWidth = options.presentation?.maskBorderWidth ?? 0;
   const fillOpacity = options.presentation?.fillOpacity ?? 0.5;
   const mosaicCellPx = options.presentation?.mosaicCellPx ?? 14;
@@ -760,54 +808,36 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
           return false;
         }
 
+        // A newer producer exists; this closure is on its way out.
+        if (activeProducerGeneration.value !== producerGeneration) {
+          return false;
+        }
+
         const frameSize = resolveVisionCameraFrameSize(frame);
         const activeExtension = extension.value;
         const startedAt = Date.now();
 
-        if (inferenceMode.value === "pose") {
-          stage = "pose-runner-check";
-          if (typeof poseRunner !== "function") {
-            throw new Error(
-              `Pose runner is unavailable in the frame runtime (${typeof poseRunner}).`,
-            );
-          }
+        if (producer === null) {
+          return false;
+        }
 
-          stage = "pose-runner-call";
-          const poseStartedAt = Date.now();
-          const uprightFrameHeight = poseFramePixelsAreUpright
-            ? frame.height
-            : null;
-          const poses = poseRunner(
-            poseFramePixelsAreUpright
-              ? {
-                  getNativeBuffer: () => frame.getNativeBuffer(),
-                  isMirrored: false,
-                  orientation: "up",
-                }
-              : frame,
-            poseMirrorFrame,
-            {
-              detectionThreshold: poseDetectionThreshold,
-              inputSize: poseInputSize,
-              keypointThreshold: poseKeypointThreshold,
-            },
+        stage = "producer-check";
+        if (typeof producer.process !== "function") {
+          throw new Error(
+            `Detection producer is unavailable in the frame runtime (${typeof producer.process}).`,
           );
-          stage = "pose-result-converter-check";
-          if (typeof createPoseDetectionFrame !== "function") {
-            throw new Error(
-              `Pose result converter is unavailable in the frame runtime (${typeof createPoseDetectionFrame}).`,
-            );
-          }
-          stage = "pose-result-conversion";
-          const detectionFrame = createPoseDetectionFrame({
-            className: poseClassName,
-            frameIndex: frame.timestamp,
-            mediaTime: frame.timestamp / 1_000_000_000,
-            minimumVisibleKeypoints: poseMinimumVisibleKeypoints,
-            poses,
-            uprightFrameHeight,
-          });
-          const poseMs = Date.now() - poseStartedAt;
+        }
+
+        stage = "producer-call";
+        const producerStartedAt = Date.now();
+        const detectionFrame = producer.process(frame);
+        const inferenceMs = Date.now() - producerStartedAt;
+
+        // Branch on the geometry the producer published, not on a task the
+        // host had to declare. Keypoints render as vector markers; anything
+        // with a box renders through the ID-mask fill.
+        if (hasKeypointGeometry(detectionFrame)) {
+          const poseMs = inferenceMs;
           stage = "pose-extension-evaluation";
           const extensionResult = activeExtension.active
             ? evaluateLiveInferencePoseExtension(
@@ -836,10 +866,9 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
             );
           }
           stage = "pose-instruction-conversion";
-          const poseInstructions = createPoseInstructions(
-            detectionFrame,
-            poseInstructionColor,
-          );
+          // No color argument: each skeleton takes its own class color, so a
+          // producer publishing more than one class does not draw them alike.
+          const poseInstructions = createPoseInstructions(detectionFrame);
           stage = "pose-prepare-vector";
           const vector = presentation.prepareVector({
             frameHeight: frameSize.height,
@@ -870,17 +899,13 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
           return true;
         }
 
-        if (
-          inferenceMode.value !== "segmentation" ||
-          segmentationProcessor === null
-        ) {
-          return false;
-        }
+        stage = "detection-serialization";
+        const serialized = serializeDetections(detectionFrame);
+        const detections = serialized.detections;
 
-        stage = "segmentation-run";
-        const segmentationStartedAt = Date.now();
-        const detections = segmentationProcessor.process(frame);
-        const segmentationMs = Date.now() - segmentationStartedAt;
+        metrics.skippedRleMaskCount.value = serialized.skippedRleMaskCount;
+
+        const segmentationMs = inferenceMs;
         const extensionResult = activeExtension.active
           ? evaluateLiveInferenceObjectExtension({
               detections,
@@ -958,7 +983,6 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
       droppedFrames,
       extension,
       fillOpacity,
-      inferenceMode,
       interaction,
       lastErrorAt,
       lastInteractionId,
@@ -968,23 +992,16 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
       mediaRect,
       metrics,
       mosaicCellPx,
-      poseClassName,
-      poseDetectionThreshold,
-      poseFramePixelsAreUpright,
-      poseInputSize,
-      poseInstructionColor,
-      poseKeypointThreshold,
-      poseMinimumVisibleKeypoints,
-      poseMirrorFrame,
-      poseRunner,
       presentation,
+      activeProducerGeneration,
       privacyContourWidth,
+      producer,
+      producerGeneration,
       reportDetections,
       reportError,
       reportFrame,
       reportInteraction,
       reportRuntime,
-      segmentationProcessor,
       showMasks,
     ],
   );
@@ -1029,6 +1046,7 @@ function useLiveInferenceMetrics() {
   const segmentationMs = useReactNativeSharedValue(0);
   const serializationMs = useReactNativeSharedValue(0);
   const shaderActive = useReactNativeSharedValue(false);
+  const skippedRleMaskCount = useReactNativeSharedValue(0);
   const visibleKeypointCount = useReactNativeSharedValue(0);
 
   return useMemo(
@@ -1049,6 +1067,7 @@ function useLiveInferenceMetrics() {
       segmentationMs,
       serializationMs,
       shaderActive,
+      skippedRleMaskCount,
       visibleKeypointCount,
     }),
     [
@@ -1068,6 +1087,7 @@ function useLiveInferenceMetrics() {
       segmentationMs,
       serializationMs,
       shaderActive,
+      skippedRleMaskCount,
       visibleKeypointCount,
     ],
   );
