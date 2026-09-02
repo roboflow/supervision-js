@@ -56,6 +56,7 @@ function createPresentedFrame(mediaTimeMs: number): PresentedFrame {
     paintSeq: index,
     quality: "exact",
     rotation: 0,
+    acknowledgePresentation: vi.fn(),
   };
 }
 
@@ -98,6 +99,7 @@ describe("presented frame tap", () => {
     expect(received[0]).toBe(presented);
     expect(forwardedInsidePresent).toBe(true);
     expect(presented.frame.close).not.toHaveBeenCalled();
+    expect(presented.acknowledgePresentation).not.toHaveBeenCalled();
   });
 
   it("records identity without holding the frame", async () => {
