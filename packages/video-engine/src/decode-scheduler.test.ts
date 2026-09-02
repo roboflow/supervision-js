@@ -152,6 +152,7 @@ function setup(
     gateDecode?: (timestampS: number) => Promise<void>;
     exactToleranceMs?: number;
     previewToleranceMs?: number;
+    scrubPrefetchQuietMs?: number;
   } = {},
 ): Harness {
   const sink = new FakeSink(opts.frames ?? [], opts.gateDecode ?? null);
@@ -170,6 +171,7 @@ function setup(
     source,
     cache,
     now: opts.now,
+    scrubPrefetchQuietMs: opts.scrubPrefetchQuietMs ?? 0,
     exactToleranceMs: opts.exactToleranceMs,
     previewToleranceMs: opts.previewToleranceMs,
   });
@@ -934,6 +936,103 @@ describe("DecodeScheduler", () => {
       expect(scheduler.getStats().prefetchState.generation).toBeGreaterThan(
         before,
       );
+    });
+  });
+
+  describe("scrub prefetch quiet period", () => {
+    it("waits for the scrub to settle before decoding neighbors", async () => {
+      vi.useFakeTimers();
+      try {
+        const h = setup({ scrubPrefetchQuietMs: 100 });
+        await h.scheduler.open();
+        await h.scheduler.whenSettled();
+        const before = h.sink.atTimestampsCalls.length;
+        const frames = record(h.scheduler);
+
+        h.scheduler.seekTo(asSec(5));
+        await h.scheduler.seekSettled();
+        await Promise.resolve();
+        expect(frames.at(-1)?.timestampS).toBe(5);
+        expect(h.scheduler.getStats().prefetchState.inFlight).toBe(false);
+        await vi.advanceTimersByTimeAsync(99);
+        expect(h.sink.atTimestampsCalls).toHaveLength(before);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await h.scheduler.whenSettled();
+        expect(h.sink.atTimestampsCalls.length).toBeGreaterThan(before);
+        await h.scheduler.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("restarts the quiet period at the latest scrub target", async () => {
+      vi.useFakeTimers();
+      try {
+        const h = setup({ scrubPrefetchQuietMs: 100 });
+        await h.scheduler.open();
+        await h.scheduler.whenSettled();
+        const before = h.sink.atTimestampsCalls.length;
+
+        h.scheduler.seekTo(asSec(5));
+        await h.scheduler.seekSettled();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(50);
+        h.scheduler.seekTo(asSec(6));
+        await h.scheduler.seekSettled();
+        await Promise.resolve();
+
+        await vi.advanceTimersByTimeAsync(99);
+        expect(h.sink.atTimestampsCalls).toHaveLength(before);
+        await vi.advanceTimersByTimeAsync(1);
+        await h.scheduler.whenSettled();
+        expect(h.sink.atTimestampsCalls).not.toContain(5);
+        expect(h.sink.atTimestampsCalls.length).toBeGreaterThan(before);
+        await h.scheduler.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not start scrub prefetch after playback takes over", async () => {
+      vi.useFakeTimers();
+      try {
+        const h = setup({ scrubPrefetchQuietMs: 100 });
+        await h.scheduler.open();
+        await h.scheduler.whenSettled();
+        const before = h.sink.atTimestampsCalls.length;
+
+        h.scheduler.seekTo(asSec(5));
+        await h.scheduler.seekSettled();
+        await Promise.resolve();
+        h.scheduler.attachPlay(5);
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(h.sink.atTimestampsCalls).toHaveLength(before);
+        await h.scheduler.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("lets close cancel a parked scrub prefetch", async () => {
+      vi.useFakeTimers();
+      try {
+        const h = setup({ scrubPrefetchQuietMs: 100 });
+        await h.scheduler.open();
+        await h.scheduler.whenSettled();
+        const before = h.sink.atTimestampsCalls.length;
+
+        h.scheduler.seekTo(asSec(5));
+        await h.scheduler.seekSettled();
+        await Promise.resolve();
+        await expect(h.scheduler.close()).resolves.toBeUndefined();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(h.sink.atTimestampsCalls).toHaveLength(before);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -2271,6 +2370,7 @@ describe("DecodeScheduler", () => {
       const scheduler = new DecodeScheduler({
         source,
         cache: makeCache(),
+        scrubPrefetchQuietMs: 0,
         // Far past anything these tests wait for, so only cancellation can
         // end a sweep; the hang watchdog must not stand in for it.
         decodeHangTimeoutMs: 600_000,

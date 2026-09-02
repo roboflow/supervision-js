@@ -36,6 +36,8 @@ export interface DecodeSchedulerOptions {
   readonly previewToleranceMs?: number;
   /** Millisecond time source for latency stats; defaults to performance.now. */
   readonly now?: () => number;
+  /** Delay before scrub-neighbor prefetch; overridable for deterministic tests. */
+  readonly scrubPrefetchQuietMs?: number;
   /**
    * Opens a fresh source handle to replace a wedged decoder, or null when the
    * source cannot be re-opened (a one-shot stream). mediabunny decodes take no
@@ -99,6 +101,8 @@ const MAX_FAILED_REBUILDS = 3;
 const MAX_UNANSWERED_DECODES = 6;
 /** Frames prefetched each side of the playhead while scrubbing. */
 const SCRUB_WINDOW_FRAMES = 6;
+/** Keep abandoned neighbor walks out of a moving scrub's decode path. */
+const SCRUB_PREFETCH_QUIET_MS = 100;
 /** Share of a scrub window spent ahead of a gesture that has a heading. The rest
  *  covers the ground just behind it, which is what a reversal lands on before the
  *  new heading is established. */
@@ -196,6 +200,7 @@ export class DecodeScheduler implements ScrubCursor {
   private readonly exactTolMs: number;
   private readonly previewTolMs: number;
   private readonly now: () => number;
+  private readonly scrubPrefetchQuietMs: number;
   /** Re-opens the source after a hung decode, or null when it cannot be re-opened. */
   private readonly reopen: (() => Promise<AnySourceHandle>) | null;
   private readonly decodeHangTimeoutMs: number;
@@ -245,6 +250,8 @@ export class DecodeScheduler implements ScrubCursor {
   /** Outstanding background prefetch chain, or null once it unwinds. Awaited
    *  only by close(), so teardown cannot outrun a sweep still holding a decoder. */
   private prefetchTask: Promise<void> | null = null;
+  /** True only while a sweep is decoding, not while scrub prefetch is parked. */
+  private prefetchDecoding = false;
   /** Bumped when a running prefetch is cancelled; that prefetch bails when it
    *  sees the token move, which is how cancellation propagates. */
   private prefetchGen = 0;
@@ -289,6 +296,8 @@ export class DecodeScheduler implements ScrubCursor {
     this.previewTolMs =
       options.previewToleranceMs ?? DEFAULT_PREVIEW_TOLERANCE_MS;
     this.now = options.now ?? (() => performance.now());
+    this.scrubPrefetchQuietMs =
+      options.scrubPrefetchQuietMs ?? SCRUB_PREFETCH_QUIET_MS;
     this.reopen = options.reopen ?? null;
     this.decodeHangTimeoutMs =
       options.decodeHangTimeoutMs ?? HANG_RECOVERY.DECODE_HANG_TIMEOUT_MS;
@@ -454,7 +463,7 @@ export class DecodeScheduler implements ScrubCursor {
       keyframesMs: boundedKeyframeTimestamps(this.keyframeIndex.known),
       prefetch: this.prefetchPlanMs(),
       prefetchState: {
-        inFlight: this.prefetchTask !== null,
+        inFlight: this.prefetchDecoding,
         generation: this.prefetchGen,
       },
       exactToleranceMs: this.exactTolMs,
@@ -1112,7 +1121,25 @@ export class DecodeScheduler implements ScrubCursor {
       try {
         await prev?.catch(() => undefined);
         if (gen !== this.prefetchGen || this.closed) return;
-        await this.runPrefetch(aroundS, gen);
+        if (
+          this.mode === AccessMode.Scrubbing &&
+          this.scrubPrefetchQuietMs > 0
+        ) {
+          const quiet = await Promise.race([
+            new Promise<true>((resolve) =>
+              setTimeout(() => resolve(true), this.scrubPrefetchQuietMs),
+            ),
+            this.whenAbandoned(gen),
+          ]);
+          if (quiet === ABANDONED || gen !== this.prefetchGen || this.closed)
+            return;
+        }
+        this.prefetchDecoding = true;
+        try {
+          await this.runPrefetch(aroundS, gen);
+        } finally {
+          this.prefetchDecoding = false;
+        }
       } catch {
         // Best-effort: a failed sweep just leaves a future cache miss.
       }
