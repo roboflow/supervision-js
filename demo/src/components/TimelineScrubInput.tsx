@@ -34,13 +34,17 @@ export const TimelineScrubInput = memo(function TimelineScrubInput({
   readonly onBlur: () => void;
   readonly onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   readonly onKeyUp: () => void;
-  readonly onLostPointerCapture: () => void;
-  readonly onPointerCancel: () => void;
-  readonly onPointerDown: () => void;
+  readonly onLostPointerCapture: (
+    event: ReactPointerEvent<HTMLInputElement>,
+  ) => void;
+  readonly onPointerCancel: (
+    event: ReactPointerEvent<HTMLInputElement>,
+  ) => void;
+  readonly onPointerDown: (event: ReactPointerEvent<HTMLInputElement>) => void;
   readonly onPointerEnter: (event: ReactPointerEvent<HTMLElement>) => void;
   readonly onPointerLeave: () => void;
-  readonly onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
-  readonly onPointerUp: () => void;
+  readonly onPointerMove: (event: ReactPointerEvent<HTMLInputElement>) => void;
+  readonly onPointerUp: (event: ReactPointerEvent<HTMLInputElement>) => void;
 }) {
   return (
     <input

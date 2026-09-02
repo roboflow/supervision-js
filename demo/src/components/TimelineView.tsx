@@ -32,7 +32,10 @@ import {
   readSourceResidencyRanges,
   SOURCE_RESIDENCY_TOOLTIP,
 } from "./source-residency-lane";
-import { readLivePreparedWindow } from "./live-readout-format";
+import {
+  readLivePreparedWindow,
+  readLivePresentedTime,
+} from "./live-readout-format";
 import { LiveReadoutText } from "./LiveReadoutText";
 import {
   formatTimelineFrame,
@@ -102,7 +105,7 @@ export function TimelineView({
   }, [rangeFloor]);
 
   const trackWidthRef = useRef(0);
-  const { playheadRef, readPlayheadTime, writePlayhead } = useTimelinePlayhead({
+  const { playheadRef, writePlayhead } = useTimelinePlayhead({
     duration: mediaDuration,
     pendingSeekTime,
     readVisualDuration,
@@ -260,7 +263,6 @@ export function TimelineView({
     onScrubChange,
     onScrubEnd,
     onScrubStart,
-    readPlayheadTime,
   });
 
   useEffect(() => {
@@ -270,26 +272,114 @@ export function TimelineView({
       onScrubChange,
       onScrubEnd,
       onScrubStart,
-      readPlayheadTime,
     };
   });
 
-  const handleSeek = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const gesture = gestureRef.current;
+  const getPointerTime = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (mediaDuration === null) {
+        return 0;
+      }
 
-    gesture.onScrubChange(
-      quantizeScrubTime(gesture.frames, Number(event.currentTarget.value)),
+      const rect = event.currentTarget.getBoundingClientRect();
+
+      return resolveScrubTime(
+        frames,
+        event.clientX - rect.left,
+        rect.width,
+        mediaDuration,
+      );
+    },
+    [frames, mediaDuration],
+  );
+  const inputPointerActiveRef = useRef(false);
+  const inputPointerTimeRef = useRef<number | null>(null);
+  const releasedInputTimeRef = useRef<number | null>(null);
+  const handleSeek = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const nextTime = quantizeScrubTime(
+      gestureRef.current.frames,
+      Number(event.currentTarget.value),
     );
+
+    if (inputPointerActiveRef.current) {
+      return;
+    }
+
+    const releasedTime = releasedInputTimeRef.current;
+    releasedInputTimeRef.current = null;
+
+    if (
+      releasedTime !== null &&
+      // The range rounds to 10 ms, so its native value may sit half a step
+      // from the coordinate-authoritative target already committed on release.
+      Math.abs(releasedTime - nextTime) <= 0.005
+    ) {
+      return;
+    }
+
+    gestureRef.current.onScrubChange(nextTime);
   }, []);
   const handleInputFlush = useCallback(() => {
     gestureRef.current.flushSeek();
   }, []);
-  const handleInputPointerDown = useCallback(() => {
-    gestureRef.current.onScrubStart(gestureRef.current.readPlayheadTime());
-  }, []);
+  const publishInputPointer = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      const nextTime = getPointerTime(event);
+
+      if (nextTime !== inputPointerTimeRef.current) {
+        inputPointerTimeRef.current = nextTime;
+        gestureRef.current.onScrubChange(nextTime);
+      }
+    },
+    [getPointerTime],
+  );
+  const handleInputPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      if (mediaDuration === null) {
+        return;
+      }
+
+      event.currentTarget.setPointerCapture(event.pointerId);
+      inputPointerActiveRef.current = true;
+      releasedInputTimeRef.current = null;
+      const nextTime = getPointerTime(event);
+
+      inputPointerTimeRef.current = nextTime;
+      // A click is one seek. Pointer movement is what turns it into a scrub.
+      gestureRef.current.onScrubStart(nextTime);
+    },
+    [getPointerTime, mediaDuration],
+  );
+  const handleInputPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      handleHoverMove(event);
+      if (inputPointerActiveRef.current && event.buttons === 1) {
+        publishInputPointer(event);
+      }
+    },
+    [handleHoverMove, publishInputPointer],
+  );
   const handleInputPointerEnd = useCallback(() => {
+    if (!inputPointerActiveRef.current) {
+      return;
+    }
+
+    inputPointerActiveRef.current = false;
+    releasedInputTimeRef.current = inputPointerTimeRef.current;
+    inputPointerTimeRef.current = null;
     gestureRef.current.onScrubEnd();
   }, []);
+  const handleInputPointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      if (!inputPointerActiveRef.current) {
+        return;
+      }
+
+      publishInputPointer(event);
+      handleInputPointerEnd();
+    },
+    [handleInputPointerEnd, publishInputPointer],
+  );
   const publishedScrubTimeRef = useRef<number | null>(null);
   const handleStripPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || mediaDuration === null) {
@@ -326,21 +416,6 @@ export function TimelineView({
     publishedScrubTimeRef.current = null;
     onScrubEnd();
   };
-  const getPointerTime = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (mediaDuration === null) {
-      return 0;
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-
-    return resolveScrubTime(
-      frames,
-      event.clientX - rect.left,
-      rect.width,
-      mediaDuration,
-    );
-  };
-
   const frameMarkRef = useRef<HTMLSpanElement>(null);
   const bandRefs = useTimelineBands();
   const scrubInputRef = useRef<HTMLInputElement>(null);
@@ -418,8 +493,8 @@ export function TimelineView({
         onPointerDown={handleInputPointerDown}
         onPointerEnter={handleHoverEnter}
         onPointerLeave={handleHoverLeave}
-        onPointerMove={handleHoverMove}
-        onPointerUp={handleInputPointerEnd}
+        onPointerMove={handleInputPointerMove}
+        onPointerUp={handleInputPointerUp}
       />
       {LIVE_LANES.map((lane, index) => (
         <Fragment key={lane.key}>
@@ -764,25 +839,6 @@ function useTimelinePlayhead({
   });
   const writtenPositionRef = useRef<string | null>(null);
 
-  const readPlayheadTime = () => {
-    const clock = clockRef.current;
-
-    const held = resolveTimelineTime(
-      clock.scrubTime,
-      clock.pendingSeekTime,
-      null,
-    );
-
-    if (held !== null) {
-      return held;
-    }
-
-    return clampTimelineTime(
-      readLiveReadouts().currentTime ?? 0,
-      clock.duration,
-    );
-  };
-
   const writePlayhead = (readouts: LiveReadouts, visualDuration: number) => {
     const playhead = playheadRef.current;
 
@@ -799,7 +855,7 @@ function useTimelinePlayhead({
     const clock = clockRef.current;
     const time =
       resolveTimelineTime(clock.scrubTime, clock.pendingSeekTime, null) ??
-      clampTimelineTime(readouts.currentTime ?? 0, clock.duration);
+      clampTimelineTime(readLivePresentedTime(readouts) ?? 0, clock.duration);
     const position = quantizePercent(time, visualDuration, stepPercent);
 
     if (position === writtenPositionRef.current) {
@@ -821,7 +877,7 @@ function useTimelinePlayhead({
     writePlayhead(readouts, readVisualDuration(readouts));
   });
 
-  return { playheadRef, readPlayheadTime, writePlayhead };
+  return { playheadRef, writePlayhead };
 }
 
 interface TimelineSeekGestureOptions {
