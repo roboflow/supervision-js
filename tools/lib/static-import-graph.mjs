@@ -1,24 +1,19 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-/**
- * An emitted chunk opens a line with the keyword for each static edge, so a
- * line that starts elsewhere carries a value expression. `import()` is the seam
- * the package splits its heavy chunks at, and a lazily loaded chunk is no part
- * of what evaluating the entry pulls in.
- */
-const staticBindingImport =
-  /^(?:import|export)\b(?!\s*\()[^\n]*?\bfrom\s*["']([^"'\n]+)["'];?$/gm;
-const staticSideEffectImport = /^import\s+["']([^"'\n]+)["'];?$/gm;
+import { parseAst } from "rollup/parseAst";
 
 /**
- * A brace list that opens without closing on its own line belongs to a
- * statement the line-anchored patterns above cannot read. Emitted chunks keep
- * each binding statement on one line today, so this never fires; if that ever
- * changes the walk would drop those edges and report a boundary as intact
- * because it stopped looking, which is the one failure this file must not have.
+ * The three declaration forms that can name another file, which an entry
+ * evaluates the moment it is named. `import()` is an expression, never one of these, which
+ * is the seam the package splits its heavy chunks at: a lazily loaded chunk is
+ * no part of what evaluating the entry pulls in.
  */
-const wrappedBindingList = /^(?:import|export)\s*\{[^}]*$/gm;
+const STATIC_IMPORT_TYPES = new Set([
+  "ImportDeclaration",
+  "ExportAllDeclaration",
+  "ExportNamedDeclaration",
+]);
 
 /**
  * Returns every file the relative static imports of an emitted entry lead to,
@@ -40,7 +35,7 @@ export async function readStaticImportGraph(entryFile) {
 
     files.set(file, source);
 
-    for (const specifier of staticImportSpecifiers(source, file)) {
+    for (const specifier of staticImportSpecifiers(source)) {
       if (specifier.startsWith(".")) {
         pending.push(path.resolve(path.dirname(file), specifier));
       }
@@ -50,17 +45,8 @@ export async function readStaticImportGraph(entryFile) {
   return files;
 }
 
-export function staticImportSpecifiers(source, label = "an emitted chunk") {
-  const wrapped = source.match(wrappedBindingList);
-
-  if (wrapped !== null) {
-    throw new Error(
-      `${label} wraps a binding list across lines, which this walk cannot follow: ${wrapped[0].trim()}`,
-    );
-  }
-
-  return [
-    ...[...source.matchAll(staticBindingImport)],
-    ...[...source.matchAll(staticSideEffectImport)],
-  ].map(([, specifier]) => specifier);
+export function staticImportSpecifiers(source) {
+  return parseAst(source)
+    .body.filter((node) => STATIC_IMPORT_TYPES.has(node.type) && node.source)
+    .map((node) => node.source.value);
 }
