@@ -49,7 +49,7 @@ export enum MediaRendererPlaybackState {
  * kinds may be added over time, so treat unrecognized values like `Unknown`.
  */
 export enum MediaErrorKind {
-  /** The media could not be opened or read at all. */
+  /** The media could not be opened or read, or was refused before any read. */
   Unreadable = "unreadable",
   /** The container or codec is not supported by this platform. */
   UnsupportedFormat = "unsupportedFormat",

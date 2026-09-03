@@ -73,12 +73,22 @@ original maps name paths that staging changes. The public `index` barrel keeps
 its own valid maps. The packer strips the repository-relative build dependency
 from the manifest npm receives.
 
-The published JavaScript keeps its dynamic
-`import("supervision/web-video-engine")`, which runs only when a caller opens a
-video-engine media source. The engine embeds a 1.5 MB decode worker, so this is
-what keeps that worker out of a consumer who only annotates images: a bundler
-splits the engine into its own chunk, and drops it entirely when nothing
-reachable opens an engine source.
+The adapter that barrel adds is a build entry of its own, reachable through the
+package's own exports rather than a subpath of its own. The browser build emits
+`media/video-engine-media-source` beside `index` and `editing`, and Rollup
+factors the adapter's modules into a single content-hashed chunk at the root of
+`dist` that the root entry and the media source entry both re-export. That is what
+lets the root entry and the engine subpath export one adapter, the same
+functions whichever import path names them, without either entry importing the
+other.
+
+The published JavaScript reaches the engine through a dynamic
+`import("./web-video-engine/engine.js")`, the chunk-relative path the build
+writes in place of the `#web-video-engine` alias, and that import runs only
+when a caller opens a video-engine media source. The engine embeds a 1.5 MB
+decode worker, so this is what keeps that worker out of a consumer who only
+annotates images: a bundler splits the engine into its own chunk, and drops it
+entirely when nothing reachable opens an engine source.
 
 ## Verify The Artifact
 
@@ -90,8 +100,9 @@ npm run package:tarball:smoke
 The smoke suite inspects the archive and then builds a throwaway npm project in
 the OS temp directory — outside this repository — to check that:
 
-- the root and editing JavaScript entrypoints, their declarations and valid
-  source maps are present;
+- the root, editing, and video-engine media source JavaScript entrypoints are
+  present with their declarations and valid source maps, as is the shared
+  adapter chunk the root and the media source entry re-export;
 - the standalone render-preparation worker is present, has no sibling chunk
   imports, and is exported as `supervision/render-preparation-worker`;
 - the main browser entry embeds the worker source instead of referencing a
@@ -99,6 +110,9 @@ the OS temp directory — outside this repository — to check that:
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
 - the three `supervision/web-video-engine` entries ship and resolve, and an
   entry that never opens a video source emits no engine chunk;
+- walking the root entry's static import graph shows it reaches the engine only
+  through a dynamic import, and walking the engine subpath's shows it never
+  reaches the root entry;
 - relocated engine entries carry no stale source maps or source-map comments;
 - tracker engines are embedded in core and do not appear as an install-time
   package or lockfile dependency;

@@ -24,7 +24,10 @@ built worker as a deployment asset for hosts whose CSP forbids `blob:` workers.
 It re-exports the engine, and beside it the adapter that opens one:
 `createWebVideoEngineMediaRendererSource` and `openWebVideoEngineMediaSource` are
 importable from the subpath and from `supervision` itself, and are the same
-functions either way. `#web-video-engine` is the browser package's own alias for
+functions either way. The adapter is emitted as a module of its own that both
+the root entry and the subpath re-export; neither imports the other, so naming
+the subpath does not evaluate the root entry and never runs the renderer
+graph. `#web-video-engine` is the browser package's own alias for
 the staged engine build; only the barrel and the media seam may name it. `no-restricted-imports` in
 `eslint.config.js` errors on any other entry, and on relative paths into
 `packages/video-engine/src`, so importers cannot bind themselves to the engine's
@@ -39,15 +42,17 @@ Types and runtime arrive from different places:
 - Vitest resolves both specifiers to the engine's TypeScript source, through
   aliases in `vitest.config.ts`, the same way it resolves `supervision` and
   `supervision-js-core`.
-- Rollup treats the alias as external and rewrites it to a path relative to
-  each chunk. The engine's own build output is staged into
+- Rollup externalises two things and rewrites each to a path relative to the
+  chunk that names it: the staged engine alias and the emitted adapter module,
+  so the barrel names both by relative path and carries neither's code. The
+  engine's own build output is staged into
   `packages/web/dist/web-video-engine`, its root entry renamed `engine` so the
   barrel can take `index`, so what the alias names ships beside the entry that
   reaches for it rather than inside it.
 - The barrel is built as its own Rollup configuration. Given the engine and the
-  entry that lazily loads it in one graph, Rollup hoists the engine into a
-  static import of the main entry, which is the one thing this whole
-  arrangement exists to prevent.
+  adapter that lazily loads it in one graph, Rollup hoists the engine into a
+  static import of the barrel, which is the one thing this whole arrangement
+  exists to prevent.
 
 The engine import inside `packages/web/src/media/video-engine-media-source.ts`
 is dynamic for one reason: the engine embeds a 1.5 MB decode worker, and a

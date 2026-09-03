@@ -171,13 +171,17 @@ not the first thing most users should reach for:
   one to `WebVideoEngine` directly instead.
   Both are also exported from `supervision/web-video-engine`, alongside the
   engine's own types; the subpath and the root give the same two functions. The
-  engine is loaded dynamically at the moment one of these opens a source, so an
-  application that never opens one pays nothing in its bundle to import
-  `supervision`. Pass `display` to size the decode to the box the frames are
-  painted into; without it they decode at the source's full resolution however
-  small that box is. Under this source the renderer also answers
-  `getRenderCount()` and `getPreparedAnnotationWindow()`, which report `null`
-  for pulled media;
+  source types are among those engine types: `UrlVideoSource`,
+  `BlobVideoSource`, and the `SourceKind` values that build one are imported
+  from `supervision/web-video-engine`, not from the package root. Importing the
+  subpath does not evaluate the root entry, so an application that wants only
+  the video engine does not run the renderer graph. The engine is loaded
+  dynamically at the moment one of these opens a source, so an application that
+  never opens one pays nothing in its bundle to import `supervision`. Pass
+  `display` to size the decode to the box the frames are painted into; without
+  it they decode at the source's full resolution however small that box is.
+  Under this source the renderer also answers `getRenderCount()` and
+  `getPreparedAnnotationWindow()`, which report `null` for pulled media;
 - `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses

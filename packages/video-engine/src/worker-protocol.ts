@@ -31,9 +31,11 @@ import type { MirrorStore } from "./mirror-store";
  *     paints nothing and every frame that earns the screen crosses as a
  *     PresentedFrameEvent, its VideoFrame on that message's transfer list.
  *
- * Everything here is structured-clone safe (no class instances besides the
- * transferable OffscreenCanvas and VideoFrame, no closures), which is what lets
- * the decode strategy and source descriptors travel as plain data.
+ * Everything here is structured-clone safe apart from three transferables: the
+ * OffscreenCanvas on bindCanvas, the VideoFrame on a presented-frame event, and
+ * a stream source's ReadableStream on the load command. Nothing else is a class
+ * instance and nothing is a closure, which is what lets the decode strategy and
+ * source descriptors travel as plain data.
  */
 
 export type RequestId = number;

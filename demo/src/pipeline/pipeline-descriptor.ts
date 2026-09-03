@@ -465,7 +465,7 @@ export const pipelineNodes: readonly PipelineNodeDefinition[] = [
     fallback: {
       kind: "unavailable",
       reason:
-        "Nothing on this build hands the engine a one-way stream. A stream is read forwards once, so seeking back has nothing left to read and the engine cannot reopen it after a stall. The engine supports it and there is no way to reach it from here.",
+        "This workbench opens the engine through a source that reads the clip twice, once for playback and once for the frames it samples alongside. A one-way stream hands over its bytes once, so that source refuses it. Only a host that drives the engine itself can hand it a stream.",
     },
     id: PipelineNodeId.BytesEngineStream,
     label: "A one-way stream, into the web video engine",

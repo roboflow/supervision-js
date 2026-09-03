@@ -164,7 +164,11 @@ inputs all open through it. A host that passes
 `createWebVideoEngineMediaRendererSource()` gets an engine-backed source instead,
 which hands each selected frame to the host. The renderer atomically composites
 matching layers and acknowledges the displayed frame, with no pull loop or
-second clock. The session contract is shaped around neither engine's types.
+second clock. That source takes a URL or a `Blob`, because it reads the video
+twice, once for the frames it presents and once for the thumbnails and
+single-frame grabs its sample sink answers, so it needs a source that opens
+twice. A host holding a one-shot stream drives `WebVideoEngine` directly. The
+session contract is shaped around neither engine's types.
 [`video-engine-presentation.md`](video-engine-presentation.md) is the contract
 for the push path and describes what the pull path still covers.
 
@@ -205,9 +209,11 @@ Media failures cross the boundary as a `MediaErrorKind` on
 `MediaSourceState.errorKind` and as a `MediaSourceError` that preserves its
 cause. The kind enum is a semantic contract and lives in core; classifying
 vendor failures into it is the browser adapter's job, and every public media
-source wraps what it throws at its own `open()` boundary. Applications branch on
-the kind and own their localized copy; they should never have to match decoder,
-demuxer, or container message text.
+source wraps what it throws at its own `open()` boundary. A source also raises a
+kind when it refuses an input it cannot serve, before it opens anything, and
+that error carries no cause because nothing failed underneath it. Applications
+branch on the kind and own their localized copy; they should never have to match
+decoder, demuxer, or container message text.
 
 Additions to these public shapes stay structurally compatible. New members of an
 already-published interface are optional, and a capability that must be

@@ -55,9 +55,11 @@ export interface BlobVideoSource {
 
 export interface StreamVideoSource {
   kind: SourceKind.Stream;
+  /** The load transfers this stream to the worker, which detaches this side's
+   *  reference: afterwards the worker holds the only readable end. */
   stream: ReadableStream<Uint8Array>;
-  /** Declared container type. The demuxer sniffs the bytes and never reads
-   *  this; it travels so a host can report what the media is. */
+  /** Declared container type. Nothing reads it: the demuxer sniffs the bytes,
+   *  and no metadata surface carries it back out. */
   mimeType: string;
 }
 
@@ -126,10 +128,9 @@ export enum WebVideoEngineErrorCode {
   /**
    * The decoder cannot decode this source at all: it refused to configure, it
    * errored, or it acknowledged decode requests and never produced a frame.
-   * Distinct from BackendCrashed, which a rebuild can recover; this one
-   * survives every rebuild, so the runtime stops rebuilding and says so. The
-   * usual cause is outside the page: another tab holding every hardware
-   * decoder session the machine has.
+   * Distinct from BackendCrashed; this one survives every rebuild, so the
+   * runtime stops rebuilding and says so. The usual cause is outside the page:
+   * another tab holding every hardware decoder session the machine has.
    */
   DecoderStalled = "DECODER_STALLED",
   /** A playback rate outside the forward range the engine supports. */

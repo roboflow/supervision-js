@@ -208,6 +208,10 @@ export class WebVideoEngine {
       createWorker ?? options.workerFactory ?? createEngineWorker;
   }
 
+  /**
+   * Loads the configured source. A stream source is transferred on this call,
+   * so a repeat load has nothing left to hand over and rejects.
+   */
   async load(): Promise<EngineReadySnapshot> {
     // Reflect Loading synchronously so a freshly mounted surface does not
     // sit on stale Idle until the worker's first status mirror lands.
