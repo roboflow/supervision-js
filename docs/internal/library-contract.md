@@ -162,9 +162,9 @@ Mediabunny remains the default adapter for reading, decoding, and normalizing
 media: the `src` path, a `Blob`, normalization output, and browser `MediaStream`
 inputs all open through it. A host that passes
 `createWebVideoEngineMediaRendererSource()` gets an engine-backed source instead,
-which announces every frame it puts on screen so the renderer composites with no
-pull loop and no second clock. The session contract is shaped around neither
-engine's types.
+which hands each selected frame to the host. The renderer atomically composites
+matching layers and acknowledges the displayed frame, with no pull loop or
+second clock. The session contract is shaped around neither engine's types.
 [`video-engine-presentation.md`](video-engine-presentation.md) is the contract
 for the push path and describes what the pull path still covers.
 
