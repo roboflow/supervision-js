@@ -16,9 +16,16 @@ const videoEngineModules = {
   "#web-video-engine": `${videoEngineStagedDir}/${videoEngineStagedRoot}.js`,
   "#web-video-engine/analysis": `${videoEngineStagedDir}/analysis.js`,
 };
+/**
+ * The package build emits the adapter as an entry of its own, which is what
+ * lets the root entry and the engine subpath export one adapter without either
+ * importing the other.
+ */
+const videoEngineAdapterModule = "#media/video-engine-media-source";
+const videoEngineAdapterEntry = "media/video-engine-media-source";
 const videoEngineBarrelModules = {
   ...videoEngineModules,
-  supervision: "index.js",
+  [videoEngineAdapterModule]: `${videoEngineAdapterEntry}.js`,
 };
 const embeddedWorkerSentinel =
   "__SUPERVISION_JS_EMBEDDED_MASK_PREPARATION_WORKER_SOURCE__";
@@ -275,6 +282,7 @@ const packageConfig = {
   input: {
     editing: "src/editing.ts",
     index: "src/index.ts",
+    [videoEngineAdapterEntry]: `src/${videoEngineAdapterEntry}.ts`,
   },
   external(source) {
     return (
@@ -304,11 +312,12 @@ const packageConfig = {
 };
 
 /**
- * The barrel re-exports the staged engine and the browser package's own adapter
- * for it. Built on its own so that Rollup never sees the engine and the entry
- * that lazily loads it in one graph: given both, it hoists the engine into a
- * static import of the main entry, and the main entry stops being the thing a
- * consumer who only annotates images can afford.
+ * The barrel re-exports the staged engine and the emitted adapter leaf that the
+ * root entry exports too, so both entries reach one adapter. Built on its own
+ * so that Rollup never sees the engine and the adapter that lazily loads it in
+ * one graph: given both, it hoists the engine into a static import that the
+ * main entry pulls in, and the main entry stops being the thing a consumer who
+ * only annotates images can afford.
  */
 const videoEngineBarrelConfig = {
   input: "src/web-video-engine/index.ts",

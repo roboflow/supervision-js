@@ -18,8 +18,7 @@
       "#types/*": ["src/types/*"],
       "#workers/*": ["src/workers/*"],
       "#web-video-engine": ["../video-engine/dist/index.d.ts"],
-      "#web-video-engine/analysis": ["../video-engine/dist/analysis.d.ts"],
-      "supervision": ["src/index.ts"]
+      "#web-video-engine/analysis": ["../video-engine/dist/analysis.d.ts"]
     },
     "strict": true,
     "declaration": true,

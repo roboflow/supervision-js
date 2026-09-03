@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { URL } from "node:url";
+import path from "node:path";
+import { fileURLToPath, URL } from "node:url";
 import test from "node:test";
+
+import {
+  readStaticImportGraph,
+  staticImportSpecifiers,
+} from "./lib/static-import-graph.mjs";
+
+const webDistDir = fileURLToPath(
+  new URL("../packages/web/dist/", import.meta.url),
+);
 
 const expectedWebRuntimeExports = [
   "BaseBoxCornerStyle",
@@ -377,35 +387,60 @@ test("built video engine subpath exposes the public runtime API", async () => {
   );
 });
 
-test("the published entries never load the video engine to reach the rest", () => {
+test("the published entries never load the video engine to reach the rest", async () => {
   // The engine embeds a 1.5 MB decode worker. A static import of it anywhere in
-  // the main entry's graph makes every consumer download that worker, whether
-  // or not anything opens a video source.
-  for (const entry of ["index", "editing"]) {
-    const source = readFileSync(
-      new URL(`../packages/web/dist/${entry}.js`, import.meta.url),
-      "utf8",
-    );
+  // an entry's graph makes every consumer download that worker, whether or not
+  // anything opens a video source, and the adapter that loads it sits a chunk
+  // away from the entry file.
+  for (const entry of ["index.js", "editing.js"]) {
+    const graph = await readStaticImportGraph(path.join(webDistDir, entry));
+    const failures = [];
 
-    assert.deepEqual(
-      [
-        ...source.matchAll(
-          /^(?:import|export)[^\n]*?["'][^"'\n]*web-video-engine[^"'\n]*["']/gm,
-        ),
-      ].map((match) => match[0]),
-      [],
-      `dist/${entry}.js statically reaches the video engine`,
+    for (const [file, source] of graph) {
+      for (const specifier of staticImportSpecifiers(source)) {
+        if (specifier.includes("web-video-engine")) {
+          failures.push(
+            `dist/${webDistPath(file)} statically imports ${specifier}`,
+          );
+        }
+      }
+    }
+
+    assert.deepEqual(failures, [], `dist/${entry} reaches the video engine`);
+  }
+
+  const rootGraph = await readStaticImportGraph(
+    path.join(webDistDir, "index.js"),
+  );
+
+  assert.ok(
+    [...rootGraph.values()].some((source) =>
+      /import\(["'][^"'\n]*web-video-engine[^"'\n]*["']\)/.test(source),
+    ),
+    "dist/index.js must still reach the engine, through a dynamic import",
+  );
+});
+
+test("the video engine subpath never evaluates the browser package's root entry", async () => {
+  const graph = await readStaticImportGraph(
+    path.join(webDistDir, "web-video-engine/index.js"),
+  );
+  const reached = new Set([...graph.keys()].map(webDistPath));
+
+  // Naming the subpath evaluates everything it statically imports, so a path
+  // back to a published entry runs the renderer graph an application that only
+  // wants the engine never asked for.
+  for (const entry of ["index.js", "editing.js"]) {
+    assert.ok(
+      !reached.has(entry),
+      `dist/web-video-engine/index.js statically reaches dist/${entry} through ${[...reached].join(", ")}`,
     );
   }
 
-  assert.match(
-    readFileSync(
-      new URL("../packages/web/dist/index.js", import.meta.url),
-      "utf8",
-    ),
-    /import\(["'][^"'\n]*web-video-engine[^"'\n]*["']\)/,
-    "dist/index.js must still reach the engine, through a dynamic import",
-  );
+  // An absence proves nothing unless the walk followed edges, and the barrel's
+  // two exports leave its directory in opposite directions.
+  assert.ok(reached.has("web-video-engine/engine.js"));
+  assert.ok(reached.has("media/video-engine-media-source.js"));
 });
 
 test("built React Native package imports core without importing web", async () => {
@@ -545,3 +580,7 @@ test("built React Native subpath entries ship and resolve", async () => {
     ),
   );
 });
+
+function webDistPath(file) {
+  return path.relative(webDistDir, file).split(path.sep).join("/");
+}

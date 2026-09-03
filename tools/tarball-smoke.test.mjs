@@ -27,6 +27,11 @@ import process from "node:process";
 import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import {
+  readStaticImportGraph,
+  staticImportSpecifiers,
+} from "./lib/static-import-graph.mjs";
+
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -155,7 +160,7 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
   );
 });
 
-test("tarball ships the video engine as its own lazily loaded subpath", () => {
+test("tarball ships the video engine as its own lazily loaded subpath", async () => {
   for (const entry of [
     "dist/web-video-engine/index.js",
     "dist/web-video-engine/index.d.ts",
@@ -221,29 +226,59 @@ test("tarball ships the video engine as its own lazily loaded subpath", () => {
 
   // The engine embeds a 1.5 MB decode worker. The main entry reaches it through
   // a dynamic import, so a consumer who only annotates images never loads it.
-  const index = readFileSync(path.join(extractedDir, "dist/index.js"), "utf8");
+  // Both published entries share one emitted adapter chunk, so the seam sits
+  // somewhere in the entry's graph rather than in the entry file itself.
+  const distDir = path.join(extractedDir, "dist");
+  const rootGraph = await readStaticImportGraph(path.join(distDir, "index.js"));
 
-  assert.match(index, /import\(['"]\.\/web-video-engine\/engine\.js['"]\)/);
+  assert.ok(
+    [...rootGraph.values()].some((source) =>
+      /import\(['"][^'"\n]*web-video-engine\/engine\.js['"]\)/.test(source),
+    ),
+    "The main entry must still reach the engine, through a dynamic import",
+  );
   assert.deepEqual(
-    [
-      ...index.matchAll(
-        /^(?:import|export)[^\n]*?['"][^'"\n]*web-video-engine[^'"\n]*['"]/gm,
-      ),
-    ].map((match) => match[0]),
+    [...rootGraph].flatMap(([file, source]) =>
+      staticImportSpecifiers(source)
+        .filter((specifier) => specifier.includes("web-video-engine"))
+        .map((specifier) => `${path.relative(distDir, file)} -> ${specifier}`),
+    ),
     [],
     "The main entry must not statically reach the engine",
   );
 
   // Every specifier the published engine entries use is relative, so a resolver
   // that supports nothing else can still read them.
-  const barrel = readFileSync(
-    path.join(extractedDir, "dist/web-video-engine/index.js"),
-    "utf8",
-  );
+  const barrelFile = path.join(distDir, "web-video-engine/index.js");
+  const barrel = readFileSync(barrelFile, "utf8");
 
   assert.match(barrel, /from ['"]\.\/engine\.js['"]/);
   assert.match(barrel, /createWebVideoEngineMediaRendererSource/);
-  assert.match(barrel, /from ['"]\.\.\/index\.js['"]/);
+  assert.deepEqual(
+    staticImportSpecifiers(barrel).filter(
+      (specifier) => !specifier.startsWith("."),
+    ),
+    [],
+    "The engine barrel must name every dependency by a relative path",
+  );
+
+  // Naming the subpath evaluates everything it statically imports, so a path
+  // back to a published entry runs the renderer graph an application that only
+  // wants the engine never asked for.
+  const barrelGraph = await readStaticImportGraph(barrelFile);
+  const reached = [...barrelGraph.keys()].map((file) =>
+    path.relative(distDir, file),
+  );
+
+  assert.ok(
+    !reached.includes("index.js"),
+    `dist/web-video-engine/index.js statically reaches dist/index.js through ${reached.join(", ")}`,
+  );
+
+  // An absence proves nothing unless the walk followed edges, and the barrel's
+  // two exports leave its directory in opposite directions.
+  assert.ok(reached.includes("web-video-engine/engine.js"));
+  assert.ok(reached.includes("media/video-engine-media-source.js"));
 });
 
 test("tarball ships the project license and package README", () => {

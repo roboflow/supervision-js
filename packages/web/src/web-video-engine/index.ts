@@ -12,7 +12,7 @@ export {
   openWebVideoEngineMediaSource,
   type WebVideoEngineMediaSource,
   type WebVideoEngineMediaSourceOptions,
-} from "supervision";
+} from "#media/video-engine-media-source";
 export {
   DIAGNOSTICS,
   FrameTimeline,
