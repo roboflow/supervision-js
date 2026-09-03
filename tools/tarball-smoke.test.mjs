@@ -128,7 +128,7 @@ after(() => {
   }
 });
 
-test("tarball ships both entrypoints with declarations and source maps", () => {
+test("tarball ships all three emitted entries with declarations and source maps", () => {
   for (const entry of [
     "dist/index.js",
     "dist/index.js.map",
@@ -136,10 +136,38 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
     "dist/editing.js",
     "dist/editing.js.map",
     "dist/editing.d.ts",
+    "dist/media/video-engine-media-source.js",
+    "dist/media/video-engine-media-source.js.map",
+    "dist/media/video-engine-media-source.d.ts",
   ]) {
     assert.ok(
       existsSync(path.join(extractedDir, entry)),
       `Expected ${entry} in the tarball`,
+    );
+  }
+
+  // The chunk both published import paths end at is named with a content hash,
+  // so its filename can only be read from the entry that re-exports it, and an
+  // empty list would pass the loop below having checked nothing.
+  const adapterEntry = path.join(
+    extractedDir,
+    "dist/media/video-engine-media-source.js",
+  );
+  const sharedChunks = staticImportSpecifiers(
+    readFileSync(adapterEntry, "utf8"),
+  )
+    .filter((specifier) => specifier.startsWith("."))
+    .map((specifier) => path.resolve(path.dirname(adapterEntry), specifier));
+
+  assert.ok(
+    sharedChunks.length > 0,
+    "Expected the adapter entry to re-export an emitted chunk",
+  );
+
+  for (const chunk of sharedChunks) {
+    assert.ok(
+      existsSync(chunk),
+      `Expected ${path.relative(extractedDir, chunk)} in the tarball`,
     );
   }
 
