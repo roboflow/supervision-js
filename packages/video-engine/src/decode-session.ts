@@ -62,6 +62,7 @@ interface DecodedPicture {
   readonly frame: VideoFrame;
   readonly timestampS: number;
   readonly durationS: number;
+  readonly independentPixels: boolean;
 }
 
 /**
@@ -102,6 +103,15 @@ export interface DecodeSessionOptions {
   readonly packets: PacketSource;
   readonly config: VideoDecoderConfig;
   readonly createDecoder: (init: VideoDecoderInit) => VideoDecoderLike;
+  /** Dimensions used to take ownership of decoder output pixels when set. */
+  readonly outputWidth?: number;
+  readonly outputHeight?: number;
+  /** Test seam for taking ownership of decoder output pixels. */
+  readonly snapshotFrame?: (
+    frame: VideoFrame,
+    width: number,
+    height: number,
+  ) => VideoFrame;
   /**
    * The track's quarter turn, which the session's frames carry and its draw
    * applies. A raw decoded picture holds the stored pixels and nothing about
@@ -295,9 +305,22 @@ export class DecodeSession implements SessionFrameSource {
 
   private readonly rotation: Rotation;
 
+  private readonly outputWidth: number | undefined;
+
+  private readonly outputHeight: number | undefined;
+
+  private readonly snapshotFrame: (
+    frame: VideoFrame,
+    width: number,
+    height: number,
+  ) => VideoFrame;
+
   constructor(private readonly options: DecodeSessionOptions) {
     this.outputTimeoutMs = options.outputTimeoutMs ?? OUTPUT_TIMEOUT_MS;
     this.rotation = options.rotation;
+    this.outputWidth = options.outputWidth;
+    this.outputHeight = options.outputHeight;
+    this.snapshotFrame = options.snapshotFrame ?? createVideoFrameSnapshotter();
     const prefixWidth = drivablePrefixWidth(options.config);
     if (prefixWidth === null) {
       throw new WebVideoEngineError(
@@ -782,7 +805,23 @@ export class DecodeSession implements SessionFrameSource {
       frame.close();
       return;
     }
-    this.decoded.push({ frame, ...timing });
+    let stable = frame;
+    if (this.outputWidth !== undefined && this.outputHeight !== undefined) {
+      try {
+        stable = this.snapshotFrame(frame, this.outputWidth, this.outputHeight);
+      } catch (error) {
+        this.stall("could not own decoder output pixels", error);
+        this.wake?.();
+        return;
+      } finally {
+        frame.close();
+      }
+    }
+    this.decoded.push({
+      frame: stable,
+      ...timing,
+      independentPixels: stable !== frame,
+    });
     this.wake?.();
   }
 
@@ -820,10 +859,28 @@ export class DecodeSession implements SessionFrameSource {
   }
 }
 
+function createVideoFrameSnapshotter(): (
+  frame: VideoFrame,
+  width: number,
+  height: number,
+) => VideoFrame {
+  return (frame, width, height) => {
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("2D canvas unavailable for frame snapshot");
+    context.drawImage(frame, 0, 0, width, height);
+    context.getImageData(0, 0, 1, 1);
+    return new VideoFrame(canvas, {
+      timestamp: frame.timestamp,
+      ...(frame.duration === null ? {} : { duration: frame.duration }),
+    });
+  };
+}
+
 /** A decoded frame in the runtime's own sample vocabulary, so a session frame
  *  and a VideoSampleSink frame reach the renderer the same way. */
 function videoFrameSample(
-  { frame, timestampS, durationS }: DecodedPicture,
+  { frame, timestampS, durationS, independentPixels }: DecodedPicture,
   rotation: Rotation,
 ): VideoSampleLike {
   const quarterTurn = rotation % 180 !== 0;
@@ -831,6 +888,7 @@ function videoFrameSample(
     timestamp: timestampS,
     duration: durationS,
     rotation,
+    ...(independentPixels ? { independentPixels: true as const } : {}),
     toVideoFrame: () => frame.clone(),
     draw: (ctx, dx, dy, dWidth, dHeight) => {
       drawRotated(

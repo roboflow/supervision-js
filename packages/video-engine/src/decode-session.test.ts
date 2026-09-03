@@ -183,6 +183,15 @@ class FakeDecoder implements VideoDecoderLike {
 function openSession(
   holdFrames = 0,
   rotation: Rotation = 0,
+  ownership?: {
+    readonly outputWidth: number;
+    readonly outputHeight: number;
+    readonly snapshotFrame: (
+      frame: VideoFrame,
+      width: number,
+      height: number,
+    ) => VideoFrame;
+  },
 ): {
   session: DecodeSession;
   packets: FakePacketSource;
@@ -194,6 +203,7 @@ function openSession(
     packets,
     config: CONFIG,
     rotation,
+    ...ownership,
     createDecoder: (init) => {
       const decoder = new FakeDecoder(init, holdFrames);
       decoders.push(decoder);
@@ -342,6 +352,33 @@ describe("DecodeSession chunks", () => {
 });
 
 describe("DecodeSession frames", () => {
+  it("owns decoder output pixels before queueing them", async () => {
+    const snapshots: Array<{ width: number; height: number }> = [];
+    const { session, decoders } = openSession(0, 0, {
+      outputWidth: 320,
+      outputHeight: 180,
+      snapshotFrame: (frame, width, height) => {
+        snapshots.push({ width, height });
+        return {
+          timestamp: frame.timestamp,
+          duration: frame.duration,
+          close: () => undefined,
+        } as unknown as VideoFrame;
+      },
+    });
+
+    const landed = await session.frameAt(0.5);
+
+    expect(landed).not.toBeNull();
+    expect(snapshots).not.toHaveLength(0);
+    expect(
+      snapshots.every(({ width, height }) => width === 320 && height === 180),
+    ).toBe(true);
+    expect(landed?.independentPixels).toBe(true);
+    expect(decoders[0].frames.every((frame) => frame.closed)).toBe(true);
+    landed?.close();
+  });
+
   it("framesCovering yields the walk from the anchor, not just the span", async () => {
     const { session } = openSession();
 

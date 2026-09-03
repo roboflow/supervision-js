@@ -5,6 +5,7 @@ import {
   detectVideoDecoder,
   detectWebgpuImport,
   openFrameProvider,
+  shouldOwnDecodeSessionPixels,
   zeroCopyViable,
   type DecodeSourceHandle,
   type SampleFrameSource,
@@ -103,6 +104,50 @@ describe("decodeSessionViable", () => {
       decodeSessionViable({
         videoDecoderAvailable: true,
         decoderConfig: { codec: "avc1.640028" },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldOwnDecodeSessionPixels", () => {
+  const canvas = { offscreenCanvasAvailable: true };
+
+  it("owns decoder output on Android from client hints", () => {
+    expect(
+      shouldOwnDecodeSessionPixels({ ...canvas, clientPlatform: "Android" }),
+    ).toBe(true);
+  });
+
+  it("trusts a non-Android client-hint platform over an emulated user agent", () => {
+    expect(
+      shouldOwnDecodeSessionPixels({
+        ...canvas,
+        clientPlatform: "macOS",
+        userAgent: "Mozilla/5.0 (Linux; Android 16)",
+      }),
+    ).toBe(false);
+  });
+
+  it("falls back to the legacy user agent when client hints are absent", () => {
+    expect(
+      shouldOwnDecodeSessionPixels({
+        ...canvas,
+        userAgent: "Mozilla/5.0 (Linux; Android 16)",
+      }),
+    ).toBe(true);
+    expect(
+      shouldOwnDecodeSessionPixels({
+        ...canvas,
+        userAgent: "Mozilla/5.0 (Macintosh)",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the current path when the worker cannot snapshot frames", () => {
+    expect(
+      shouldOwnDecodeSessionPixels({
+        clientPlatform: "Android",
+        offscreenCanvasAvailable: false,
       }),
     ).toBe(false);
   });

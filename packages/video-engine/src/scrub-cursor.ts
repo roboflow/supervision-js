@@ -48,6 +48,9 @@ export interface VideoSampleLike {
    * whoever takes one owes it the turn named by `rotation` below.
    */
   toVideoFrame(): VideoFrame;
+  /** The sample owns storage independent of a decoder output pool, so a host
+   * transfer may rewrap it without copying its pixels again. */
+  readonly independentPixels?: true;
   /** The turn the pixels still need, already applied by draw() and dropped by
    *  toVideoFrame(). */
   readonly rotation: Rotation;
@@ -105,6 +108,7 @@ export function idempotentSample(sample: VideoSampleLike): VideoSampleLike {
   let closed = false;
   return {
     toVideoFrame: () => sample.toVideoFrame(),
+    independentPixels: sample.independentPixels,
     rotation: sample.rotation,
     draw: (ctx, dx, dy, dWidth, dHeight) =>
       sample.draw(ctx, dx, dy, dWidth, dHeight),

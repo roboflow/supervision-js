@@ -267,6 +267,7 @@ function sampleAtPresentationTime(
   const owned = idempotentSample(sample);
   return {
     toVideoFrame: () => owned.toVideoFrame(),
+    independentPixels: owned.independentPixels,
     rotation: owned.rotation,
     draw: (ctx, dx, dy, dWidth, dHeight) =>
       owned.draw(ctx, dx, dy, dWidth, dHeight),
@@ -647,11 +648,18 @@ function sessionHandle(
   config: VideoDecoderConfig,
 ): SessionSourceHandle {
   const packets = new EncodedPacketSink(opened.videoTrack);
+  const ownDecoderOutputPixels = detectDecodeSessionPixelOwnership();
   const session = new DecodeSession({
     packets,
     config,
     createDecoder: webCodecsDecoder,
     rotation: opened.track.rotation,
+    ...(ownDecoderOutputPixels
+      ? {
+          outputHeight: opened.track.decodeHeight,
+          outputWidth: opened.track.decodeWidth,
+        }
+      : {}),
   });
   const { timeline } = opened.track;
   return {
@@ -897,6 +905,42 @@ export interface DecodeSessionContext {
   /** The opened track's decoder config, which decides whether the session's
    *  anchor trick applies to this bitstream. */
   readonly decoderConfig: VideoDecoderConfig;
+}
+
+/** Platform facts used to contain decoder-output ownership to Android.
+ * Client hints win when available so desktop UA emulation cannot accidentally
+ * turn the expensive path on. */
+export interface DecodeSessionPixelOwnershipContext {
+  readonly clientPlatform?: string;
+  readonly userAgent?: string;
+  readonly offscreenCanvasAvailable: boolean;
+}
+
+export function shouldOwnDecodeSessionPixels(
+  context: DecodeSessionPixelOwnershipContext,
+): boolean {
+  if (!context.offscreenCanvasAvailable) return false;
+  const clientPlatform = context.clientPlatform?.trim();
+  if (clientPlatform) return clientPlatform.toLowerCase() === "android";
+  return /\bAndroid\b/i.test(context.userAgent ?? "");
+}
+
+function detectDecodeSessionPixelOwnership(): boolean {
+  const navigator = (
+    globalThis as {
+      navigator?: {
+        readonly userAgent?: string;
+        readonly userAgentData?: { readonly platform?: string };
+      };
+    }
+  ).navigator;
+  return shouldOwnDecodeSessionPixels({
+    clientPlatform: navigator?.userAgentData?.platform,
+    offscreenCanvasAvailable:
+      typeof (globalThis as { OffscreenCanvas?: unknown }).OffscreenCanvas ===
+      "function",
+    userAgent: navigator?.userAgent,
+  });
 }
 
 /**

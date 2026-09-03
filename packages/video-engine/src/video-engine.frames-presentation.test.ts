@@ -86,6 +86,7 @@ class FakeSample implements VideoSampleLike {
     readonly timestamp: number = 0,
     readonly duration: number = 0,
     readonly rotation: Rotation = 0,
+    readonly independentPixels?: true,
   ) {}
 
   toVideoFrame(): VideoFrame {
@@ -580,6 +581,31 @@ describe("ScrubController in frames presentation", () => {
     // Materialization spends both the sample and its decoder-backed frame. The
     // independently wrapped canvas frame remains owned by the receiver.
     expect(sample.closeCount).toBe(1);
+    expect(sample.handedOut[0].closeCount).toBe(1);
+    expect(wrapped[1].closeCount).toBe(0);
+    controller.dispose();
+  });
+
+  it("does not copy an independently-owned sample through a canvas", async () => {
+    const { controller, deliver, paints } = setupController();
+    const sample = new FakeSample(500_000, 0, 0, true);
+
+    deliver({
+      kind: "sample",
+      sample,
+      timestampS: asSec(0.5),
+      width: 320,
+      height: 180,
+      isKeyFrame: false,
+      quality: "exact",
+    });
+    await flushRaf();
+
+    expect(paints).toHaveLength(1);
+    expect(sample.handedOut).toHaveLength(1);
+    expect(wrapped).toHaveLength(2);
+    expect(wrapped[1].source).toBe(sample.handedOut[0]);
+    expect(wrapped[1].init?.timestamp).toBe(500_000);
     expect(sample.handedOut[0].closeCount).toBe(1);
     expect(wrapped[1].closeCount).toBe(0);
     controller.dispose();

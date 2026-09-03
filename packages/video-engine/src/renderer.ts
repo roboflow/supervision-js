@@ -118,6 +118,11 @@ export class TransferFrameSink implements FrameSink {
     if (frame.kind === "sample") {
       const source = frame.sample.toVideoFrame();
       try {
+        if (frame.sample.independentPixels) {
+          return new VideoFrame(source, {
+            timestamp: Math.round(frame.timestampS * 1e6),
+          });
+        }
         const canvas = new OffscreenCanvas(frame.width, frame.height);
         const context = canvas.getContext("2d", {
           alpha: false,
