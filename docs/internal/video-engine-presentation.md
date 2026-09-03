@@ -62,6 +62,14 @@ single frame grabs are answered separately, through the engine's analysis entry
 opened lazily on first use, so a consumer that never asks for one never opens a
 second decode source. Presentation never travels that seam.
 
+Two readers of one video is why the adapter takes a URL or a Blob and nothing
+else. Both of those open a second time; a `ReadableStream` yields its bytes
+once, and the engine's load transfers it into the worker, which detaches the
+page's reference, so the analysis entry would open onto nothing. A host holding
+a stream drives `WebVideoEngine` itself, where the stream has one reader.
+`openWebVideoEngineMediaSource` refuses one before it opens anything, so the
+bytes are still there to hand somewhere else.
+
 ## The Atomic Present
 
 `packages/web/src/renderers/pixi-frame-present.ts` turns one announced frame

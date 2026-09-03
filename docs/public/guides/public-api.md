@@ -165,6 +165,10 @@ not the first thing most users should reach for:
   for video presented by the web video engine, which owns the playhead and
   hands each selected frame to the host. The renderer atomically composites
   annotations from that frame's identity and acknowledges it once displayed.
+  Its source is a URL or a `Blob`, because it reads the video twice: once for
+  the frames it presents, and once for the thumbnails and single-frame grabs
+  its sample sink answers. A `ReadableStream` can be read only once, so pass
+  one to `WebVideoEngine` directly instead.
   Both are also exported from `supervision/web-video-engine`, alongside the
   engine's own types; the subpath and the root give the same two functions. The
   engine is loaded dynamically at the moment one of these opens a source, so an

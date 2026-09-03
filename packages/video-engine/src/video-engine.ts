@@ -212,8 +212,9 @@ export class WebVideoEngine {
     // Reflect Loading synchronously so a freshly mounted surface does not
     // sit on stale Idle until the worker's first status mirror lands.
     this.store.writeStatus(PlaybackStatus.Loading);
+    const { source, transfer } = toWorkerSource(this.options.source);
     const config: EngineLoadConfig = {
-      source: toWorkerSource(this.options.source),
+      source,
       presentation: this.options.presentation,
       cacheStrategy: this.options.cacheStrategy,
       previewCapacity: this.options.previewCapacity,
@@ -225,11 +226,10 @@ export class WebVideoEngine {
       urlSource: this.options.urlSource,
     };
     try {
-      const response = await this.request((requestId) => ({
-        type: "load",
-        requestId,
-        config,
-      }));
+      const response = await this.request(
+        (requestId) => ({ type: "load", requestId, config }),
+        transfer,
+      );
       if (response.type !== "ready") {
         throw new WebVideoEngineError(
           WebVideoEngineErrorCode.BackendCrashed,
@@ -759,6 +759,7 @@ export class WebVideoEngine {
 
   private request(
     build: (requestId: RequestId) => AwaitableCommand,
+    transfer: Transferable[] = [],
   ): Promise<ResponseEvent> {
     const port = this.ensurePort();
     if (!port) {
@@ -787,7 +788,19 @@ export class WebVideoEngine {
         );
       }, HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS);
       this.pending.set(requestId, { resolve, reject, timer });
-      port.postMessage(build(requestId), []);
+      try {
+        port.postMessage(build(requestId), transfer);
+      } catch (cause) {
+        clearTimeout(timer);
+        this.pending.delete(requestId);
+        reject(
+          new WebVideoEngineError(
+            WebVideoEngineErrorCode.BackendCrashed,
+            "web video engine could not hand the command to the worker",
+            cause,
+          ),
+        );
+      }
     });
   }
 
@@ -862,13 +875,30 @@ export class WebVideoEngine {
  * inside it `new URL("/clip.mp4", self.location.href)` throws and `fetch` on a
  * relative path fails to parse. The facade runs on the page, so it is the last
  * place a relative source URL can be resolved against the document a host means.
+ *
+ * A ReadableStream cannot be structured-cloned, so it travels on the load
+ * message's transfer list, which detaches this side's reference to it: the
+ * worker holds the only readable end afterwards. A URL and a Blob are cloned
+ * and stay readable here.
  */
-function toWorkerSource(source: VideoSource): VideoSource {
-  if (source.kind !== SourceKind.Url) return source;
-  return {
-    ...source,
-    url: new URL(source.url, globalThis.location?.href).href,
-  };
+function toWorkerSource(source: VideoSource): {
+  readonly source: VideoSource;
+  readonly transfer: Transferable[];
+} {
+  switch (source.kind) {
+    case SourceKind.Url:
+      return {
+        source: {
+          ...source,
+          url: new URL(source.url, globalThis.location?.href).href,
+        },
+        transfer: [],
+      };
+    case SourceKind.Blob:
+      return { source, transfer: [] };
+    case SourceKind.Stream:
+      return { source, transfer: [source.stream] };
+  }
 }
 
 /**

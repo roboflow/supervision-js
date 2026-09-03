@@ -1,5 +1,5 @@
 import { SourceKind } from "#web-video-engine";
-import type { UrlVideoSource } from "#web-video-engine";
+import type { BlobVideoSource, UrlVideoSource } from "#web-video-engine";
 import type { PresentedVideoFrame } from "#renderers/presented-frame-channel";
 import { MediaErrorKind } from "supervision-js-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { MediaSourceError } from "./media-errors";
 import {
   createWebVideoEngineMediaRendererSource,
   openWebVideoEngineMediaSource,
+  type WebVideoEngineMediaSourceOptions,
 } from "./video-engine-media-source";
 
 type ReadySnapshot = {
@@ -181,16 +182,42 @@ describe("video engine media source", () => {
     expect(source.engine).toBeDefined();
   });
 
-  it("reports the declared mime type of a stream source", async () => {
-    const source = await openWebVideoEngineMediaSource({
-      source: {
-        kind: SourceKind.Stream,
-        mimeType: "video/webm",
-        stream: new ReadableStream<Uint8Array>(),
-      },
+  it("opens a blob source through the engine and the analysis entry", async () => {
+    const blobSource: BlobVideoSource = {
+      blob: new Blob([new Uint8Array([1, 2, 3])]),
+      kind: SourceKind.Blob,
+    };
+
+    const source = await openWebVideoEngineMediaSource({ source: blobSource });
+    await source.sampleSink.getSample(0);
+
+    expect(engine.options[0]).toMatchObject({ source: blobSource });
+    expect(analysis.open).toHaveBeenCalledWith({
+      decodeStrategy: undefined,
+      source: blobSource,
+    });
+    expect(source.metadata.mimeType).toBeNull();
+  });
+
+  it("refuses a one-shot stream before anything reads it", async () => {
+    const stream = new ReadableStream<Uint8Array>();
+    const source = {
+      kind: SourceKind.Stream,
+      mimeType: "video/webm",
+      stream,
+    } as unknown as WebVideoEngineMediaSourceOptions["source"];
+
+    await expect(
+      openWebVideoEngineMediaSource({ source }),
+    ).rejects.toMatchObject({
+      kind: MediaErrorKind.Unreadable,
+      name: "MediaSourceError",
     });
 
-    expect(source.metadata.mimeType).toBe("video/webm");
+    expect(engine.options).toHaveLength(0);
+    expect(engine.load).not.toHaveBeenCalled();
+    expect(analysis.open).not.toHaveBeenCalled();
+    expect(stream.locked).toBe(false);
   });
 
   it("leaves the frame rate unknown when the engine reports none", async () => {

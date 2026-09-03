@@ -17,8 +17,10 @@ import { setDiagnosticsEnabled } from "./scrub-controller";
 import { TRACE_SCHEMA } from "./trace-recorder";
 import {
   PlaybackStatus,
+  SourceKind,
   WebVideoEngineError,
   WebVideoEngineErrorCode,
+  type VideoSource,
 } from "./types";
 import { WebVideoEngine, type EngineWorkerPort } from "./video-engine";
 import { handleEngineCommand } from "./worker-dispatch";
@@ -52,12 +54,16 @@ beforeAll(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   setDiagnosticsEnabled(false);
 });
 
 class FakeWorkerPort implements EngineWorkerPort {
   readonly engine: EngineCore;
   terminated = false;
+  /** One entry per posted command, in order, beside its transfer list. */
+  readonly commands: EngineCommand[] = [];
+  readonly transfers: Transferable[][] = [];
   private listener: ((event: MessageEvent<EngineEvent>) => void) | null = null;
 
   constructor(clock: MediaClock) {
@@ -68,7 +74,9 @@ class FakeWorkerPort implements EngineWorkerPort {
     });
   }
 
-  postMessage(command: EngineCommand): void {
+  postMessage(command: EngineCommand, transfer: Transferable[] = []): void {
+    this.commands.push(command);
+    this.transfers.push(transfer);
     void handleEngineCommand(this.engine, command, (out) => this.deliver(out));
   }
 
@@ -88,7 +96,7 @@ class FakeWorkerPort implements EngineWorkerPort {
   }
 }
 
-function setup(): {
+function setup(source: VideoSource = LOAD_CONFIG.source): {
   engine: WebVideoEngine;
   clock: FakeClock;
   cursor: FakeCursor;
@@ -101,7 +109,7 @@ function setup(): {
     .mockResolvedValue(cursor);
   const clock = new FakeClock();
   let port: FakeWorkerPort | null = null;
-  const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => {
+  const engine = new WebVideoEngine({ source }, () => {
     port = new FakeWorkerPort(clock);
     return port;
   });
@@ -461,6 +469,144 @@ describe("WebVideoEngine", () => {
       // The entry is gone, so a late reply (if any) would no-op rather than
       // settle a stale promise. A second command starts a fresh request.
       vi.useRealTimers();
+    });
+  });
+
+  describe("source handoff", () => {
+    const streamOf = (bytes: Uint8Array): ReadableStream<Uint8Array> =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      });
+
+    it("a stream load carries the stream itself on the transfer list", async () => {
+      const stream = streamOf(new Uint8Array([1, 2, 3]));
+      const { engine, getPort } = setup({
+        kind: SourceKind.Stream,
+        mimeType: "video/mp4",
+        stream,
+      });
+
+      await engine.load();
+
+      expect(getPort()?.transfers[0]).toEqual([stream]);
+      await engine.dispose();
+    });
+
+    it("a relative source url is resolved against the page before it is posted", async () => {
+      vi.stubGlobal("location", { href: "https://host.test/app/page.html" });
+      const { engine, getPort } = setup({
+        kind: SourceKind.Url,
+        url: "clip.mp4",
+      });
+
+      await engine.load();
+
+      const [load] = getPort()?.commands ?? [];
+      if (load?.type !== "load" || load.config.source.kind !== SourceKind.Url) {
+        throw new Error("the worker received no url load");
+      }
+      expect(load.config.source.url).toBe("https://host.test/app/clip.mp4");
+      await engine.dispose();
+    });
+
+    it("a url load transfers nothing", async () => {
+      const { engine, getPort } = setup();
+
+      await engine.load();
+
+      expect(getPort()?.transfers[0]).toEqual([]);
+      await engine.dispose();
+    });
+
+    it("a blob load transfers nothing", async () => {
+      const { engine, getPort } = setup({
+        kind: SourceKind.Blob,
+        blob: new Blob([new Uint8Array([1, 2, 3])]),
+      });
+
+      await engine.load();
+
+      expect(getPort()?.transfers[0]).toEqual([]);
+      await engine.dispose();
+    });
+
+    it("a command the port refuses to post rejects with its timer cleared", async () => {
+      vi.useFakeTimers();
+      const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => ({
+        postMessage(): void {
+          throw new DOMException("could not be cloned", "DataCloneError");
+        },
+        addEventListener(): void {},
+        terminate(): void {},
+      }));
+
+      await expect(engine.load()).rejects.toMatchObject({
+        code: WebVideoEngineErrorCode.BackendCrashed,
+        message: "web video engine could not hand the command to the worker",
+      });
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(engine.getStatus()).toBe(PlaybackStatus.Errored);
+      vi.useRealTimers();
+    });
+
+    /**
+     * The suite's other ports hand the command object straight to the
+     * dispatcher, so nothing there would notice a source that cannot be
+     * cloned. This one runs the load over a real MessagePort pair, where the
+     * structured clone algorithm decides.
+     */
+    it("a stream load survives a real structured clone and arrives readable", async () => {
+      vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(
+        makeFakeCursor(),
+      );
+      const bytes = new Uint8Array([9, 8, 7, 6]);
+      const stream = streamOf(bytes);
+      const channel = new MessageChannel();
+      const core = new EngineCore({
+        emit: (event) => channel.port2.postMessage(event),
+        emitDiagnostics: (event) => channel.port2.postMessage(event),
+        clock: new FakeClock(),
+      });
+      const received: EngineCommand[] = [];
+      channel.port2.onmessage = (event: MessageEvent<EngineCommand>) => {
+        received.push(event.data);
+        void handleEngineCommand(core, event.data, (out) =>
+          channel.port2.postMessage(out),
+        );
+      };
+      const engine = new WebVideoEngine(
+        { source: { kind: SourceKind.Stream, mimeType: "video/mp4", stream } },
+        () => ({
+          postMessage: (command, transfer) =>
+            channel.port1.postMessage(command, transfer),
+          addEventListener: (_type, listener) => {
+            channel.port1.onmessage = listener;
+          },
+          terminate: () => {
+            channel.port1.close();
+            channel.port2.close();
+          },
+        }),
+      );
+
+      await engine.load();
+
+      const [load] = received;
+      if (
+        load?.type !== "load" ||
+        load.config.source.kind !== SourceKind.Stream
+      ) {
+        throw new Error("the worker received no stream load");
+      }
+      const arrived = load.config.source.stream;
+      expect(arrived).not.toBe(stream);
+      expect((await arrived.getReader().read()).value).toEqual(bytes);
+
+      await engine.dispose();
     });
   });
 

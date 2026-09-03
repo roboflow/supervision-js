@@ -7,12 +7,13 @@ import type {
 import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
 import type { MediaRendererSource } from "#types/media-renderer";
 import type {
+  BlobVideoSource,
   DecodeResolutionStrategy,
   DisplayBoxResolutionOptions,
   EngineReadySnapshot,
+  UrlVideoSource,
   WebVideoEngine,
   WebVideoEngineOptions,
-  VideoSource,
 } from "#web-video-engine";
 import type {
   AnalysisSession,
@@ -35,8 +36,18 @@ const FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX = 320;
 
 export interface WebVideoEngineMediaSourceOptions extends Omit<
   WebVideoEngineOptions,
-  "presentation"
+  "presentation" | "source"
 > {
+  /**
+   * The video to open. Two readers open it here, so it has to be one that can
+   * be opened twice: the worker-backed engine decodes playback and scrubbing,
+   * and the analysis session behind `sampleSink` decodes thumbnails and one-off
+   * grabs from scratch. A URL re-fetches and a Blob re-reads. A ReadableStream
+   * yields its bytes once, and the engine's load transfers it to the worker,
+   * which detaches it here, so the pull path would be left with nothing to
+   * read; pass one to {@link WebVideoEngine} directly instead.
+   */
+  readonly source: UrlVideoSource | BlobVideoSource;
   /**
    * The box a compositor paints these frames into, in CSS pixels, with the
    * viewer's device pixel ratio.
@@ -78,6 +89,13 @@ export interface WebVideoEngineMediaSource extends DecodedMediaSource {
 export async function openWebVideoEngineMediaSource(
   options: WebVideoEngineMediaSourceOptions,
 ): Promise<WebVideoEngineMediaSource> {
+  if ("stream" in options.source) {
+    throw new MediaSourceError(
+      MediaErrorKind.Unreadable,
+      "This media source decodes playback and one-off frame grabs from two readers of the video, so it needs one that opens twice: a URL or a Blob. A ReadableStream yields its bytes once.",
+    );
+  }
+
   let engine: WebVideoEngine | undefined;
   let retainedFrames:
     ReturnType<typeof retainFramesUntilSubscribed> | undefined;
@@ -111,7 +129,7 @@ export async function openWebVideoEngineMediaSource(
           void openedEngine.dispose();
         },
       },
-      metadata: createMetadata(options.source, snapshot),
+      metadata: createMetadata(snapshot),
       sampleSink: frames.sampleSink,
     };
   } catch (error) {
@@ -230,7 +248,7 @@ function framesPreviewWidth(
 function createAnalysisFrameReader(options: {
   readonly decodeStrategy: DecodeResolutionStrategy | undefined;
   readonly frameDuration: number;
-  readonly source: VideoSource;
+  readonly source: WebVideoEngineMediaSourceOptions["source"];
 }) {
   let sessionPromise: Promise<AnalysisSession> | undefined;
   let closed = false;
@@ -341,7 +359,6 @@ function createSample(
 }
 
 function createMetadata(
-  source: VideoSource,
   snapshot: EngineReadySnapshot,
 ): DecodedMediaSourceMetadata {
   const duration = Number.isFinite(snapshot.durationMs)
@@ -364,7 +381,7 @@ function createMetadata(
     firstTimestamp: snapshot.firstTimestampMs / MILLISECONDS_PER_SECOND,
     formatMimeType: null,
     formatName: "video-engine",
-    mimeType: "stream" in source ? source.mimeType : null,
+    mimeType: null,
     primaryVideoHeight: snapshot.naturalHeight,
     primaryVideoWidth: snapshot.naturalWidth,
     trackCount: 1,
