@@ -63,7 +63,7 @@ export interface FramePresentTargets {
 }
 
 /**
- * The atomic present: one frame the producer put on screen becomes one screen.
+ * The atomic present: one frame handed to the host becomes one composited screen.
  *
  * The media time is the one the producer published for the frame these pixels
  * are, and it is the only time any step below sees. Nothing here awaits, so no

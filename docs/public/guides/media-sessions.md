@@ -63,8 +63,9 @@ detection coverage or prepared artifacts are missing and started again when the
 wait settles.
 
 Video files are opened through `createWebVideoEngineMediaRendererSource`, which
-decodes, seeks and presents frames itself and reports the media time of the
-frame it put on screen. Passing a URL or a `Blob` directly keeps the renderer
+decodes and seeks frames, then hands each selected frame and its media time to
+the renderer. The renderer composites matching annotations and acknowledges the
+frame once displayed. Passing a URL or a `Blob` directly keeps the renderer
 pulling samples instead.
 
 ## Reading The Resolved Defaults

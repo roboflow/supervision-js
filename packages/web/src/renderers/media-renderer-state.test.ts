@@ -10,7 +10,7 @@ import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import type { PresentedMediaSample } from "./media-renderer-scene";
 
 describe("media renderer runtime state", () => {
-  it("counts every frame a push producer puts on screen", () => {
+  it("counts every displayed frame from a push producer", () => {
     const state = createRuntimeState();
 
     state.recordPresentationUpdate(createPresentedFrame(0, 1));
