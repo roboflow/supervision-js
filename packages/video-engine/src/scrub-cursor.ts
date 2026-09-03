@@ -31,8 +31,9 @@ export interface ScrubFrameBase {
 
 /**
  * The structural slice of mediabunny's VideoSample the runtime touches: enough
- * to draw it into a 2D canvas, hand its pixels to WebGPU zero-copy, and release
- * it. Kept as a slice rather than the concrete class so the runtime never
+ * to draw it into a 2D canvas, hand its pixels to WebGPU without an intermediate
+ * transfer copy where the selected path supports that, and release it. Kept as
+ * a slice rather than the concrete class so the runtime never
  * imports mediabunny and stays fake-injectable under test.
  *
  * close() is the caller's obligation and is made idempotent at the cursor
@@ -72,9 +73,11 @@ export interface VideoSampleLike {
  *
  * A canvas frame carries a canvas and no close obligation: it is a cache blit
  * or a CanvasSink decode. WebGPU uploads it with copyExternalImageToTexture,
- * which accepts neither an SVG image nor a video element. A sample frame carries a live VideoSample
- * the zero-copy path imports straight into WebGPU; whoever stashes it owns its
- * close, so only fresh decodes on the sample source produce one.
+ * which accepts neither an SVG image nor a video element. A sample frame carries
+ * a live VideoSample that an eligible VideoSampleSink route can import directly
+ * into WebGPU. A DecodeSession route may first materialize independently owned
+ * pixels. Whoever stashes the sample owns its close, so only fresh decodes on
+ * the sample source produce one.
  */
 export interface CanvasScrubFrame extends ScrubFrameBase {
   readonly kind: "canvas";

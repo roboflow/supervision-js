@@ -135,10 +135,10 @@ A `MediaRendererSource` opens into a `DecodedMediaSource`, whose `sampleSink`
 answers `getSample(timestamp)` for a time the renderer picks. A source that owns
 its own decode clock cannot answer that without the renderer forming a second
 opinion about which frame belongs on screen, so it publishes a
-`PresentedFrameChannel` as `engine` instead: it announces each frame it puts on
-screen, and the renderer composites that frame and draws every annotation layer
-from the same media time. `sampleSink` stays required either way, and still
-serves thumbnails and one-off frame grabs.
+`PresentedFrameChannel` as `engine` instead: it hands each selected frame to the
+host, and the renderer atomically composites annotation layers from that frame's
+identity before acknowledging it as displayed. `sampleSink` stays required
+either way, and still serves thumbnails and one-off frame grabs.
 
 `createWebVideoEngineMediaRendererSource()` is the implementation of that in this
 package. `PresentedFrameChannel` is exported so a host can implement its own.

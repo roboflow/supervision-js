@@ -3,10 +3,12 @@
 Measures the library through the running demo the way a reviewer would: does
 the picture hold its rate in every second of a clip, do the boxes land on the
 frame they belong to, how long does a seek take, and does the engine survive
-being scrubbed by an impatient thumb. Everything is
-read over the Chrome DevTools Protocol from a real browser against a real dev
-server, so the numbers describe the app as shipped rather than a unit under a
-mock.
+being scrubbed by an impatient thumb. Everything is read over the Chrome
+DevTools Protocol from a real browser against a real dev server, so the numbers
+describe the built artifacts actually served to the browser rather than a unit
+under a mock. A valid report must record a consumer commit and dirty state that
+match the intended checkout; a running dev server alone does not prove package
+output is current.
 
 ## Prerequisites
 

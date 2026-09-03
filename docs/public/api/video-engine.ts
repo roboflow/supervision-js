@@ -2,10 +2,12 @@
  * The web video engine that decodes and presents video files, available from
  * the `supervision/web-video-engine` entrypoint.
  *
- * The engine owns the playhead and announces every frame it puts on screen. A
- * media session reaches it through the two adapters here, which load it the
- * moment one of them opens a source, so an application that only ever renders
- * still images never downloads it.
+ * The engine owns frame selection and hands each selected frame to the host. A
+ * media session atomically composites matching annotation layers and
+ * acknowledges the frame once it has been displayed. The session reaches the
+ * engine through the two adapters here, which load it the moment one of them
+ * opens a source, so an application that only ever renders still images never
+ * downloads it.
  *
  * @module Web Video Engine
  */

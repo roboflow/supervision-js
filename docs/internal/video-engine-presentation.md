@@ -95,11 +95,12 @@ Adding a layer to the present means adding a step that takes the media time,
 reads nothing else, and returns synchronously. Anything that needs to await, or
 to know the wall clock, does not belong inside the present.
 
-The pixels ride one GPU texture: the compositor copies the decoder's frame
-straight into it, and a decode of another size swaps the texture atomically, so
-a refused swap leaves nothing behind. `captureFrame` reads the composited
-surface rather than re-decoding. `pixi-media-scene.compositor.test.ts` covers
-those cases against a fake device.
+The pixels ride one GPU texture. An eligible VideoSampleSink route can copy its
+decoded frame straight into it; the Android H.264 DecodeSession route may first
+materialize independently owned pixels. A decode of another size swaps the
+texture atomically, so a refused swap leaves nothing behind. `captureFrame`
+reads the composited surface rather than re-decoding.
+`pixi-media-scene.compositor.test.ts` covers those cases against a fake device.
 
 Not every browser converts a decoded frame into a copy source. Firefox's queue
 takes only ImageBitmap, HTMLImageElement, HTMLCanvasElement and OffscreenCanvas,
@@ -120,17 +121,18 @@ the sprite's texture. Both steps land inside the present: Pixi's GL texture
 system uploads from the `update()` call rather than at render time, so this cost
 follows presented frames rather than the renders `renderPresent` coalesces.
 
-The upload is what Safari costs: it runs once per presented frame, and it
-dominates the wall clock during playback. It is not the pixels. The same frames
-uploaded straight from the decoded VideoFrame into a WebGL texture, in the same
-browser, cost a small fraction of that. Part of that gap is per-pixel and part
-of it is that the staging surface is media-sized whatever the decode delivers,
-so a decode below media size is drawn back up before it is uploaded. It is sized
-that way because `captureFrame` reads it, and a capture is media-sized on both
-paths. Anything that stops writing that canvas therefore owns the captured
-pixels, the decode sizes the sprite has to keep ignoring, and a per-browser
-answer to whether this WebGL context takes a VideoFrame at all, which is the
-question `acceptsVideoFrameUpload` already asks the GPU queue.
+On the tested Safari 18.6/reference-Mac route, this upload ran once per
+presented frame and dominated the recorded playback wall time. The same frames
+uploaded straight from the decoded VideoFrame into a WebGL texture in that
+browser cost a small fraction of that. This is a scoped measurement, not a
+cross-device browser guarantee. Part of the gap is per-pixel work and part of it
+is that the staging surface is media-sized whatever the decode delivers, so a
+decode below media size is drawn back up before it is uploaded. It is sized that
+way because `captureFrame` reads it, and a capture is media-sized on both paths.
+Anything that stops writing that canvas therefore owns the captured pixels, the
+decode sizes the sprite has to keep ignoring, and a per-browser answer to
+whether this WebGL context takes a VideoFrame at all, which is the question
+`acceptsVideoFrameUpload` already asks the GPU queue.
 
 That settles the upload and nothing else. A source only reaches the compositor
 once WebCodecs has decoded it, and `openInput` refuses a track whose codec

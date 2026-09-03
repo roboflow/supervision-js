@@ -12,10 +12,9 @@ export type Fps = number & { readonly __fps: unique symbol };
 
 /**
  * Paints since the source loaded, monotonic within it and reset on source swap.
- * It counts paints, not frames of the source: two paints of the same media
- * position (a coarse stand-in then the crisp decode) take two numbers, and
- * nothing here identifies which frame of the source is on screen. That identity
- * travels only as the media timestamp on the paint event.
+ * It counts paints, not source frames: two paints of one media position can
+ * take two sequence numbers. Source-frame identity is carried separately by
+ * the presented frame's frameId and media timestamp.
  */
 export type PaintSeq = number & { readonly __paintSeq: unique symbol };
 

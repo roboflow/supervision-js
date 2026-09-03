@@ -9,12 +9,11 @@ summary: What the browser video path does not do, which browsers it costs, and h
 Four things the browser path does not do. None of them is a defect, and each
 surfaces the same way every time.
 
-## Firefox Does Not Decode HEVC
+## The Tested Firefox WebCodecs Route Does Not Decode HEVC
 
-Firefox refuses every HEVC profile. Firefox 154 plays an HEVC file in its own
-`<video>` element while its `VideoDecoder` reports both `hvc1` and `hev1`
-configurations unsupported, so the same file that plays in the browser fails to
-open here.
+In Firefox 154, WebCodecs reported the tested `hvc1` and `hev1` configurations
+unsupported even though the same HEVC file played in a `<video>` element. The
+built-in URL/File source therefore fails to open that file.
 
 The failure is at load, not at a frame. Opening the source asks the browser
 whether it can decode the track, and a refusal raises `DecodeUnsupported` with
@@ -26,15 +25,18 @@ This is that decoder rather than a rule about non-Chromium browsers. Safari 18.6
 reports `hvc1` and `hev1` supported alongside `avc1`, `vp8`, `vp09` and `av01`,
 and plays the same file.
 
-The package decodes through WebCodecs only. There is no software fallback, and
-supplying your own decoder is not supported.
+The built-in URL/File source decodes through WebCodecs and has no software
+decoder fallback. Advanced hosts can provide their own `PresentedFrameChannel`,
+but then own decoding, frame selection, and presentation acknowledgement.
 
 ## A Video Without WebGPU Pays A Staging Canvas Per Frame
 
-Where WebGPU is available and its queue converts a decoded frame, the frame goes
-straight into the texture the scene samples. Where it is not, every presented
-frame is drawn into a media-sized 2D canvas and that whole canvas is uploaded
-into the sprite's texture.
+Where WebGPU is available and its queue accepts the selected sample path, the
+frame goes straight into the texture the scene samples. Eligible Android H.264
+decoder-session output may first be materialized into independently owned
+pixels before WebGPU performs the final upload. Where direct upload is not
+available, every presented frame is drawn into a media-sized 2D canvas and that
+whole canvas is uploaded into the sprite's texture.
 
 Two browsers take the second path today, for different reasons:
 
@@ -45,12 +47,13 @@ Two browsers take the second path today, for different reasons:
   decoded frame. The scene asks once when it is built and routes the frames
   through the staging canvas rather than letting each present fail.
 
-The cost is real. In Safari the staging route runs once per presented frame, and
-it dominates the wall clock during playback. The same frames uploaded straight
-into a WebGL texture in the same browser cost a small fraction of that. It is
-not the pixels: part of the gap is per-pixel work, and part is that the staging
-surface is media-sized whatever the decode delivers, so a decode below media
-size is drawn back up before it is uploaded.
+On the tested Safari 18.6/reference-Mac route, staging ran once per presented
+frame and dominated the recorded playback wall time. The same frames uploaded
+straight into a WebGL texture in that browser cost a small fraction of that.
+This is a scoped measurement, not a cross-device browser guarantee. Part of the
+gap is per-pixel work, and part is that the staging surface is media-sized
+whatever the decode delivers, so a decode below media size is drawn back up
+before it is uploaded.
 
 Nothing is lost, and no application has to opt in or out. What it costs is
 headroom, so a heavy annotation load on a large clip has less of it in these
