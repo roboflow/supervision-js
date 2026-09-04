@@ -16,7 +16,6 @@ import {
   copySortedDetectionFrames,
   detectionFrameOverlapsRange,
   selectDetectionFrame,
-  validateDetectionFrames,
 } from "#utils/detection-frames";
 
 const DEFAULT_BUFFER_AHEAD_SECONDS = 10;
@@ -1118,7 +1117,10 @@ function reuseBufferedFrameSnapshots(
   currentFrames: readonly DetectionFrame[],
   loadedFrames: readonly DetectionFrame[],
 ) {
-  validateDetectionFrames(loadedFrames);
+  /* Not validated here. Every caller reaches this through the source's own
+     loadFrames, which returns copySortedDetectionFrames output, and that
+     validates the same array before returning it. A second pass walks every
+     detection, keypoint and polygon point again to reach the same verdict. */
 
   const currentFramesByIdentity = new Map(
     currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
