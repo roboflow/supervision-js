@@ -33,6 +33,25 @@ type IndexedDetectionFrame = DetectionFrame & { readonly frameIndex: number };
  */
 const PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS = 0.0005;
 
+/**
+ * Validates and orders a window without copying it. The frames stay the
+ * caller's own objects, which is what a source wants: `DetectionFrame` and its
+ * `detections` are both `readonly`, nothing in the library writes to either,
+ * and the buffer that receives this window already keeps the objects it
+ * recognises and copies only the ones it does not
+ * (`reuseBufferedFrameSnapshots`). A source that copies first pays for every
+ * frame the buffer is about to discard.
+ */
+export function sortedDetectionFrames(
+  detectionFrames: readonly DetectionFrame[] | undefined,
+): DetectionFrame[] {
+  validateDetectionFrames(detectionFrames ?? []);
+
+  return [...(detectionFrames ?? [])].sort(
+    (left, right) => left.mediaTime - right.mediaTime,
+  );
+}
+
 export function copySortedDetectionFrames(
   detectionFrames: readonly DetectionFrame[] | undefined,
 ): DetectionFrame[] {

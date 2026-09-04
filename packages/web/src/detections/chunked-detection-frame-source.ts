@@ -7,8 +7,8 @@ import type {
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import {
-  copySortedDetectionFrames,
   detectionFrameOverlapsRange,
+  sortedDetectionFrames,
 } from "supervision-js-core";
 
 const UNPINNED_CACHE_FLOOR_CHUNKS = 12;
@@ -85,7 +85,7 @@ export function createChunkedDetectionFrameSource(
         new Set(chunks.map((chunk) => chunk.chunkIndex)),
       );
 
-      return copySortedDetectionFrames(
+      return sortedDetectionFrames(
         dedupeDetectionFrames(
           loadedChunks.flatMap((chunk) => chunk.frames),
         ).filter((frame) =>
