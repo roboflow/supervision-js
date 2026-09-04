@@ -182,8 +182,6 @@ function writeScaledMaskRuns(
   const maskHeight = mask.height;
   let maskOffset = 0;
 
-  const stride = axes.stride;
-
   for (let index = 0; index < counts.length; index += 1) {
     const runLength = counts[index] ?? 0;
 
@@ -194,34 +192,20 @@ function writeScaledMaskRuns(
 
     let x = Math.floor(maskOffset / maskHeight);
     let y = maskOffset - x * maskHeight;
-    let remaining = runLength;
+    let column = axes.columns[x];
 
-    /* A run walks down one column and wraps into the next, so it splits into
-       column-sized segments. Within a segment the destination offset only ever
-       steps by the row pitch or stays put: createMaskAxisMap builds
-       `rows[i] = min(height - 1, floor(i * scale)) * width` with scale <= 1, so
-       consecutive entries differ by exactly 0 or exactly `width`. Walking the
-       destination directly therefore touches the same bytes the per-pixel loop
-       touched, and drops the bounds test, the wrap test and one typed-array
-       load from every source pixel. Where the scale collapses several source
-       rows onto one destination row, this writes that byte once instead of
-       once per source row. */
-    while (remaining > 0 && x < maskWidth) {
-      const span = Math.min(remaining, maskHeight - y);
-      const column = axes.columns[x];
-      const first = axes.rows[y];
-      const last = axes.rows[y + span - 1];
-
-      for (let offset = first; offset <= last; offset += stride) {
-        data[offset + column] = detectionMaskId;
+    for (let step = 0; step < runLength; step += 1) {
+      if (x >= maskWidth) {
+        break;
       }
 
-      remaining -= span;
-      y += span;
+      data[axes.rows[y] + column] = detectionMaskId;
+      y += 1;
 
       if (y === maskHeight) {
         y = 0;
         x += 1;
+        column = axes.columns[x];
       }
     }
 
@@ -260,8 +244,6 @@ export function resolveIdMaskStrokeTexels(
 interface ScaledMaskAxes {
   readonly columns: Int32Array;
   readonly rows: Int32Array;
-  /** Destination row pitch, so a run can step rows without re-reading `rows`. */
-  readonly stride: number;
 }
 
 function createScaledMaskAxes(frame: {
@@ -273,7 +255,6 @@ function createScaledMaskAxes(frame: {
   return {
     columns: createMaskAxisMap(frame.maskWidth, frame.width, 1),
     rows: createMaskAxisMap(frame.maskHeight, frame.height, frame.width),
-    stride: frame.width,
   };
 }
 
