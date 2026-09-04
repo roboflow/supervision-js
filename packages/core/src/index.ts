@@ -171,6 +171,7 @@ export { resolveStyleValue } from "#styles/style-value";
 // Pure utilities used by platform packages.
 export {
   copySortedDetectionFrames,
+  sortedDetectionFrames,
   decodeCompressedRleMask,
   decodeCompressedRleCounts,
   detectionFrameOverlapsRange,
