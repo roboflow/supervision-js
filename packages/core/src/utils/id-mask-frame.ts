@@ -43,8 +43,18 @@ export function createIdMaskFrame(
     return undefined;
   }
 
-  const maskWidth = Math.max(...instructions.map(({ mask }) => mask.width));
-  const maskHeight = Math.max(...instructions.map(({ mask }) => mask.height));
+  /* Floored because every downstream index is an array offset. A fractional
+     height makes `new Int32Array(h)` one entry short and leaves the axis map
+     with a hole, which the raster walk reads as `undefined` and skips, dropping
+     a detection rather than smearing it. No producer in this repository emits
+     one, and nothing between a detection source and here checks, so the floor
+     is the cheap guarantee. */
+  const maskWidth = Math.floor(
+    Math.max(...instructions.map(({ mask }) => mask.width)),
+  );
+  const maskHeight = Math.floor(
+    Math.max(...instructions.map(({ mask }) => mask.height)),
+  );
   const width = resolveRasterWidth(maskWidth, options.maxWidth);
   const height =
     width === maskWidth
@@ -182,6 +192,8 @@ function writeScaledMaskRuns(
   const maskHeight = mask.height;
   let maskOffset = 0;
 
+  const stride = axes.stride;
+
   for (let index = 0; index < counts.length; index += 1) {
     const runLength = counts[index] ?? 0;
 
@@ -192,20 +204,34 @@ function writeScaledMaskRuns(
 
     let x = Math.floor(maskOffset / maskHeight);
     let y = maskOffset - x * maskHeight;
-    let column = axes.columns[x];
+    let remaining = runLength;
 
-    for (let step = 0; step < runLength; step += 1) {
-      if (x >= maskWidth) {
-        break;
+    /* A run walks down one column and wraps into the next, so it splits into
+       column-sized segments. Within a segment the destination offset only ever
+       steps by the row pitch or stays put: createMaskAxisMap builds
+       `rows[i] = min(height - 1, floor(i * scale)) * width` with scale <= 1, so
+       consecutive entries differ by exactly 0 or exactly `width`. Walking the
+       destination directly therefore touches the same bytes the per-pixel loop
+       touched, and drops the bounds test, the wrap test and one typed-array
+       load from every source pixel. Where the scale collapses several source
+       rows onto one destination row, this writes that byte once instead of
+       once per source row. */
+    while (remaining > 0 && x < maskWidth) {
+      const span = Math.min(remaining, maskHeight - y);
+      const column = axes.columns[x];
+      const first = axes.rows[y];
+      const last = axes.rows[y + span - 1];
+
+      for (let offset = first; offset <= last; offset += stride) {
+        data[offset + column] = detectionMaskId;
       }
 
-      data[axes.rows[y] + column] = detectionMaskId;
-      y += 1;
+      remaining -= span;
+      y += span;
 
       if (y === maskHeight) {
         y = 0;
         x += 1;
-        column = axes.columns[x];
       }
     }
 
@@ -244,6 +270,8 @@ export function resolveIdMaskStrokeTexels(
 interface ScaledMaskAxes {
   readonly columns: Int32Array;
   readonly rows: Int32Array;
+  /** Destination row pitch, so a run can step rows without re-reading `rows`. */
+  readonly stride: number;
 }
 
 function createScaledMaskAxes(frame: {
@@ -255,6 +283,7 @@ function createScaledMaskAxes(frame: {
   return {
     columns: createMaskAxisMap(frame.maskWidth, frame.width, 1),
     rows: createMaskAxisMap(frame.maskHeight, frame.height, frame.width),
+    stride: frame.width,
   };
 }
 
