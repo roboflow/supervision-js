@@ -263,6 +263,8 @@ export interface RenderPreparationArtifactDiagnostics {
   /** Byte ceiling for prepared rasters, and how much of it is in use. */
   readonly maxPreparedBytes?: number;
   readonly preparedBytes?: number;
+  /** Prepared rasters currently at the coarse tier, owed a fine cook once settled. */
+  readonly coarseCount?: number;
   readonly pendingCount: number;
   /**
    * Frames in the unbroken run of prepared frames starting at the active
