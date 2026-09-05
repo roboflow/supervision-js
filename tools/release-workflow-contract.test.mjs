@@ -12,13 +12,17 @@ const workflowPath = path.join(
 test("npm publish waits for the selected dist-tag to propagate", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /for attempt in \{1\.\.12\}; do/);
+  assert.match(workflow, /attempts=60/);
+  assert.match(workflow, /for attempt in \$\(seq 1 "\$\{attempts\}"\); do/);
   assert.match(
     workflow,
     /npm view "supervision@\$\{DIST_TAG\}" version 2>\/dev\/null \|\| true/,
   );
   assert.match(workflow, /sleep 5/);
-  assert.match(workflow, /did not resolve to \$\{version\} after 60 seconds/);
+  assert.match(
+    workflow,
+    /did not resolve to \$\{version\} after \$\(\(attempts \* 5\)\) seconds/,
+  );
   assert.match(workflow, /git config user\.name "github-actions\[bot\]"/);
   assert.match(
     workflow,
