@@ -11,7 +11,7 @@ import {
   sortedDetectionFrames,
 } from "supervision-js-core";
 
-const UNPINNED_CACHE_FLOOR_CHUNKS = 12;
+const UNPINNED_CACHE_FLOOR_CHUNKS = 80;
 /**
  * Windows of cached chunks when the caller sets no cap: the one being served
  * and the one before it. A cache that holds only the live window has nothing
