@@ -27,6 +27,21 @@ import {
 import { canReuseMaskStyleArtifacts } from "supervision-js-core";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 
+/* A raster a quarter as wide is a sixteenth of the bytes and a fraction of the
+   cook. During a fling the eye cannot read mask edges and the cache is what
+   matters (every eviction is a re-cook); the moment the playhead settles the
+   frame on screen is re-cooked at full width and swapped in place. */
+export enum PreparedRasterTier {
+  Coarse = "coarse",
+  Fine = "fine",
+}
+const COARSE_RASTER_DIVISOR = 4;
+/* A step wider than this many frame strides is fast playback, not a scrub. */
+const FAST_PLAYHEAD_STRIDES = 3.5;
+/* How long without a playhead step before the frame on screen is owed its
+   fine cook. */
+const SETTLE_AFTER_MS = 150;
+
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
 /* 64 MB per GB of device memory as Chrome reports it, clamped to [256 MB,
    1 GB]. An id-mask frame at this raster size is ~1.7 MB of plane plus ~1.7 MB
@@ -40,7 +55,9 @@ const DEFAULT_MASK_FRAME_CACHE_BYTES = Math.min(
       ((typeof navigator !== "undefined" &&
         (navigator as { deviceMemory?: number }).deviceMemory) ||
         4) *
-        64 * 1024 * 1024,
+        64 *
+        1024 *
+        1024,
     ),
   ),
 );
@@ -58,6 +75,8 @@ const PRESENTED_FRAME_STRIDE_SAMPLE_COUNT = 4;
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
 
 interface PendingMaskFrame {
+  /** Raster tier this cook produces; coarse while the playhead flings. */
+  readonly tier: PreparedRasterTier;
   readonly frame: DetectionFrame;
   readonly generation: number;
   readonly key: string;
@@ -262,10 +281,19 @@ export function createPreparedRenderWindow(options: {
   let previousActiveFrameMediaTime: number | null = null;
   let consecutivePlayheadJumpCount = 0;
   let isPlayheadSettled = true;
+  /* A step wider than a few frame strides is fast playback; its cooks go
+     coarse so the prefetch window stays cheap and small. */
+  let isPlayheadFast = false;
+  let consecutiveWideStepCount = 0;
+  /* Fires when steps stop: a paused playhead is settled and owed a fine cook. */
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastSteppedMediaTime: number | null = null;
   let isDestroyed = false;
   let generation = 0;
   let preparationProgress = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
+  /** Keys whose prepared raster is the coarse tier and owed a fine cook once settled. */
+  const coarseMaskFrameKeys = new Set<string>();
   const pendingMaskFrames = new Map<string, PendingMaskFrame>();
   const queuedMaskFrameKeys: string[] = [];
   const inFlightMaskFrames = new Set<PendingMaskFrame>();
@@ -287,6 +315,7 @@ export function createPreparedRenderWindow(options: {
     scheduleOptions: {
       readonly emitDiagnostics?: boolean;
       readonly priority: PreparedRenderSchedulePriority;
+      readonly tier?: PreparedRasterTier;
     },
   ) => {
     const key = getFrameKey(frame);
@@ -298,9 +327,17 @@ export function createPreparedRenderWindow(options: {
     }
 
     observeMaskFrame(frame, key);
-
-    if (preparedMaskFrames.has(key) || emptyMaskFrameKeys.has(key)) {
+    if (emptyMaskFrameKeys.has(key)) {
       return false;
+    }
+    if (preparedMaskFrames.has(key)) {
+      const owedFine =
+        coarseMaskFrameKeys.has(key) &&
+        (scheduleOptions.tier === PreparedRasterTier.Fine ||
+          (isPlayheadSettled && !isPlayheadFast));
+      if (!owedFine) {
+        return false;
+      }
     }
 
     if (pendingMaskFrames.has(key)) {
@@ -334,6 +371,11 @@ export function createPreparedRenderWindow(options: {
       key,
       maskStyle,
       mediaTime,
+      tier:
+        scheduleOptions.tier ??
+        (isPlayheadSettled && !isPlayheadFast
+          ? PreparedRasterTier.Fine
+          : PreparedRasterTier.Coarse),
     });
 
     if (isActiveFrame) {
@@ -415,7 +457,7 @@ export function createPreparedRenderWindow(options: {
         .prepare({
           instructions,
           key,
-          maxRasterWidth: options.resolveMaxRasterWidth?.(),
+          maxRasterWidth: resolveRasterWidthFor(job.tier),
         })
         .then((maskFrame) => {
           inFlightMaskFrames.delete(job);
@@ -446,8 +488,20 @@ export function createPreparedRenderWindow(options: {
             return;
           }
 
+          const previous = preparedMaskFrames.get(key);
+          if (previous) {
+            // an upgrade: the coarse raster gives way to the fine one
+            releaseMaskFrame(key);
+            options.onMaskFrameEvicted?.(key);
+            previous.close();
+          }
           preparedMaskFrames.set(key, maskFrame);
           chargeMaskFrame(key, maskFrame);
+          if (job.tier === PreparedRasterTier.Coarse) {
+            coarseMaskFrameKeys.add(key);
+          } else {
+            coarseMaskFrameKeys.delete(key);
+          }
           preparationProgress += 1;
           evictPreparedMaskFrames();
           options.onMaskFramePrepared?.(maskFrame);
@@ -625,6 +679,7 @@ export function createPreparedRenderWindow(options: {
     }
 
     preparedMaskFrames.delete(key);
+    coarseMaskFrameKeys.delete(key);
     releaseMaskFrame(key);
     options.onMaskFrameEvicted?.(key);
     maskFrame.close();
@@ -892,6 +947,7 @@ export function createPreparedRenderWindow(options: {
       }
 
       isDestroyed = true;
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
       clearPreparedMaskFrames();
       maskFramePreparer.destroy();
       notifyReadinessWaiters();
@@ -963,6 +1019,7 @@ export function createPreparedRenderWindow(options: {
           maxPreparedBytes: maxMaskFrameCacheBytes,
           maxPreparedCount: maxMaskFrameCacheSize,
           preparedBytes: preparedMaskBytes,
+          coarseCount: coarseMaskFrameKeys.size,
           pendingCount: pendingMaskFrames.size,
           preparedAheadFrameCount: preparedAhead.frameCount,
           preparedAheadSeconds: preparedAhead.seconds,
@@ -985,6 +1042,15 @@ export function createPreparedRenderWindow(options: {
     options.onPreparedWindowChange?.();
   }
 
+  function resolveRasterWidthFor(tier: PreparedRasterTier) {
+    const fine = options.resolveMaxRasterWidth?.();
+    if (tier === PreparedRasterTier.Fine || fine === undefined) {
+      return fine;
+    }
+    // rows stay a multiple of four so the R8 upload is not paid in four channels
+    return Math.max(64, Math.ceil(fine / COARSE_RASTER_DIVISOR / 4) * 4);
+  }
+
   function evictPreparedMaskFrames() {
     while (
       preparedMaskFrames.size > maxMaskFrameCacheSize ||
@@ -999,6 +1065,7 @@ export function createPreparedRenderWindow(options: {
       const maskFrame = preparedMaskFrames.get(evictedKey);
 
       preparedMaskFrames.delete(evictedKey);
+      coarseMaskFrameKeys.delete(evictedKey);
       releaseMaskFrame(evictedKey);
       options.onMaskFrameEvicted?.(evictedKey);
       maskFrame?.close();
@@ -1075,6 +1142,7 @@ export function createPreparedRenderWindow(options: {
       const maskFrames = Array.from(preparedMaskFrames.values());
 
       preparedMaskFrames.clear();
+      coarseMaskFrameKeys.clear();
       preparedMaskBytesByKey.clear();
       preparedMaskBytes = 0;
       options.onMaskFramesCleared?.();
@@ -1438,6 +1506,15 @@ export function createPreparedRenderWindow(options: {
 
     const advance = mediaTime - previousMediaTime;
 
+    lastSteppedMediaTime = mediaTime;
+
+    const stride = getFrameStrideSeconds();
+
+    const isWideStep =
+      stride > 0 && Math.abs(advance) > stride * FAST_PLAYHEAD_STRIDES;
+    consecutiveWideStepCount = isWideStep ? consecutiveWideStepCount + 1 : 0;
+    isPlayheadFast = consecutiveWideStepCount >= DRAGGED_PLAYHEAD_JUMP_COUNT;
+
     if (advance > 0 && advance <= getSettledPlayheadAdvanceSeconds()) {
       consecutivePlayheadJumpCount = 0;
       isPlayheadSettled = true;
@@ -1447,6 +1524,37 @@ export function createPreparedRenderWindow(options: {
     consecutivePlayheadJumpCount += 1;
     isPlayheadSettled =
       consecutivePlayheadJumpCount < DRAGGED_PLAYHEAD_JUMP_COUNT;
+    /* Only a coarse cook owes a fine one, so only a fling or fast playback
+       needs the timer. A step that settles cooks fine on its own. */
+    if (!isPlayheadSettled || isPlayheadFast) {
+      armSettleTimer();
+    }
+  }
+
+  function getFrameStrideSeconds() {
+    const [firstFrame, secondFrame] = lastPreparedWindowFrames;
+    return firstFrame && secondFrame
+      ? secondFrame.mediaTime - firstFrame.mediaTime
+      : 0;
+  }
+
+  function armSettleTimer() {
+    if (settleTimer !== undefined) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined;
+      if (isDestroyed) return;
+      /* Only the frame on screen. A stopped drag is still a drag for the window
+         around it, so nothing cooks ahead of where the playhead landed. */
+      const at = lastSteppedMediaTime;
+      const frame =
+        at === null ? undefined : options.detectionTimeline.selectFrame(at);
+      if (frame && at !== null) {
+        scheduleMaskFrame(frame, at, {
+          priority: PreparedRenderSchedulePriority.Active,
+          tier: PreparedRasterTier.Fine,
+        });
+      }
+    }, SETTLE_AFTER_MS);
   }
 
   function getSettledPlayheadAdvanceSeconds() {
