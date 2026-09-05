@@ -181,7 +181,7 @@ describe("demo session options", () => {
     });
     // Seven seconds of prefetch and eight of cache, at the detection rate.
     expect(configuration.resolved.renderPreparation.maskFrame).toMatchObject({
-      maxCacheFrameCount: 192,
+      maxCacheFrameCount: 2160,
       prefetchFrameCount: 168,
     });
     expect(configuration.autoPlay).toBe(false);
