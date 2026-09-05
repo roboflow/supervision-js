@@ -85,7 +85,12 @@ export function createChunkedDetectionFrameSource(
         new Set(chunks.map((chunk) => chunk.chunkIndex)),
       );
 
-      return sortedDetectionFrames(
+      /* Every chunk in loadedChunks was validated once, when it was parsed
+         (see loadChunk). A window load over a warm cache used to walk every
+         detection again through sortedDetectionFrames, on every playhead move
+         wide enough to shift the window: ~20k detections per load, for the
+         same verdict every time. Only the merge and the order are per-load. */
+      return sortDetectionFramesByTime(
         dedupeDetectionFrames(
           loadedChunks.flatMap((chunk) => chunk.frames),
         ).filter((frame) =>
@@ -115,6 +120,12 @@ function getOverlappingChunks(
   );
 }
 
+function sortDetectionFramesByTime(
+  frames: readonly DetectionFrame[],
+): DetectionFrame[] {
+  return [...frames].sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
 function loadChunk(
   chunk: DetectionFrameChunkDescriptor,
   fetchChunk: DetectionFrameChunkFetch,
@@ -128,13 +139,19 @@ function loadChunk(
     return cachedChunk;
   }
 
-  const chunkPromise = fetchChunk(chunk).catch((error: unknown) => {
-    if (chunkCache.get(chunk.chunkIndex) === chunkPromise) {
-      chunkCache.delete(chunk.chunkIndex);
-    }
+  const chunkPromise = fetchChunk(chunk)
+    .then((loaded) => ({
+      ...loaded,
+      // validated once, here, for the life of the cached chunk
+      frames: sortedDetectionFrames(loaded.frames),
+    }))
+    .catch((error: unknown) => {
+      if (chunkCache.get(chunk.chunkIndex) === chunkPromise) {
+        chunkCache.delete(chunk.chunkIndex);
+      }
 
-    throw error;
-  });
+      throw error;
+    });
 
   chunkCache.set(chunk.chunkIndex, chunkPromise);
   return chunkPromise;
