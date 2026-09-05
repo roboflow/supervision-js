@@ -11,6 +11,12 @@ import {
   sortedDetectionFrames,
 } from "supervision-js-core";
 
+/**
+ * Chunks kept when the caller sets no cap, at least. Twelve evicted under any
+ * drag wider than twelve seconds and the scrub re-downloaded the dataset over
+ * and over (6.6x its size in 12 s on a 70 s clip); eighty covers a long clip
+ * end to end and measured nothing visible in memory.
+ */
 const UNPINNED_CACHE_FLOOR_CHUNKS = 80;
 /**
  * Windows of cached chunks when the caller sets no cap: the one being served

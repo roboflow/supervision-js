@@ -34,7 +34,7 @@ describe("media session defaults", () => {
     });
     expect(defaults.renderPreparation).toMatchObject({
       maskFrame: {
-        maxCacheFrameCount: 240,
+        maxCacheFrameCount: 2700,
         maxPendingFrameCount: 24,
         prefetchFrameCount: 210,
         scanIntervalSeconds: 0.1,
@@ -89,7 +89,7 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.renderPreparation.maskFrame).toMatchObject({
-      maxCacheFrameCount: 80,
+      maxCacheFrameCount: 900,
       prefetchFrameCount: 70,
     });
   });
@@ -265,7 +265,7 @@ describe("media session defaults", () => {
     });
     expect(defaults.renderPreparation).toMatchObject({
       maskFrame: {
-        maxCacheFrameCount: 240,
+        maxCacheFrameCount: 2700,
         prefetchFrameCount: 12,
         workerCount: 2,
       },

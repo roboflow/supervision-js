@@ -117,7 +117,9 @@ const horseTrailFrames = Array.from({ length: 340 }, (_, frameIndex) => ({
   mediaTime: frameIndex * HORSE_TRAIL_FRAME_PITCH_SECONDS,
 })) satisfies DetectionFrame[];
 const GATE_FRAME_RATE = 25;
-const SESSION_MASK_CACHE_FRAME_COUNT = 200;
+/* 90 s at the gate's 25 fps. The count is a ceiling only: memory is bounded
+   by `maxCacheBytes` (see media-session-defaults.ts). */
+const SESSION_MASK_CACHE_FRAME_COUNT = 2250;
 const SESSION_PLAYBACK_GATE_OPTIONS = {
   enabled: true,
   resumeAtSeconds: 0.3,
