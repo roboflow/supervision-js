@@ -43,8 +43,18 @@ export function createIdMaskFrame(
     return undefined;
   }
 
-  const maskWidth = Math.max(...instructions.map(({ mask }) => mask.width));
-  const maskHeight = Math.max(...instructions.map(({ mask }) => mask.height));
+  /* Floored because every downstream index is an array offset. A fractional
+     height makes `new Int32Array(h)` one entry short and leaves the axis map
+     with a hole, which the raster walk reads as `undefined` and skips, dropping
+     a detection rather than smearing it. No producer in this repository emits
+     one, and nothing between a detection source and here checks, so the floor
+     is the cheap guarantee. */
+  const maskWidth = Math.floor(
+    Math.max(...instructions.map(({ mask }) => mask.width)),
+  );
+  const maskHeight = Math.floor(
+    Math.max(...instructions.map(({ mask }) => mask.height)),
+  );
   const width = resolveRasterWidth(maskWidth, options.maxWidth);
   const height =
     width === maskWidth
