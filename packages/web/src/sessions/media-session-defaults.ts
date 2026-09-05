@@ -67,7 +67,9 @@ const MASK_FRAME_DEFAULTS = {
 };
 
 const FILE_MASK_PREFETCH_SECONDS = 7;
-const FILE_MASK_CACHE_SECONDS = 8;
+/* A count ceiling only. Memory is bounded by `maxCacheBytes`; the count is
+   sized so a drag across a long clip is not evicted on the count first. */
+const FILE_MASK_CACHE_SECONDS = 90;
 const STREAM_MASK_PREFETCH_SECONDS = 3;
 const STREAM_MASK_CACHE_SECONDS = 5;
 const DEFAULT_STREAM_RETENTION_SECONDS = 300;

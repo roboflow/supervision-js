@@ -113,6 +113,13 @@ export interface RenderPreparationMaskFrameOptions {
    */
   readonly maxCacheFrameCount?: number;
   /**
+   * Ceiling in bytes for prepared mask rasters held in memory, charged per
+   * frame from its raster. Bounds memory where `maxCacheFrameCount` bounds a
+   * count; whichever is reached first evicts. Default: 96 MB per GB of device
+   * memory as Chrome reports it (at most 8), so 768 MB on a typical laptop.
+   */
+  readonly maxCacheBytes?: number;
+  /**
    * Maximum number of mask frames queued for preparation.
    */
   readonly maxPendingFrameCount?: number;
@@ -253,6 +260,9 @@ export interface RenderPreparationArtifactDiagnostics {
   readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
+  /** Byte ceiling for prepared rasters, and how much of it is in use. */
+  readonly maxPreparedBytes?: number;
+  readonly preparedBytes?: number;
   readonly pendingCount: number;
   /**
    * Frames in the unbroken run of prepared frames starting at the active

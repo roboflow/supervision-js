@@ -25,8 +25,25 @@ import {
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { canReuseMaskStyleArtifacts } from "supervision-js-core";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
+/* 64 MB per GB of device memory as Chrome reports it, clamped to [256 MB,
+   1 GB]. An id-mask frame at this raster size is ~1.7 MB of plane plus ~1.7 MB
+   of R8 texture, so 1 GB holds ~300 frames, ten seconds at 30 fps — more than
+   the 8 s default this replaces, in the unit that actually bounds memory. */
+const DEFAULT_MASK_FRAME_CACHE_BYTES = Math.min(
+  1024 * 1024 * 1024,
+  Math.max(
+    256 * 1024 * 1024,
+    Math.round(
+      ((typeof navigator !== "undefined" &&
+        (navigator as { deviceMemory?: number }).deviceMemory) ||
+        4) *
+        64 * 1024 * 1024,
+    ),
+  ),
+);
 const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
 const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
@@ -132,6 +149,7 @@ export function createPreparedRenderWindow(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle?: MaskStyle | null;
   readonly maxMaskFrameCacheSize?: number;
+  readonly maxMaskFrameCacheBytes?: number;
   readonly onMaskFrameEvicted?: (key: string) => void;
   readonly onMaskFramePrepared?: (maskFrame: PreparedMaskFrame) => void;
   readonly onMaskFramesCleared?: () => void;
@@ -161,6 +179,45 @@ export function createPreparedRenderWindow(options: {
         DEFAULT_MASK_FRAME_CACHE_SIZE,
     ) || DEFAULT_MASK_FRAME_CACHE_SIZE,
   );
+  /* A cache sized in seconds is right for playback and wrong for a drag: 8 s
+     evicts under any wide scrub (one re-cook per cook, measured), 90 s holds a
+     70 s clip but costs 2.4 GB. Bytes are the honest unit. The count above
+     stays as a ceiling; this budget is what actually bounds memory, and it is
+     charged per frame from the raster the cook produced, so it needs no guess
+     about raster size up front. Default mirrors the engine's frame cache:
+     per GB of device memory, clamped. */
+  const maxMaskFrameCacheBytes = Math.max(
+    16 * 1024 * 1024,
+    Math.floor(
+      options.maxMaskFrameCacheBytes ??
+        maskFrameOptions?.maxCacheBytes ??
+        DEFAULT_MASK_FRAME_CACHE_BYTES,
+    ),
+  );
+  let preparedMaskBytes = 0;
+  const preparedMaskBytesByKey = new Map<string, number>();
+
+  function chargeMaskFrame(
+    key: string,
+    maskFrame: { width: number; height: number; kind: PreparedMaskFrameKind },
+  ) {
+    /* An id-mask frame is one byte per pixel on the CPU (the id plane) and,
+       once drawn, one byte per pixel again as an R8 texture the layer keeps
+       per cached key. The RGBA composite fallback is four bytes per pixel
+       plus its plane. Charging five bytes for every frame, as a first version
+       did, starved the cache five-fold and thrashed at 430% of a core. */
+    const perPixel = maskFrame.kind === PreparedMaskFrameKind.IdMask ? 2 : 5;
+    const bytes = Math.max(1, maskFrame.width * maskFrame.height * perPixel);
+    preparedMaskBytesByKey.set(key, bytes);
+    preparedMaskBytes += bytes;
+  }
+
+  function releaseMaskFrame(key: string) {
+    const bytes = preparedMaskBytesByKey.get(key);
+    if (bytes === undefined) return;
+    preparedMaskBytesByKey.delete(key);
+    preparedMaskBytes -= bytes;
+  }
   const prefetchFrameCount = resolvePreparedWindowFrameCount(options);
   const preparedWindowScanIntervalSeconds = Math.max(
     0,
@@ -390,6 +447,7 @@ export function createPreparedRenderWindow(options: {
           }
 
           preparedMaskFrames.set(key, maskFrame);
+          chargeMaskFrame(key, maskFrame);
           preparationProgress += 1;
           evictPreparedMaskFrames();
           options.onMaskFramePrepared?.(maskFrame);
@@ -567,6 +625,7 @@ export function createPreparedRenderWindow(options: {
     }
 
     preparedMaskFrames.delete(key);
+    releaseMaskFrame(key);
     options.onMaskFrameEvicted?.(key);
     maskFrame.close();
   }
@@ -901,7 +960,9 @@ export function createPreparedRenderWindow(options: {
           kind: options.artifactKind ?? RenderPreparationArtifactKind.MaskFrame,
           maxInFlightCount,
           maxPendingCount: maxPendingFrameCount,
+          maxPreparedBytes: maxMaskFrameCacheBytes,
           maxPreparedCount: maxMaskFrameCacheSize,
+          preparedBytes: preparedMaskBytes,
           pendingCount: pendingMaskFrames.size,
           preparedAheadFrameCount: preparedAhead.frameCount,
           preparedAheadSeconds: preparedAhead.seconds,
@@ -925,7 +986,10 @@ export function createPreparedRenderWindow(options: {
   }
 
   function evictPreparedMaskFrames() {
-    while (preparedMaskFrames.size > maxMaskFrameCacheSize) {
+    while (
+      preparedMaskFrames.size > maxMaskFrameCacheSize ||
+      preparedMaskBytes > maxMaskFrameCacheBytes
+    ) {
       const evictedKey = findPreparedMaskFrameEvictionCandidate();
 
       if (evictedKey === undefined) {
@@ -935,6 +999,7 @@ export function createPreparedRenderWindow(options: {
       const maskFrame = preparedMaskFrames.get(evictedKey);
 
       preparedMaskFrames.delete(evictedKey);
+      releaseMaskFrame(evictedKey);
       options.onMaskFrameEvicted?.(evictedKey);
       maskFrame?.close();
     }
@@ -1010,6 +1075,8 @@ export function createPreparedRenderWindow(options: {
       const maskFrames = Array.from(preparedMaskFrames.values());
 
       preparedMaskFrames.clear();
+      preparedMaskBytesByKey.clear();
+      preparedMaskBytes = 0;
       options.onMaskFramesCleared?.();
 
       for (const maskFrame of maskFrames) {
