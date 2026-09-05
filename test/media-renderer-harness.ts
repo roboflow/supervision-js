@@ -83,6 +83,7 @@ const mockState = vi.hoisted(() => {
       x: number;
       y: number;
     }>,
+    bufferImageSourceOptions: [] as unknown[],
     imageSourceDestroy: vi.fn(),
     imageSourceOptions: [] as unknown[],
     meshGeometryDestroy: vi.fn(),
@@ -219,6 +220,15 @@ vi.mock("pixi.js", () => {
 
     constructor(options: unknown) {
       pixiMock.imageSourceOptions.push(options);
+    }
+  }
+
+  class BufferImageSource {
+    destroy = pixiMock.imageSourceDestroy;
+    style = {};
+
+    constructor(options: unknown) {
+      pixiMock.bufferImageSourceOptions.push(options);
     }
   }
 
@@ -372,6 +382,17 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class BlurFilter {
+    destroy = vi.fn();
+    quality: number;
+    strength: number;
+
+    constructor(options: { quality?: number; strength: number }) {
+      this.quality = options.quality ?? 4;
+      this.strength = options.strength;
+    }
+  }
+
   class MeshGeometry {
     destroy = pixiMock.meshGeometryDestroy;
 
@@ -437,17 +458,6 @@ vi.mock("pixi.js", () => {
     }
   }
 
-  class BlurFilter {
-    destroy = vi.fn();
-    quality: number;
-    strength: number;
-
-    constructor(options: { quality?: number; strength: number }) {
-      this.quality = options.quality ?? 4;
-      this.strength = options.strength;
-    }
-  }
-
   class Filter {
     destroy = vi.fn();
     padding = 0;
@@ -464,6 +474,7 @@ vi.mock("pixi.js", () => {
     Application,
     Assets,
     BlurFilter,
+    BufferImageSource,
     CanvasSource,
     Container,
     defaultFilterVert: "default-filter-vertex",
@@ -606,6 +617,7 @@ export function resetMocks() {
   pixiMock.containerAddChild.mockClear();
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
+  pixiMock.bufferImageSourceOptions.length = 0;
   pixiMock.imageSourceDestroy.mockClear();
   pixiMock.imageSourceOptions.length = 0;
   pixiMock.meshGeometryDestroy.mockClear();
@@ -679,6 +691,10 @@ export function resetMocks() {
   domMock.cancelAnimationFrame.mockClear();
   domMock.createElement.mockClear();
   domMock.createElement.mockImplementation((tagName: string) => {
+    if (tagName === "div") {
+      return { appendChild: domMock.appendChild, style: {} };
+    }
+
     if (tagName !== "canvas") {
       throw new Error(`Unexpected element: ${tagName}`);
     }
@@ -686,6 +702,7 @@ export function resetMocks() {
     return {
       getContext: domMock.getContext,
       height: 0,
+      style: {},
       width: 0,
     };
   });

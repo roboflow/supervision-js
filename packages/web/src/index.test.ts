@@ -65,6 +65,7 @@ describe("package entrypoint", () => {
       "BoxStrokeAlignment",
       "DEFAULT_DETECTION_CLASS_STYLES",
       "DEFAULT_DETECTION_COLOR_SEQUENCE",
+      "DEFAULT_NORMALIZATION_FRAME_RATE",
       "DetectionBufferStatus",
       "DetectionFrameRetentionMode",
       "DetectionFrameSelectionMode",
@@ -94,10 +95,12 @@ describe("package entrypoint", () => {
       "MediaRendererPlaybackState",
       "MediaSessionActivityKind",
       "MediaSessionActivityStatus",
+      "MediaSessionMediaBranch",
       "MediaSessionMode",
       "MediaSessionStatus",
       "MediaSourceError",
       "MediaSourceStatus",
+      "PlaybackGateReach",
       "RegionRendererComposeMode",
       "RegionRendererCoverageKind",
       "RegionRendererMediaEffectKind",
@@ -133,6 +136,7 @@ describe("package entrypoint", () => {
       "createProjectedDetectionFrameSource",
       "createSortTracker",
       "createStaticImageMediaSource",
+      "createWebVideoEngineMediaRendererSource",
       "createWritableDetectionFrameSource",
       "detectionPostProcessors",
       "getMediaErrorKind",
@@ -140,6 +144,7 @@ describe("package entrypoint", () => {
       "normalizeDetectionClassName",
       "normalizeMedia",
       "normalizeMediaProgressively",
+      "openWebVideoEngineMediaSource",
       "pickDetectionAtPoint",
       "prepareMedia",
       "prepareMediaProgressively",
@@ -148,6 +153,7 @@ describe("package entrypoint", () => {
       "projectDetectionFrameForTracking",
       "projectDetectionFrames",
       "resolveDetectionClassColorStyle",
+      "resolveMediaSessionDefaults",
       "toMediaSourceError",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
@@ -157,9 +163,9 @@ describe("package entrypoint", () => {
       ellipse: expect.any(Function),
       keypoints: expect.any(Function),
       label: expect.any(Function),
+      marker: expect.any(Function),
       mask: expect.any(Function),
       maskHalo: expect.any(Function),
-      marker: expect.any(Function),
       polygon: expect.any(Function),
       polyline: expect.any(Function),
       region: expect.any(Function),
@@ -185,6 +191,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.prepareMediaProgressively).toEqual(expect.any(Function));
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
+    expect(entrypoint.DEFAULT_NORMALIZATION_FRAME_RATE).toBe(30);
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxCornerStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseFocusStyle).toEqual(expect.any(Function));
@@ -274,12 +281,15 @@ describe("package entrypoint", () => {
       Ready: "ready",
     });
     expect(entrypoint.MediaSessionActivityKind).toEqual({
+      DetectionsAwaitingCoverage: "detectionsAwaitingCoverage",
       DetectionsBuffering: "detectionsBuffering",
       DetectionsLoading: "detectionsLoading",
       Error: "error",
       MediaNormalizing: "mediaNormalizing",
       MediaOpening: "mediaOpening",
+      MediaSourceReading: "mediaSourceReading",
       PlaybackBuffering: "playbackBuffering",
+      RenderPreparationAbandoned: "renderPreparationAbandoned",
       RenderPreparing: "renderPreparing",
     });
     expect(entrypoint.MediaSessionActivityStatus).toEqual({
@@ -294,6 +304,7 @@ describe("package entrypoint", () => {
       Prepared: "prepared",
     });
     expect(entrypoint.DetectionBufferStatus).toEqual({
+      AwaitingCoverage: "awaitingCoverage",
       Destroyed: "destroyed",
       Error: "error",
       Idle: "idle",
@@ -478,7 +489,7 @@ describe("package entrypoint", () => {
     expect(renderer.getState()).toMatchObject({
       currentTime: 0,
       detectionBuffer: {
-        bufferEndTime: 5,
+        bufferEndTime: 10,
         bufferStartTime: 0,
         detectionCount: 0,
         frameCount: 0,
@@ -595,6 +606,53 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("plays without waiting on prediction coverage when no gate is configured", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+    const detectionSource = {
+      loadFrames: vi.fn(async () => []),
+      // A wait that never settles, so a gate that turned itself on would stall
+      // the draw below rather than pass quietly.
+      waitForRange: vi.fn(() => new Promise<void>(() => undefined)),
+    };
+    const onState = vi.fn();
+
+    const renderer = await createRenderer(false, false, {
+      detectionSource,
+      onState,
+    });
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(detectionSource.waitForRange).not.toHaveBeenCalled();
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+    expect(onState).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    );
+
+    renderer.destroy();
+  });
+
   it("keeps prediction-gated playback inside exact appended coverage", async () => {
     resetMocks();
     mediaMock.samples = [
@@ -651,6 +709,53 @@ describe("package entrypoint", () => {
         mediaTime: 0.04,
       },
     ]);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+    detectionSource.destroy?.();
+  });
+
+  it("plays a frame whose predictions were never appended", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+    const {
+      createMemoryColdDetectionFrameStore,
+      createWritableDetectionFrameSource,
+    } = await import("./index");
+    const detectionSource = createWritableDetectionFrameSource({
+      datasetId: "sparse-predictions",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await detectionSource.appendFrames([
+      { detections: [], endTime: 0.04, frameIndex: 0, mediaTime: 0 },
+      { detections: [], endTime: 0.12, frameIndex: 2, mediaTime: 0.08 },
+    ]);
+
+    const renderer = await createRenderer(false, false, {
+      detectionSource,
+    });
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    flushAnimationFrame(40);
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
     });
@@ -888,12 +993,12 @@ describe("package entrypoint", () => {
       activeDetectionCount: 1,
       activeDetectionFrameTime: 0.04,
       detectionBuffer: {
-        bufferEndTime: 5,
+        bufferEndTime: 10,
         bufferStartTime: 0,
         detectionCount: 2,
         errorMessage: null,
         frameCount: 2,
-        requestedEndTime: 5,
+        requestedEndTime: 10,
         requestedStartTime: 0,
         status: DetectionBufferStatus.Ready,
       },
@@ -1372,13 +1477,6 @@ describe("package entrypoint", () => {
   it("renders halo passes for a halo-only renderer list", async () => {
     resetMocks();
 
-    const { annotationRenderers } = await import("./index");
-    // Node lacks createImageBitmap; stubbing it lets the prepared pipeline
-    // take the PngIdMask path the halo depends on.
-    vi.stubGlobal(
-      "createImageBitmap",
-      vi.fn(async () => ({ close: vi.fn(), height: 2, width: 2 })),
-    );
     const haloResolve = vi.fn(() => ({
       alpha: 0.6,
       color: 0x8b5cf6,
@@ -1407,27 +1505,33 @@ describe("package entrypoint", () => {
       ],
     });
 
-    // The halo style resolves per detection even though no mask renderer is
-    // listed, because the session forwards the resolved halo style and the
-    // scene prepares mask coverage internally.
+    // No mask renderer is listed, so the coverage the glow reads exists only
+    // if the scene prepared it from the halo style.
     await vi.waitFor(() => {
       expect(haloResolve).toHaveBeenCalled();
     });
 
     await vi.waitFor(() => {
-      const haloMesh = pixiMock.meshInstances.find(
-        (mesh) => mesh.visible && mesh.filters !== undefined,
+      const haloPass = pixiMock.meshInstances.find(
+        (mesh) => mesh.filters !== undefined,
       );
 
-      expect(haloMesh).toBeDefined();
+      expect(haloPass).toMatchObject({ visible: true });
+      expect(haloPass?.filters).toEqual([
+        expect.objectContaining({ strength: 12 }),
+      ]);
     });
 
+    const fillMesh = pixiMock.meshInstances.find(
+      (mesh) => mesh.filters === undefined,
+    );
+
+    expect(fillMesh?.visible).toBe(false);
+
     renderer.destroy();
-    // Restore the node default so later tests take the RGBA fallback again.
-    vi.stubGlobal("createImageBitmap", undefined);
   });
 
-  it("prepares a composited mask texture without breaking box drawing", async () => {
+  it("prepares an ID-mask texture without breaking box drawing", async () => {
     resetMocks();
 
     const resolve = vi.fn((detection: Detection) =>
@@ -1475,8 +1579,7 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.canvasSourceOptions).toHaveLength(1);
-      // Prepared mask, id-mask placeholder, and the halo placeholder source.
-      expect(pixiMock.imageSourceOptions).toHaveLength(3);
+      expect(pixiMock.bufferImageSourceOptions).toHaveLength(1);
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
@@ -1494,17 +1597,19 @@ describe("package entrypoint", () => {
     expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
     expect(scene?.children[1]).toBe(maskContainer);
     expect(scene?.children[2]).toBe(boxGraphics);
-    // Halo pass container first so the glow draws beneath the mask sprite
-    // and id mesh; passes are created lazily only when halos render.
+    // Halo pass container first so the glow draws beneath the mask sprite and
+    // the id mesh.
     expect(maskContainer?.children).toHaveLength(3);
     expect(pixiMock.containerInstances).toContain(maskContainer?.children[0]);
     expect(maskContainer?.children[1]).toBe(pixiMock.spriteInstances[1]);
     expect(maskContainer?.children[2]).toBe(pixiMock.meshInstances[0]);
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      height: 720,
-      texture: expect.any(Object),
-      visible: true,
-      width: 1280,
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(true);
+    expect(pixiMock.bufferImageSourceOptions[0]).toMatchObject({
+      format: "rgba8unorm",
+      height: 2,
+      scaleMode: "nearest",
+      width: 2,
     });
     expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
@@ -1609,7 +1714,8 @@ describe("package entrypoint", () => {
     try {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
-      const { ImageSource, Sprite, Texture } = await import("pixi.js");
+      const { BufferImageSource, ImageSource, Sprite, Texture } =
+        await import("pixi.js");
       const detectionFrames = Array.from({ length: 14 }, (_, index) => ({
         detections: [
           {
@@ -1644,6 +1750,7 @@ describe("package entrypoint", () => {
       } satisfies BufferedDetectionTimeline;
 
       const layer = createPixiMaskLayer({
+        BufferImageSource,
         detectionTimeline,
         ImageSource,
         maskStyle: new BaseMaskStyle(),
@@ -1658,7 +1765,7 @@ describe("package entrypoint", () => {
 
       expect(sprite.visible).toBe(true);
 
-      layer.drawFrame(0.52);
+      layer.drawFrame(0.04);
 
       expect(sprite.visible).toBe(false);
 
@@ -1675,7 +1782,8 @@ describe("package entrypoint", () => {
     try {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
-      const { ImageSource, Sprite, Texture } = await import("pixi.js");
+      const { BufferImageSource, ImageSource, Sprite, Texture } =
+        await import("pixi.js");
       const detectionFrames = [
         {
           detections: [
@@ -1712,6 +1820,7 @@ describe("package entrypoint", () => {
       } satisfies BufferedDetectionTimeline;
 
       const layer = createPixiMaskLayer({
+        BufferImageSource,
         detectionTimeline,
         ImageSource,
         maskStyle: createArtifactStableMaskStyle(0.2),
@@ -1741,23 +1850,15 @@ describe("package entrypoint", () => {
     }
   });
 
-  it("renders PNG ID-mask artifacts through the Pixi shader path", async () => {
+  it("renders ID-mask artifacts through the Pixi shader path", async () => {
     vi.useFakeTimers();
     resetMocks();
-
-    const originalCreateImageBitmap = globalThis.createImageBitmap;
-    const imageBitmap = {
-      close: vi.fn(),
-      height: 2,
-      width: 2,
-    } as unknown as ImageBitmap;
-
-    globalThis.createImageBitmap = vi.fn(async () => imageBitmap);
 
     try {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
       const {
+        BufferImageSource,
         Container,
         ImageSource,
         Mesh,
@@ -1803,6 +1904,7 @@ describe("package entrypoint", () => {
       } satisfies BufferedDetectionTimeline;
 
       const layer = createPixiMaskLayer({
+        BufferImageSource,
         Container,
         detectionTimeline,
         ImageSource,
@@ -1819,9 +1921,9 @@ describe("package entrypoint", () => {
       layer.drawFrame(0);
       await vi.runOnlyPendingTimersAsync();
       await vi.waitFor(() => {
-        expect(globalThis.createImageBitmap).toHaveBeenCalled();
+        layer.drawFrame(0);
+        expect(pixiMock.bufferImageSourceOptions).not.toHaveLength(0);
       });
-      layer.drawFrame(0);
 
       expect(pixiMock.shaderFrom).toHaveBeenCalledOnce();
       expect(
@@ -1833,7 +1935,7 @@ describe("package entrypoint", () => {
       await vi.waitFor(() => {
         expect(pixiMock.meshInstances[0]?.visible).toBe(true);
       });
-      expect(pixiMock.imageSourceOptions).toContainEqual(
+      expect(pixiMock.bufferImageSourceOptions).toContainEqual(
         expect.objectContaining({
           autoGenerateMipmaps: false,
           scaleMode: "nearest",
@@ -1842,7 +1944,7 @@ describe("package entrypoint", () => {
       expect(pixiMock.spriteInstances[0]?.visible).toBe(false);
 
       const selectionCount = detectionTimeline.selectFrame.mock.calls.length;
-      const activeIdMaskFrameTexture = layer.getActiveIdMaskFrameTexture();
+      const activeIdMaskFrameTexture = layer.getActiveIdMaskFrameTexture(0);
 
       expect(activeIdMaskFrameTexture?.frame.key).toBe("time:0");
       expect(detectionTimeline.selectFrame).toHaveBeenCalledTimes(
@@ -1858,12 +1960,11 @@ describe("package entrypoint", () => {
 
       layer.destroy();
     } finally {
-      globalThis.createImageBitmap = originalCreateImageBitmap;
       vi.useRealTimers();
     }
   });
 
-  it("premultiplies PNG ID-mask shader colors for Pixi blending", async () => {
+  it("premultiplies ID-mask shader colors for Pixi blending", async () => {
     const fsModuleName = "node:fs/promises";
     const { readFile } = (await import(fsModuleName)) as {
       readFile(path: URL, encoding: "utf8"): Promise<string>;
@@ -2294,12 +2395,56 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, false);
 
     expect(pixiMock.appInit).toHaveBeenCalledOnce();
-    expect(pixiMock.rendererResize).not.toHaveBeenCalled();
+    pixiMock.rendererResize.mockClear();
 
-    renderer.setRenderQuality({ maxDevicePixelRatio: 1 });
+    renderer.setRenderQuality({ maxDevicePixelRatio: 0.5 });
 
     expect(pixiMock.appInit).toHaveBeenCalledOnce();
-    expect(pixiMock.rendererResize).toHaveBeenCalledWith(640, 360, 1);
+    expect(pixiMock.rendererResize).toHaveBeenCalledWith(640, 360, 0.5);
+
+    renderer.destroy();
+  });
+
+  it("stops the canvas at the picture so the letterbox margin is not in it", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: vi.fn(),
+        clientHeight: 480,
+        clientWidth: 640,
+      } as unknown as HTMLElement,
+    });
+
+    // 1280x720 contained in 640x480 leaves a 60px band above and below.
+    expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(640, 360, 1);
+    expect(pixiMock.canvasInstances.at(-1)?.style).toMatchObject({
+      left: "0px",
+      top: "60px",
+    });
+
+    renderer.destroy();
+  });
+
+  it("keeps the canvas on the picture when the viewport is zoomed", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: vi.fn(),
+        clientHeight: 480,
+        clientWidth: 640,
+      } as unknown as HTMLElement,
+    });
+
+    // A pan moves the picture without filling the container, so the letterbox
+    // band it leaves must stay outside the canvas.
+    renderer.setViewportTransform({ scale: 1, x: 0, y: 40 });
+
+    const [, pannedHeight] = pixiMock.rendererResize.mock.lastCall ?? [];
+    expect(pannedHeight).toBeLessThan(480);
 
     renderer.destroy();
   });
@@ -2377,12 +2522,8 @@ describe("package entrypoint", () => {
     });
 
     expect(firstResolve).toHaveBeenCalled();
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      height: 720,
-      texture: expect.any(Object),
-      visible: true,
-      width: 1280,
-    });
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(true);
 
     renderer.destroy();
   });
@@ -2412,7 +2553,7 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.textureOptions).toHaveLength(2);
-      expect(pixiMock.spriteInstances[1]?.visible).toBe(true);
+      expect(pixiMock.meshInstances[0]?.visible).toBe(true);
     });
 
     renderer.setPresentation({ maskStyle: null });
@@ -2420,9 +2561,8 @@ describe("package entrypoint", () => {
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
     expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
     expect(pixiMock.textureOptions).toHaveLength(2);
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      visible: false,
-    });
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(false);
 
     await renderer.play();
     flushAnimationFrame(20);
@@ -2432,9 +2572,8 @@ describe("package entrypoint", () => {
 
     expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
     expect(pixiMock.textureOptions).toHaveLength(2);
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      visible: false,
-    });
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(false);
 
     renderer.destroy();
   });

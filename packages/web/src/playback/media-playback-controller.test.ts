@@ -262,6 +262,54 @@ describe("media playback controller", () => {
     controller.destroy();
     releaseIterator?.();
   });
+
+  /**
+   * The picture running out of decoded samples is the whole of a byte stall on
+   * a pulled source, and nothing downstream of the read reports it: the
+   * playhead keeps its state and no transport is consulted.
+   */
+  it("reports the wait while the source owes the picture its next sample", async () => {
+    resetMocks();
+    let releaseSample: (() => void) | undefined;
+    const heldSample = new Promise<void>((resolve) => {
+      releaseSample = resolve;
+    });
+    const sourceWaits: boolean[] = [];
+    const presentedTimestamps: number[] = [];
+    const controller = createMediaPlaybackController({
+      duration: null,
+      firstTimestamp: 0,
+      initialMediaTime: -1 / 30,
+      loop: false,
+      onCurrentTimeChange: vi.fn(),
+      onEnded: vi.fn(),
+      onError: vi.fn(),
+      onSourceWait: (waiting) => sourceWaits.push(waiting),
+      presentSample: (presentedSample) => {
+        presentedTimestamps.push(presentedSample.timestamp);
+        presentedSample.close();
+      },
+      sampleSink: {
+        getSample: mediaMock.getSample,
+        async *samples() {
+          await heldSample;
+          yield createMockSample(0, 1 / 30) as unknown as DecodedVideoSample;
+        },
+      },
+    });
+
+    controller.play();
+    flushAnimationFrame(1_000 / 30);
+
+    await vi.waitFor(() => expect(sourceWaits).toEqual([true]));
+
+    releaseSample?.();
+
+    await vi.waitFor(() => expect(presentedTimestamps).toEqual([0]));
+    expect(sourceWaits).toEqual([true, false]);
+
+    controller.destroy();
+  });
 });
 
 function mediaMockSampleSink() {

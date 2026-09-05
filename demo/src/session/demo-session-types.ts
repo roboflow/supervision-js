@@ -1,6 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   DetectionPickResult,
+  MediaRendererPresentation,
+  MediaRendererSource,
   MediaRendererState,
   MediaSessionState,
   MediaSourceState,
@@ -11,8 +13,12 @@ import type {
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
 import type { PreparedUploadMedia } from "../media/upload-media";
-import type { DemoPresentationSettings } from "../presentation/demo-presentation";
+import type { PipelineRecorder } from "../pipeline/pipeline-recorder";
 import type { DemoRenderQuality } from "./render-quality";
+import type {
+  DemoSessionConfiguration,
+  DemoSessionOptions,
+} from "./session-options";
 
 export enum DemoSourceMode {
   Fixture = "fixture",
@@ -35,7 +41,6 @@ export interface UploadInferenceState {
   readonly completedFrames: number;
   readonly errorMessage: string | null;
   readonly inferredDetections: number;
-  readonly normalizedRanges: readonly TimelineRange[];
   readonly preparedMedia: PreparedUploadMedia | null;
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
@@ -61,10 +66,23 @@ export interface DemoSessionCallbacks {
     diagnostics: RenderPreparationDiagnostics,
   ) => void;
   readonly onRendererState: (state: MediaRendererState) => void;
+  readonly onSessionConfiguration: (
+    configuration: DemoSessionConfiguration,
+  ) => void;
   readonly onSessionState: (state: MediaSessionState) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
-  readonly presentationSettings: DemoPresentationSettings;
+  /** Where each step of the session stamps that it ran, for the path diagram. */
+  readonly pipeline: PipelineRecorder;
+  readonly presentation: MediaRendererPresentation;
+  /**
+   * The presentation as it stands now. Layer toggles and focused playgrounds
+   * replace it without reopening the session, so a session that acts on it
+   * past its own creation has to ask rather than keep the snapshot above.
+   */
+  readonly readPresentation?: () => MediaRendererPresentation;
   readonly renderQuality: DemoRenderQuality;
+  readonly sessionOptions: DemoSessionOptions;
+  readonly tapMediaSource: (source: MediaRendererSource) => MediaRendererSource;
 }
 
 export type UploadInferenceStateSetter = Dispatch<

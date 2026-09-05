@@ -49,7 +49,7 @@ export enum MediaRendererPlaybackState {
  * kinds may be added over time, so treat unrecognized values like `Unknown`.
  */
 export enum MediaErrorKind {
-  /** The media could not be opened or read at all. */
+  /** The media could not be opened or read, or was refused before any read. */
   Unreadable = "unreadable",
   /** The container or codec is not supported by this platform. */
   UnsupportedFormat = "unsupportedFormat",
@@ -141,6 +141,12 @@ export interface MediaRendererAssetError {
  */
 export interface MediaSourceState {
   readonly status: MediaSourceStatus;
+  /**
+   * True while the renderer is waiting on a read it cannot draw without.
+   * Prefetch that runs behind a moving picture is not a wait and leaves this
+   * false, so this is set only where the picture has stopped for the source.
+   */
+  readonly awaitingRead?: boolean;
   readonly canRead: boolean | null;
   readonly formatName: string | null;
   readonly formatMimeType: string | null;
@@ -162,8 +168,7 @@ export interface MediaSourceState {
    * Stable failure classification when `status` is `Error`, otherwise `null`.
    *
    * Prefer this over `errorMessage` for control flow. Messages are diagnostic
-   * text and may name vendor internals. Optional so state fixtures written
-   * against the previous shape stay assignable.
+   * text and may name vendor internals.
    */
   readonly errorKind?: MediaErrorKind | null;
 }
@@ -171,10 +176,35 @@ export interface MediaSourceState {
 /**
  * Current renderer state.
  */
+/**
+ * What a playback gate holds back.
+ *
+ * A source the renderer pulls samples from can be held between any two frames,
+ * because the renderer decides when each one is drawn. A source that presents
+ * its own frames owns the playhead, so holding it means stopping the producer
+ * and starting it again, and a gate that stops one has to bound its own wait
+ * or a producer nothing answers for never runs again.
+ */
+export enum PlaybackGateReach {
+  /** No gate: the picture moves and unprepared layers are absent from it. */
+  Off = "off",
+  /**
+   * Playback waits to begin, and stops again at any frame whose artifacts are
+   * missing, until they arrive or the gate's own wait bound gives up on them.
+   */
+  EveryFrame = "everyFrame",
+}
+
 export interface MediaRendererState {
   readonly rendererBackend: string | null;
   readonly playbackState: MediaRendererPlaybackState;
   readonly fit: MediaRendererFit;
+  /**
+   * Media time of the pixels currently composited, or `null` before the first
+   * frame reaches the scene. Unlike `currentTime`, this does not move when a
+   * producer advances its playhead ahead of the picture under load.
+   */
+  readonly presentedTime?: number | null;
   readonly currentTime: number;
   readonly playbackRate: number;
   readonly duration: number | null;
@@ -184,6 +214,53 @@ export interface MediaRendererState {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
+  /**
+   * Detection frame the mask raster on screen belongs to, null when no mask is
+   * up. A renderer should either name `activeDetectionFrameTime` or draw no
+   * raster; another value exposes a presentation invariant breach.
+   */
+  readonly drawnMaskFrameTime?: number | null;
+  /**
+   * How far the active playback gates reach on the source this renderer opened.
+   */
+  readonly playbackGateReach?: PlaybackGateReach;
+  /**
+   * The render-preparation gate stopped playback for artifacts that never
+   * arrived and gave up on them, so the picture is moving without them. False
+   * again once preparation covers the playhead.
+   */
+  readonly renderPreparationGateAbandoned?: boolean;
+  /**
+   * Whether the raster on screen belongs to a frame other than the one the rest
+   * of the annotations were drawn from. Renderers report the mismatch instead
+   * of hiding it so diagnostics can fail loudly.
+   */
+  readonly maskHeldStale?: boolean;
+  /**
+   * Whether the playhead has been moved to a frame that is not on screen yet.
+   * `playbackState` cannot answer this: it keeps reporting what the transport
+   * settled on before the seek, so a seek of any length reads as paused or
+   * playing.
+   *
+   * A scrub sets this on every tick, so a host that draws it owes the viewer a
+   * delay before it appears, and owes them `scrubbing` too: a viewer dragging
+   * the playhead is not waiting for the picture, they are leading it.
+   *
+   * It answers for the transport, which settles one message before the frame it
+   * landed on reaches this thread. In that window the picture on screen is the
+   * cached stand-in the seek painted on its way out, which can be a quarter of a
+   * second from the frame requested, while this already reads false. A host that
+   * needs "is the right picture up" should compare the presented frame's own
+   * media time; reading a position the instant a seek resolves can return a
+   * frame that was never asked for.
+   */
+  readonly seeking?: boolean;
+  /**
+   * Whether a drag is open on the playhead. True from the first scrub of a
+   * gesture until the seek that lands it, which is what separates a viewer
+   * leading the picture from one waiting on it.
+   */
+  readonly scrubbing?: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly lastFrameRenderTimings: MediaFrameRenderTimings | null;
   readonly source: MediaSourceState;
@@ -251,8 +328,10 @@ export interface MediaRendererQuality {
   /**
    * Caps render resolution relative to device pixels.
    *
-   * Use `undefined` or a non-positive value to restore native device
-   * resolution.
+   * Unset, non-finite, or non-positive takes the library's own ceiling of 2,
+   * which is what keeps the presentation surface, the mask rasters drawn onto
+   * it, and the decode under both on one pixel grid. Pass
+   * `window.devicePixelRatio` to rasterize at the display's full ratio.
    */
   readonly maxDevicePixelRatio?: number;
 }

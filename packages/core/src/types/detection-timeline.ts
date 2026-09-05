@@ -6,6 +6,12 @@ import type {
 export enum DetectionBufferStatus {
   Idle = "idle",
   Loading = "loading",
+  /**
+   * The playback gate is holding playback until the source produces detections
+   * for the requested range. {@link DetectionBufferStatus.Loading} fetches
+   * detections the source already has; this one waits on a producer.
+   */
+  AwaitingCoverage = "awaitingCoverage",
   Ready = "ready",
   Error = "error",
   Destroyed = "destroyed",
@@ -18,13 +24,31 @@ export enum DetectionFrameSelectionMode {
   /**
    * Select the frame whose `[mediaTime, endTime)` interval contains the media
    * time. This is the default for interval annotations and timestamped sources.
+   *
+   * Frame times must come from the media itself. Times reconstructed from a
+   * nominal frame rate drift against a clip whose real rate differs, and once
+   * that drift passes the half-millisecond selection tolerance a playhead
+   * landing on a frame boundary selects the previous frame's detections.
+   *
+   * A frame that carries no `endTime` stays active until the next frame starts,
+   * which bridges an index the source never produced.
+   * {@link DetectionFrameSelectionMode.NearestFrameIndex} bounds each frame to
+   * one grid step instead, so a missing index reads as no detections.
    */
   Interval = "interval",
 
   /**
-   * Select from a known inference frame grid using `frameIndex`, `frameRate`,
-   * and optional `frameIndexOriginTime`. This is useful when inference was run
-   * on normalized frames and playback should snap detections to that grid.
+   * Select from a known inference frame grid using `frameIndex` and
+   * `frameRate`. This is useful when inference was run on normalized frames and
+   * playback should snap detections to that grid.
+   *
+   * A frame speaks for one grid step starting at its own media time, and an
+   * index the source never produced selects nothing rather than a neighbour.
+   *
+   * A frame carrying no `frameIndex` speaks for its step on the same terms,
+   * reached by the time it starts at rather than by an index that names it. Its
+   * `endTime` does not widen it past that step, so a source that labels only
+   * part of what it writes cannot bridge the indexes it never produced.
    */
   NearestFrameIndex = "nearestFrameIndex",
 }
@@ -35,12 +59,18 @@ export interface DetectionFrameSelectionOptions {
    */
   readonly selectionMode?: DetectionFrameSelectionMode;
   /**
-   * Inference frame rate used by `NearestFrameIndex`.
+   * Nominal inference frame rate, and the grid step `NearestFrameIndex` falls
+   * back to. With two or more indexed frames buffered the step is measured from
+   * their own media times, so a rate that disagrees with the clip's real one
+   * cannot walk selection off the grid.
    */
   readonly frameRate?: number;
   /**
-   * Media timestamp for inference frame index 0. Defaults to the first indexed
-   * frame's time minus `frameIndex / frameRate`.
+   * Media timestamp for inference frame index 0.
+   *
+   * @deprecated Selection does not read this. Each buffered frame carries the
+   * media time its index sits at, which states the same thing without an origin
+   * to extrapolate from.
    */
   readonly frameIndexOriginTime?: number;
 }
@@ -71,6 +101,22 @@ export interface DetectionFrameSourceChanges {
 
 export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   /**
+   * Whether the window keeps loading, asked again every time a load is about
+   * to start.
+   *
+   * Loading stays on when this is unset, so a host that hides its annotations
+   * while keeping them buffered behaves as it always has. Turned off, nothing
+   * is fetched: no rolling prefetch, no per-frame `prepare`, and no playback
+   * gate wait. The window already loaded is kept and still answers
+   * `selectFrame`, so turning it back on resumes from where it stopped instead
+   * of reloading ground it still holds.
+   *
+   * A predicate is read at each of those points rather than captured, which is
+   * how a host drives this from state that changes while the timeline lives
+   * without rebuilding it and throwing the window away.
+   */
+  readonly enabled?: boolean | (() => boolean);
+  /**
    * Seconds of detections to keep loaded ahead of playback.
    */
   readonly bufferAheadSeconds?: number;
@@ -79,11 +125,34 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    */
   readonly bufferBehindSeconds?: number;
   /**
-   * Minimum media-time movement before refreshing the hot detection window.
+   * Minimum media-time movement before the hot detection window is rebuilt.
+   *
+   * This governs refreshes of ground the window already covers. A media time
+   * the window does not cover loads immediately whatever this says, so raising
+   * it costs coverage nothing and only reduces repeated work.
+   *
+   * A session defaults it to 2.5 seconds for a file, whose detections do not
+   * change while it plays, and to 0.25 seconds for a stream, where the source
+   * gains data under the window. A renderer created directly leaves it unset,
+   * which refreshes whenever the playhead moves.
    */
   readonly refreshIntervalSeconds?: number;
   /**
-   * Optional playback gate based on detection availability.
+   * Hold playback until detections cover the frame about to be presented.
+   *
+   * Off by default: the picture moves first, and a frame the buffered window
+   * does not cover presents without annotations until a later load reaches it.
+   * Enabled, a gated `prepare` awaits the source's `waitForRange` for the
+   * requested lookahead before it loads, so playback stalls rather than
+   * showing an unannotated frame.
+   *
+   * A media source the renderer pulls decoded samples from stalls in the
+   * renderer's own sample pump, frame by frame. A source that
+   * presents its own frames owns the playhead and the renderer follows it.
+   * There the renderer stops the producer instead: coverage is awaited before
+   * it is asked to run, and again whenever it reaches a frame the source
+   * cannot answer for yet, which it resumes from on its own once the coverage
+   * arrives.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
@@ -93,15 +162,48 @@ export interface DetectionTimelineContext {
   readonly loop: boolean;
 }
 
+/**
+ * Detection-coverage playback gate, off unless `enabled` says otherwise.
+ *
+ * Off, annotations catch up to the picture and never hold it: a frame the
+ * buffered window does not cover presents without annotations. On, playback
+ * waits for the requested coverage before the next frame is presented, and the
+ * renderer reports buffering for as long as that wait lasts.
+ *
+ * On a media source the renderer pulls samples from, that wait happens between
+ * pulling one decoded sample and drawing it. A source that
+ * presents its own frames runs the playhead itself. There the renderer stops
+ * the producer for the wait and starts it again afterwards, before playback
+ * begins and again at any frame the source cannot answer for yet.
+ *
+ * Either way the renderer reports `Buffering` for as long as the wait lasts,
+ * and `maxWaitSeconds` bounds it, so a producer that has stopped answering
+ * costs that wait once rather than stranding the picture.
+ */
 export interface DetectionPlaybackGateOptions {
   /**
-   * Pause playback while the requested detection window is unavailable.
+   * Pause playback while the requested detection window is unavailable. A
+   * session with appendable detections turns this on by default, since a source
+   * still being written is the case worth waiting for; `playbackGate: false` on
+   * the session turns it off.
    */
   readonly enabled?: boolean;
   /**
-   * Required detections ahead of the active playback time.
+   * Detection lead required ahead of the playback time before an enabled gate
+   * lets playback continue. Defaults to none, which asks only that the frame
+   * about to be presented is covered.
    */
   readonly requiredAheadSeconds?: number;
+  /**
+   * How long an enabled gate holds playback before it gives up and presents the
+   * frame with whatever detections exist. `Infinity` waits indefinitely.
+   *
+   * Inference can fail, fall behind, or be cancelled, and none of those look
+   * any different to the gate from a result still on its way. Once a wait is
+   * abandoned, a source that reports versions is not waited on again until it
+   * gains data, so a producer that has stopped costs one wait, not one a frame.
+   */
+  readonly maxWaitSeconds?: number;
 }
 
 export enum DetectionFrameRetentionMode {
@@ -132,14 +234,35 @@ export interface DetectionFrameRetentionOptions {
   readonly windowSeconds?: number;
 }
 
+/**
+ * Per-call preparation context.
+ *
+ * Only a gated prepare reads `duration` and `firstTimestamp`, which bound the
+ * coverage it asks for at the end of media. Everything else the timeline needs
+ * about duration and looping arrives through
+ * {@link BufferedDetectionTimeline.setTimelineContext}.
+ */
 export interface DetectionBufferPrepareOptions {
   readonly duration?: number | null;
   readonly firstTimestamp?: number;
+  /**
+   * Wait for the coverage {@link DetectionPlaybackGateOptions} asks for before
+   * loading the hot window.
+   *
+   * Defaults to false, and does nothing unless the timeline was built with an
+   * enabled gate. Both have to say yes, so a caller that prepares detections
+   * for its own reasons never blocks on coverage.
+   */
   readonly gatePlayback?: boolean;
 }
 
 /**
  * Current hot detection-buffer state.
+ *
+ * Window ends are media times, so a current time sits inside them or outside
+ * them. On a looping timeline a window that reaches past the last frame keeps
+ * counting: its start stays within the media, and its end runs past the
+ * duration by however far it wraps into the replay.
  */
 export interface DetectionBufferState {
   readonly status: DetectionBufferStatus;
@@ -182,8 +305,13 @@ export interface DetectionFrameSource {
     options?: DetectionFrameLoadOptions,
   ): Promise<readonly DetectionFrame[]>;
   /**
-   * Optional backpressure hook used by playback gates. Resolve when the source
-   * has enough data to answer `loadFrames` for the requested range.
+   * Optional coverage hook. Resolve when the source has enough data to answer
+   * `loadFrames` for the requested range.
+   *
+   * Playback awaits it under an enabled detection playback gate, which a
+   * session with appendable detections gets by default; otherwise a caller that
+   * wants to wait awaits it itself. A
+   * composed source fans it out to the entries it composes.
    */
   waitForRange?(range: DetectionFrameSourceVersionRange): Promise<void>;
   /**
@@ -232,9 +360,10 @@ export interface CompositeDetectionFrameSourceEntry {
    */
   readonly sync?: DetectionFrameSelectionOptions;
   /**
-   * When false, playback gates skip this source's `waitForRange` hook.
+   * When false, the composed source's `waitForRange` resolves without waiting
+   * for this entry. Defaults to true.
    */
-  readonly requiredForPlayback?: boolean;
+  readonly requiredForCoverage?: boolean;
 }
 
 export interface CompositeDetectionFrameSourceOptions extends DetectionFrameSelectionOptions {
@@ -293,8 +422,21 @@ export interface ChunkedDetectionFrameSourceOptions {
   readonly fetchChunk?: DetectionFrameChunkFetch;
   /**
    * Maximum number of decoded chunks cached in memory.
+   *
+   * Left unset, the cache grows to twice the widest buffer window it has been
+   * asked to serve, so the ground a backwards scrub lands on is still resident.
+   * A fixed value caps the cache at that size even when the window is wider,
+   * which costs a refetch on every load that spans more chunks than the cap.
    */
   readonly maxCachedChunks?: number;
+  /**
+   * Maximum number of chunk requests in flight at once.
+   *
+   * One buffer window can span dozens of chunk files, and they queue behind the
+   * same connection the media's own reads use. Raise it on a transport that is
+   * not competing with a media fetch.
+   */
+  readonly maxConcurrentChunkFetches?: number;
 }
 
 /**
@@ -305,11 +447,45 @@ export interface BufferedDetectionTimeline {
     mediaTime: number,
     options?: DetectionBufferPrepareOptions,
   ): Promise<void>;
+  /**
+   * Whether `prepare(mediaTime)` still has to put or keep that time in the hot
+   * buffer.
+   *
+   * Source coverage and hot-buffer coverage are separate: a finite source can
+   * advertise its complete range while the currently loaded window is
+   * elsewhere. An older load can also be about to replace a buffer that still
+   * answers the requested time. Push renderers use this answer to keep a newly
+   * presented frame behind its matching detections without preparing every
+   * already-hot frame.
+   */
+  needsBufferPrepare?(mediaTime: number): boolean;
+  /**
+   * Whether a gated `prepare` at `mediaTime` would wait, answered without
+   * starting the wait.
+   *
+   * A caller driving a source that runs its own playhead uses this to decide
+   * whether to stop it, which it cannot do by awaiting: the wait is the thing
+   * it is deciding about. False whenever waiting is not on the table at all,
+   * which covers a disabled gate, a source that reports neither coverage nor a
+   * way to wait for it, and a source the gate has already given up on.
+   */
+  needsPlaybackGateWait?(
+    mediaTime: number,
+    options?: DetectionBufferPrepareOptions,
+  ): boolean;
   prefetch(mediaTime: number): void;
   setTimelineContext?(context: DetectionTimelineContext): void;
   selectFrame(mediaTime: number): DetectionFrame | undefined;
   getBufferedFrames(): readonly DetectionFrame[];
   getState(): DetectionBufferState;
+  /**
+   * Observe the buffered window changing.
+   *
+   * A load landing is the only way a media time that answered nothing starts
+   * answering a frame, and a resting playhead draws nothing that would ask
+   * again. Without this a consumer keeps the answer from before the load.
+   */
+  subscribe?(listener: () => void): () => void;
   destroy(): void;
 }
 
@@ -493,9 +669,10 @@ export interface LiveWritableDetectionFrameSource extends WritableDetectionFrame
    * A container can declare a duration beyond the last decoded sample, and a
    * live frame is deliberately held open past the data it describes. Finalizing
    * sets the latest frame's exclusive end to `endTime`, extending or shortening
-   * it as needed, so coverage-gated playback neither stalls on a terminal
-   * sliver nor believes the source covers time past the end of media. It is
-   * idempotent and returns the current summary when there is nothing to change.
+   * it as needed, so the source stops answering for time past the end of media.
+   * The readers this serves are `waitForRange` and the buffered window's own
+   * coverage arithmetic. It is idempotent and returns the current summary when
+   * there is nothing to change.
    */
   finalizeCoverage(
     endTime: number,

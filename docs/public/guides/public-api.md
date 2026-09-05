@@ -24,6 +24,12 @@ Install the current browser release with `npm install supervision`. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 
+The web video engine subpaths are currently available from the `0.2` preview:
+
+```sh
+npm install supervision@next
+```
+
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
 workers, or browser storage part of those core concepts.
@@ -155,6 +161,27 @@ not the first thing most users should reach for:
   display time — so a host can correlate transport-side results with what is on
   screen without opening a second hidden video. No DOM element or vendor object
   crosses that boundary, and every field beyond `mediaTime` is optional;
+- `createWebVideoEngineMediaRendererSource()` and `openWebVideoEngineMediaSource()`
+  for video presented by the web video engine, which owns the playhead and
+  hands each selected frame to the host. The renderer atomically composites
+  annotations from that frame's identity and acknowledges it once displayed.
+  Its source is a URL or a `Blob`, because it reads the video twice: once for
+  the frames it presents, and once for the thumbnails and single-frame grabs
+  its sample sink answers. A `ReadableStream` can be read only once, so pass
+  one to `WebVideoEngine` directly instead.
+  Both are also exported from `supervision/web-video-engine`, alongside the
+  engine's own types; the subpath and the root give the same two functions. The
+  source types are among those engine types: `UrlVideoSource`,
+  `BlobVideoSource`, and the `SourceKind` values that build one are imported
+  from `supervision/web-video-engine`, not from the package root. Importing the
+  subpath does not evaluate the root entry, so an application that wants only
+  the video engine does not run the renderer graph. The engine is loaded
+  dynamically at the moment one of these opens a source, so an application that
+  never opens one pays nothing in its bundle to import `supervision`. Pass
+  `display` to size the decode to the box the frames are painted into; without
+  it they decode at the source's full resolution however small that box is.
+  Under this source the renderer also answers `getRenderCount()` and
+  `getPreparedAnnotationWindow()`, which report `null` for pulled media;
 - `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses
@@ -233,9 +260,9 @@ A producer that streams results into a session has four supported contracts:
   end of media, defaulting to the renderer's reported duration. It sets that
   frame's exclusive end to the requested time, extending a finite frame whose
   container declared a duration past the last decoded sample, or shortening a
-  live frame that is still held open. Without it, coverage-gated playback either
-  stalls on a terminal sliver or believes the source covers time past the end of
-  media. It is idempotent.
+  live frame that is still held open. Without it, reported availability either
+  leaves a terminal sliver uncovered or claims time past the end of media. It is
+  idempotent.
 - `session.refresh()` still redraws on demand. By default the session also
   redraws itself when a write actually changed the frame selected for the
   displayed time. Live writes, batch writes, and coverage finalization all use
@@ -319,7 +346,7 @@ These are implementation details, even when they are important to performance:
 - Pixi scene layers;
 - Mediabunny adapter internals;
 - worker message protocols;
-- PNG ID-mask artifact payloads;
+- ID-mask artifact payloads;
 - shader palette formats;
 - prepared render-window cache internals;
 - demo-only Roboflow or SAM3 request code;
@@ -380,26 +407,25 @@ reason, and hosts without the native module keep the usual fallback
 diagnostics. Rotated videos (portrait phone recordings with a
 `rotation-degrees` track metadata) are rejected with an explicit error until
 the GPU rotation pass lands. The pipeline is validated end-to-end on an
-emulator; physical-device validation and performance numbers are still
-pending, so do not claim production-ready cross-platform file support yet.
+emulator; physical-device validation and performance numbers are still pending.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
 
-The remaining mobile work is platform implementation and measurement, not a
-second session abstraction: add the Android saved-video source and measure
-whether native-thread prepared windows are needed before introducing them. The experimental
-`./react/live-inference` entrypoint owns the live VisionCamera worklet through
-`useReactNativeLiveInference()`; applications provide model runners and
-serializable configuration, not frame callbacks. This keeps the generic
-`./react` entry usable without the optional Worklets peer.
+The experimental `./react/live-inference` entrypoint owns the live VisionCamera
+worklet through `useReactNativeLiveInference()`; applications provide model
+runners and serializable configuration, not frame callbacks. This keeps the
+generic `./react` entry usable without the optional Worklets peer.
 
 ## Compatibility Posture
 
 The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
+
+See [Migrating to 0.2](migrating-to-0.2.md) for source changes required by the
+preview, including interaction presentation options.
 
 1. one media item maps to one session;
 2. detections are semantic input;

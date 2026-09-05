@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canReuseMaskVisibilityArtifacts,
   observePixiContainerResize,
+  resolvePixiResolution,
 } from "./pixi-media-scene";
+import {
+  createPixiSceneLayerSlot,
+  PixiSceneLayerKind,
+  syncPixiSceneLayerChildren,
+} from "./pixi-scene-layer-slot";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -92,4 +98,63 @@ describe("Pixi media scene mask visibility", () => {
       expect(canReuseMaskVisibilityArtifacts(previous, next)).toBe(false);
     },
   );
+});
+
+describe("Pixi media scene layer stacking", () => {
+  it("stacks the focus veil under the interaction affordances, whatever order they arrive in", () => {
+    const scene = { children: [] as { name: string }[] };
+    const focusSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Focus);
+    const interactionSlot = createPixiSceneLayerSlot(
+      PixiSceneLayerKind.Interaction,
+    );
+    const slots = [interactionSlot, focusSlot];
+    const container = {
+      addChild: (...children: { name: string }[]) => {
+        scene.children.push(...children);
+      },
+      removeChildren: () => scene.children.splice(0),
+    };
+
+    interactionSlot.setDisplay({ name: "interaction" } as never);
+    focusSlot.setDisplay({ name: "focus" } as never);
+    syncPixiSceneLayerChildren(container as never, slots);
+
+    expect(scene.children.map(({ name }) => name)).toStrictEqual([
+      "focus",
+      "interaction",
+    ]);
+  });
+});
+
+describe("Pixi media scene presentation resolution", () => {
+  it("holds a scene that states no ceiling to the ratio the decode uses", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(undefined)).toBe(2);
+  });
+
+  it("treats a ceiling that is not a usable number as none stated", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(Number.NaN)).toBe(2);
+    expect(resolvePixiResolution(0)).toBe(2);
+  });
+
+  it("takes a stated ceiling below the default", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(1.5)).toBe(1.5);
+  });
+
+  it("takes a stated ceiling above the default", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(3)).toBe(3);
+  });
+
+  it("never rasterizes above the ratio the viewer's display has", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 1 });
+
+    expect(resolvePixiResolution(3)).toBe(1);
+  });
 });

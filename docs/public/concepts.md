@@ -5,6 +5,7 @@ children:
   - ./guides/detections-and-rendering.md
   - ./guides/presentation-styles.md
   - ./guides/media-preparation.md
+  - ./guides/browser-support.md
   - ./guides/public-api.md
 ---
 
@@ -21,5 +22,7 @@ layers and host frameworks.
   style objects and runtime updates.
 - [Media preparation](./guides/media-preparation.md) — normalize browser media
   without changing its timeline contract.
+- [Browser support](./guides/browser-support.md) — the codec, rendering, audio
+  and frame-count limits of the browser path.
 - [Public API](./guides/public-api.md) — supported entrypoints and advanced
   integration boundaries.

@@ -9,14 +9,48 @@ import {
   type DetectionTimelineContext,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import { isRangeCovered } from "#utils/detection-ranges";
+import { startWaitBound } from "#utils/wait-bound";
 import {
+  copyDetectionFrame,
   copySortedDetectionFrames,
   detectionFrameOverlapsRange,
   selectDetectionFrame,
+  validateDetectionFrames,
 } from "#utils/detection-frames";
 
-const DEFAULT_BUFFER_AHEAD_SECONDS = 5;
-const DEFAULT_BUFFER_BEHIND_SECONDS = 0.5;
+const DEFAULT_BUFFER_AHEAD_SECONDS = 10;
+const DEFAULT_BUFFER_BEHIND_SECONDS = 5;
+/**
+ * Share of the ahead window that must still lead the playhead when the next
+ * window is fetched.
+ *
+ * A window fetched only once the playhead reaches its end leaves the playhead
+ * uncovered for exactly as long as the fetch takes, every time, so annotations
+ * blink out once per window at a steady rate. Fetching while the current window
+ * still answers means the load lands behind a picture that never lost them.
+ */
+const REFILL_LEAD_FRACTION = 0.5;
+const MIN_REFILL_LEAD_SECONDS = 1;
+/**
+ * How long a playback gate holds before it gives up on coverage.
+ *
+ * The gate waits on a producer, and a producer that has failed, stalled, or
+ * fallen far behind is indistinguishable from one that is about to answer. Past
+ * this a frozen picture is the worse of the two outcomes, so the frame is
+ * presented with whatever detections exist.
+ */
+const DEFAULT_PLAYBACK_GATE_MAX_WAIT_SECONDS = 10;
+
+/**
+ * How far ahead of the playhead a load reaches.
+ *
+ * At a one-second chunking the lead is a dozen chunk requests on the same link
+ * the video is read over, and only the chunk under the playhead carries the
+ * frame the picture is waiting to draw. `covering` asks for that one; the lead
+ * follows once it lands.
+ */
+type DetectionBufferLead = "covering" | "full";
 
 interface DetectionBufferLoadPlan {
   readonly endTime: number;
@@ -57,6 +91,16 @@ export function createBufferedDetectionTimeline(
       ? null
       : Math.max(0, options.refreshIntervalSeconds);
   const playbackGate = options.playbackGate;
+  const refillLeadSeconds =
+    bufferAheadSeconds <= 0
+      ? 0
+      : Math.min(
+          bufferAheadSeconds,
+          Math.max(
+            MIN_REFILL_LEAD_SECONDS,
+            bufferAheadSeconds * REFILL_LEAD_FRACTION,
+          ),
+        );
 
   let buffer: DetectionFrame[] = [];
   let state = createIdleDetectionBufferState();
@@ -76,14 +120,25 @@ export function createBufferedDetectionTimeline(
         readonly id: number;
         readonly startTime: number;
         readonly endTime: number;
+        /** Playhead the window was anchored on, on the comparable clock. */
+        readonly mediaTime: number;
         readonly sourceVersion: number;
         readonly promise: Promise<void>;
       }
     | undefined;
   let incrementalRefresh: Promise<void> | undefined;
+  /** Source version the gate last gave up on, or null while it still waits. */
+  let abandonedGateSourceVersion: number | null = null;
   let pendingPrefetch:
     { readonly loadId: number; readonly mediaTime: number } | undefined;
   let prefetchPump: Promise<void> | undefined;
+  const listeners = new Set<() => void>();
+
+  const notifyBufferChanged = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
 
   const getSourceVersion = (
     ranges?: readonly DetectionFrameSourceVersionRange[],
@@ -98,29 +153,55 @@ export function createBufferedDetectionTimeline(
       0,
     );
   };
+  const isLoadingEnabled = () =>
+    typeof options.enabled === "function"
+      ? options.enabled()
+      : options.enabled !== false;
   const isBufferFresh = () =>
     bufferedVersionRange !== null &&
     bufferedSourceVersion === getSourceVersion(getBufferedSourceRanges());
 
-  const getLoadRange = (mediaTime: number) => {
+  const getLoadRange = (
+    mediaTime: number,
+    lead: DetectionBufferLead = "full",
+  ) => {
     const comparableMediaTime = getComparableMediaTime(mediaTime);
     const startTime = comparableMediaTime - bufferBehindSeconds;
-    const endTime = comparableMediaTime + bufferAheadSeconds;
+    const endTime =
+      comparableMediaTime + (lead === "full" ? bufferAheadSeconds : 0);
 
     return createLoadPlan(startTime, endTime);
   };
 
-  const loadWindow = (mediaTime: number) => {
-    const { endTime, sourceRanges, startTime } = getLoadRange(mediaTime);
+  const loadWindow = (
+    mediaTime: number,
+    lead: DetectionBufferLead = "full",
+  ) => {
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+    const { endTime, sourceRanges, startTime } = getLoadRange(mediaTime, lead);
     const versionRange = { endTime, startTime };
     const sourceVersion = getSourceVersion(sourceRanges);
 
-    if (
-      inFlight &&
-      inFlight.sourceVersion === sourceVersion &&
-      rangeContains(inFlight.startTime, inFlight.endTime, startTime, endTime)
-    ) {
-      return inFlight.promise;
+    if (inFlight && inFlight.sourceVersion === sourceVersion) {
+      if (
+        rangeContains(inFlight.startTime, inFlight.endTime, startTime, endTime)
+      ) {
+        return inFlight.promise;
+      }
+
+      // A load already in flight that still covers where the playhead is going
+      // answers the same question a fresh one would. Playback moves the anchor
+      // every frame, so a window superseded on anchor equality alone is
+      // superseded on every frame of its own flight: the fetch is thrown away
+      // and the wait restarts, which is how a gap grows instead of closing.
+      if (
+        refillLeadSeconds > 0 &&
+        comparableMediaTime >= inFlight.mediaTime &&
+        comparableMediaTime + refillLeadSeconds <=
+          inFlight.mediaTime + bufferAheadSeconds
+      ) {
+        return inFlight.promise;
+      }
     }
 
     const currentLoadId = loadId + 1;
@@ -145,13 +226,13 @@ export function createBufferedDetectionTimeline(
         }
 
         const committedSourceVersion = getSourceVersion(sourceRanges);
-        const loadedBuffer = copySortedDetectionFrames(frameRanges.flat());
+        const loadedFrames = frameRanges.flat();
 
         buffer =
           bufferedSourceVersion !== null &&
           bufferedSourceVersion === committedSourceVersion
-            ? reuseBufferedFrameSnapshots(buffer, loadedBuffer)
-            : loadedBuffer;
+            ? reuseBufferedFrameSnapshots(buffer, loadedFrames)
+            : copySortedDetectionFrames(loadedFrames);
         bufferedVersionRange = versionRange;
         bufferedSourceVersion = committedSourceVersion;
         state = {
@@ -164,6 +245,7 @@ export function createBufferedDetectionTimeline(
           requestedStartTime: startTime,
           status: DetectionBufferStatus.Ready,
         };
+        notifyBufferChanged();
       })
       .catch((error: unknown) => {
         if (!destroyed && currentLoadId === loadId) {
@@ -182,15 +264,66 @@ export function createBufferedDetectionTimeline(
         }
       });
 
+    if (lead === "covering") {
+      // Chained past the clearing of `inFlight`, which would otherwise be
+      // handed back to the widening load as a window that already answers.
+      void promise
+        .then(() => {
+          if (!destroyed && currentLoadId === loadId) {
+            void loadWindow(mediaTime).catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
+    }
+
     inFlight = {
       endTime,
       id: currentLoadId,
+      mediaTime: comparableMediaTime,
       promise,
       sourceVersion,
       startTime,
     };
 
     return promise;
+  };
+
+  /**
+   * Restates the window in the lap the playhead is on.
+   *
+   * A window planned near the end of a looping source runs past the loop
+   * point, so once playback wraps, a host comparing the window against the
+   * media clock reads a range that starts after the time it is holding. The
+   * offset removed here is a whole number of laps, which is what
+   * `getComparableMediaTime` already treats as the same position, so
+   * membership and the frames on screen are untouched.
+   */
+  const anchorWindowToPlayhead = (mediaTime: number) => {
+    const duration = timelineContext.duration;
+
+    if (
+      !isLoopingTimeline() ||
+      duration === null ||
+      state.bufferStartTime === null ||
+      state.bufferEndTime === null
+    ) {
+      return;
+    }
+
+    const laps = Math.round(
+      (getComparableMediaTime(mediaTime) - mediaTime) / duration,
+    );
+
+    if (laps === 0) {
+      return;
+    }
+
+    state = {
+      ...state,
+      bufferEndTime: state.bufferEndTime - laps * duration,
+      bufferStartTime: state.bufferStartTime - laps * duration,
+    };
+    notifyBufferChanged();
   };
 
   const isBuffered = (mediaTime: number) => {
@@ -205,6 +338,38 @@ export function createBufferedDetectionTimeline(
     );
   };
 
+  const inFlightCovers = (mediaTime: number) => {
+    if (!inFlight) {
+      return true;
+    }
+
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+    return (
+      comparableMediaTime >= inFlight.startTime &&
+      comparableMediaTime <= inFlight.endTime
+    );
+  };
+
+  const supersedeLoadOutside = (mediaTime: number) => {
+    if (!inFlight || inFlightCovers(mediaTime)) {
+      return;
+    }
+
+    const keepsCurrentBuffer = isBuffered(mediaTime);
+    loadId += 1;
+    inFlight = undefined;
+    if (keepsCurrentBuffer) {
+      state = {
+        ...state,
+        errorMessage: null,
+        requestedEndTime: state.bufferEndTime,
+        requestedStartTime: state.bufferStartTime,
+        status: DetectionBufferStatus.Ready,
+      };
+      notifyBufferChanged();
+    }
+  };
+
   const isInsideBufferedRange = (mediaTime: number) => {
     const comparableMediaTime = getComparableMediaTime(mediaTime);
 
@@ -217,8 +382,16 @@ export function createBufferedDetectionTimeline(
     );
   };
 
-  const refreshBuffer = async (mediaTime: number) => {
+  const refreshBuffer = async (
+    mediaTime: number,
+    lead: DetectionBufferLead = "full",
+  ) => {
     if (isBuffered(mediaTime)) {
+      // A backwards navigation may land in the retained buffer while a rolling
+      // prefetch for the old playhead is about to replace it. The navigation
+      // is current truth; do not let that older load evict its detections after
+      // the frame has been accepted.
+      supersedeLoadOutside(mediaTime);
       return;
     }
 
@@ -239,13 +412,21 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      return refreshBuffer(mediaTime);
+      return refreshBuffer(mediaTime, lead);
     }
 
-    await loadWindow(mediaTime);
+    await loadWindow(mediaTime, lead);
   };
 
+  /**
+   * Whether the next window is worth fetching while the current one still
+   * answers, so the load lands behind annotations that never went away.
+   */
   const shouldPrefetch = (mediaTime: number) => {
+    if (!isLoadingEnabled()) {
+      return false;
+    }
+
     if (!isBuffered(mediaTime)) {
       return true;
     }
@@ -258,15 +439,26 @@ export function createBufferedDetectionTimeline(
       return false;
     }
 
-    return (
-      getComparableMediaTime(mediaTime) + bufferAheadSeconds / 2 >=
+    if (
+      getComparableMediaTime(mediaTime) + bufferAheadSeconds / 2 <
       state.bufferEndTime
+    ) {
+      return false;
+    }
+
+    const { endTime, startTime } = getLoadRange(mediaTime);
+
+    // A window already spanning everything the source can offer has nowhere to
+    // advance to, so its lead only shrinks from here. Refetching it would
+    // repeat for every remaining frame of playback and buy no coverage.
+    return (
+      startTime !== state.bufferStartTime || endTime !== state.bufferEndTime
     );
   };
 
   const timeline: BufferedDetectionTimeline = {
     async prepare(mediaTime, prepareOptions) {
-      if (destroyed) {
+      if (destroyed || !isLoadingEnabled()) {
         return;
       }
 
@@ -279,10 +471,46 @@ export function createBufferedDetectionTimeline(
       }
 
       await refreshBuffer(mediaTime);
+      anchorWindowToPlayhead(mediaTime);
+    },
+
+    needsBufferPrepare(mediaTime) {
+      return (
+        !destroyed &&
+        isLoadingEnabled() &&
+        (!isBuffered(mediaTime) || !inFlightCovers(mediaTime))
+      );
+    },
+
+    needsPlaybackGateWait(mediaTime, prepareOptions) {
+      if (
+        destroyed ||
+        !isLoadingEnabled() ||
+        !playbackGate?.enabled ||
+        !options.source.waitForRange ||
+        !options.source.getAvailableRanges ||
+        hasAbandonedGate()
+      ) {
+        return false;
+      }
+
+      const availableRanges = options.source.getAvailableRanges();
+
+      return !createPlaybackGateCoveragePlan(
+        mediaTime,
+        prepareOptions,
+      ).sourceRanges.every((range) => isRangeCovered(range, availableRanges));
     },
 
     prefetch(mediaTime) {
-      if (destroyed || !shouldPrefetch(mediaTime)) {
+      if (destroyed || !isLoadingEnabled()) {
+        return;
+      }
+
+      anchorWindowToPlayhead(mediaTime);
+      supersedeLoadOutside(mediaTime);
+
+      if (!shouldPrefetch(mediaTime)) {
         return;
       }
 
@@ -316,12 +544,21 @@ export function createBufferedDetectionTimeline(
       return { ...state };
     },
 
+    subscribe(listener) {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
     destroy() {
       if (destroyed) {
         return;
       }
 
       destroyed = true;
+      listeners.clear();
       pendingPrefetch = undefined;
       buffer = [];
       bufferedSourceVersion = null;
@@ -377,10 +614,18 @@ export function createBufferedDetectionTimeline(
         continue;
       }
 
+      // A playhead the window does not reach is a jump rather than the window
+      // rolling forward, and the frame under it is the one thing the picture
+      // cannot draw without. A window that still spans it, however stale, is
+      // missing no such frame.
+      const lead: DetectionBufferLead = isInsideBufferedRange(mediaTime)
+        ? "full"
+        : "covering";
+
       await (
-        shouldRefreshRollingWindow(mediaTime)
-          ? loadWindow(mediaTime)
-          : refreshBuffer(mediaTime)
+        isBuffered(mediaTime) || shouldRefreshRollingWindow(mediaTime)
+          ? loadWindow(mediaTime, lead)
+          : refreshBuffer(mediaTime, lead)
       ).catch(() => undefined);
     }
   }
@@ -447,6 +692,7 @@ export function createBufferedDetectionTimeline(
         frameCount: buffer.length,
         status: DetectionBufferStatus.Ready,
       };
+      notifyBufferChanged();
     } catch (error) {
       if (!destroyed) {
         state = {
@@ -470,6 +716,39 @@ export function createBufferedDetectionTimeline(
     );
   }
 
+  function createPlaybackGateCoveragePlan(
+    mediaTime: number,
+    prepareOptions: DetectionBufferPrepareOptions | undefined,
+  ) {
+    const requiredAheadSeconds = Math.max(
+      0,
+      playbackGate?.requiredAheadSeconds ?? 0,
+    );
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+    const endTime = getRequiredCoverageEndTime({
+      // A looping window counts past the end of media and wraps into the
+      // replay, so clamping it to duration would ask for less than it needs.
+      duration: isLoopingTimeline() ? null : prepareOptions?.duration,
+      firstTimestamp: prepareOptions?.firstTimestamp,
+      mediaTime: comparableMediaTime,
+      requiredAheadSeconds,
+    });
+
+    // A lead clamped away at the end of media, or asked for as zero, still
+    // leaves the frame under the playhead to wait for.
+    return createLoadPlan(
+      comparableMediaTime,
+      Math.max(comparableMediaTime, endTime),
+    );
+  }
+
+  function hasAbandonedGate() {
+    return (
+      abandonedGateSourceVersion !== null &&
+      getSourceVersion() <= abandonedGateSourceVersion
+    );
+  }
+
   async function waitForPlaybackGate(
     mediaTime: number,
     prepareOptions: DetectionBufferPrepareOptions | undefined,
@@ -478,38 +757,34 @@ export function createBufferedDetectionTimeline(
       return;
     }
 
-    const requiredAheadSeconds = Math.max(
-      0,
-      playbackGate.requiredAheadSeconds ?? 0,
-    );
-    const comparableMediaTime = getComparableMediaTime(mediaTime);
-    const endTime = getRequiredCoverageEndTime({
-      duration: isLoopingTimeline() ? null : prepareOptions?.duration,
-      firstTimestamp: prepareOptions?.firstTimestamp,
-      mediaTime: comparableMediaTime,
-      requiredAheadSeconds,
-    });
-
-    if (endTime <= comparableMediaTime) {
+    if (hasAbandonedGate()) {
       return;
     }
 
-    const coveragePlan = createLoadPlan(comparableMediaTime, endTime);
+    const coveragePlan = createPlaybackGateCoveragePlan(
+      mediaTime,
+      prepareOptions,
+    );
 
     state = {
       ...state,
       errorMessage: null,
       requestedEndTime: coveragePlan.endTime,
       requestedStartTime: coveragePlan.startTime,
-      status: DetectionBufferStatus.Loading,
+      status: DetectionBufferStatus.AwaitingCoverage,
     };
 
     try {
-      await Promise.all(
-        coveragePlan.sourceRanges.map((range) =>
-          options.source.waitForRange?.(range),
+      const covered = await waitForSourceCoverage(
+        coveragePlan.sourceRanges,
+        Math.max(
+          0,
+          playbackGate.maxWaitSeconds ?? DEFAULT_PLAYBACK_GATE_MAX_WAIT_SECONDS,
         ),
       );
+
+      abandonedGateSourceVersion =
+        covered || !options.source.getVersion ? null : getSourceVersion();
     } catch (error) {
       if (!destroyed) {
         state = {
@@ -521,6 +796,47 @@ export function createBufferedDetectionTimeline(
 
       throw error;
     }
+  }
+
+  /**
+   * Resolves true once the source covers every range, false once the wait has
+   * run longer than `maxWaitSeconds`.
+   */
+  async function waitForSourceCoverage(
+    sourceRanges: readonly DetectionFrameSourceVersionRange[],
+    maxWaitSeconds: number,
+  ) {
+    const covered = whenRangesCovered(sourceRanges);
+
+    if (!Number.isFinite(maxWaitSeconds)) {
+      return covered;
+    }
+
+    const bound = startWaitBound(maxWaitSeconds * 1000);
+
+    try {
+      const result = await Promise.race([covered, bound.expired]);
+
+      if (!result) {
+        // The abandoned wait outlives this call, and a rejection it reaches
+        // afterwards has nobody left to hand it to.
+        void covered.catch(() => undefined);
+      }
+
+      return result;
+    } finally {
+      bound.cancel();
+    }
+  }
+
+  async function whenRangesCovered(
+    sourceRanges: readonly DetectionFrameSourceVersionRange[],
+  ) {
+    await Promise.all(
+      sourceRanges.map((range) => options.source.waitForRange?.(range)),
+    );
+
+    return true;
   }
 
   function shouldRefreshRollingWindow(mediaTime: number) {
@@ -536,9 +852,29 @@ export function createBufferedDetectionTimeline(
     const { endTime, startTime } = getLoadRange(mediaTime);
 
     return (
-      Math.abs(startTime - state.bufferStartTime) >= refreshIntervalSeconds ||
-      Math.abs(endTime - state.bufferEndTime) >= refreshIntervalSeconds
+      getWindowDrift(startTime, state.bufferStartTime) >=
+        refreshIntervalSeconds ||
+      getWindowDrift(endTime, state.bufferEndTime) >= refreshIntervalSeconds
     );
+  }
+
+  /**
+   * How far a planned edge sits from the window's, counted the short way around
+   * a looping timeline. A plan is stated on the first lap and the window on the
+   * playhead's, so across the loop point the two state the same edge a whole lap
+   * apart; measured straight, that reads as a window a full lap stale and
+   * rebuilds it on every frame until the plan stops reaching behind zero.
+   */
+  function getWindowDrift(planTime: number, bufferTime: number) {
+    const drift = Math.abs(planTime - bufferTime);
+
+    if (!isLoopingTimeline() || timelineContext.duration === null) {
+      return drift;
+    }
+
+    const wrappedDrift = modulo(drift, timelineContext.duration);
+
+    return Math.min(wrappedDrift, timelineContext.duration - wrappedDrift);
   }
 
   function createLoadPlan(
@@ -574,10 +910,16 @@ export function createBufferedDetectionTimeline(
       };
     }
 
+    // Both ends move by the same whole number of laps, so the window keeps its
+    // span and its source ranges while its start reads on the media clock: a
+    // window counted in the laps playback accumulated is one no host can hold
+    // against a current time.
+    const laps = Math.floor(startTime / duration);
+
     return {
-      endTime,
+      endTime: endTime - laps * duration,
       sourceRanges: getLoopingSourceRanges(startTime, endTime, duration),
-      startTime,
+      startTime: startTime - laps * duration,
     };
   }
 
@@ -611,17 +953,16 @@ export function createBufferedDetectionTimeline(
     }
 
     const duration = timelineContext.duration;
-    let comparableMediaTime = mediaTime;
 
-    while (comparableMediaTime < state.bufferStartTime) {
-      comparableMediaTime += duration;
-    }
-
-    while (comparableMediaTime > state.bufferEndTime) {
-      comparableMediaTime -= duration;
-    }
-
-    return comparableMediaTime;
+    // The representative of mediaTime (mod duration) anchored at the window
+    // start. The mapping must depend only on where the window sits, never on
+    // how many laps playback has accumulated, or membership drifts away from
+    // what the buffer actually holds. A time less than one lap past the
+    // anchor never wraps, so ordinary forward playback cannot ratchet.
+    return (
+      state.bufferStartTime +
+      modulo(mediaTime - state.bufferStartTime, duration)
+    );
   }
 
   function getSourceMediaTime(mediaTime: number) {
@@ -767,18 +1108,29 @@ function mergeIncrementalFrames(
   return Array.from(framesByIdentity.values()).sort(compareDetectionFrames);
 }
 
+/**
+ * Keeps the frame already held wherever the source returned one this buffer
+ * knows, and copies only what is new. Copying everything first and then
+ * discarding it is the same result for a great deal more work: a window rebuilt
+ * while a gesture moves inside it re-derives hundreds of frames it already has.
+ */
 function reuseBufferedFrameSnapshots(
   currentFrames: readonly DetectionFrame[],
   loadedFrames: readonly DetectionFrame[],
 ) {
+  validateDetectionFrames(loadedFrames);
+
   const currentFramesByIdentity = new Map(
     currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
   );
 
-  return loadedFrames.map(
-    (frame) =>
-      currentFramesByIdentity.get(getDetectionFrameIdentity(frame)) ?? frame,
-  );
+  return loadedFrames
+    .map(
+      (frame) =>
+        currentFramesByIdentity.get(getDetectionFrameIdentity(frame)) ??
+        copyDetectionFrame(frame),
+    )
+    .sort(compareDetectionFrames);
 }
 
 function getDetectionFrameIdentity(frame: DetectionFrame) {

@@ -4,20 +4,33 @@ import type {
 } from "supervision-js-core";
 import { DetectionFrameRetentionMode } from "supervision-js-core";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import {
+  DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
+} from "#constants/media-renderer";
 import type {
   MediaSessionAppendableDetectionOptions,
-  MediaSessionDetectionOptions,
   MediaSessionMode,
-  MediaSessionRendererOptions,
+  MediaSessionOptions,
 } from "#types/media-session";
 import { MediaSessionMode as SessionMode } from "#types/media-session";
 
 const DEFAULT_FRAME_RATE = 30;
 
+/**
+ * The refresh interval rebuilds a window that already covers the playhead. A gap
+ * the window does not reach reloads immediately whatever this says, so this only
+ * decides how often covered ground is derived again, and a file's detections do
+ * not change under it. Rebuilding an 8 second window every half second cost 15
+ * rebuilds a second at 8x playback, each re-deriving a window overlapping the
+ * one it replaced by 95%. A stream keeps the short interval below, because there
+ * the source really does gain data.
+ */
 const FILE_DETECTION_BUFFER_DEFAULTS = {
   bufferAheadSeconds: 10,
-  bufferBehindSeconds: 0.5,
-  refreshIntervalSeconds: 0.5,
+  bufferBehindSeconds: 5,
+  refreshIntervalSeconds: 2.5,
 } satisfies DetectionBufferOptions;
 
 const STREAM_DETECTION_BUFFER_DEFAULTS = {
@@ -26,15 +39,25 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
   refreshIntervalSeconds: 0.25,
 } satisfies DetectionBufferOptions;
 
-const APPENDABLE_PREDICTION_GATE_DEFAULTS = {
+/**
+ * Playback waits for annotations unless a host says otherwise, so a viewer sees
+ * a frame and the marks that belong to it together rather than a picture that
+ * fills in afterwards. `playbackGate: false` on the session, or either gate's
+ * own `enabled`, turns it off.
+ */
+const DETECTION_PLAYBACK_GATE_DEFAULTS = {
   enabled: true,
+  maxWaitSeconds: 10,
   requiredAheadSeconds: 2,
 };
 
 const RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS = {
   enabled: true,
-  minimumAheadSeconds: 0.25,
+  maxWaitSeconds: DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
   requiredAheadSeconds: 1,
+  resumeMarginWallSeconds:
+    DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+  stopBelowWallSeconds: DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
 };
 
 const MASK_FRAME_DEFAULTS = {
@@ -54,11 +77,20 @@ export interface ResolvedMediaSessionDefaults {
   readonly renderPreparation: RenderPreparationOptions;
 }
 
-export function resolveMediaSessionDefaults(options: {
-  readonly detections?: MediaSessionDetectionOptions;
-  readonly mode?: MediaSessionMode;
-  readonly renderer?: MediaSessionRendererOptions;
-}): ResolvedMediaSessionDefaults {
+/**
+ * The detection-buffer and render-preparation configuration a session created
+ * with these options actually runs on.
+ *
+ * `createMediaSession` resolves its options through this, so a host can read
+ * the numbers a session will use, and show or log them, without restating the
+ * defaults itself.
+ */
+export function resolveMediaSessionDefaults(
+  options: Pick<
+    MediaSessionOptions,
+    "detections" | "mode" | "playbackGate" | "renderer"
+  >,
+): ResolvedMediaSessionDefaults {
   const mode = options.mode ?? SessionMode.File;
   const appendableDetections =
     options.detections?.appendable ?? options.detections?.writable;
@@ -75,10 +107,12 @@ export function resolveMediaSessionDefaults(options: {
     mode === SessionMode.Stream
       ? STREAM_DETECTION_BUFFER_DEFAULTS
       : FILE_DETECTION_BUFFER_DEFAULTS;
+  const inheritsGateLookahead =
+    hasAppendableDetections || options.playbackGate === true;
   const detectionPlaybackGate =
     options.detections?.playbackGate ??
     userDetectionBuffer?.playbackGate ??
-    (hasAppendableDetections ? APPENDABLE_PREDICTION_GATE_DEFAULTS : null);
+    (inheritsGateLookahead ? DETECTION_PLAYBACK_GATE_DEFAULTS : null);
   const detectionBuffer = {
     ...baseDetectionBuffer,
     ...options.detections?.sync,
@@ -86,8 +120,18 @@ export function resolveMediaSessionDefaults(options: {
     ...(detectionPlaybackGate
       ? {
           playbackGate: {
-            ...(hasAppendableDetections
-              ? APPENDABLE_PREDICTION_GATE_DEFAULTS
+            // The detection timeline applies this bound even when a caller
+            // enables only the specific gate and leaves the session switch
+            // unset. Resolving it here makes the session snapshot describe the
+            // runtime that will actually open.
+            maxWaitSeconds: DETECTION_PLAYBACK_GATE_DEFAULTS.maxWaitSeconds,
+            ...(inheritsGateLookahead
+              ? DETECTION_PLAYBACK_GATE_DEFAULTS
+              : undefined),
+            // The session switch is the coarse answer; a gate's own `enabled`
+            // is the specific one and wins.
+            ...(options.playbackGate === false
+              ? { enabled: false }
               : undefined),
             ...userDetectionBuffer?.playbackGate,
             ...options.detections?.playbackGate,
@@ -122,6 +166,7 @@ export function resolveMediaSessionDefaults(options: {
     },
     playbackGate: {
       ...RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS,
+      ...(options.playbackGate === false ? { enabled: false } : undefined),
       ...userRenderPreparation?.playbackGate,
     },
   };

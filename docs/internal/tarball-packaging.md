@@ -5,6 +5,10 @@ consumer installation channel: consumers install the stable package with
 `npm install supervision`. This document exists for maintainers who validate
 or change the packaging path.
 
+`supervision` is the only package this repository publishes. Everything else in
+`packages/` is a private workspace that reaches consumers inside that one
+archive.
+
 ## Build The Tarball
 
 ```sh
@@ -12,8 +16,9 @@ npm run package:tarball
 ```
 
 That command builds the internal tracker engines into `supervision-js-core`,
-builds the published `supervision` package, and then writes a single archive to
-the ignored `artifacts/` directory:
+builds the private web video engine, builds the published `supervision`
+package, and then writes a single archive to the ignored `artifacts/`
+directory:
 
 ```text
 artifacts/supervision-<version>.tgz
@@ -55,6 +60,36 @@ The source tree, package boundary checks, and Rollup externals are unchanged.
 `pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
 registry by the consumer.
 
+## How The Private Web Video Engine Ships
+
+The engine is a `file:../video-engine` build dependency of `packages/web`, and
+its own build already emits the chunking and declarations the engine entries
+point at. Rather than rebuild those, the browser Rollup config stages the
+engine's JavaScript, declarations, and chunks into
+`packages/web/dist/web-video-engine` and renames its root entry to `engine`,
+leaving `index` for the barrel that adds the adapter. Relocated engine source
+maps are omitted and their `sourceMappingURL` comments are stripped because the
+original maps name paths that staging changes. The public `index` barrel keeps
+its own valid maps. The packer strips the repository-relative build dependency
+from the manifest npm receives.
+
+The adapter that barrel adds is a build entry of its own, reachable through the
+package's own exports rather than a subpath of its own. The browser build emits
+`media/video-engine-media-source` beside `index` and `editing`, and Rollup
+factors the adapter's modules into a single content-hashed chunk at the root of
+`dist` that the root entry and the media source entry both re-export. That is what
+lets the root entry and the engine subpath export one adapter, the same
+functions whichever import path names them, without either entry importing the
+other.
+
+The published JavaScript reaches the engine through a dynamic
+`import("./web-video-engine/engine.js")`, the chunk-relative path the build
+writes in place of the `#web-video-engine` alias, and that import runs only
+when a caller opens a video-engine media source. The engine embeds a 1.5 MB
+decode worker, so this is what keeps that worker out of a consumer who only
+annotates images: a bundler splits the engine into its own chunk, and drops it
+entirely when nothing reachable opens an engine source.
+
 ## Verify The Artifact
 
 ```sh
@@ -65,12 +100,20 @@ npm run package:tarball:smoke
 The smoke suite inspects the archive and then builds a throwaway npm project in
 the OS temp directory — outside this repository — to check that:
 
-- both JavaScript entrypoints, their declarations and source maps are present;
+- the root, editing, and video-engine media source JavaScript entrypoints are
+  present with their declarations and valid source maps, as is the shared
+  adapter chunk the root and the media source entry re-export;
 - the standalone render-preparation worker is present, has no sibling chunk
   imports, and is exported as `supervision/render-preparation-worker`;
 - the main browser entry embeds the worker source instead of referencing a
   runtime-relative worker URL;
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
+- the three `supervision/web-video-engine` entries ship and resolve, and an
+  entry that never opens a video source emits no engine chunk;
+- walking the root entry's static import graph shows it reaches the engine only
+  through a dynamic import, and walking the engine subpath's shows it never
+  reaches the root entry;
+- relocated engine entries carry no stale source maps or source-map comments;
 - tracker engines are embedded in core and do not appear as an install-time
   package or lockfile dependency;
 - a clean archive installation produces a lockfile with no `file:` path;
@@ -84,9 +127,9 @@ archive with `SUPERVISION_TARBALL=<path>`.
 
 ## npm Publishing
 
-The portable archive is the only artifact that may be published. Do not run
-`npm publish` from `packages/web`: its workspace manifest intentionally points
-at the private core package through `file:../core`.
+Do not run `npm publish` from `packages/web`: its workspace manifest
+intentionally points at the private core package through `file:../core`. The
+assembled archive is the only form of that package which may be published.
 
 See [npm-release.md](npm-release.md) for release ownership, trusted-publisher
 configuration, stable and preview tags, and the protected manual workflow. Use

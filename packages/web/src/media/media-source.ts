@@ -1,3 +1,5 @@
+import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
+
 export interface DecodedVideoSample {
   readonly timestamp: number;
   readonly duration: number;
@@ -21,6 +23,16 @@ export interface DecodedVideoSampleSink {
     endTimestamp?: number,
     options?: { skipLiveWait?: boolean },
   ): AsyncGenerator<DecodedVideoSample, void, unknown>;
+  /**
+   * A sample per timestamp, in the order asked for, `null` where no frame
+   * covers it, over a single pass across the track. Optional: a caller with a
+   * whole set in hand takes this where a source offers it, and otherwise pays
+   * a seek per {@link DecodedVideoSampleSink.getSample}.
+   */
+  samplesAtTimestamps?(
+    timestamps: Iterable<number>,
+    options?: { skipLiveWait?: boolean },
+  ): AsyncGenerator<DecodedVideoSample | null, void, unknown>;
 }
 
 export interface DisposableMediaInput {
@@ -47,4 +59,11 @@ export interface DecodedMediaSource {
   readonly input: DisposableMediaInput;
   readonly metadata: DecodedMediaSourceMetadata;
   readonly sampleSink: DecodedVideoSampleSink;
+  /**
+   * A source that owns its own decode clock publishes one, and the renderer
+   * composites the frames it announces rather than asking `sampleSink` for a
+   * frame at a time the renderer chose. `sampleSink` stays required, and still
+   * serves thumbnails and one-off grabs.
+   */
+  readonly engine?: PresentedFrameChannel;
 }

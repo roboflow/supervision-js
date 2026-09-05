@@ -9,6 +9,7 @@ import type {
   MediaRendererStateController,
   MediaSourceState,
 } from "supervision-js-core";
+import type { PreparedAnnotationWindowSnapshot } from "#renderers/prepared-annotation-window";
 import type { DetectionFrame } from "supervision-js-core";
 import type {
   DetectionPickResult,
@@ -62,7 +63,8 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly loop?: boolean;
   readonly playbackRate?: number;
   /**
-   * No-op in the current video-only renderer. Audio playback is deferred.
+   * @deprecated Nothing reads this. The renderer is video-only and audio
+   * playback is deferred, so setting it changes nothing either way.
    */
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
@@ -163,7 +165,20 @@ export interface DetectionLabelBounds {
 export interface MediaRenderer extends MediaRendererStateController {
   play(): Promise<void>;
   pause(): void;
+  /**
+   * Flips playback without the caller first reading which way it is going, so
+   * a frame presented between the read and the call cannot invert the result.
+   * Rejects when the play it decides on fails.
+   */
+  togglePlayback(): Promise<void>;
+  /** Lands on `mediaTime` and resolves once the frame there is presented. */
   seek(mediaTime: number): Promise<void>;
+  /**
+   * Moves the playhead for a gesture that is still moving, such as a timeline
+   * drag between pointer down and up. The frame that answers it may be an
+   * approximation; `seek` is what lands the released position exactly.
+   */
+  scrub(mediaTime: number): void;
   stepForward(): Promise<void>;
   stepBackward(): Promise<void>;
   setPlaybackRate(playbackRate: number): void;
@@ -180,6 +195,21 @@ export interface MediaRenderer extends MediaRendererStateController {
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
+  /**
+   * Explicit renders issued under the render-on-change policy, which only a
+   * media source that pushes presented frames runs under: the count moves when
+   * something on screen changed, so a paused, untouched renderer holds it
+   * still. It is `null` when the renderer pulls samples instead, because Pixi's
+   * ticker then paints every animation frame and no count describes that, so a
+   * `null` here is an answer rather than a failure.
+   */
+  getRenderCount(): number | null;
+  /**
+   * Span and per-frame readiness of the prepared annotation window, for
+   * instruments; null when the scene free-runs on the ticker or no window
+   * exists, so a `null` here is an answer rather than a failure.
+   */
+  getPreparedAnnotationWindow(): PreparedAnnotationWindowSnapshot | null;
   destroy(): void;
   getViewportTransform(): import("supervision-js-core").ViewportTransform;
   setViewportTransform(

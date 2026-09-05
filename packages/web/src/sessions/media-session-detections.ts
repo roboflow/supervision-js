@@ -151,7 +151,7 @@ async function prepareMultiSourceSessionDetections(options: {
         frames: sourceOptions.frames,
         id: sourceOptions.id,
         order: sourceOptions.order,
-        requiredForPlayback: sourceOptions.requiredForPlayback,
+        requiredForCoverage: sourceOptions.requiredForCoverage,
         source: sourceOptions.source ?? appendableSource,
         sync: sourceOptions.sync,
       });

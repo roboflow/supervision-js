@@ -4,6 +4,7 @@ import { createCompositeDetectionFrameSource } from "#detections/composite-detec
 import { DetectionFrameSelectionMode } from "#types/detection-timeline";
 import { DetectionMaskEncoding } from "#types/detections";
 import type { DetectionFrame, Rect } from "#types/detections";
+import { selectDetectionFrame } from "#utils/detection-frames";
 
 const rect: Rect = { height: 10, width: 20, x: 1, y: 2 };
 
@@ -141,7 +142,7 @@ describe("createCompositeDetectionFrameSource", () => {
     ]);
   });
 
-  it("waits only for sources required for playback", async () => {
+  it("waits only for sources required for coverage", async () => {
     const requiredWaitForRange = vi.fn(async () => undefined);
     const optionalWaitForRange = vi.fn(async () => undefined);
     const source = createCompositeDetectionFrameSource({
@@ -155,7 +156,7 @@ describe("createCompositeDetectionFrameSource", () => {
         },
         {
           id: "optional",
-          requiredForPlayback: false,
+          requiredForCoverage: false,
           source: {
             loadFrames: vi.fn(async () => []),
             waitForRange: optionalWaitForRange,
@@ -293,6 +294,193 @@ describe("createCompositeDetectionFrameSource", () => {
     expect(frame?.coordinateSpace).toBeUndefined();
   });
 
+  it("reaches every written grid index when the clip is slower than the grid", async () => {
+    const source = createCompositeDetectionFrameSource({
+      frameIndexOriginTime: 0,
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      sources: [{ frames: createSampledGridFrames(24, 30, 10), id: "sam3" }],
+    });
+
+    const frames = await source.loadFrames(0, 10 / 30);
+
+    expect(frames.map((frame) => frame.frameIndex)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    ]);
+    expect(frames.map((frame) => frame.detections[0]?.className)).toEqual([
+      "grid-0",
+      "grid-1",
+      "grid-2",
+      "grid-3",
+      "grid-4",
+      "grid-5",
+      "grid-6",
+      "grid-7",
+      "grid-8",
+      "grid-9",
+    ]);
+    expect(frames.map((frame) => frame.mediaTime)).toEqual([
+      0 / 24,
+      1 / 24,
+      2 / 24,
+      2 / 24,
+      3 / 24,
+      4 / 24,
+      5 / 24,
+      6 / 24,
+      6 / 24,
+      7 / 24,
+    ]);
+  });
+
+  it("composes a frame the child source left unindexed", async () => {
+    const source = createCompositeDetectionFrameSource({
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      sources: [
+        {
+          frames: [
+            createFrame({ className: "grid-0", frameIndex: 0, mediaTime: 0 }),
+            createFrame({ className: "loose", mediaTime: 1 / 30 }),
+            createFrame({
+              className: "grid-2",
+              frameIndex: 2,
+              mediaTime: 2 / 30,
+            }),
+          ],
+          id: "predictions",
+        },
+      ],
+    });
+
+    const frames = await source.loadFrames(0, 3 / 30);
+
+    expect(frames.map((frame) => frame.detections[0]?.className)).toEqual([
+      "grid-0",
+      "loose",
+      "grid-2",
+    ]);
+    expect(frames.map((frame) => frame.frameIndex)).toEqual([0, undefined, 2]);
+    expect(frames.map((frame) => frame.mediaTime)).toEqual([0, 1 / 30, 2 / 30]);
+  });
+
+  it("holds an overlapped child on its own index across an unindexed frame", async () => {
+    const source = createCompositeDetectionFrameSource({
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      sources: [
+        {
+          frames: [
+            createFrame({ className: "grid-0", frameIndex: 0, mediaTime: 0 }),
+            createFrame({
+              className: "grid-1",
+              frameIndex: 1,
+              mediaTime: 1 / 30,
+            }),
+            createFrame({
+              className: "grid-2",
+              frameIndex: 2,
+              mediaTime: 2 / 30,
+            }),
+          ],
+          id: "predictions",
+        },
+        {
+          frames: [
+            createFrame({ className: "review-0", frameIndex: 0, mediaTime: 0 }),
+            createFrame({ className: "review-loose", mediaTime: 1.5 / 30 }),
+          ],
+          id: "review",
+          order: 10,
+        },
+      ],
+    });
+
+    const frames = await source.loadFrames(0, 3 / 30);
+
+    expect(
+      frames.map((frame) => ({
+        classNames: frame.detections.map((detection) => detection.className),
+        frameIndex: frame.frameIndex,
+        mediaTime: frame.mediaTime,
+      })),
+    ).toEqual([
+      { classNames: ["grid-0", "review-0"], frameIndex: 0, mediaTime: 0 },
+      { classNames: ["grid-1"], frameIndex: 1, mediaTime: 1 / 30 },
+      {
+        classNames: ["grid-1", "review-loose"],
+        frameIndex: undefined,
+        mediaTime: 1.5 / 30,
+      },
+      {
+        classNames: ["grid-2", "review-loose"],
+        frameIndex: 2,
+        mediaTime: 2 / 30,
+      },
+    ]);
+
+    const selectionOptions = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
+
+    expect(selectDetectionFrame(frames, 1.5 / 30, selectionOptions)).toBe(
+      frames[2],
+    );
+    expect(selectDetectionFrame(frames, 1.9 / 30, selectionOptions)).toBe(
+      frames[2],
+    );
+  });
+
+  it("composes a wholly unindexed child on every grid slot", async () => {
+    const source = createCompositeDetectionFrameSource({
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      sources: [
+        {
+          frames: [
+            createFrame({ className: "grid-0", frameIndex: 0, mediaTime: 0 }),
+            createFrame({
+              className: "grid-1",
+              frameIndex: 1,
+              mediaTime: 1 / 30,
+            }),
+            createFrame({
+              className: "grid-2",
+              frameIndex: 2,
+              mediaTime: 2 / 30,
+            }),
+          ],
+          id: "predictions",
+        },
+        {
+          frames: [
+            createFrame({
+              className: "overlay",
+              endTime: 3 / 30,
+              mediaTime: 0,
+            }),
+          ],
+          id: "overlay",
+          order: 10,
+        },
+      ],
+    });
+
+    const frames = await source.loadFrames(0, 3 / 30);
+
+    expect(frames.map((frame) => frame.frameIndex)).toEqual([0, 1, 2]);
+    expect(
+      frames.map((frame) =>
+        frame.detections.map((detection) => detection.className),
+      ),
+    ).toEqual([
+      ["grid-0", "overlay"],
+      ["grid-1", "overlay"],
+      ["grid-2", "overlay"],
+    ]);
+  });
+
   it("rejects invalid source declarations", () => {
     expect(() =>
       createCompositeDetectionFrameSource({
@@ -320,6 +508,33 @@ describe("createCompositeDetectionFrameSource", () => {
     );
   });
 });
+
+/**
+ * Frames as an inference pass on an even grid writes them: it asks the decoder
+ * for the middle of each grid slot, gets back whichever sample the clip really
+ * displays then, and stores that sample's own timestamp against the slot's
+ * index. A clip slower than the grid answers consecutive slots with one sample.
+ */
+function createSampledGridFrames(
+  realFrameRate: number,
+  gridFrameRate: number,
+  gridSlotCount: number,
+): DetectionFrame[] {
+  return Array.from({ length: gridSlotCount }, (_, frameIndex) => {
+    const requestedTime = (frameIndex + 0.5) / gridFrameRate;
+    const mediaTime = Math.floor(requestedTime * realFrameRate) / realFrameRate;
+
+    return {
+      detections: [{ className: `grid-${frameIndex}`, rect }],
+      endTime: Math.max(
+        mediaTime + 1 / realFrameRate,
+        (frameIndex + 1.5) / gridFrameRate,
+      ),
+      frameIndex,
+      mediaTime,
+    };
+  });
+}
 
 function createEmptySource() {
   return {

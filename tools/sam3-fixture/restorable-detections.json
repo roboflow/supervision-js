@@ -1,0 +1,14 @@
+{
+  "fixtures": [
+    {
+      "detectionsSha256": "2052a6acc0be93832da42ec656a16ffebed9b9bf3d6252d32a9dbe18588cef99",
+      "sampleName": "basketball_sam3"
+    },
+    {
+      "detectionsSha256": "fb3eeb098bf6a9467e04e35a67df249babca19201fc6b3d989f8c1c8ec7cdfce",
+      "sampleName": "horse_trail"
+    }
+  ],
+  "schema": "supervision-js.tools.sam3-fixture.restorable-detections",
+  "version": 1
+}

@@ -33,6 +33,11 @@ session.destroy();
 The host should not need to know how Pixi containers, mask textures, worker
 queues, or detection chunks are wired internally.
 
+What the host does need to know is where the browser stops: which codecs open,
+what a browser without WebGPU costs per frame, that no session plays audio, and
+the frame-count ceiling on a source. [Browser Support](./browser-support.md)
+covers all four.
+
 ## Good Defaults
 
 The default path is intentionally boring:
@@ -42,7 +47,49 @@ The default path is intentionally boring:
 - detections are optional;
 - render preparation uses the built-in worker strategy when available;
 - state is available through `getState()` and `subscribe()`;
+- playback waits for annotations, so a frame and the marks that belong to it
+  reach the screen together rather than the picture filling in afterwards;
 - advanced buffering, retention, interaction, and diagnostics are opt-in.
+
+Both gates are on by default. Pass `playbackGate: false` when starting quickly
+matters more than annotations.
+It turns off both the detection-coverage and the render-preparation gates; left
+on, the session reports a buffering activity while it waits. The detection gate
+applies to a session with appendable detections, and `playbackGate: true` turns
+it on for any session. Both gates hold every frame. A source the renderer pulls
+samples from waits between decoding and drawing. A source that presents its own
+frames, which is what `openWebVideoEngineMediaSource` returns, is stopped when
+detection coverage or prepared artifacts are missing and started again when the
+wait settles.
+
+Video files are opened through `createWebVideoEngineMediaRendererSource`, which
+decodes and seeks frames, then hands each selected frame and its media time to
+the renderer. The renderer composites matching annotations and acknowledges the
+frame once displayed. Passing a URL or a `Blob` directly keeps the renderer
+pulling samples instead.
+
+## Reading The Resolved Defaults
+
+`resolveMediaSessionDefaults()` reports the detection-buffer and
+render-preparation configuration a session built from a given set of options
+will actually run on:
+
+```ts
+import { MediaSessionMode, resolveMediaSessionDefaults } from "supervision";
+
+const defaults = resolveMediaSessionDefaults({
+  detections: { sync: { frameRate: 24 } },
+  mode: MediaSessionMode.File,
+});
+
+defaults.detectionBuffer.bufferAheadSeconds;
+defaults.renderPreparation.maskFrame?.prefetchFrameCount;
+```
+
+`createMediaSession()` resolves its own options through the same function, so a
+host that surfaces these numbers is showing the ones the session uses rather
+than a copy that can drift. Frame counts follow the detection frame rate, so
+they answer differently for a 24Hz source than for a 30Hz one.
 
 ## Minimal Start
 
@@ -72,10 +119,11 @@ It also includes activity details such as media normalization, detection loading
 playback buffering, and render artifact preparation. Apps can use this to show
 loading UI without wiring every internal subsystem manually.
 
-`activities` are the host-facing loading contract. They distinguish media
-normalization, detection buffering, playback gates, and render-artifact
-preparation, so apps can choose a compact status chip, a media overlay, or a
-debug panel without reading lower-level renderer internals.
+`activities` are the host-facing loading contract. They distinguish opening
+media, media normalization, playback buffering, detection loading and
+buffering, render-artifact preparation, and errors, so apps can choose a compact
+status chip, a media overlay, or a debug panel without reading lower-level
+renderer internals.
 
 For common UI decisions, use the aggregate flags first:
 
@@ -88,6 +136,22 @@ session.subscribe((state) => {
 
 Use `activities` when the app needs to explain why playback or presentation is
 blocked.
+
+### Seeking
+
+A seek moves the playhead at once and the picture follows when the frame
+decodes. `playbackState` keeps reporting whatever playback settled on before the
+seek, so it cannot stand in for that gap; read `seeking` on the renderer state
+instead:
+
+```ts
+session.subscribe((state) => {
+  spinner.hidden = !state.renderer?.seeking;
+});
+```
+
+Every tick of a scrub sets it, so an app that draws it owes the viewer a delay
+before it appears, or a drag will strobe.
 
 ## Streaming Detections
 
@@ -179,8 +243,8 @@ track ends playback.
 
 ## Renderer Quality
 
-By default the renderer uses the browser's device pixel ratio. Apps that need
-to reduce GPU memory or fill-rate pressure can cap it:
+By default the renderer rasterizes at the display's pixel ratio up to a ceiling
+of 2. Apps that need to reduce GPU memory or fill-rate pressure can lower it:
 
 ```ts
 const session = await createMediaSession({
@@ -193,7 +257,11 @@ const session = await createMediaSession({
 ```
 
 Lower values trade some sharpness for smoother playback on constrained devices
-or busy browsers. Leaving the option unset preserves native device resolution.
+or busy browsers. Leaving the option unset takes the ceiling of 2, which is what
+keeps the picture, the masks drawn onto it, and the decode under both on one
+pixel grid; a mask raster carries one detection per pixel and can only be
+sampled nearest, so a grid it does not share shows as stair-stepped edges. Pass
+`window.devicePixelRatio` to rasterize at the display's full ratio.
 
 Quality can also change at runtime without rebuilding the media session:
 

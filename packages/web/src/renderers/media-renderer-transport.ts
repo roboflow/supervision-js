@@ -1,0 +1,542 @@
+import { MediaRendererPlaybackState } from "#types/media-renderer";
+import type {
+  PresentedFrameChannel,
+  PresentedFrameChannelStatus,
+  PresentedFrameNavigation,
+} from "./presented-frame-channel";
+
+const MILLISECONDS_PER_SECOND = 1000;
+
+export interface MediaRendererTransport {
+  play(): Promise<void>;
+  pause(): void;
+  togglePlayback(): Promise<void>;
+  scrub(mediaTime: number): void;
+  commit(mediaTime: number): Promise<void>;
+  step(direction: 1 | -1): Promise<void>;
+  setPlaybackRate(rate: number): void;
+  /** Holds a producer frame before the scene can display it. */
+  protectPresentation(
+    mediaTime: number,
+    signal: AbortSignal,
+  ): Promise<void> | null;
+  destroy(): void;
+}
+
+export interface MediaRendererTransportOptions {
+  /** Replay from the start when the producer reports the source ended. */
+  readonly loop: boolean;
+  readonly channel: PresentedFrameChannel;
+  readonly onPlaybackRate: (rate: number) => void;
+  readonly onPlaybackState: (state: MediaRendererPlaybackState) => void;
+  readonly onPlayheadTime: (mediaTime: number) => void;
+  /**
+   * The playhead has moved to a frame that is not on screen yet. Reported apart
+   * from `onPlaybackState` because the state a seek settles from is the one the
+   * transport keeps reporting throughout it.
+   *
+   * True for a scrub as well as for a landing, so pair it with `onScrubbing` to
+   * tell a viewer who is waiting from one who is dragging.
+   */
+  readonly onSeeking: (seeking: boolean) => void;
+  /**
+   * A drag is open on the playhead. Published as the drag opens and closes
+   * without waiting for the producer, whose next word on a slow source is
+   * seconds away.
+   */
+  readonly onScrubbing: (scrubbing: boolean) => void;
+  /** Buffered playback. Awaited before the producer is asked to run. */
+  readonly waitForReadiness?: (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
+  /**
+   * A bounded wait for whatever annotates `mediaTime`, or null when nothing is
+   * missing. Asked on every playhead move, so answering null has to be cheap.
+   *
+   * This is what stops a producer already at speed, so what it waits for has to
+   * be something that gives up on its own. Left out, playback is held once and
+   * never again, and a producer outrunning whatever feeds it runs on past
+   * frames that have nothing to draw.
+   *
+   * `signal` aborts once anything else settles playback, so a hold the viewer
+   * has already paused or seeked past is not still holding a play nobody asked
+   * for.
+   */
+  readonly holdForReadiness?: (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => Promise<void> | null;
+  /** Readiness required before a producer frame may enter the scene. */
+  readonly waitForPresentationReadiness?: (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => Promise<void> | null;
+  /** Drops a guarded frame synchronously when navigation supersedes it. */
+  readonly invalidatePresentedFrame?: () => void;
+  /** Opens an acknowledgment that settles after the scene accepts the frame
+   *  where the producer's navigation landed. */
+  readonly beginPresentedFrameNavigation?: () => PresentedFrameNavigation;
+}
+
+/**
+ * The renderer's playback surface over a producer that owns the playhead.
+ * Seconds meet milliseconds here and nowhere else.
+ *
+ * A drag is a pair: every `scrub` belongs to one gesture the producer is told
+ * about, and the `commit` that lands it releases that gesture, so a producer
+ * that froze itself for the drag is the one deciding whether to resume. The
+ * drag and the settle travel as separate signals: which of the two a viewer is
+ * looking at is the host's judgement, not the transport's.
+ */
+export function createMediaRendererTransport(
+  options: MediaRendererTransportOptions,
+): MediaRendererTransport {
+  const { channel } = options;
+  let gestureInFlight = false;
+  let landingRelease: Promise<void> | null = null;
+  let settledState: MediaRendererPlaybackState | null = null;
+  // Anything that settles playback other than the hold itself invalidates the
+  // play the hold is waiting for, so a pause taken during it is not undone by
+  // the readiness that arrives afterwards.
+  let playbackIntent = 0;
+  /** Intent a readiness wait belongs to, or null while none is running. */
+  let readinessHoldIntent: number | null = null;
+  /** Whether a readiness hold still owes the producer its release. */
+  let readinessFreezeHeld = false;
+  let activeReadinessWait: AbortController | undefined;
+  let presentationWait = 0;
+  let presentationHold: {
+    readonly intent: number;
+    readonly wait: number;
+  } | null = null;
+  const isHoldingForReadiness = () =>
+    readinessHoldIntent === playbackIntent ||
+    presentationHold?.intent === playbackIntent;
+
+  /**
+   * Supersedes every playback intent still in flight. A readiness wait is
+   * awaited bare, so this is the only moment the gate can be told the play it
+   * is holding open is over.
+   */
+  const beginPlaybackIntent = () => {
+    activeReadinessWait?.abort();
+    activeReadinessWait = undefined;
+
+    return ++playbackIntent;
+  };
+
+  const publishSeekSignals = () => {
+    options.onScrubbing(gestureInFlight);
+    options.onSeeking(isSettling(channel.getStatus(), channel.getSeeking()));
+  };
+
+  const releaseGesture = async () => {
+    if (!gestureInFlight) {
+      return;
+    }
+
+    gestureInFlight = false;
+    // The producer holds one freeze, so a drag that took it over from a
+    // readiness hold is releasing that hold's too.
+    readinessFreezeHeld = false;
+    publishSeekSignals();
+    await channel.endInteractiveSeek();
+  };
+
+  const releaseReadinessFreeze = async () => {
+    if (!readinessFreezeHeld || gestureInFlight) {
+      return;
+    }
+
+    readinessFreezeHeld = false;
+    await channel.endInteractiveSeek();
+  };
+
+  const publishPlaybackState = () => {
+    const status = channel.getStatus();
+
+    // A producer never loops itself, and its play() from ENDED restarts at the
+    // start of the source, so looping is one replay at the moment the producer
+    // announces the end.
+    if (status === "ENDED" && options.loop) {
+      void channel.play();
+    }
+
+    const seeking = channel.getSeeking();
+    // The gesture only speaks for the surface while the producer sits in the
+    // mechanical pause it asked for. A producer reporting anything else has
+    // moved on, and letting the gesture go means paying the release it owes:
+    // dropping the bookkeeping alone would leave the producer frozen for a
+    // drag nobody is holding.
+    if (
+      gestureInFlight &&
+      !isSettling(status, seeking) &&
+      status !== "PAUSED"
+    ) {
+      void releaseGesture();
+    }
+
+    // A drag stops the picture, and a control that reads this state has to be
+    // able to say so. What the user settled on survives in `settledState`,
+    // which is what the release resumes and what a toggle acts on.
+    const state =
+      gestureInFlight && status !== "ERRORED"
+        ? MediaRendererPlaybackState.Paused
+        : isHoldingForReadiness() && status !== "ERRORED"
+          ? MediaRendererPlaybackState.Buffering
+          : resolveTransportPlaybackState(status, seeking, settledState);
+
+    if (!gestureInFlight && !isSettling(status, seeking)) {
+      settledState = state;
+    }
+
+    publishSeekSignals();
+    options.onPlaybackState(state);
+  };
+  /**
+   * Stops the producer while the frame it has reached waits for what annotates
+   * it, and starts it again once that arrives.
+   *
+   * The producer's own mechanical pause is what holds it, the same one a drag
+   * uses, so a drag arriving mid-hold takes the hold over rather than fighting
+   * it and the release it lands with is the one that resumes.
+   */
+  const holdForReadiness = async (
+    wait: Promise<void>,
+    readinessWait: AbortController,
+  ) => {
+    const intent = playbackIntent;
+
+    readinessHoldIntent = intent;
+    readinessFreezeHeld = true;
+    channel.beginInteractiveSeek();
+    publishPlaybackState();
+
+    try {
+      await wait;
+    } catch {
+      // A wait that failed is over, and the release below is the only thing
+      // that starts the producer again. Whoever owns the failure reports it.
+    } finally {
+      if (activeReadinessWait === readinessWait) {
+        activeReadinessWait = undefined;
+      }
+
+      if (readinessHoldIntent === intent) {
+        readinessHoldIntent = null;
+      }
+    }
+
+    // A play that superseded this hold is waiting for readiness of its own,
+    // and the producer running before that lands is what the wait is there to
+    // prevent. It inherits the freeze and releases it when it starts playback.
+    if (readinessHoldIntent === null) {
+      await releaseReadinessFreeze();
+    }
+
+    publishPlaybackState();
+  };
+
+  const publishPlayheadTime = () => {
+    options.onPlayheadTime(channel.getPlayhead().mediaTimeS);
+
+    if (
+      !options.holdForReadiness ||
+      readinessHoldIntent !== null ||
+      gestureInFlight ||
+      channel.getStatus() !== "PLAYING" ||
+      channel.getSeeking()
+    ) {
+      return;
+    }
+
+    const readinessWait = new AbortController();
+    const wait = options.holdForReadiness(
+      channel.getPlayhead().mediaTimeS,
+      readinessWait.signal,
+    );
+
+    if (wait) {
+      activeReadinessWait = readinessWait;
+      void holdForReadiness(wait, readinessWait);
+    }
+  };
+  const publishPlaybackRate = () => {
+    options.onPlaybackRate(channel.getPlaybackRate());
+  };
+  const unsubscribes = [
+    channel.subscribe("state", publishPlaybackState),
+    channel.subscribe("seeking", publishPlaybackState),
+    channel.subscribe("time", publishPlayheadTime),
+    channel.subscribe("rate", publishPlaybackRate),
+  ];
+
+  const transport: MediaRendererTransport = {
+    async play() {
+      options.invalidatePresentedFrame?.();
+      presentationWait += 1;
+      presentationHold = null;
+      // The producer answers on its own thread, so its status still reads the
+      // previous playback until it does. Recording the ask here is what lets a
+      // second toggle arriving in that window flip it.
+      settledState = MediaRendererPlaybackState.Playing;
+      const intent = beginPlaybackIntent();
+      await releaseGesture();
+
+      /* A play superseded while the gesture was releasing must not open a
+         readiness hold: nothing would be left holding the one that replaced
+         it. */
+      if (intent !== playbackIntent) {
+        publishPlaybackState();
+        return;
+      }
+
+      if (options.waitForReadiness) {
+        const readinessWait = new AbortController();
+
+        activeReadinessWait = readinessWait;
+        readinessHoldIntent = intent;
+        publishPlaybackState();
+
+        let readinessLanded = false;
+
+        try {
+          await options.waitForReadiness(
+            channel.getPlayhead().mediaTimeS,
+            readinessWait.signal,
+          );
+          readinessLanded = true;
+        } finally {
+          if (activeReadinessWait === readinessWait) {
+            activeReadinessWait = undefined;
+          }
+
+          if (readinessHoldIntent === intent) {
+            readinessHoldIntent = null;
+          }
+
+          // A wait that failed takes the play with it, and the producer is
+          // still frozen for a hold this play took over.
+          if (!readinessLanded && intent === playbackIntent) {
+            void releaseReadinessFreeze();
+          }
+        }
+
+        if (intent !== playbackIntent) {
+          publishPlaybackState();
+          return;
+        }
+      }
+
+      await releaseReadinessFreeze();
+      await channel.play();
+      // A producer already at speed reports no change, so nothing else would
+      // retire the hold's own Buffering and it would stand for good.
+      publishPlaybackState();
+    },
+
+    pause() {
+      options.invalidatePresentedFrame?.();
+      presentationWait += 1;
+      presentationHold = null;
+      settledState = MediaRendererPlaybackState.Paused;
+      beginPlaybackIntent();
+      // A pause ends the producer's mechanical hold, so it lands ahead of the
+      // releases a readiness hold or an open gesture still owe.
+      channel.pause();
+      void releaseReadinessFreeze();
+      void releaseGesture();
+    },
+
+    async togglePlayback() {
+      // The producer's own toggle is fire-and-forget, so a play that fails
+      // inside it reaches nobody. Deciding here is also what a drag needs: the
+      // producer sits paused as a mechanic for its length and would read that
+      // as the user's pause, while `settledState` holds what the user chose.
+      // A stall is a play still being asked for, so it toggles off.
+      if (
+        settledState === MediaRendererPlaybackState.Playing ||
+        settledState === MediaRendererPlaybackState.Buffering
+      ) {
+        transport.pause();
+        return;
+      }
+
+      await transport.play();
+    },
+
+    scrub(mediaTime) {
+      // A drag whose landing seek is still releasing the producer is the drag
+      // this scrub belongs to. Opening a second one there would stop the
+      // picture for a gesture nobody is holding, and nothing would release it.
+      options.invalidatePresentedFrame?.();
+      presentationWait += 1;
+      presentationHold = null;
+      beginPlaybackIntent();
+      if (!gestureInFlight && landingRelease === null) {
+        gestureInFlight = true;
+        channel.beginInteractiveSeek();
+        publishSeekSignals();
+      }
+
+      channel.scrub(mediaTime * MILLISECONDS_PER_SECOND, "gesture");
+    },
+
+    async commit(mediaTime) {
+      options.invalidatePresentedFrame?.();
+      const navigationPresentation = ++presentationWait;
+      presentationHold = null;
+      beginPlaybackIntent();
+      // Releasing first is what keeps a drag from freezing the picture on
+      // release: the producer resumes on its own terms, and the landing decode
+      // for a cold region no longer sits between the pointer coming up and
+      // playback continuing.
+      const release = releaseGesture();
+      landingRelease = release;
+      try {
+        await release;
+        if (navigationPresentation === presentationWait) {
+          await releaseReadinessFreeze();
+        }
+      } finally {
+        if (landingRelease === release) {
+          landingRelease = null;
+        }
+      }
+
+      const presentation = options.beginPresentedFrameNavigation?.();
+      try {
+        await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
+        await presentation?.waitFor(channel.getPlayhead().frame);
+      } catch (error) {
+        presentation?.cancel();
+        throw error;
+      }
+    },
+
+    async step(direction) {
+      options.invalidatePresentedFrame?.();
+      const navigationPresentation = ++presentationWait;
+      presentationHold = null;
+      beginPlaybackIntent();
+      await releaseGesture();
+      if (navigationPresentation === presentationWait) {
+        await releaseReadinessFreeze();
+      }
+      const presentation = options.beginPresentedFrameNavigation?.();
+      const before = channel.getPlayhead().frame;
+      try {
+        await channel.step(direction);
+        const after = channel.getPlayhead().frame;
+        if (before.index === after.index && before.ticks === after.ticks) {
+          // A boundary step intentionally emits no replacement frame. The
+          // frame already on screen remains authoritative, but it predates
+          // this navigation ticket and therefore cannot acknowledge it.
+          presentation?.cancel();
+        } else {
+          await presentation?.waitFor(after);
+        }
+      } catch (error) {
+        presentation?.cancel();
+        throw error;
+      }
+    },
+
+    setPlaybackRate(rate) {
+      channel.setPlaybackRate(rate);
+    },
+
+    protectPresentation(mediaTime, signal) {
+      if (!options.waitForPresentationReadiness) return null;
+      const guarded = options.waitForPresentationReadiness(mediaTime, signal);
+      if (!guarded) {
+        if (presentationHold) {
+          presentationWait += 1;
+          presentationHold = null;
+          void releaseReadinessFreeze().then(publishPlaybackState);
+        }
+        return null;
+      }
+      const wait = ++presentationWait;
+      const intent = playbackIntent;
+      presentationHold = { intent, wait };
+      readinessFreezeHeld = true;
+      channel.beginInteractiveSeek();
+      publishPlaybackState();
+
+      return (async () => {
+        try {
+          await guarded;
+        } catch {
+          // A readiness provider failure degrades annotations, not media. The
+          // provider's diagnostics own the error while the frame stays visible.
+        } finally {
+          if (presentationHold?.wait === wait) {
+            presentationHold = null;
+          }
+          // An aborted frame hands the existing freeze to a newer frame. A
+          // navigation increments presentationWait and releases explicitly.
+          if (wait === presentationWait && !signal.aborted) {
+            await releaseReadinessFreeze();
+            publishPlaybackState();
+          }
+        }
+      })();
+    },
+
+    destroy() {
+      presentationWait += 1;
+      presentationHold = null;
+      beginPlaybackIntent();
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    },
+  };
+
+  return transport;
+}
+
+/**
+ * A settling seek is not a playback state: the picture is landing, and the
+ * transport keeps whatever play or pause the seek interrupted. Seeking travels
+ * as its own signal, so folding it in here would only spend the buffering
+ * state on every scrub and leave nothing to say when playback truly stalls.
+ */
+function resolveTransportPlaybackState(
+  status: PresentedFrameChannelStatus,
+  seeking: boolean,
+  settledState: MediaRendererPlaybackState | null,
+): MediaRendererPlaybackState {
+  if (status === "ERRORED") {
+    return MediaRendererPlaybackState.Error;
+  }
+
+  if (isSettling(status, seeking)) {
+    return settledState ?? MediaRendererPlaybackState.Ready;
+  }
+
+  switch (status) {
+    case "PLAYING":
+      return MediaRendererPlaybackState.Playing;
+    case "PAUSED":
+    case "ENDED":
+      return MediaRendererPlaybackState.Paused;
+    case "READY":
+      return MediaRendererPlaybackState.Ready;
+    case "SEEKING":
+      return settledState ?? MediaRendererPlaybackState.Ready;
+    case "IDLE":
+    case "LOADING":
+      // Falling back to loading mid-playback is the producer saying it cannot
+      // advance the frame it is meant to be playing.
+      return settledState === MediaRendererPlaybackState.Playing
+        ? MediaRendererPlaybackState.Buffering
+        : MediaRendererPlaybackState.Loading;
+  }
+}
+
+function isSettling(status: PresentedFrameChannelStatus, seeking: boolean) {
+  return seeking || status === "SEEKING";
+}

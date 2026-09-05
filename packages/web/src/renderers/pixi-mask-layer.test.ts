@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+import {
+  IdMaskTextureFormat,
+  PreparedMaskFrameKind,
+} from "#render-preparation/mask-frame-artifact";
+import { RenderPreparationArtifactKind } from "#types/render-preparation";
+import type { RenderPreparationMaskFrameOptions } from "#types/render-preparation";
 import { BaseMaskStyle } from "supervision-js-core";
 
 const preparedWindow = vi.hoisted(() => ({
@@ -8,12 +13,15 @@ const preparedWindow = vi.hoisted(() => ({
     | {
         detectionFrame: { detections: never[]; mediaTime: number };
         key: string;
+        maskFrame?: unknown;
         maskStatus: string;
       }
     | undefined,
   options: undefined as
     | {
-        onMaskFramePrepared?: (frame: unknown) => void;
+        onMaskFrameEvicted?: (key: string) => void;
+        onPreparedWindowChange?: () => void;
+        resolveMaxRasterWidth?: () => number | undefined;
       }
     | undefined,
 }));
@@ -30,14 +38,22 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
     return {
       destroy: vi.fn(),
       getFrame: vi.fn(() => preparedWindow.frame),
+      isArtifactPrepared: vi.fn(
+        () => preparedWindow.frame?.maskStatus === "prepared",
+      ),
       setMaskStyle: vi.fn(),
+      setPlaybackActive: vi.fn(),
       setTimelineContext: vi.fn(),
       waitForReady: vi.fn(() => Promise.resolve()),
     };
   }),
 }));
 
-import { createPixiMaskLayer } from "#renderers/pixi-mask-layer";
+import {
+  createPixiMaskLayer,
+  PixiMaskLayerIdMaskStatus,
+} from "#renderers/pixi-mask-layer";
+import type { IdMaskDisplayBox } from "#renderers/pixi-mask-layer";
 
 beforeEach(() => {
   preparedWindow.frame = undefined;
@@ -45,15 +61,16 @@ beforeEach(() => {
 });
 
 describe("pixi mask layer", () => {
-  it("notifies when the active ID-mask frame finishes preparing", () => {
-    const onActiveIdMaskFramePresented = vi.fn();
+  it("leaves the drawn frame alone when a cook lands, and draws it on the redraw", () => {
+    const onPreparedWindowChange = vi.fn();
     const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
       detectionTimeline: {} as never,
       maskStyle: new BaseMaskStyle(),
-      onActiveIdMaskFramePresented,
+      onPreparedWindowChange,
     });
 
     layer.createSprite({ height: 80, width: 120 });
@@ -64,28 +81,404 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1);
 
-    preparedWindow.options?.onMaskFramePrepared?.({
-      close: vi.fn(),
-      fillPalette: new Float32Array(),
-      hasStroke: false,
-      height: 80,
+    preparedWindow.frame = {
+      ...preparedWindow.frame,
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    preparedWindow.options?.onPreparedWindowChange?.();
+
+    expect(onPreparedWindowChange).toHaveBeenCalledOnce();
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+
+    layer.drawFrame(0.1);
+
+    expect(layer.getActiveIdMaskFrameTexture(0.1)?.frame.key).toBe(
+      "mask-frame",
+    );
+  });
+
+  it("takes a shown frame off screen when asked to clear", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
       key: "mask-frame",
-      kind: PreparedMaskFrameKind.PngIdMask,
-      maxStrokeWidth: 0,
-      png: new Uint8Array(),
-      source: {},
-      strokePalette: new Float32Array(),
-      strokeWidths: new Float32Array(),
-      width: 120,
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(sprite.visible).toBe(true);
+
+    layer.clearFrame();
+
+    expect(sprite.visible).toBe(false);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+  });
+
+  it.each([true, false])(
+    "takes the previous mask off a pending frame while playback active is %s",
+    (playbackActive) => {
+      const layer = createPixiMaskLayer({
+        BufferImageSource: FakeBufferImageSource as never,
+        ImageSource: FakeImageSource as never,
+        Sprite: FakeSprite as never,
+        Texture: FakeTexture as never,
+        detectionTimeline: detectionTimelineAt([0.1, 0.1333]),
+        maskStyle: new BaseMaskStyle(),
+      });
+      const sprite = layer.createSprite({
+        height: 80,
+        width: 120,
+      }) as FakeSprite;
+
+      layer.setPlaybackActive(playbackActive);
+      preparedWindow.frame = {
+        detectionFrame: { detections: [], mediaTime: 0.1 },
+        key: "mask-frame",
+        maskFrame: idMaskFrame(),
+        maskStatus: "prepared",
+      };
+      layer.drawFrame(0.1);
+
+      preparedWindow.frame = {
+        detectionFrame: { detections: [], mediaTime: 0.1333 },
+        key: "owed-frame",
+        maskStatus: "pending",
+      };
+      layer.drawFrame(0.1333);
+
+      expect(sprite.visible).toBe(false);
+      expect(layer.getDrawnState().drawnFrameTime).toBeNull();
+      expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+      expect(layer.getActiveRegionMaskCoverage(0.1)).toBeNull();
+    },
+  );
+
+  it("draws no mask for a frame that has none, next to one that does", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333]),
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      key: "empty-frame",
+      maskStatus: "empty",
+    };
+    layer.drawFrame(0.1333);
+
+    expect(sprite.visible).toBe(false);
+  });
+
+  it("names the producer frame the raster on screen was accepted for", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333, 0.1667]),
+      maskStyle: new BaseMaskStyle(),
     });
 
-    expect(onActiveIdMaskFramePresented).toHaveBeenCalledOnce();
-    expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
+    layer.createSprite({ height: 80, width: 120 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1, { index: 3, ticks: 3003 });
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameId: { index: 3, ticks: 3003 },
+      drawnFrameKey: "mask-frame",
+      drawnFrameTime: 0.1,
+      idMaskStatus: PixiMaskLayerIdMaskStatus.Present,
+    });
+
+    // A redraw at a resting playhead draws the same frame and knows only its
+    // time, so the raster stops naming a producer frame rather than naming the
+    // wrong one.
+    layer.drawFrame(0.1);
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameId: null,
+      drawnFrameKey: "mask-frame",
+      drawnFrameTime: 0.1,
+      idMaskStatus: PixiMaskLayerIdMaskStatus.Present,
+    });
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1667 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1667, { index: 4, ticks: 4004 });
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameId: null,
+      drawnFrameKey: null,
+      drawnFrameTime: null,
+      idMaskStatus: PixiMaskLayerIdMaskStatus.None,
+    });
+  });
+
+  it("refuses the raster to a layer drawing a different detection frame", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const coverage = regionMaskCoverage();
+
+    layer.createSprite({ height: 80, width: 120 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: { ...idMaskFrame(), regionMaskCoverage: coverage },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(layer.getActiveIdMaskFrameTexture(0.1)?.frame.key).toBe(
+      "mask-frame",
+    );
+    expect(layer.getActiveRegionMaskCoverage(0.1)?.frame).toBe(coverage);
+
+    // The focus, interaction and region layers all pair this raster to
+    // detections by position, so one drawn for another frame pairs one frame's
+    // silhouettes to another frame's detections.
+    expect(layer.getActiveIdMaskFrameTexture(0.1333)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(0.1333)).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(null)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(null)).toBeNull();
+  });
+
+  it("drops the region coverage with the raster it belongs to", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333, 0.1667]),
+      maskStyle: new BaseMaskStyle(),
+    });
+    const coverage = regionMaskCoverage();
+
+    layer.createSprite({ height: 80, width: 120 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: { ...idMaskFrame(), regionMaskCoverage: coverage },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1667 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1667);
+
+    expect(layer.getActiveRegionMaskCoverage(0.1)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(0.1667)).toBeNull();
+  });
+
+  it("leaves the frame on screen whole while a later frame is prefetched", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const coverage = regionMaskCoverage();
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: { ...idMaskFrame(), regionMaskCoverage: coverage },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.5 },
+      key: "prefetched-frame",
+      maskStatus: "pending",
+    };
+    layer.prepareFrame(0.5);
+
+    expect(sprite.visible).toBe(true);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)?.frame.key).toBe(
+      "mask-frame",
+    );
+    expect(layer.getActiveRegionMaskCoverage(0.1)?.frame).toBe(coverage);
+  });
+
+  it("takes the frame on screen off it when its cook is evicted", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(sprite.visible).toBe(true);
+
+    preparedWindow.options?.onMaskFrameEvicted?.("mask-frame");
+
+    expect(sprite.visible).toBe(false);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+  });
+
+  it("uploads an odd-width id raster one byte per pixel on a renderer that takes it", () => {
+    const upload = uploadIdMask(121, () => true);
+
+    expect(upload.format).toBe(IdMaskTextureFormat.R8);
+    expect(upload.resource.length).toBe(121 * 80);
+    expect(upload.resource[121]).toBe(7);
+  });
+
+  it("pays four channels for an odd-width id raster the renderer would reject", () => {
+    const upload = uploadIdMask(121, () => false);
+
+    expect(upload.format).toBe(IdMaskTextureFormat.Rgba8);
+    expect(upload.resource.length).toBe(121 * 80 * 4);
+    expect([...upload.resource.slice(121 * 4, 121 * 4 + 4)]).toEqual([
+      7, 0, 0, 255,
+    ]);
+  });
+
+  it("uploads an aligned id raster one byte per pixel whatever the renderer takes", () => {
+    for (const acceptsUnaligned of [true, false, undefined]) {
+      const upload = uploadIdMask(
+        120,
+        acceptsUnaligned === undefined ? undefined : () => acceptsUnaligned,
+      );
+
+      expect(upload.format).toBe(IdMaskTextureFormat.R8);
+      expect(upload.resource.length).toBe(120 * 80);
+    }
+  });
+
+  it("cooks id rasters no wider than the declared display box shows", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    // 767 / 2016 is the tighter fit of the two axes.
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(573);
+  });
+
+  it("keeps a cooked raster on the four-byte boundary the renderer needs", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: false,
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(572);
+  });
+
+  it("holds a box that states no ceiling to the ratio the decode uses", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display: { devicePixelRatio: 3, maxDevicePixelRatio: undefined },
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    // 2x of the fitted 572.2, not the 1717 a 3x display would ask for.
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(1145);
+  });
+
+  it("asks for no width of its own before a sprite gives it media dimensions", () => {
+    maskLayerWithDisplayBox({ acceptsUnalignedTextureRows: true });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
+  });
+
+  it("leaves a layer with no display box at the detections' own resolution", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
+  });
+
+  it("leaves a polygon frame at the size its geometry was rasterized to", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      artifactKind: RenderPreparationArtifactKind.PolygonFrame,
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
   });
 
   it("renders per-spread halo passes from the live halo style", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: () => ({
+          createImageData: (width: number, height: number) => ({
+            data: new Uint8ClampedArray(width * height * 4),
+          }),
+          putImageData: vi.fn(),
+        }),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const detections = [
@@ -112,6 +505,7 @@ describe("pixi mask layer", () => {
           blurFilters.push(this);
         }
       },
+      BufferImageSource: FakeBufferImageSource as never,
       Container: FakeContainer as never,
       ImageSource: FakeImageSource as never,
       Mesh: FakeMesh as never,
@@ -149,41 +543,31 @@ describe("pixi mask layer", () => {
     const display = layer.createSprite({
       height: 80,
       width: 120,
-    }) as unknown as {
-      children: Array<{ alpha?: number }>;
-    };
+    }) as unknown as { children: Array<{ alpha?: number }> };
+
     preparedWindow.frame = {
       detectionFrame: detectionFrame as never,
       key: "mask-frame",
-      maskStatus: "pending",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
     };
     layer.drawFrame(0.1);
-    preparedWindow.options?.onMaskFramePrepared?.({
-      close: vi.fn(),
-      fillPalette: new Float32Array(),
-      hasStroke: false,
-      height: 80,
-      key: "mask-frame",
-      kind: PreparedMaskFrameKind.PngIdMask,
-      maxStrokeWidth: 0,
-      png: new Uint8Array(),
-      source: {},
-      strokePalette: new Float32Array(),
-      strokeWidths: new Float32Array(),
-      width: 120,
-    });
 
     // Mixed spreads render as separate blur passes so each detection's
     // requested spread is honored exactly.
     expect(
       blurFilters.map((filter) => filter.strength).sort((a, b) => a - b),
     ).toEqual([4, 24]);
+
     const haloGroups = uniformGroups.filter(
       (group) => group.uniforms.uHaloPalette !== undefined,
     );
+
     expect(haloGroups).toHaveLength(2);
+
     const narrowPalette = haloGroups[0]!.uniforms.uHaloPalette as Float32Array;
     const widePalette = haloGroups[1]!.uniforms.uHaloPalette as Float32Array;
+
     // Mask id 1 (horse, 4px) only in the narrow pass; id 2 (cow, 24px) only
     // in the wide pass.
     expect(narrowPalette[7]).toBeCloseTo(0.6);
@@ -208,6 +592,7 @@ describe("pixi mask layer", () => {
         width: 0,
       })),
     });
+
     const uniformGroups: FakeUniformGroup[] = [];
     const layer = createPixiMaskLayer({
       BlurFilter: class {
@@ -217,6 +602,7 @@ describe("pixi mask layer", () => {
           this.strength = options.strength;
         }
       },
+      BufferImageSource: FakeBufferImageSource as never,
       Container: FakeContainer as never,
       ImageSource: FakeImageSource as never,
       Mesh: FakeMesh as never,
@@ -263,24 +649,319 @@ describe("pixi mask layer", () => {
     preparedWindow.frame = {
       detectionFrame: { detections: [], mediaTime: 0.1 },
       key: "rgba-mask-frame",
-      maskStatus: "pending",
+      maskFrame: {
+        close: vi.fn(),
+        height: 2,
+        idMaskPlane: {
+          data: Uint8Array.from([1, 1, 1, 1]),
+          height: 2,
+          width: 2,
+        },
+        key: "rgba-mask-frame",
+        kind: PreparedMaskFrameKind.RgbaImage,
+        source: {},
+        width: 2,
+      },
+      maskStatus: "prepared",
     };
     layer.drawFrame(0.1);
-    preparedWindow.options?.onMaskFramePrepared?.({
-      close: vi.fn(),
-      height: 2,
-      idMaskData: new Uint8Array([1, 0, 0, 0]),
-      key: "rgba-mask-frame",
-      kind: PreparedMaskFrameKind.RgbaImage,
-      source: {} as never,
-      width: 2,
-    });
 
     expect(
       uniformGroups.some((group) => group.uniforms.uHaloPalette !== undefined),
     ).toBe(true);
   });
+
+  it("builds the RGBA fallback halo texture at the ID plane's capped size", () => {
+    const canvases: { height: number; width: number }[] = [];
+
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => {
+        const canvas = {
+          getContext: () => ({
+            createImageData: (width: number, height: number) => ({
+              data: new Uint8ClampedArray(width * height * 4),
+            }),
+            putImageData: vi.fn(),
+          }),
+          height: 0,
+          width: 0,
+        };
+
+        canvases.push(canvas);
+
+        return canvas;
+      }),
+    });
+
+    const imageSources: unknown[] = [];
+    const layer = createPixiMaskLayer({
+      BlurFilter: class {
+        strength: number;
+
+        constructor(options: { strength: number }) {
+          this.strength = options.strength;
+        }
+      },
+      BufferImageSource: FakeBufferImageSource as never,
+      Container: FakeContainer as never,
+      ImageSource: class extends FakeImageSource {
+        constructor(options: unknown) {
+          super(options);
+          imageSources.push(options);
+        }
+      } as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Rectangle: class {
+        constructor(
+          readonly x: number,
+          readonly y: number,
+          readonly width: number,
+          readonly height: number,
+        ) {}
+      },
+      Shader: { from: () => ({ destroy() {}, resources: {} }) } as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      UniformGroup: FakeUniformGroup as never,
+      detectionTimeline: {
+        selectFrame: () => ({
+          detections: [
+            {
+              mask: {
+                counts: "04",
+                encoding: "compressedRle",
+                height: 4,
+                width: 8,
+              },
+            },
+          ],
+          mediaTime: 0.1,
+        }),
+      } as never,
+      maskHaloStyle: {
+        resolve: () => ({ alpha: 0.6, color: 0x123456, spread: 8 }),
+      },
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 4, width: 8 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "rgba-mask-frame",
+      maskFrame: {
+        close: vi.fn(),
+        height: 4,
+        idMaskPlane: {
+          data: new Uint8Array(4 * 2).fill(1),
+          height: 2,
+          width: 4,
+        },
+        key: "rgba-mask-frame",
+        kind: PreparedMaskFrameKind.RgbaImage,
+        source: {},
+        width: 8,
+      },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(canvases).toContainEqual(
+      expect.objectContaining({ height: 2, width: 4 }),
+    );
+    expect(imageSources).toContainEqual(
+      expect.objectContaining({ height: 2, width: 4 }),
+    );
+  });
+
+  it("says when the frame on screen cannot answer for detection ids", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 80, width: 120 });
+
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.None,
+    );
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.Present,
+    );
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.2 },
+      key: "rgba-mask-frame",
+      maskFrame: {
+        close: vi.fn(),
+        height: 80,
+        key: "rgba-mask-frame",
+        kind: PreparedMaskFrameKind.RgbaImage,
+        source: {},
+        width: 120,
+      },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.2);
+
+    expect(layer.getActiveIdMaskFrameTexture(0.2)).toBeNull();
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.Absent,
+    );
+
+    layer.clearFrame();
+
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.None,
+    );
+  });
+
+  it("reports the window's readiness for a media time", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskStatus: "pending",
+    };
+
+    expect(layer.isArtifactPrepared(0.1)).toBe(false);
+
+    preparedWindow.frame = { ...preparedWindow.frame, maskStatus: "prepared" };
+
+    expect(layer.isArtifactPrepared(0.1)).toBe(true);
+  });
 });
+
+/**
+ * A detection timeline that answers with the frames it was given, which is what
+ * decides whether two frames are next to each other.
+ */
+function detectionTimelineAt(mediaTimes: readonly number[]) {
+  return {
+    getBufferedFrames: () =>
+      mediaTimes.map((mediaTime) => ({ detections: [], mediaTime })),
+  } as never;
+}
+
+function maskLayerWithDisplayBox(options: {
+  readonly acceptsUnalignedTextureRows: boolean;
+  readonly artifactKind?: RenderPreparationArtifactKind;
+  readonly display?: Partial<IdMaskDisplayBox>;
+}) {
+  const display: IdMaskDisplayBox = {
+    boxHeight: 767,
+    boxWidth: 574,
+    devicePixelRatio: 2,
+    maxDevicePixelRatio: 1,
+    ...options.display,
+  };
+  const maskFrame: RenderPreparationMaskFrameOptions & {
+    readonly display: IdMaskDisplayBox;
+  } = { display };
+
+  return createPixiMaskLayer({
+    BufferImageSource: FakeBufferImageSource as never,
+    ImageSource: FakeImageSource as never,
+    Sprite: FakeSprite as never,
+    Texture: FakeTexture as never,
+    acceptsUnalignedTextureRows: () => options.acceptsUnalignedTextureRows,
+    artifactKind: options.artifactKind,
+    detectionTimeline: {} as never,
+    maskStyle: new BaseMaskStyle(),
+    renderPreparation: { maskFrame },
+  });
+}
+
+function regionMaskCoverage() {
+  return {
+    entries: [
+      {
+        data: new Uint8Array(4),
+        detectionIndex: 0,
+        height: 2,
+        width: 2,
+        x: 0,
+        y: 0,
+      },
+    ],
+  };
+}
+
+function idMaskFrame(width = 120) {
+  const raster = new Uint8Array(width * 80);
+
+  raster[width] = 7;
+
+  return {
+    close: vi.fn(),
+    fillPalette: new Float32Array(),
+    hasStroke: false,
+    height: 80,
+    key: "mask-frame",
+    kind: PreparedMaskFrameKind.IdMask,
+    maxStrokeWidth: 0,
+    raster,
+    strokePalette: new Float32Array(),
+    strokeWidths: new Float32Array(),
+    width,
+  };
+}
+
+function uploadIdMask(
+  width: number,
+  acceptsUnalignedTextureRows: (() => boolean) | undefined,
+) {
+  const layer = createPixiMaskLayer({
+    BufferImageSource: FakeBufferImageSource as never,
+    ImageSource: FakeImageSource as never,
+    Sprite: FakeSprite as never,
+    Texture: FakeTexture as never,
+    acceptsUnalignedTextureRows,
+    detectionTimeline: {} as never,
+    maskStyle: new BaseMaskStyle(),
+  });
+
+  layer.createSprite({ height: 80, width });
+  preparedWindow.frame = {
+    detectionFrame: { detections: [], mediaTime: 0.1 },
+    key: "mask-frame",
+    maskFrame: idMaskFrame(width),
+    maskStatus: "prepared",
+  };
+  layer.drawFrame(0.1);
+
+  const texture = layer.getActiveIdMaskFrameTexture(0.1)
+    ?.texture as unknown as {
+    source: FakeBufferImageSource;
+  };
+
+  return texture.source._options as {
+    format: IdMaskTextureFormat;
+    resource: Uint8Array;
+    width: number;
+  };
+}
 
 class FakeContainer {
   alpha = 1;
@@ -294,8 +975,7 @@ class FakeContainer {
 class FakeMesh {
   alpha = 1;
   visible = true;
-  shader: unknown;
-  uniformValues: Record<string, unknown> | undefined;
+  readonly shader: unknown;
 
   constructor(options: unknown) {
     this.shader = (options as { shader?: unknown }).shader;
@@ -311,9 +991,11 @@ class FakeMeshGeometry {
 }
 
 class FakeUniformGroup {
-  readonly uniforms: Record<string, unknown> = {};
+  readonly uniforms: Record<string, unknown>;
 
-  constructor(readonly _options: unknown) {}
+  constructor(readonly _options: unknown) {
+    this.uniforms = { ...(_options as Record<string, unknown>) };
+  }
 
   update() {}
 }
@@ -324,11 +1006,21 @@ class FakeImageSource {
   constructor(readonly _options: unknown) {}
 }
 
-class FakeTexture {
-  static readonly EMPTY = new FakeTexture({});
-  readonly source = {};
+class FakeBufferImageSource {
+  readonly style = {};
 
   constructor(readonly _options: unknown) {}
+}
+
+class FakeTexture {
+  static readonly EMPTY = new FakeTexture({});
+  readonly source: unknown;
+
+  constructor(readonly _options: { source?: unknown }) {
+    this.source = _options.source ?? {};
+  }
+
+  destroy() {}
 }
 
 class FakeSprite {

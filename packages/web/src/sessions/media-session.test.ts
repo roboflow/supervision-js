@@ -1255,12 +1255,14 @@ describe("media session", () => {
 
     expect(onState).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        errorMessage: "No video track found in media source.",
+        errorMessage:
+          "The media source's tracks read and none of them carries video.",
         status: MediaSessionStatus.Error,
       }),
     );
     expect(failedSession.getState()).toMatchObject({
-      errorMessage: "No video track found in media source.",
+      errorMessage:
+        "The media source's tracks read and none of them carries video.",
       status: MediaSessionStatus.Error,
     });
 

@@ -7,8 +7,8 @@ import type {
 } from "#types/detection-timeline";
 import { DetectionFrameRetentionMode as RetentionMode } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import { isRangeCovered, RANGE_EPSILON_SECONDS } from "#utils/detection-ranges";
 
-const RANGE_EPSILON_SECONDS = 1e-6;
 const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
 const DEFAULT_LIVE_HOLD_SECONDS = 60;
 const NO_COVERAGE_INVALIDATION: CoverageInvalidation = { ranges: [] };
@@ -252,8 +252,8 @@ export function createWritableDetectionFrameSource(
         );
 
         // Closing a held live frame shortens coverage. Reported availability
-        // has to shrink with it, or a playback gate would still believe the
-        // source covers time past the end of media.
+        // has to shrink with it, or `waitForRange` and the buffered window
+        // would still believe the source covers time past the end of media.
         clipAvailableRangesAfter(endTime);
 
         return finalSummary;
@@ -910,15 +910,4 @@ function recordAvailableRange(
   }
 
   availableRanges.length = writeIndex;
-}
-
-function isRangeCovered(
-  range: DetectionFrameSourceVersionRange,
-  availableRanges: readonly DetectionFrameSourceVersionRange[],
-) {
-  return availableRanges.some(
-    (availableRange) =>
-      availableRange.startTime <= range.startTime + RANGE_EPSILON_SECONDS &&
-      availableRange.endTime + RANGE_EPSILON_SECONDS >= range.endTime,
-  );
 }

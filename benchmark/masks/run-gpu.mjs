@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global clearTimeout, fetch, process, setTimeout, URL, WebSocket */
+/* global fetch, process, URL, WebSocket */
 
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";

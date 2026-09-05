@@ -1,4 +1,5 @@
 import {
+  PlaybackGateReach,
   createArrayDetectionFrameSource,
   createDefaultAnnotationPresentation,
   createProjectedDetectionFrameSource,
@@ -24,8 +25,14 @@ import {
   type MediaPlaybackController,
 } from "#playback/media-playback-controller";
 import {
+  DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
+} from "#constants/media-renderer";
+import {
   DetectionTimelineOrigin,
   MediaRendererFit,
+  MediaRendererPlaybackState,
   type MediaRenderer,
   type MediaRendererOptions,
   type MediaRendererPresentation,
@@ -35,14 +42,66 @@ import {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
-  type RenderPreparationPlaybackGateOptions,
+  type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
+import {
+  createMediaRendererTransport,
+  type MediaRendererTransport,
+} from "./media-renderer-transport";
+import {
+  createProtectedPresentedFrameSource,
+  resolvePresentedFrameChannel,
+  type ProtectedPresentedFrameSource,
+} from "./presented-frame-channel";
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
+
+const MILLISECONDS_PER_SECOND = 1000;
+
+/**
+ * Two seconds of frozen picture for masks that have not been cooked.
+ *
+ * Preparation is local work, so a lead it cannot rebuild in this long is one it
+ * is losing rather than one that is late, and every further second is spent on
+ * a picture that has stopped. The detection gate waits five times as long
+ * because what it waits on is a model somewhere else.
+ */
+export function resolveRenderPreparationMaxWaitSeconds(
+  value: number | undefined,
+): number {
+  if (value === undefined) {
+    return DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS;
+  }
+  if (value === Number.POSITIVE_INFINITY) return value;
+  if (Number.isNaN(value)) {
+    return DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS;
+  }
+  return Math.max(0, value);
+}
+
+/**
+ * A tenth of a second of runway left, and a fifth of a second more banked
+ * before the picture moves again.
+ *
+ * A viewer counts a stop in their own seconds rather than seconds of timeline,
+ * so both are wall-clock and the playback rate converts them. The resume is
+ * the stop plus a margin, which fixes the length of a stop at that margin: how
+ * deep a bank preparation aims for is then a question about memory and cooks
+ * alone.
+ */
+/**
+ * Ceiling on a stop threshold as a share of the lead that ends the stop.
+ *
+ * A requirement too small to fund the margin caps the resume lead below the
+ * stop threshold the wall clock asks for, and a gate that stops and resumes at
+ * one lead stops again on the frame it just released. Half the resume lead is
+ * the widest stop threshold that still leaves a stop something to wait for.
+ */
+const RENDER_PREPARATION_GATE_MAX_STOP_SHARE_OF_RESUME = 0.5;
 
 export interface MediaRendererCoreProviders {
   openMediaSource(src: string | URL | Request): Promise<DecodedMediaSource>;
@@ -88,21 +147,131 @@ export async function createMediaRendererCore(
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
+  // A drag is a run of scrubs closed by the seek that lands it, the pairing the
+  // transport already keeps for the producer.
+  let isSeekGestureInFlight = false;
+  const publishPlaybackActivity = () => {
+    mediaScene?.setPlaybackActive?.(
+      runtimeState.isPlaybackActive() || isSeekGestureInFlight,
+    );
+  };
+  const endSeekGesture = () => {
+    cancelPullScrubPreview();
+    isSeekGestureInFlight = false;
+    publishPlaybackActivity();
+  };
+  /**
+   * A hold reads the rate once, so the thresholds it is waiting on are the
+   * ones the old rate implied. Ending the hold hands the next frame back to
+   * the gate, which asks again at the rate now in force.
+   */
+  let renderPreparationRateEpoch = new AbortController();
+  const adoptPlaybackRate = (playbackRate: number) => {
+    if (playbackRate === runtimeState.playbackRate()) {
+      return;
+    }
+
+    runtimeState.setPlaybackRate(playbackRate);
+
+    const supersededHolds = renderPreparationRateEpoch;
+
+    renderPreparationRateEpoch = new AbortController();
+    supersededHolds.abort();
+  };
   const runtimeState = createMediaRendererRuntimeState({
     fit,
     playbackRate: initialPlaybackRate,
+    getPlaybackGateReach: () =>
+      shouldGatePlayback ? PlaybackGateReach.EveryFrame : PlaybackGateReach.Off,
     getDetectionBufferState: () =>
       detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
     onSource: options.onSource,
-    onState: options.onState,
+    onState(state) {
+      publishPlaybackActivity();
+      options.onState?.(state);
+    },
   });
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
+  let transport: MediaRendererTransport | undefined;
+  let protectedPresentedFrames: ProtectedPresentedFrameSource | undefined;
+  let pushPresentationReady = false;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
   let navigationVersion = 0;
+  let outstandingSourceReads = 0;
+  let pendingPullScrubTime: number | null = null;
+  let pullScrubEpoch = 0;
+  let pullScrubReadInFlight = false;
+  let pullScrubScheduled = false;
+
+  const cancelPullScrubPreview = () => {
+    pendingPullScrubTime = null;
+    pullScrubEpoch += 1;
+
+    if (pullScrubReadInFlight) {
+      navigationVersion += 1;
+    }
+  };
+
+  const beginSourceRead = () => {
+    outstandingSourceReads += 1;
+
+    if (outstandingSourceReads === 1) {
+      runtimeState.setSourceAwaitingRead(true);
+    }
+  };
+
+  const endSourceRead = () => {
+    outstandingSourceReads -= 1;
+
+    if (outstandingSourceReads === 0) {
+      runtimeState.setSourceAwaitingRead(false);
+    }
+  };
+
+  const trackSourceRead = async <TRead>(read: Promise<TRead>) => {
+    beginSourceRead();
+
+    try {
+      return await read;
+    } finally {
+      endSourceRead();
+    }
+  };
+
+  const adoptTransportPlaybackState = (state: MediaRendererPlaybackState) => {
+    // Not gated on isError: the producer owns playback truth here, so a
+    // recovery after a transient error must be adopted, not ignored forever.
+    if (runtimeState.isDestroyed()) {
+      return;
+    }
+
+    switch (state) {
+      case MediaRendererPlaybackState.Playing:
+        runtimeState.setPlaying();
+        break;
+      case MediaRendererPlaybackState.Buffering:
+        runtimeState.setBuffering();
+        break;
+      case MediaRendererPlaybackState.Paused:
+        runtimeState.setPaused();
+        break;
+      case MediaRendererPlaybackState.Ready:
+        if (pushPresentationReady) runtimeState.setReady();
+        break;
+      case MediaRendererPlaybackState.Loading:
+        runtimeState.setLoading();
+        break;
+      case MediaRendererPlaybackState.Error:
+        runtimeState.setRenderError(new Error("Media playback failed."));
+        break;
+      default:
+        break;
+    }
+  };
 
   const handleRenderPreparationDiagnostics = (
     diagnostics: RenderPreparationDiagnostics,
@@ -120,6 +289,280 @@ export async function createMediaRendererCore(
     }
 
     options.renderPreparation?.onDiagnostics?.(diagnostics);
+  };
+
+  const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
+  const renderPreparationPlaybackGate = options.renderPreparation?.playbackGate;
+  const shouldGateDetectionPlayback = detectionPlaybackGate?.enabled === true;
+  const shouldGateRenderPreparationPlayback =
+    renderPreparationPlaybackGate?.enabled === true;
+  const shouldGatePlayback =
+    shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
+  const renderPreparationGateMaxWaitSeconds =
+    resolveRenderPreparationMaxWaitSeconds(
+      renderPreparationPlaybackGate?.maxWaitSeconds,
+    );
+  /**
+   * The gate's wall-clock thresholds in seconds of timeline, which is the unit
+   * a prepared lead is measured in. A rate is how many seconds of timeline a
+   * second of runway is worth, so at 8x a tenth of a second of picture is
+   * eight tenths of a second of frames.
+   *
+   * `requiredAheadSeconds` is a ceiling on the resume lead, and the stop
+   * threshold is held under that lead: a requirement of a single frame still
+   * buys a stop that ends higher than it began, at the price of a band
+   * narrower than the wall clock asked for. Zero on both sides is the one pair
+   * that meets, and there the lead gate is off and only an unprepared frame
+   * under the playhead stops the picture.
+   */
+  const resolveRenderPreparationGateThresholds =
+    (): ResolvedRenderPreparationGateThresholds => {
+      const playbackRate = runtimeState.playbackRate();
+      const bankSeconds = Math.max(
+        renderPreparationPlaybackGate?.requiredAheadSeconds ?? 0,
+        0,
+      );
+      const stopBelowWallSeconds = Math.max(
+        renderPreparationPlaybackGate?.stopBelowWallSeconds ??
+          DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
+        0,
+      );
+      const resumeMarginWallSeconds = Math.max(
+        renderPreparationPlaybackGate?.resumeMarginWallSeconds ??
+          DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+        0,
+      );
+      const resumeAtSeconds = Math.min(
+        bankSeconds,
+        (stopBelowWallSeconds + resumeMarginWallSeconds) * playbackRate,
+      );
+
+      return {
+        enabled: renderPreparationPlaybackGate?.enabled,
+        resumeAtSeconds,
+        stopBelowSeconds: Math.min(
+          stopBelowWallSeconds * playbackRate,
+          resumeAtSeconds * RENDER_PREPARATION_GATE_MAX_STOP_SHARE_OF_RESUME,
+        ),
+      };
+    };
+  /**
+   * Where preparation stood when the hold that last gave up opened, or null
+   * while the gate is armed. Preparation that has finished a frame since is
+   * preparation that is running, however far behind the playhead it still is,
+   * and the gate is worth spending again on it. The frame that says so lands
+   * during the hold on a machine where cooking and decoding contend for one
+   * core, which is why the mark is the hold's start and not its end.
+   */
+  let abandonedGateProgress: number | null = null;
+
+  const readRenderPreparationProgress = () =>
+    mediaScene?.getRenderPreparationProgress?.() ?? 0;
+
+  const hasAbandonedRenderPreparationGate = () =>
+    abandonedGateProgress !== null &&
+    readRenderPreparationProgress() <= abandonedGateProgress;
+
+  const armRenderPreparationGate = () => {
+    abandonedGateProgress = null;
+    runtimeState.setRenderPreparationGateAbandoned(false);
+  };
+
+  const abandonRenderPreparationGate = (progressAtHoldStart: number) => {
+    abandonedGateProgress = progressAtHoldStart;
+    runtimeState.setRenderPreparationGateAbandoned(true);
+  };
+
+  /**
+   * Holds the picture for prepared artifacts, under the gate's bound.
+   *
+   * Preparation that has fallen behind is indistinguishable from a cook still
+   * on its way, and the bound is the way back out of a hold on one that will
+   * never answer. Giving up lasts only until preparation finishes another
+   * frame: a preparer that is merely losing to the playhead is still a
+   * preparer, and the picture it feeds is worth stopping for again. One that
+   * has finished nothing since is stuck, and the gate stays out of its way
+   * rather than spending the bound once a frame on it.
+   */
+  const waitForRenderPreparationWithin = async (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => {
+    const bound = new AbortController();
+    const abortBound = () => bound.abort();
+    const rateEpoch = renderPreparationRateEpoch.signal;
+    const progressAtHoldStart = readRenderPreparationProgress();
+    const expiry = Number.isFinite(renderPreparationGateMaxWaitSeconds)
+      ? setTimeout(() => {
+          abandonRenderPreparationGate(progressAtHoldStart);
+          bound.abort();
+        }, renderPreparationGateMaxWaitSeconds * MILLISECONDS_PER_SECOND)
+      : undefined;
+
+    signal.addEventListener("abort", abortBound);
+    rateEpoch.addEventListener("abort", abortBound);
+
+    try {
+      await mediaScene?.waitForRenderPreparation?.(
+        mediaTime,
+        resolveRenderPreparationGateThresholds(),
+        bound.signal,
+      );
+    } finally {
+      clearTimeout(expiry);
+      signal.removeEventListener("abort", abortBound);
+      rateEpoch.removeEventListener("abort", abortBound);
+    }
+  };
+
+  const waitForDetectionCoverage = (mediaTime: number) =>
+    detectionTimeline?.prepare(mediaTime, {
+      duration: runtimeState.duration(),
+      firstTimestamp,
+      gatePlayback: true,
+    });
+
+  /**
+   * The wait a play makes before the picture starts moving. A play is a fresh
+   * intent, so it arms a gate an earlier run gave up on: the frame the viewer
+   * is about to be shown is the one they asked to see annotated.
+   */
+  const waitForPlaybackReadiness = async (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => {
+    if (shouldGateDetectionPlayback) {
+      await waitForDetectionCoverage(mediaTime);
+    }
+
+    if (shouldGateRenderPreparationPlayback) {
+      armRenderPreparationGate();
+      await waitForRenderPreparationWithin(mediaTime, signal);
+    }
+  };
+
+  /**
+   * A gate that gave up comes back on preparation finishing another frame, and
+   * on the playhead reaching frames preparation finished already: a loop or a
+   * seek back lands inside a window that is covered, and coverage cooked before
+   * the hold moves no progress count.
+   */
+  const holdForSampleReadiness = async (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => {
+    if (shouldGateDetectionPlayback) {
+      await waitForDetectionCoverage(mediaTime);
+    }
+
+    if (!shouldGateRenderPreparationPlayback) {
+      return;
+    }
+
+    const isRenderPreparationCovered =
+      mediaScene?.needsRenderPreparationWait?.(
+        mediaTime,
+        resolveRenderPreparationGateThresholds(),
+      ) === false;
+
+    if (!isRenderPreparationCovered && hasAbandonedRenderPreparationGate()) {
+      return;
+    }
+
+    armRenderPreparationGate();
+    await waitForRenderPreparationWithin(mediaTime, signal);
+  };
+
+  const holdForDetectionCoverage = (mediaTime: number) => {
+    if (
+      !detectionTimeline ||
+      (detectionTimeline.needsBufferPrepare?.(mediaTime) !== true &&
+        detectionTimeline.needsPlaybackGateWait?.(mediaTime, {
+          duration: runtimeState.duration(),
+          firstTimestamp,
+          gatePlayback: true,
+        }) !== true)
+    ) {
+      return null;
+    }
+
+    return detectionTimeline.prepare(mediaTime, {
+      duration: runtimeState.duration(),
+      firstTimestamp,
+      gatePlayback: true,
+    });
+  };
+
+  const holdForRenderPreparation = (mediaTime: number, signal: AbortSignal) => {
+    if (
+      mediaScene?.needsRenderPreparationWait?.(
+        mediaTime,
+        resolveRenderPreparationGateThresholds(),
+      ) !== true
+    ) {
+      armRenderPreparationGate();
+      return null;
+    }
+
+    if (hasAbandonedRenderPreparationGate()) return null;
+
+    armRenderPreparationGate();
+    return waitForRenderPreparationWithin(mediaTime, signal);
+  };
+
+  /** Detaches a readiness source that does not implement cancellation itself.
+   * Its eventual rejection remains owned while a superseding frame can start
+   * its own guard immediately. */
+  const abortableReadiness = (
+    wait: Promise<unknown>,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    if (signal.aborted) {
+      void wait.catch(() => undefined);
+      return Promise.resolve();
+    }
+    let onAbort = () => {};
+    const aborted = new Promise<void>((resolve) => {
+      onAbort = resolve;
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    void wait.catch(() => undefined);
+    return Promise.race([wait.then(() => undefined), aborted]).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  };
+
+  const holdForPresentationReadiness = (
+    mediaTime: number,
+    signal: AbortSignal,
+  ): Promise<void> | null => {
+    const combined = new AbortController();
+    const abortCombined = () => combined.abort();
+    if (signal.aborted) abortCombined();
+    else signal.addEventListener("abort", abortCombined, { once: true });
+
+    const holds: Promise<void>[] = [];
+    const detection = shouldGateDetectionPlayback
+      ? holdForDetectionCoverage(mediaTime)
+      : null;
+    const preparation = shouldGateRenderPreparationPlayback
+      ? holdForRenderPreparation(mediaTime, combined.signal)
+      : null;
+    if (detection) holds.push(abortableReadiness(detection, combined.signal));
+    if (preparation)
+      holds.push(abortableReadiness(preparation, combined.signal));
+
+    if (holds.length === 0) {
+      signal.removeEventListener("abort", abortCombined);
+      return null;
+    }
+
+    return Promise.all(holds)
+      .then(() => undefined)
+      .finally(() => {
+        signal.removeEventListener("abort", abortCombined);
+        combined.abort();
+      });
   };
 
   const presentSample = (sample: DecodedVideoSample) => {
@@ -167,6 +610,97 @@ export async function createMediaRendererCore(
     }
   };
 
+  const seekPullSample = async (targetTime: number) => {
+    if (!playbackController || !sampleSink) {
+      throw new Error("Media renderer is not ready.");
+    }
+
+    // A seek taken while buffering should resume playback, not strand it:
+    // buffering means playback was requested and is waiting for data.
+    const wasPlaying = runtimeState.isPlaybackActive();
+    const requestVersion = ++navigationVersion;
+
+    playbackController.pause();
+
+    try {
+      const sample = await trackSourceRead(
+        sampleSink.getSample(targetTime, { skipLiveWait: true }),
+      );
+
+      if (!sample) {
+        throw new Error("No decoded video sample was found for seek.");
+      }
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        sample.close();
+        return;
+      }
+
+      await prepareAndPresentSample(
+        sample,
+        () =>
+          requestVersion === navigationVersion && !runtimeState.isDestroyed(),
+      );
+
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+
+      playbackController.seek(runtimeState.currentTime());
+
+      if (wasPlaying) {
+        runtimeState.setPlaying();
+        playbackController.play();
+      } else if (runtimeState.isBuffering()) {
+        // Seeking always leaves the controller paused. Settle the reported
+        // state so the session is paused rather than perpetually buffering.
+        runtimeState.setPaused();
+      }
+    } catch (error) {
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+      runtimeState.setRenderError(error);
+      throw error;
+    }
+  };
+
+  const schedulePullScrubPreview = () => {
+    if (
+      pullScrubScheduled ||
+      pullScrubReadInFlight ||
+      pendingPullScrubTime === null
+    ) {
+      return;
+    }
+
+    pullScrubScheduled = true;
+    const scheduledEpoch = pullScrubEpoch;
+
+    queueMicrotask(() => {
+      pullScrubScheduled = false;
+
+      if (
+        scheduledEpoch !== pullScrubEpoch ||
+        pendingPullScrubTime === null ||
+        runtimeState.isDestroyed()
+      ) {
+        schedulePullScrubPreview();
+        return;
+      }
+
+      const targetTime = pendingPullScrubTime;
+      pendingPullScrubTime = null;
+      pullScrubReadInFlight = true;
+
+      void seekPullSample(targetTime)
+        .catch(() => undefined)
+        .finally(() => {
+          pullScrubReadInFlight = false;
+          schedulePullScrubPreview();
+        });
+    });
+  };
+
   const renderer: MediaRenderer = {
     async play() {
       if (runtimeState.isDestroyed()) {
@@ -177,6 +711,13 @@ export async function createMediaRendererCore(
         throw new Error(
           runtimeState.errorMessage() ?? "Media renderer is in error state.",
         );
+      }
+
+      endSeekGesture();
+
+      if (transport) {
+        await transport.play();
+        return;
       }
 
       if (!playbackController) {
@@ -190,17 +731,52 @@ export async function createMediaRendererCore(
         return;
       }
 
+      // A source the renderer pulls samples from has no readiness wait of its
+      // own: its start of playback is the first per-sample hold, so the fresh
+      // intent arms the gate here.
+      armRenderPreparationGate();
       runtimeState.setPlaying();
       playbackController.play();
     },
 
     pause() {
-      if (runtimeState.isDestroyed() || !runtimeState.isPlaybackActive()) {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+
+      endSeekGesture();
+
+      if (transport) {
+        transport.pause();
+        return;
+      }
+
+      if (!runtimeState.isPlaybackActive()) {
         return;
       }
 
       runtimeState.setPaused();
       playbackController?.pause();
+    },
+
+    async togglePlayback() {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+
+      endSeekGesture();
+
+      if (transport) {
+        await transport.togglePlayback();
+        return;
+      }
+
+      if (runtimeState.isPlaybackActive()) {
+        renderer.pause();
+        return;
+      }
+
+      await renderer.play();
     },
 
     async seek(mediaTime) {
@@ -214,71 +790,48 @@ export async function createMediaRendererCore(
         );
       }
 
-      if (!playbackController || !sampleSink) {
-        throw new Error("Media renderer is not ready.");
-      }
-
-      // A seek taken while buffering should resume playback, not strand it:
-      // buffering means playback was requested and is waiting for data.
-      const wasPlaying = runtimeState.isPlaybackActive();
-      const requestVersion = ++navigationVersion;
       const targetTime = clampSeekTime({
         duration: runtimeState.duration(),
         firstTimestamp,
         mediaTime,
       });
 
-      playbackController.pause();
+      endSeekGesture();
 
-      try {
-        const sample = await sampleSink.getSample(targetTime, {
-          skipLiveWait: true,
-        });
-
-        if (!sample) {
-          throw new Error("No decoded video sample was found for seek.");
-        }
-        if (
-          requestVersion !== navigationVersion ||
-          runtimeState.isDestroyed()
-        ) {
-          sample.close();
-          return;
-        }
-
-        await prepareAndPresentSample(
-          sample,
-          () =>
-            requestVersion === navigationVersion && !runtimeState.isDestroyed(),
-        );
-
-        if (
-          requestVersion !== navigationVersion ||
-          runtimeState.isDestroyed()
-        ) {
-          return;
-        }
-
-        playbackController.seek(runtimeState.currentTime());
-
-        if (wasPlaying) {
-          runtimeState.setPlaying();
-          playbackController.play();
-        } else if (runtimeState.isBuffering()) {
-          // Seeking always leaves the controller paused. Settle the reported
-          // state so the session is paused rather than perpetually buffering.
-          runtimeState.setPaused();
-        }
-      } catch (error) {
-        if (
-          requestVersion !== navigationVersion ||
-          runtimeState.isDestroyed()
-        ) {
-          return;
-        }
-        runtimeState.setRenderError(error);
-        throw error;
+      if (transport) {
+        await transport.commit(targetTime);
+        return;
       }
+
+      await seekPullSample(targetTime);
+    },
+
+    scrub(mediaTime) {
+      if (runtimeState.isDestroyed() || runtimeState.isError()) {
+        return;
+      }
+
+      const targetTime = clampSeekTime({
+        duration: runtimeState.duration(),
+        firstTimestamp,
+        mediaTime,
+      });
+
+      isSeekGestureInFlight = true;
+      publishPlaybackActivity();
+
+      if (transport) {
+        transport.scrub(targetTime);
+        return;
+      }
+
+      pendingPullScrubTime = targetTime;
+
+      if (pullScrubReadInFlight) {
+        navigationVersion += 1;
+      }
+
+      schedulePullScrubPreview();
     },
 
     async stepForward() {
@@ -299,8 +852,21 @@ export async function createMediaRendererCore(
         );
       }
 
+      // Nothing paces the picture until one of the two paths is up, so a
+      // non-unit rate would only falsify the state readout.
+      if (!transport && !playbackController && playbackRate !== 1) {
+        throw new Error("Media renderer is not ready.");
+      }
+
+      if (transport) {
+        // The producer owns the rate as it owns the playhead, and answers on
+        // the rate signal; adopting it there keeps one reading of the truth.
+        transport.setPlaybackRate(playbackRate);
+        return;
+      }
+
       playbackController?.setPlaybackRate(playbackRate);
-      runtimeState.setPlaybackRate(playbackRate);
+      adoptPlaybackRate(playbackRate);
     },
 
     async refresh() {
@@ -311,7 +877,8 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      const mediaTime = runtimeState.currentTime();
+      const mediaTime =
+        runtimeState.presentedTime() ?? runtimeState.currentTime();
       const requestVersion = navigationVersion;
       await detectionTimeline?.prepare(mediaTime, {
         duration: runtimeState.duration(),
@@ -341,6 +908,14 @@ export async function createMediaRendererCore(
       return mediaScene.captureFrame(captureOptions);
     },
 
+    getRenderCount() {
+      return mediaScene?.getRenderCount?.() ?? null;
+    },
+
+    getPreparedAnnotationWindow() {
+      return mediaScene?.getPreparedAnnotationWindow?.() ?? null;
+    },
+
     getState() {
       return runtimeState.snapshot();
     },
@@ -368,9 +943,11 @@ export async function createMediaRendererCore(
       }
 
       currentPresentation = resolvePresentation(presentation);
+      const mediaTime =
+        runtimeState.presentedTime() ?? runtimeState.currentTime();
       const presentedSample = mediaScene?.setPresentation(
         currentPresentation,
-        runtimeState.currentTime(),
+        mediaTime,
       );
 
       if (presentedSample) {
@@ -432,7 +1009,10 @@ export async function createMediaRendererCore(
         return;
       }
 
+      cancelPullScrubPreview();
       runtimeState.markDestroyed();
+      protectedPresentedFrames?.destroy();
+      transport?.destroy();
       playbackController?.destroy();
       stopActiveIterator();
       destroyMediaInput();
@@ -491,16 +1071,20 @@ export async function createMediaRendererCore(
             )
           : detectionSource,
       ...options.detectionBuffer,
-      ...(options.detectionTimelineOrigin ===
-        DetectionTimelineOrigin.MediaStart &&
-      options.detectionBuffer?.frameIndexOriginTime !== undefined
-        ? {
-            frameIndexOriginTime:
-              options.detectionBuffer.frameIndexOriginTime +
-              metadata.firstTimestamp,
-          }
-        : {}),
     });
+    const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
+    protectedPresentedFrames = presentedFrameChannel
+      ? createProtectedPresentedFrameSource(presentedFrameChannel, (error) => {
+          // A scene that can no longer accept pixels cannot recover because
+          // the producer keeps running. Cut off future frames and state
+          // signals before publishing the rendering failure.
+          protectedPresentedFrames?.destroy();
+          transport?.destroy();
+          presentedFrameChannel.pause();
+          if (!runtimeState.isDestroyed()) runtimeState.setRenderError(error);
+        })
+      : undefined;
+
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
@@ -532,6 +1116,7 @@ export async function createMediaRendererCore(
       },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
+      presentedFrames: protectedPresentedFrames?.source,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
@@ -542,6 +1127,7 @@ export async function createMediaRendererCore(
         : undefined,
       visibility: currentPresentation.visibility,
     });
+    publishPlaybackActivity();
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({
       duration: metadata.duration,
@@ -554,6 +1140,68 @@ export async function createMediaRendererCore(
     mediaScene.initializeMedia(mediaDimensions);
     runtimeState.setSourceReady(metadata);
 
+    if (presentedFrameChannel) {
+      // The producer holds the playhead: it decides which frame is on screen
+      // and announces it. Pulling samples here would present a second opinion.
+      // The producer's playhead is also what keeps the detection buffer hot,
+      // through the same coalescing pump the pull path feeds per presented
+      // sample. Fire-and-forget by design: awaiting a load anywhere near a draw
+      // would gate presentation on it, and a landing for the frame on screen
+      // renders through the prepared window's own term. A failed chunk load is
+      // retried by the next playhead move.
+      transport = createMediaRendererTransport({
+        channel: presentedFrameChannel,
+        loop: options.loop !== false,
+        onPlaybackRate: adoptPlaybackRate,
+        onPlaybackState: adoptTransportPlaybackState,
+        onScrubbing: (scrubbing) => runtimeState.setScrubbing(scrubbing),
+        onSeeking: (seeking) => runtimeState.setSeeking(seeking),
+        onPlayheadTime: (currentTime) => {
+          runtimeState.recordPlayheadTime(currentTime);
+          detectionTimeline?.prefetch(currentTime);
+        },
+        waitForReadiness: shouldGatePlayback
+          ? waitForPlaybackReadiness
+          : undefined,
+        waitForPresentationReadiness: shouldGatePlayback
+          ? holdForPresentationReadiness
+          : undefined,
+        invalidatePresentedFrame: () => protectedPresentedFrames?.invalidate(),
+        beginPresentedFrameNavigation: () =>
+          protectedPresentedFrames!.beginNavigation(),
+      });
+      protectedPresentedFrames?.activate((presented, signal) =>
+        transport!.protectPresentation(presented.mediaTimeS, signal),
+      );
+      if (initialPlaybackRate !== 1) {
+        transport.setPlaybackRate(initialPlaybackRate);
+      }
+      detectionTimeline?.prefetch(metadata.firstTimestamp);
+      // Loading is not complete until the scene has accepted real media
+      // pixels. A paused, non-autoplay source otherwise reports Ready over a
+      // blank compositor because the producer's load settled before a frame
+      // consumer existed.
+      await presentedFrameChannel.commit(
+        metadata.firstTimestamp * MILLISECONDS_PER_SECOND,
+      );
+      await protectedPresentedFrames?.waitForFirstPresentation();
+      // The first accepted frame does not prove the presentation path stayed
+      // healthy until initialization finished. A producer may emit a newer
+      // replacement before commit() resolves, and that handoff can fail after
+      // the first-presentation latch has already opened. Preserve that fatal
+      // state instead of publishing Ready over it or starting autoplay on a
+      // producer the error path just stopped.
+      if (runtimeState.isDestroyed() || runtimeState.isError()) return renderer;
+      pushPresentationReady = true;
+      runtimeState.setReady();
+
+      if (options.autoPlay ?? true) {
+        await renderer.play();
+      }
+
+      return renderer;
+    }
+
     const firstSample = await readFirstDecodedVideoSample({
       sampleSink: mediaSource.sampleSink,
       setActiveIterator(iterator) {
@@ -564,47 +1212,10 @@ export async function createMediaRendererCore(
 
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
-    const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
-    const renderPreparationPlaybackGate =
-      options.renderPreparation?.playbackGate;
-    const shouldGateDetectionPlayback = detectionPlaybackGate?.enabled === true;
-    const shouldGateRenderPreparationPlayback =
-      renderPreparationPlaybackGate?.enabled === true;
-    const shouldGatePlayback =
-      shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
     const waitForSample = shouldGatePlayback
-      ? (sample: DecodedVideoSample) =>
-          waitForPlaybackReadiness(sample, {
-            detectionEnabled: shouldGateDetectionPlayback,
-            renderPreparationEnabled: shouldGateRenderPreparationPlayback,
-            renderPreparationOptions: renderPreparationPlaybackGate,
-          })
+      ? (sample: DecodedVideoSample, signal: AbortSignal) =>
+          holdForSampleReadiness(sample.timestamp, signal)
       : undefined;
-
-    async function waitForPlaybackReadiness(
-      sample: DecodedVideoSample,
-      waitOptions: {
-        readonly detectionEnabled: boolean;
-        readonly renderPreparationEnabled: boolean;
-        readonly renderPreparationOptions:
-          RenderPreparationPlaybackGateOptions | undefined;
-      },
-    ) {
-      if (waitOptions.detectionEnabled) {
-        await detectionTimeline?.prepare(sample.timestamp, {
-          duration: runtimeState.duration(),
-          firstTimestamp,
-          gatePlayback: true,
-        });
-      }
-
-      if (waitOptions.renderPreparationEnabled) {
-        await mediaScene?.waitForRenderPreparation?.(
-          sample.timestamp,
-          waitOptions.renderPreparationOptions ?? {},
-        );
-      }
-    }
 
     playbackController = createMediaPlaybackController({
       duration: runtimeState.duration(),
@@ -613,7 +1224,7 @@ export async function createMediaRendererCore(
       loop: options.loop !== false,
       playbackRate: initialPlaybackRate,
       onCurrentTimeChange(nextCurrentTime) {
-        runtimeState.setCurrentTime(nextCurrentTime);
+        runtimeState.recordPlayheadTime(nextCurrentTime);
       },
       onEnded() {
         runtimeState.setPaused();
@@ -622,6 +1233,13 @@ export async function createMediaRendererCore(
       onResume() {
         if (runtimeState.isBuffering()) {
           runtimeState.setPlaying();
+        }
+      },
+      onSourceWait(waiting) {
+        if (waiting) {
+          beginSourceRead();
+        } else {
+          endSourceRead();
         }
       },
       onWaiting() {
@@ -654,6 +1272,16 @@ export async function createMediaRendererCore(
         runtimeState.errorMessage() ?? "Media renderer is in error state.",
       );
     }
+
+    // A step lands on a frame, so it closes any drag still open the way a
+    // commit does. Left open, the playhead reads as moving while it rests.
+    endSeekGesture();
+
+    if (transport) {
+      await transport.step(direction === "forward" ? 1 : -1);
+      return;
+    }
+
     if (!playbackController || !sampleSink) {
       throw new Error("Media renderer is not ready.");
     }
@@ -667,16 +1295,20 @@ export async function createMediaRendererCore(
 
     try {
       if (direction === "backward") {
-        sample = await sampleSink.getSample(
-          Math.max(firstTimestamp, currentTime - epsilon),
-          { skipLiveWait: true },
+        sample = await trackSourceRead(
+          sampleSink.getSample(
+            Math.max(firstTimestamp, currentTime - epsilon),
+            {
+              skipLiveWait: true,
+            },
+          ),
         );
       } else {
         const iterator = sampleSink.samples(currentTime + epsilon, undefined, {
           skipLiveWait: true,
         });
         try {
-          const result = await iterator.next();
+          const result = await trackSourceRead(iterator.next());
           sample = result.done ? null : result.value;
         } finally {
           await iterator.return?.();

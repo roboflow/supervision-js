@@ -1,0 +1,316 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  acceptsVideoFrameUpload,
+  createMediaCompositor,
+  type MediaGpuTextureSource,
+} from "./pixi-media-scene";
+
+interface FakeTexture {
+  readonly destroy: ReturnType<typeof vi.fn>;
+  readonly height: number;
+  readonly width: number;
+}
+
+interface FakeDevice {
+  readonly copies: { texture: FakeTexture }[];
+  readonly created: FakeTexture[];
+  readonly device: GPUDevice;
+}
+
+beforeEach(() => {
+  vi.stubGlobal("GPUTextureUsage", {
+    COPY_DST: 1,
+    RENDER_ATTACHMENT: 2,
+    TEXTURE_BINDING: 4,
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("media compositor", () => {
+  it("copies a frame of the media's own size into the texture it started with", () => {
+    const gpu = createFakeDevice();
+    const source = createTextureSource();
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 240,
+      onTextureReplaced: vi.fn(),
+      width: 320,
+    });
+
+    compositor.upload(frame(320, 240));
+
+    expect(gpu.created).toHaveLength(1);
+    expect(gpu.copies).toStrictEqual([{ texture: gpu.created[0] }]);
+  });
+
+  it("takes a decode of another size on a texture sized by the frame", () => {
+    const gpu = createFakeDevice();
+    const source = createTextureSource();
+    const onTextureReplaced = vi.fn();
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 240,
+      onTextureReplaced,
+      width: 320,
+    });
+
+    compositor.upload(frame(640, 360));
+
+    const [retired, replacement] = gpu.created;
+    expect([replacement.width, replacement.height]).toStrictEqual([640, 360]);
+    expect(source.updateGPUTexture.mock.calls).toStrictEqual([[replacement]]);
+    expect(retired.destroy).toHaveBeenCalledTimes(1);
+    expect(onTextureReplaced).toHaveBeenCalledTimes(1);
+    expect(gpu.copies).toStrictEqual([{ texture: replacement }]);
+  });
+
+  it("reports the replacement's size to the source before announcing the swap", () => {
+    const gpu = createFakeDevice();
+    let sourceSize: [number, number] | null = null;
+    const source = {
+      resize: vi.fn(),
+      updateGPUTexture: vi.fn((texture: GPUTexture) => {
+        sourceSize = [texture.width, texture.height];
+      }),
+    };
+    const seenAtAnnounce: ([number, number] | null)[] = [];
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 240,
+      onTextureReplaced: () => seenAtAnnounce.push(sourceSize),
+      width: 320,
+    });
+
+    compositor.upload(frame(640, 360));
+
+    expect(seenAtAnnounce).toStrictEqual([[640, 360]]);
+  });
+
+  it("leaves no texture behind when the swap is refused", () => {
+    const gpu = createFakeDevice();
+    const source = createTextureSource();
+    source.updateGPUTexture.mockImplementation(() => {
+      throw new Error("texture rejected");
+    });
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 240,
+      onTextureReplaced: vi.fn(),
+      width: 320,
+    });
+
+    expect(() => compositor.upload(frame(640, 360))).toThrow(
+      "texture rejected",
+    );
+
+    const [live, refused] = gpu.created;
+    expect(refused.destroy).toHaveBeenCalledTimes(1);
+    expect(live.destroy).not.toHaveBeenCalled();
+
+    // The texture that stayed on screen still takes frames, and the destroy
+    // below accounts for it, so nothing the compositor made outlives it.
+    compositor.upload(frame(320, 240));
+    compositor.destroy();
+
+    expect(gpu.copies).toStrictEqual([{ texture: live }]);
+    expect(
+      gpu.created.map((texture) => texture.destroy.mock.calls.length),
+    ).toStrictEqual([1, 1]);
+  });
+
+  it("destroys the texture it is holding when it is destroyed", () => {
+    const gpu = createFakeDevice();
+    const compositor = createMediaCompositor({
+      attach: () => createTextureSource(),
+      device: gpu.device,
+      height: 240,
+      onTextureReplaced: vi.fn(),
+      width: 320,
+    });
+
+    compositor.upload(frame(640, 360));
+    compositor.destroy();
+
+    expect(
+      gpu.created.map((texture) => texture.destroy.mock.calls.length),
+    ).toStrictEqual([1, 1]);
+  });
+});
+
+function createFakeDevice({ acceptsVideoFrames = true } = {}): FakeDevice {
+  const created: FakeTexture[] = [];
+  const copies: { texture: FakeTexture }[] = [];
+
+  const device = {
+    createTexture(descriptor: {
+      readonly size: { readonly height: number; readonly width: number };
+    }): FakeTexture {
+      const texture = {
+        destroy: vi.fn(),
+        height: descriptor.size.height,
+        width: descriptor.size.width,
+      };
+
+      created.push(texture);
+      return texture;
+    },
+    queue: {
+      copyExternalImageToTexture(
+        source: { readonly source: unknown },
+        destination: { readonly texture: FakeTexture },
+      ) {
+        // Firefox's own wording, because the message is the evidence that this
+        // is a converter refusing the type rather than a copy going wrong.
+        if (!acceptsVideoFrames && source.source instanceof FakeVideoFrame) {
+          throw new TypeError(
+            "GPUQueue.copyExternalImageToTexture: 'source' member of " +
+              "GPUCopyExternalImageSourceInfo could not be converted to any " +
+              "of: ImageBitmap, HTMLImageElement, HTMLCanvasElement, " +
+              "OffscreenCanvas.",
+          );
+        }
+
+        copies.push({ texture: destination.texture });
+      },
+    },
+  };
+
+  return { copies, created, device: device as unknown as GPUDevice };
+}
+
+function createTextureSource() {
+  return {
+    resize: vi.fn<MediaGpuTextureSource["resize"]>(),
+    updateGPUTexture: vi.fn<MediaGpuTextureSource["updateGPUTexture"]>(),
+  };
+}
+
+function frame(displayWidth: number, displayHeight: number): VideoFrame {
+  return { displayHeight, displayWidth } as unknown as VideoFrame;
+}
+
+describe("media compositor texture lifetime", () => {
+  it("restates the source at the pixels the replacement actually has", () => {
+    const gpu = createFakeDevice();
+    const source = createTextureSource();
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 1080,
+      onTextureReplaced: vi.fn(),
+      width: 1920,
+    });
+
+    compositor.upload(frame(320, 180));
+    compositor.upload(frame(1920, 1080));
+
+    expect(source.resize.mock.calls).toStrictEqual([
+      [1920, 1080, 320 / 1920],
+      [1920, 1080, 1],
+    ]);
+  });
+
+  it("frees the texture it retired only once nothing points at it", () => {
+    const gpu = createFakeDevice();
+    const order: string[] = [];
+    const source = {
+      resize: vi.fn(() => order.push("resize")),
+      updateGPUTexture: vi.fn(() => order.push("updateGPUTexture")),
+    };
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 1080,
+      onTextureReplaced: () => order.push("onTextureReplaced"),
+      width: 1920,
+    });
+
+    compositor.upload(frame(320, 180));
+    const retired = gpu.created[1];
+    retired!.destroy.mockImplementation(() => order.push("destroy"));
+    order.length = 0;
+    compositor.upload(frame(1920, 1080));
+
+    expect(order).toStrictEqual([
+      "updateGPUTexture",
+      "resize",
+      "onTextureReplaced",
+      "destroy",
+    ]);
+  });
+});
+
+describe("decoded frame upload support", () => {
+  /** A browser that has WebCodecs and a canvas to build a probe frame from. */
+  const stubDecodedFrames = () => {
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext() {
+          return { fillRect: vi.fn() };
+        }
+      },
+    );
+    vi.stubGlobal("VideoFrame", FakeVideoFrame);
+  };
+
+  it("reports a queue that converts a decoded frame", () => {
+    const gpu = createFakeDevice();
+    stubDecodedFrames();
+
+    expect(acceptsVideoFrameUpload(gpu.device)).toBe(true);
+  });
+
+  it("reports a queue that refuses a decoded frame", () => {
+    const gpu = createFakeDevice({ acceptsVideoFrames: false });
+    stubDecodedFrames();
+
+    expect(acceptsVideoFrameUpload(gpu.device)).toBe(false);
+  });
+
+  it("closes the probe frame and frees its texture on either answer", () => {
+    stubDecodedFrames();
+
+    for (const acceptsVideoFrames of [true, false]) {
+      const gpu = createFakeDevice({ acceptsVideoFrames });
+      FakeVideoFrame.opened.length = 0;
+
+      acceptsVideoFrameUpload(gpu.device);
+
+      expect(FakeVideoFrame.opened.map((probe) => probe.closed)).toStrictEqual([
+        true,
+      ]);
+      expect(
+        gpu.created.map((texture) => texture.destroy.mock.calls.length),
+      ).toStrictEqual([1]);
+    }
+  });
+
+  it("refuses a browser that cannot make a decoded frame at all", () => {
+    const gpu = createFakeDevice();
+
+    expect(acceptsVideoFrameUpload(gpu.device)).toBe(false);
+    expect(gpu.created).toHaveLength(0);
+  });
+});
+
+class FakeVideoFrame {
+  static readonly opened: FakeVideoFrame[] = [];
+  closed = false;
+
+  constructor() {
+    FakeVideoFrame.opened.push(this);
+  }
+
+  close() {
+    this.closed = true;
+  }
+}

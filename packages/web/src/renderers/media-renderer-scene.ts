@@ -41,9 +41,11 @@ import type {
 } from "supervision-js-core";
 import type {
   RenderPreparationOptions,
-  RenderPreparationPlaybackGateOptions,
+  ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
+import type { PresentedFrameSource } from "./presented-frame-channel";
+import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-window";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
@@ -80,21 +82,55 @@ export interface MediaRendererSceneOptions {
   readonly previewOverlay: (() => PreviewOverlayData | null) | undefined;
   /** Propagates renderer-owned asynchronous visual changes into runtime state. */
   readonly onPresentationUpdate?: (sample: PresentedMediaSample) => void;
+  /**
+   * Present plane of a media source that decides for itself which frame is on
+   * screen. Given one, the scene presents what the producer announces instead
+   * of what the renderer pulls, and renders only when something changed.
+   */
+  readonly presentedFrames?: PresentedFrameSource;
 }
 
 export interface PresentedMediaSample {
+  /**
+   * Which frame the scene has on screen, as its count of the frames it has
+   * presented. Two presentations of one media time carry different serials, and
+   * every redraw of the frame on screen carries that frame's own.
+   */
+  readonly presentedFrameSerial: number;
   readonly mediaTime: number;
   readonly duration?: number;
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
+  /** Detection frame the mask raster on screen belongs to, null when no mask is
+   *  up. Apart from `activeDetectionFrameTime` it names a desync in seconds. */
+  readonly drawnMaskFrameTime: number | null;
+  /** The raster on screen and the detections over it name different frames.
+   *  This is an invariant breach: a pending mask must leave the frame bare. */
+  readonly maskHeldStale: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly renderTimings?: MediaFrameRenderTimings;
 }
 
 export interface MediaRendererScene {
   readonly rendererBackend: string;
+  /**
+   * Explicit renders issued so far, which a push-presented scene only issues on
+   * change. A scene that free-runs on the ticker has no such count.
+   */
+  getRenderCount?(): number | null;
+  /**
+   * Which frames around the playhead have every enabled layer's data cooked. A
+   * scene that free-runs on the ticker gates nothing and reports none.
+   */
+  getPreparedAnnotationWindow?(): PreparedAnnotationWindowSnapshot | null;
   initializeMedia(dimensions: { width: number; height: number }): void;
+  /**
+   * Whether the playhead is moving. Cooking far ahead of a resting playhead is
+   * speculation, so the scene narrows what it prepares until the playhead moves
+   * again.
+   */
+  setPlaybackActive?(active: boolean): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   /**
@@ -104,9 +140,25 @@ export interface MediaRendererScene {
   captureFrame?(
     options: MediaFrameCaptureOptions | undefined,
   ): Promise<MediaFrameCapture>;
+  /**
+   * Whether `waitForRenderPreparation` would wait, scheduling nothing. A source
+   * that owns its own playhead is held by stopping it, so the renderer needs
+   * this answer before it opens a wait rather than from the wait itself.
+   */
+  needsRenderPreparationWait?(
+    mediaTime: number,
+    options: ResolvedRenderPreparationGateThresholds,
+  ): boolean;
+  /**
+   * Frames render preparation has finished, counted up over the scene's life.
+   * A gate that gave up reads this to tell preparation that is slow from
+   * preparation that is stuck: only the second deserves to stay given up on.
+   */
+  getRenderPreparationProgress?(): number;
   waitForRenderPreparation?(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
+    signal?: AbortSignal,
   ): Promise<void>;
   setRenderQuality(maxDevicePixelRatio: number | undefined): void;
   setDisplayAdjustments?(adjustments: MediaDisplayAdjustments): void;

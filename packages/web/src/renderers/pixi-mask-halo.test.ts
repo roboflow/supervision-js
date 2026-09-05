@@ -5,7 +5,7 @@ import {
   buildMaskHaloPalette,
   createPixiMaskHaloRenderer,
 } from "#renderers/pixi-mask-halo";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 
 describe("mask halo palette", () => {
   it("premultiplies halo colors into per-id slots", () => {
@@ -36,8 +36,11 @@ describe("mask halo palette", () => {
 });
 
 function createHarness() {
+  const shaders: { destroy: ReturnType<typeof vi.fn> }[] = [];
+  const getContext = vi.fn();
+
   vi.stubGlobal("document", {
-    createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    createElement: vi.fn(() => ({ getContext, height: 0, width: 0 })),
   });
 
   const uniformGroups: { uniforms: Record<string, unknown> }[] = [];
@@ -67,6 +70,8 @@ function createHarness() {
       readonly style = {};
 
       constructor(readonly _options: unknown) {}
+
+      destroy() {}
     } as never,
     Mesh: class {
       visible = true;
@@ -93,10 +98,16 @@ function createHarness() {
       ) {}
     },
     Shader: {
-      from: () => ({
-        destroy() {},
-        resources: {} as Record<string, unknown>,
-      }),
+      from: () => {
+        const shader = {
+          destroy: vi.fn(),
+          resources: {} as Record<string, unknown>,
+        };
+
+        shaders.push(shader);
+
+        return shader;
+      },
     } as never,
     UniformGroup: class {
       readonly uniforms: Record<string, unknown> = {};
@@ -110,10 +121,19 @@ function createHarness() {
     mediaHeight: 80,
     mediaWidth: 120,
   });
-  const frame = { height: 80, width: 120 } as PreparedPngIdMaskFrame;
+  const frame = { height: 80, width: 120 } as PreparedIdMaskFrame;
   const texture = { source: { style: {} } };
 
-  return { blurFilters, frame, meshes, renderer, texture, uniformGroups };
+  return {
+    blurFilters,
+    frame,
+    getContext,
+    meshes,
+    renderer,
+    shaders,
+    texture,
+    uniformGroups,
+  };
 }
 
 describe("mask halo renderer", () => {
@@ -150,6 +170,14 @@ describe("mask halo renderer", () => {
     expect(blurFilters[0]!.strength).toBe(8);
   });
 
+  it("gives its placeholder canvas a rendering context", () => {
+    const { getContext } = createHarness();
+
+    // WebGPU builds the placeholder into the shader's first bind group, and a
+    // canvas that was never given a rendering context has nothing to bind.
+    expect(getContext).toHaveBeenCalledWith("2d");
+  });
+
   it("hides the display when no group renders", () => {
     const { frame, renderer, texture } = createHarness();
 
@@ -168,5 +196,27 @@ describe("mask halo renderer", () => {
 
     renderer.hide();
     expect(renderer.display.visible).toBe(false);
+  });
+
+  it("leaves the shared program alive when one halo is destroyed", () => {
+    const { frame, renderer, shaders, texture } = createHarness();
+
+    renderer.render(frame, texture as never, [
+      {
+        palette: buildMaskHaloPalette(
+          new Map([[1, { alpha: 1, color: 0xffffff }]]),
+        ),
+        spread: 10,
+      },
+    ]);
+    expect(shaders.length).toBeGreaterThan(0);
+
+    renderer.destroy();
+
+    // Pixi caches a GpuProgram by its source, so every halo pass holds the same
+    // one; destroying it nulls the layout the other halos still render through.
+    for (const shader of shaders) {
+      expect(shader.destroy).toHaveBeenCalledWith();
+    }
   });
 });

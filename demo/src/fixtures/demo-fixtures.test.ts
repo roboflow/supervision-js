@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -10,13 +10,55 @@ import { describe, expect, it } from "vitest";
 import { KeypointVisibility, type DetectionFrame } from "supervision";
 import { computeDetectionMaskRect } from "supervision/editing";
 import {
+  constrainDemoPresentationSettings,
+  createDemoPresentation,
+  defaultDemoPresentationSettings,
+  type DemoPresentationLayerSetting,
+} from "../presentation/demo-presentation";
+import {
+  defaultDemoFixture,
   demoFixtureCatalog,
   demoFixtures,
   resolveDemoFixture,
+  resolveDemoFixtureAvailability,
+  resolveDemoFixturePlaybackSrc,
+  type DemoFixtureGeometrySummary,
 } from "./demo-fixtures";
+
+const geometryCountKeys = {
+  boxesEnabled: "boxDetectionCount",
+  keypointsEnabled: "keypointDetectionCount",
+  masksEnabled: "maskDetectionCount",
+  polygonsEnabled: "polygonDetectionCount",
+  polylinesEnabled: "polylineDetectionCount",
+} as const satisfies Record<string, keyof DemoFixtureGeometrySummary>;
+const geometryBackedLayers = Object.keys(
+  geometryCountKeys,
+) as readonly (keyof typeof geometryCountKeys & DemoPresentationLayerSetting)[];
+/** The merged basketball fixture as its builder reports it without a pose run. */
+const maskDerivedGeometry: DemoFixtureGeometrySummary = {
+  boxDetectionCount: 5948,
+  keypointDetectionCount: 0,
+  maskDetectionCount: 5948,
+  polygonDetectionCount: 5948,
+  polylineDetectionCount: 224,
+};
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
+const restorableDetections = readJson<{
+  readonly fixtures: readonly {
+    readonly detectionsSha256: string;
+    readonly sampleName: string;
+  }[];
+}>(
+  fileURLToPath(
+    new URL(
+      "../../../tools/sam3-fixture/restorable-detections.json",
+      import.meta.url,
+    ),
+  ),
+);
 const fixturePaths = readdirSync(fixturesRoot, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => join(fixturesRoot, entry.name));
@@ -27,7 +69,7 @@ const manifests = fixturePaths.flatMap((fixturePath) => {
     ? [readJson<Record<string, unknown>>(manifestPath)]
     : [];
 });
-const geometryFixturePath = join(fixturesRoot, "basketball_geometry");
+const geometryFixturePath = join(fixturesRoot, "basketball_sam3");
 const geometryManifest = readJson<Record<string, unknown>>(
   join(geometryFixturePath, "detections.manifest.json"),
 );
@@ -44,6 +86,10 @@ const regionsChunks = listDetectionChunkPaths(regionsFixturePath).map((path) =>
 
 describe("fixture geometry", () => {
   it("uses center-based rects for deterministic fixture mask samples", () => {
+    let comparedRects = 0;
+
+    expect(manifests.length).toBeGreaterThan(0);
+
     for (const manifest of manifests) {
       expect(manifest).not.toHaveProperty("rectCoordinateConvention");
     }
@@ -52,26 +98,32 @@ describe("fixture geometry", () => {
       const detection = findFirstMaskedDetection(chunk);
 
       if (!detection?.mask || !detection.rect) continue;
+
+      comparedRects += 1;
       expect(detection.rect).toEqual(computeDetectionMaskRect(detection.mask));
     }
+
+    expect(comparedRects).toBeGreaterThan(0);
   });
 });
 
 describe("geometry showcase fixture", () => {
-  it("keeps the pre-normalized basketball effect fixture out of the general demo selector", () => {
+  it("resolves the basketball fixture from the catalog and offers it in the selector", () => {
     expect(
       demoFixtureCatalog.find(
         ({ sampleName }) => sampleName === "basketball_sam3",
       ),
     ).toMatchObject({
       datasetId: "basketball_sam3_v1",
-      normalizeInBrowser: false,
-      showInDemo: false,
+      showInDemo: true,
     });
     expect(resolveDemoFixture("basketball_sam3")).toMatchObject({
       sampleName: "basketball_sam3",
       videoSrc: expect.any(String),
     });
+    expect(resolveDemoFixture("not_a_committed_fixture")).toBe(
+      defaultDemoFixture,
+    );
   });
 
   it("exposes the demo samples with their documented geometry", () => {
@@ -82,13 +134,10 @@ describe("geometry showcase fixture", () => {
       })),
     ).toEqual([
       { displayName: "70s horse trail", sampleName: "horse_trail" },
+      { displayName: "9s basketball sample", sampleName: "basketball_sam3" },
       {
         displayName: "Basketball Region Effects",
         sampleName: "basketball_regions",
-      },
-      {
-        displayName: "Basketball with Keypoints",
-        sampleName: "basketball_geometry",
       },
     ]);
   });
@@ -110,20 +159,32 @@ describe("geometry showcase fixture", () => {
     });
   });
 
-  it("defaults the basketball keypoint sample to keypoints and labels", () => {
+  it("opens the basketball sample on the kinds its detections carry", () => {
     const fixture = demoFixtures.find(
-      ({ sampleName }) => sampleName === "basketball_geometry",
+      ({ sampleName }) => sampleName === "basketball_sam3",
     );
 
     expect(fixture?.presentationDefaults).toEqual({
       boxesEnabled: false,
-      focusEnabled: false,
+      confidenceThreshold: 0.5,
       keypointsEnabled: true,
       labelsEnabled: true,
-      masksEnabled: false,
+      masksEnabled: true,
       polygonsEnabled: false,
-      polylinesEnabled: false,
+      polylinesEnabled: true,
     });
+    // Nothing is closed: the detections carry every kind the demo can draw.
+    expect(fixture?.presentationAvailability).toEqual({});
+  });
+
+  it("curates presentation defaults for every sample the picker offers", () => {
+    expect(
+      demoFixtures
+        .filter(
+          ({ presentationDefaults }) => presentationDefaults === undefined,
+        )
+        .map(({ sampleName }) => sampleName),
+    ).toEqual([]);
   });
 
   it("publishes per-geometry detection counts in its manifest", () => {
@@ -153,14 +214,16 @@ describe("geometry showcase fixture", () => {
     );
     expect(provenance.pose.minimumMatchIou).toBe(0.3);
     expect(provenance.pose.matchedPoseDetectionCount).toBeGreaterThan(0);
-    expect(provenance.pose.weightsSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(provenance.pose.model).toBe("yolov8m-pose-640");
+    expect(provenance.pose.runtime).toBe("roboflow-serverless");
+    expect(provenance.pose.frameCount).toBe(geometryManifest.frameCount);
     expect(provenance.pose.visibilityPolicy).toContain("NotLabeled");
     expect(provenance.sources).toHaveLength(2);
     expect(JSON.stringify(provenance)).not.toMatch(/api[_-]?key/i);
 
     for (const source of provenance.sources) {
       expect(source.inputSha256).toBe(
-        sourceSha256(readFileSync(resolve(geometryFixturePath, source.input))),
+        committedSourceSha256(resolve(geometryFixturePath, source.input)),
       );
     }
   });
@@ -278,6 +341,62 @@ describe("geometry showcase fixture", () => {
     expect(violations).toBe(0);
   });
 
+  it("keeps the basketball trace drawn for as long as the track holds", () => {
+    const fixture = demoFixtures.find(
+      (candidate) => candidate.sampleName === "basketball_sam3",
+    )!;
+    const presentation = createDemoPresentation(
+      constrainDemoPresentationSettings(
+        { ...defaultDemoPresentationSettings, ...fixture.presentationDefaults },
+        fixture.presentationAvailability,
+      ),
+    );
+    const drawn: boolean[] = [];
+    let untracked = 0;
+
+    for (const chunk of geometryChunks) {
+      for (const frame of chunk.frames) {
+        for (const [detectionIndex, detection] of frame.detections.entries()) {
+          if (!detection.polyline) continue;
+
+          const trackConfidence = detection.metadata?.trajectoryConfidence;
+
+          if (
+            typeof trackConfidence !== "number" ||
+            trackConfidence < 0 ||
+            trackConfidence > 1
+          ) {
+            untracked += 1;
+          }
+
+          drawn.push(
+            presentation.polylineStyle?.resolve(detection, {
+              detectionIndex,
+              frame,
+              mediaTime: frame.mediaTime,
+            }) !== undefined,
+          );
+        }
+      }
+    }
+
+    // The reported symptom: the trail starts, then blinks out. A frame the
+    // fixture's own default threshold hides between two frames it shows is one
+    // blink, whatever the run of frames around it does.
+    const blinks = drawn.filter(
+      (shown, index) =>
+        !shown &&
+        index > 0 &&
+        drawn[index - 1] === true &&
+        drawn[index + 1] === true,
+    ).length;
+
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(untracked).toBe(0);
+    expect(blinks).toBe(0);
+    expect(drawn.filter(Boolean).length / drawn.length).toBeGreaterThan(0.9);
+  });
+
   it("stores the basketball trace on one masked frozen identity", () => {
     const provenance = geometryManifest.provenance as {
       readonly polyline: {
@@ -294,6 +413,7 @@ describe("geometry showcase fixture", () => {
     let polylineCount = 0;
     let maximumSegmentLength = 0;
     let violations = 0;
+    let widestFrameCoverage = 0;
     const trackedSourceIds = new Set<string>();
 
     for (const chunk of geometryChunks) {
@@ -302,6 +422,16 @@ describe("geometry showcase fixture", () => {
           if (!detection.polyline) continue;
           polylineCount += 1;
           trackedSourceIds.add(String(detection.id ?? ""));
+
+          const frameArea =
+            (detection.mask?.width ?? 0) * (detection.mask?.height ?? 0);
+
+          if (frameArea > 0 && detection.rect) {
+            widestFrameCoverage = Math.max(
+              widestFrameCoverage,
+              (detection.rect.width * detection.rect.height) / frameArea,
+            );
+          }
 
           const previousPoint = detection.polyline.points.at(-2);
           const currentPoint = detection.polyline.points.at(-1);
@@ -333,6 +463,10 @@ describe("geometry showcase fixture", () => {
       }
     }
 
+    // A whole-scene mask answers the prompt at low confidence, and once the
+    // association takes one the trace follows a static blob for the rest of the
+    // clip while every other check here still passes.
+    expect(widestFrameCoverage).toBeLessThan(0.5);
     expect(provenance.polyline).toMatchObject({
       algorithm: "basketball-motion-track-v1",
       derivedFrom:
@@ -359,11 +493,165 @@ describe("geometry showcase fixture", () => {
   });
 });
 
+describe("fixture layer availability", () => {
+  it("closes a toggle the detections count none of", () => {
+    expect(
+      resolveDemoFixtureAvailability(undefined, maskDerivedGeometry),
+    ).toEqual({ keypointsEnabled: false });
+  });
+
+  it("keeps a layer a fixture curates away even when the detections carry it", () => {
+    expect(
+      resolveDemoFixtureAvailability(
+        { polygonsEnabled: false },
+        maskDerivedGeometry,
+      ),
+    ).toEqual({ keypointsEnabled: false, polygonsEnabled: false });
+  });
+
+  it("leaves a manifest that counts nothing to its own declaration", () => {
+    expect(
+      resolveDemoFixtureAvailability({ keypointsEnabled: false }, undefined),
+    ).toEqual({ keypointsEnabled: false });
+  });
+
+  it("offers no sample a layer its own manifest counts none of", () => {
+    const offered = demoFixtures.flatMap((fixture) => {
+      const geometry = readJson<{
+        readonly geometry?: DemoFixtureGeometrySummary;
+      }>(
+        join(fixturesRoot, fixture.sampleName, "detections.manifest.json"),
+      ).geometry;
+
+      if (!geometry) return [];
+
+      return geometryBackedLayers.flatMap((layer) =>
+        geometry[geometryCountKeys[layer]] === 0 &&
+        fixture.presentationAvailability?.[layer] !== false
+          ? [`${fixture.sampleName}.${layer}`]
+          : [],
+      );
+    });
+
+    expect(offered).toEqual([]);
+  });
+
+  it("draws some geometry on every sample the picker opens with", () => {
+    const blank = demoFixtures.filter((fixture) => {
+      const settings = constrainDemoPresentationSettings(
+        { ...defaultDemoPresentationSettings, ...fixture.presentationDefaults },
+        fixture.presentationAvailability,
+      );
+
+      return geometryBackedLayers.every((layer) => settings[layer] === false);
+    });
+
+    expect(blank.map(({ sampleName }) => sampleName)).toEqual([]);
+  });
+});
+
+describe("fixture playback media", () => {
+  it("plays the declared detection-timeline proxy", () => {
+    expect(
+      resolveDemoFixturePlaybackSrc({
+        ...baseDefinition,
+        proxyVideoSrc: "/proxy-30fps.webm",
+        videoSrc: "/source.mov",
+      }),
+    ).toBe("/proxy-30fps.webm");
+  });
+
+  it("plays the source media when no proxy is declared", () => {
+    expect(
+      resolveDemoFixturePlaybackSrc({
+        ...baseDefinition,
+        proxyVideoSrc: null,
+        videoSrc: "/source.mov",
+      }),
+    ).toBe("/source.mov");
+  });
+
+  it("declares a proxy on every fixture whose detections were computed on one", () => {
+    // A fixture without firstTimestamp pairs detections by index-times-rate
+    // against a transcode's frame grid, so it has to play that transcode or
+    // every annotation lands on the wrong frame. The reverse does not hold: a
+    // fixture that pairs by interval may still declare a proxy, as long as the
+    // proxy keeps the source's presentation timestamps and only cheapens
+    // decode.
+    const unplayable = demoFixtures.filter((fixture) => {
+      const meta = readJson<{
+        readonly media: { readonly proxyFile?: string };
+      }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
+      const manifest = readJson<{
+        readonly video: { readonly firstTimestamp?: number };
+      }>(join(fixturesRoot, fixture.sampleName, "detections.manifest.json"));
+
+      return (
+        manifest.video.firstTimestamp === undefined &&
+        meta.media.proxyFile === undefined
+      );
+    });
+
+    expect(unplayable.map(({ sampleName }) => sampleName)).toEqual([]);
+  });
+
+  it("plays the proxy file it declares, and it exists", () => {
+    expect(demoFixtures.length).toBeGreaterThan(0);
+
+    for (const fixture of demoFixtures) {
+      const meta = readJson<{
+        readonly media: { readonly proxyFile?: string };
+      }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
+
+      if (meta.media.proxyFile === undefined) {
+        expect(fixture.proxyVideoSrc).toBeNull();
+        continue;
+      }
+
+      expect(
+        existsSync(
+          resolve(fixturesRoot, fixture.sampleName, meta.media.proxyFile),
+        ),
+      ).toBe(true);
+      expect(resolveDemoFixturePlaybackSrc(fixture)).toBe(
+        fixture.proxyVideoSrc,
+      );
+    }
+  });
+
+  it("computed its detections against the media it plays", () => {
+    // video.width and video.height are the pixel space every box, label anchor,
+    // polygon, polyline and keypoint is written in, and video.file is the only
+    // record of which media that space belongs to. A manifest naming media the
+    // fixture does not play leaves nothing to catch a swap between two rasters
+    // that happen to share a frame size.
+    for (const fixture of demoFixtures) {
+      const meta = readJson<{
+        readonly media: { readonly file: string; readonly proxyFile?: string };
+      }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
+      const manifest = readJson<{ readonly video: { readonly file: string } }>(
+        join(fixturesRoot, fixture.sampleName, "detections.manifest.json"),
+      );
+      const played = meta.media.proxyFile ?? meta.media.file;
+
+      expect({
+        played: basename(played),
+        sampleName: fixture.sampleName,
+      }).toEqual({
+        played: basename(manifest.video.file),
+        sampleName: fixture.sampleName,
+      });
+    }
+  });
+});
+
 describe("basketball region fixture", () => {
   it("keeps stabilized, padded head masks with stable short-gap-free tracks", () => {
     let headCount = 0;
     let frameCount = 0;
     const framesByTrack = new Map<string, number[]>();
+    const observedFramesByTrack = new Map<string, number[]>();
+    const gapFilledFramesByTrack = new Map<string, number[]>();
     const representativeHeadByTrack = new Map<
       string,
       DetectionFrame["detections"][number]
@@ -427,6 +715,14 @@ describe("basketball region fixture", () => {
           matchedPlayerIds.add(matchedPlayerId);
           trackFrames.push(frame.frameIndex!);
           framesByTrack.set(trackId, trackFrames);
+          const observationFrames =
+            detection.metadata?.headObservation === "observed"
+              ? observedFramesByTrack
+              : gapFilledFramesByTrack;
+          observationFrames.set(trackId, [
+            ...(observationFrames.get(trackId) ?? []),
+            frame.frameIndex!,
+          ]);
           if (!representativeHeadByTrack.has(trackId)) {
             representativeHeadByTrack.set(trackId, detection);
           }
@@ -439,11 +735,18 @@ describe("basketball region fixture", () => {
     expect(headCount).toBeGreaterThan(0);
     expect(frameCount).toBe(regionsManifest.frameCount);
 
-    for (const frameIndexes of framesByTrack.values()) {
-      for (let index = 1; index < frameIndexes.length; index += 1) {
-        const gapLength = frameIndexes[index] - frameIndexes[index - 1] - 1;
+    expect(gapFilledFramesByTrack.size).toBeGreaterThan(0);
 
-        expect(gapLength === 0 || gapLength > 7).toBe(true);
+    for (const [trackId, frameIndexes] of gapFilledFramesByTrack) {
+      const observed = observedFramesByTrack.get(trackId) ?? [];
+
+      for (const frameIndex of frameIndexes) {
+        const previous = Math.max(...observed.filter((at) => at < frameIndex));
+        const next = Math.min(...observed.filter((at) => at > frameIndex));
+
+        expect(Number.isFinite(previous)).toBe(true);
+        expect(Number.isFinite(next)).toBe(true);
+        expect(next - previous - 1).toBeLessThanOrEqual(4);
       }
     }
 
@@ -475,12 +778,12 @@ describe("basketball region fixture", () => {
     const headSource = provenance.sources.find(({ id }) => id === "sam3-head");
 
     expect(provenance.headRegions).toMatchObject({
-      algorithm: "sam3-head-temporal-mask-v4",
+      algorithm: "sam3-head-temporal-mask-v5",
       prompt: "head",
       sourceId: "sam3-head",
     });
     expect(provenance.headRegions.associationPolicy).toContain(
-      "internal gaps of at most 7 frames are filled",
+      "internal gaps of at most 4 frames are filled",
     );
     expect(provenance.headRegions.cropPolicy).toContain(
       "every crop remains a superset of its stabilized mask bounds",
@@ -493,12 +796,22 @@ describe("basketball region fixture", () => {
     ).toBeGreaterThan(0);
     expect(headSource).toBeDefined();
     expect(headSource?.inputSha256).toBe(
-      sourceSha256(
-        readFileSync(resolve(regionsFixturePath, headSource!.input)),
-      ),
+      committedSourceSha256(resolve(regionsFixturePath, headSource!.input)),
     );
   });
 });
+
+const baseDefinition = {
+  basePath: "../../fixtures/sample",
+  datasetId: "sample_v1",
+  detectionsManifestSrc: "/detections.manifest.json",
+  displayName: "Sample",
+  inferenceLabel: "SAM3",
+  mediaLoadingStatusLabel: "opening sample",
+  mediaReadyStatusLabel: "sample ready",
+  sampleName: "sample",
+  showInDemo: true,
+} as const;
 
 interface DetectionChunk {
   readonly frames: readonly DetectionFrame[];
@@ -540,6 +853,32 @@ function readJson<T>(path: string): T {
 
 function sha256(content: Buffer) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * A fixture's `detections.json` is a git-ignored build intermediate, so a clean
+ * checkout holds no bytes to hash. Its digest is pinned where the restore tool
+ * reads it, and that tool checks the rebuilt file against the same pin, so the
+ * two records cannot drift apart unnoticed.
+ */
+function committedSourceSha256(inputPath: string) {
+  if (existsSync(inputPath)) {
+    return sourceSha256(readFileSync(inputPath));
+  }
+
+  const pinned = restorableDetections.fixtures.find(
+    (fixture) =>
+      resolve(fixturesRoot, fixture.sampleName, "detections.json") ===
+      inputPath,
+  );
+
+  if (!pinned) {
+    throw new Error(
+      `${inputPath} is neither committed nor restorable, so its provenance digest describes nothing.`,
+    );
+  }
+
+  return pinned.detectionsSha256;
 }
 
 function sourceSha256(content: Buffer) {

@@ -1,4 +1,9 @@
 import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
+import type {
   AnnotationStyleContext,
   BufferedDetectionTimeline,
   Detection,
@@ -94,11 +99,11 @@ export interface PixiRegionLayer {
   destroy(): void;
 }
 
+type RegionMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
+
 /** Browser implementation for asset- and media-backed region descriptors. */
 export function createPixiRegionLayer(options: {
-  readonly AlphaMask: new (options: {
-    mask: PixiMesh<PixiMeshGeometry, PixiShader>;
-  }) => PixiAlphaMask;
+  readonly AlphaMask: new (options: { mask: RegionMesh }) => PixiAlphaMask;
   readonly BlurFilter?: new (options: {
     kernelSize?: number;
     quality?: number;
@@ -123,17 +128,8 @@ export function createPixiRegionLayer(options: {
     scaleMode?: "linear" | "nearest";
     width: number;
   }) => PixiImageSource;
-  readonly Mesh: new (options: {
-    geometry: PixiMeshGeometry;
-    shader: PixiShader;
-  }) => PixiMesh<PixiMeshGeometry, PixiShader>;
-  readonly MeshGeometry: new (options: {
-    indices: Uint32Array;
-    positions: Float32Array;
-    shrinkBuffersToFit: boolean;
-    topology: "triangle-list";
-    uvs: Float32Array;
-  }) => PixiMeshGeometry;
+  readonly Mesh: InjectedMeshConstructor<RegionMesh>;
+  readonly MeshGeometry: InjectedMeshGeometryConstructor;
   readonly Rectangle: new (
     x?: number,
     y?: number,
@@ -141,12 +137,7 @@ export function createPixiRegionLayer(options: {
     height?: number,
   ) => PixiRectangle;
   readonly Sprite: new (options: { texture: PixiTexture }) => PixiSprite;
-  readonly Shader: {
-    from(options: {
-      gl: { fragment: string; vertex: string };
-      resources: Record<string, unknown>;
-    }): PixiShader;
-  };
+  readonly Shader: InjectedShaderFactory;
   readonly Texture: new (options: {
     readonly dynamic?: boolean;
     readonly frame?: PixiRectangle;
@@ -160,7 +151,9 @@ export function createPixiRegionLayer(options: {
     >,
   ) => PixiUniformGroup;
   readonly detectionTimeline: BufferedDetectionTimeline;
-  readonly getActiveRegionMaskCoverage: () => PixiActiveRegionMaskCoverage | null;
+  readonly getActiveRegionMaskCoverage: (
+    detectionFrameTime: number | null,
+  ) => PixiActiveRegionMaskCoverage | null;
   readonly getMediaTexture: () => PixiTexture | undefined;
   readonly onInvalidate?: () => void;
   readonly onAssetError?: (options: {
@@ -537,7 +530,9 @@ export function createPixiRegionLayer(options: {
 
     if (renderer.source.coverage.kind === RegionRendererCoverageKind.Mask) {
       removePolygonCoverageMask(entry);
-      const artifact = options.getActiveRegionMaskCoverage();
+      const artifact = options.getActiveRegionMaskCoverage(
+        currentFrame?.mediaTime ?? null,
+      );
 
       if (!detection.mask || !artifact) {
         removeExactCoverageMask(entry);

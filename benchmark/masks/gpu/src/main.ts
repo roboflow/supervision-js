@@ -9,9 +9,8 @@ import {
   UniformGroup,
 } from "pixi.js";
 
-const fixtureDetectionsPath = "/demo/fixtures/basketball_sam3/detections.json";
-const fixtureManifestPath =
-  "/demo/fixtures/basketball_sam3/detections.manifest.json";
+const fixtureDir = "/demo/fixtures/basketball_sam3";
+const fixtureManifestPath = `${fixtureDir}/detections.manifest.json`;
 const sampleFrameCount = 45;
 const warmupFrameCount = 5;
 const yieldEveryArtifactCount = 2;
@@ -172,6 +171,7 @@ interface FixtureDetections {
 }
 
 interface FixtureManifest {
+  readonly chunks: readonly { readonly src: string }[];
   readonly duration: number;
   readonly frameRate: number;
   readonly inference: {
@@ -333,10 +333,8 @@ void run().catch((error: unknown) => {
 async function run() {
   setStatus("Loading fixture...");
 
-  const [fixture, manifest] = await Promise.all([
-    fetchJson<FixtureDetections>(fixtureDetectionsPath),
-    fetchJson<FixtureManifest>(fixtureManifestPath),
-  ]);
+  const manifest = await fetchJson<FixtureManifest>(fixtureManifestPath);
+  const fixture = await fetchChunkedDetections(manifest);
   const app = new Application();
 
   await app.init({
@@ -1517,6 +1515,34 @@ function percentile(sortedValues: readonly number[], quantile: number) {
   );
 
   return sortedValues[index] ?? 0;
+}
+
+/**
+ * A frame whose interval crosses a chunk boundary is written into every chunk
+ * it touches, so chunk frames are de-duplicated by media time.
+ */
+async function fetchChunkedDetections(
+  manifest: FixtureManifest,
+): Promise<FixtureDetections> {
+  const framesByMediaTime = new Map<number, DetectionFrame>();
+
+  for (const chunk of manifest.chunks) {
+    const { frames } = await fetchJson<FixtureDetections>(
+      `${fixtureDir}/${chunk.src}`,
+    );
+
+    for (const frame of frames) {
+      if (!framesByMediaTime.has(frame.mediaTime)) {
+        framesByMediaTime.set(frame.mediaTime, frame);
+      }
+    }
+  }
+
+  return {
+    frames: [...framesByMediaTime.values()].sort(
+      (left, right) => left.mediaTime - right.mediaTime,
+    ),
+  };
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

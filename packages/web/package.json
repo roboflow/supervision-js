@@ -1,6 +1,6 @@
 {
   "name": "supervision",
-  "version": "0.1.7",
+  "version": "0.2.0-next.1",
   "description": "Browser-native computer vision media rendering and annotation engine.",
   "repository": {
     "type": "git",
@@ -36,10 +36,31 @@
       "types": "./dist/editing.d.ts",
       "import": "./dist/editing.js"
     },
+    "./web-video-engine": {
+      "types": "./dist/web-video-engine/index.d.ts",
+      "import": "./dist/web-video-engine/index.js",
+      "default": "./dist/web-video-engine/index.js"
+    },
+    "./web-video-engine/analysis": {
+      "types": "./dist/web-video-engine/analysis.d.ts",
+      "import": "./dist/web-video-engine/analysis.js",
+      "default": "./dist/web-video-engine/analysis.js"
+    },
+    "./web-video-engine/worker": "./dist/web-video-engine/engine.worker.js",
     "./render-preparation-worker": "./dist/mask-preparation.worker.js",
     "./detection-post-processing-worker": "./dist/tracking.worker.js"
   },
   "imports": {
+    "#web-video-engine": {
+      "types": "./dist/web-video-engine/engine.d.ts",
+      "import": "./dist/web-video-engine/engine.js",
+      "default": "./dist/web-video-engine/engine.js"
+    },
+    "#web-video-engine/analysis": {
+      "types": "./dist/web-video-engine/analysis.d.ts",
+      "import": "./dist/web-video-engine/analysis.js",
+      "default": "./dist/web-video-engine/analysis.js"
+    },
     "#editing/*": {
       "types": "./dist/editing/*.d.ts",
       "import": "./dist/editing/*.js"
@@ -101,5 +122,8 @@
     "mediabunny": "^1.55.5",
     "pixi.js": "^8.20.1",
     "supervision-js-core": "file:../core"
+  },
+  "devDependencies": {
+    "supervision-js-web-video-engine": "file:../video-engine"
   }
 }

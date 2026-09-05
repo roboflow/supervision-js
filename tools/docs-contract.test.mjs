@@ -5,20 +5,29 @@ import process from "node:process";
 import test from "node:test";
 import ts from "typescript";
 
+import {
+  checkChecksums,
+  checkCommentFlags,
+  checkDeclaredFlags,
+  checkExports,
+  checkNpmScripts,
+  checkPaths,
+  checkScriptFlags,
+  checkVersions,
+  loadDocuments,
+  loadRepository,
+  loadSources,
+} from "./docs-claims.mjs";
+
 const rootDir = process.cwd();
 const publicDocsDir = path.join(rootDir, "docs/public");
 const publicApiDir = path.join(publicDocsDir, "api");
 
-test("public Markdown links resolve inside the repository", async () => {
-  const markdownFiles = [
-    path.join(rootDir, "README.md"),
-    ...(await listFiles(publicDocsDir, ".md")),
-  ];
+test("Markdown links resolve inside the repository", async () => {
+  const { documents } = await documentation();
   const failures = [];
 
-  for (const file of markdownFiles) {
-    const source = await readFile(file, "utf8");
-
+  for (const { file, source } of documents) {
     for (const target of findMarkdownLinks(source)) {
       if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
         continue;
@@ -63,18 +72,66 @@ test("generated API facades cover every browser package export", async () => {
   );
 });
 
-test("Editing API facade covers every editing subpath export", async () => {
-  const editingExports = await readNamedExports(
-    path.join(rootDir, "packages/web/src/editing.ts"),
+test("every typed package subpath has a complete API facade", async () => {
+  const manifest = JSON.parse(
+    await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
   );
-  const documentedExports = new Set(
-    await readNamedExports(path.join(publicApiDir, "editing.ts")),
-  );
+  const facadeBySubpath = new Map([
+    [
+      ".",
+      [
+        "detections.ts",
+        // Editing types are intentionally dual-exported from the root and
+        // the tree-shakeable editing subpath, so this one facade covers both.
+        "editing.ts",
+        "interactions.ts",
+        "media-preparation.ts",
+        "post-processing.ts",
+        "rendering.ts",
+        "sessions.ts",
+        "styles.ts",
+      ],
+    ],
+    ["./editing", ["editing.ts"]],
+    ["./web-video-engine", ["video-engine.ts"]],
+    ["./web-video-engine/analysis", ["video-engine-analysis.ts"]],
+  ]);
+  const sourceBySubpath = new Map([
+    [".", "packages/web/src/index.ts"],
+    ["./editing", "packages/web/src/editing.ts"],
+    ["./web-video-engine", "packages/web/src/web-video-engine/index.ts"],
+    ["./web-video-engine/analysis", "packages/video-engine/src/analysis.ts"],
+  ]);
+  const typedSubpaths = Object.entries(manifest.exports)
+    .filter(
+      ([, target]) =>
+        typeof target === "object" && target !== null && "types" in target,
+    )
+    .map(([subpath]) => subpath)
+    .sort();
 
-  assert.deepEqual(
-    editingExports.filter((name) => !documentedExports.has(name)).sort(),
-    [],
-  );
+  assert.deepEqual([...facadeBySubpath.keys()].sort(), typedSubpaths);
+
+  for (const subpath of typedSubpaths) {
+    const sourceExports = await readNamedExports(
+      path.join(rootDir, sourceBySubpath.get(subpath)),
+    );
+    const documentedExports = new Set(
+      (
+        await Promise.all(
+          facadeBySubpath
+            .get(subpath)
+            .map((facade) => readNamedExports(path.join(publicApiDir, facade))),
+        )
+      ).flat(),
+    );
+
+    assert.deepEqual(
+      sourceExports.filter((name) => !documentedExports.has(name)).sort(),
+      [],
+      `${subpath} has exports missing from its TypeDoc facade`,
+    );
+  }
 });
 
 test("TypeDoc includes every public API facade", async () => {
@@ -123,10 +180,130 @@ test("documentation toolbar mirrors the browser package manifest version", async
 
   assert.equal(packageName, packageJson.name);
   assert.equal(packageVersion, packageJson.version);
-  assert.equal(packageReleaseStatus, "");
+  assert.equal(
+    packageReleaseStatus,
+    packageJson.version.includes("-next.") ? "next preview" : "",
+  );
 });
 
-test("public installation guidance uses the stable browser package", async () => {
+const playbackGateSurfaces = [
+  "packages/core/src/types/detection-timeline.ts",
+  "packages/web/src/types/media-session.ts",
+  "packages/web/src/types/render-preparation.ts",
+  "docs/public/guides/detections-and-rendering.md",
+  "docs/public/guides/media-preparation.md",
+  "docs/public/guides/media-sessions.md",
+  "docs/public/recipes/multiple-detection-sources.md",
+  "docs/public/recipes/streaming-detections.md",
+];
+
+/**
+ * Splits prose into sentences so a claim can be judged against the qualifier
+ * standing next to it. Comment leaders and Markdown bullets are stripped first
+ * and the split needs whitespace after the terminator, so `session.play` and
+ * `detections.playbackGate` survive it intact.
+ */
+function proseSentences(source) {
+  return source
+    .replace(/^[ \t]*(?:\/\*\*|\*\/|\*|\/\/|[-*+]|#+)[ \t]?/gm, " ")
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.;:])\s+/);
+}
+
+test("every playback-gate surface states the default and reach the code ships", async () => {
+  // Every gate reaches every frame on both source kinds, through different
+  // mechanics. The default is read from the resolver rather than from a phrase,
+  // because a surface can name a scope and still describe the wrong default.
+  const defaultsSource = await readFile(
+    path.join(rootDir, "packages/web/src/sessions/media-session-defaults.ts"),
+    "utf8",
+  );
+  const readsGateEnabled = (constantName) => {
+    const match = new RegExp(
+      `const ${constantName} = \\{[^}]*?enabled: (true|false)`,
+      "s",
+    ).exec(defaultsSource);
+
+    assert.ok(match, `${constantName} no longer declares an enabled default`);
+
+    return match[1] === "true";
+  };
+  const gateShipsOn =
+    readsGateEnabled("DETECTION_PLAYBACK_GATE_DEFAULTS") &&
+    readsGateEnabled("RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS");
+  const namesTheGate = /playbackGate|playback gate/;
+  // Prose is reflowed to a column, so a stated default can straddle a line
+  // break and a naive pattern would miss it.
+  const statesTheDefault = gateShipsOn
+    ? /on\s+by\s+default|holds[\s\S]{0,120}?by\s+default/i
+    : /off\s+by\s+default|off\s+unless|the gate off, which is the default/i;
+  const namesThePulledPath =
+    /pulls?\s+(?:a\s+)?(?:decoded\s+)?samples?|pulling\s+samples/i;
+  /* A symbol name does not count. Naming the one implementation that presents
+   * its own frames satisfied this check while saying nothing about the contract,
+   * which is how an engine symbol came to sit in a core type that cannot even
+   * resolve it. */
+  const namesThePresentedPath =
+    /presents?\s+its\s+own\s+frames|push-presented|presented-frame\s+channel/i;
+  // A no-op claim is honest when it says which sources it is about and false
+  // when it stands alone, so each claim is judged against its own sentence
+  // rather than against the file.
+  const scopesTheClaim = new RegExp(
+    `${namesThePulledPath.source}|${namesThePresentedPath.source}`,
+    "i",
+  );
+  const claimsNoGate = [
+    /accepted and ignored/i,
+    /(?:playback|presentation) (?:is )?never (?:gated|awaits|waits)/i,
+  ];
+  const claimsStartOnly =
+    /holds? only the start of playback|held at the start of playback|holds? the start of playback and nothing after|held at the start only/i;
+  const failures = [];
+
+  for (const surface of playbackGateSurfaces) {
+    const source = await readFile(path.join(rootDir, surface), "utf8");
+
+    if (!namesTheGate.test(source)) {
+      failures.push(`${surface} never names the playback gate`);
+    }
+
+    if (!statesTheDefault.test(source)) {
+      failures.push(
+        `${surface} never states that the gate ships ${gateShipsOn ? "on" : "off"} by default`,
+      );
+    }
+
+    if (
+      !namesThePulledPath.test(source) ||
+      !namesThePresentedPath.test(source)
+    ) {
+      failures.push(
+        `${surface} never states which media sources the gate reaches`,
+      );
+    }
+
+    for (const sentence of proseSentences(source)) {
+      if (claimsStartOnly.test(sentence)) {
+        failures.push(
+          `${surface} documents a start-only gate, but both source kinds are gated at every frame`,
+        );
+      }
+
+      if (
+        claimsNoGate.some((claim) => claim.test(sentence)) &&
+        !scopesTheClaim.test(sentence)
+      ) {
+        failures.push(
+          `${surface} documents the gate as a no-op everywhere, which it is not`,
+        );
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("public installation guidance distinguishes stable and preview installs", async () => {
   const consumerDocs = [
     path.join(rootDir, "README.md"),
     path.join(publicDocsDir, "index.md"),
@@ -138,7 +315,10 @@ test("public installation guidance uses the stable browser package", async () =>
     const source = await readFile(file, "utf8");
 
     assert.match(source, /npm install supervision(?:\n|`|<)/);
-    assert.doesNotMatch(source, /npm install supervision@/);
+
+    if (source.includes("supervision/web-video-engine")) {
+      assert.match(source, /npm install supervision@next(?:\n|`|<)/);
+    }
   }
 });
 
@@ -192,6 +372,8 @@ test("TypeDoc presents public guidance as five navigable sections", async () => 
     "Media Sessions",
     "Rendering",
     "Styles",
+    "Web Video Engine",
+    "Web Video Engine Analysis",
   ]);
 });
 
@@ -365,6 +547,64 @@ test("every fixture-backed annotation renderer has a focused live playground", a
   );
 });
 
+test("every renderer a docs page asks for is one the playground can build", async () => {
+  const rendererModule = await readFile(
+    path.join(rootDir, "demo/src/docs-annotation-renderer.ts"),
+    "utf8",
+  );
+  const playgroundRouter = await readFile(
+    path.join(
+      rootDir,
+      "demo/src/components/DocsAnnotationRendererPlayground.tsx",
+    ),
+    "utf8",
+  );
+  const pageRenderers = (
+    await Promise.all(
+      (await readdir(path.join(publicDocsDir, "annotation-renderers"))).map(
+        (file) =>
+          readFile(
+            path.join(publicDocsDir, "annotation-renderers", file),
+            "utf8",
+          ),
+      ),
+    )
+  ).flatMap(
+    (page) =>
+      page.match(/embed=annotation-renderer&amp;renderer=(?<id>[\w-]+)/)?.groups
+        ?.id ?? [],
+  );
+  const declaredIds = [
+    ...(rendererModule
+      .match(
+        /export const docsAnnotationRendererIds = \[(?<ids>[\s\S]*?)\] as const;/,
+      )
+      ?.groups?.ids.matchAll(/"(?<id>[^"]+)"/g) ?? []),
+  ].map((match) => match.groups.id);
+  const dedicatedPlaygrounds = [
+    ...playgroundRouter.matchAll(/renderer === "(?<id>[^"]+)"/g),
+  ].map((match) => match.groups.id);
+  const snippetCases = [
+    ...(rendererModule
+      .match(
+        /export function createDocsAnnotationRendererSnippet[\s\S]*?\n\}\n/,
+      )?.[0]
+      .matchAll(/case "(?<id>[^"]+)":/g) ?? []),
+  ].map((match) => match.groups.id);
+
+  assert.deepEqual([...pageRenderers].sort(), [...declaredIds].sort());
+
+  for (const renderer of pageRenderers) {
+    // parseDocsAnnotationRenderer falls back to boxes, so an id the demo does
+    // not know renders the wrong playground rather than failing.
+    assert.ok(
+      dedicatedPlaygrounds.includes(renderer) ||
+        snippetCases.includes(renderer),
+      `${renderer} has neither a dedicated playground nor a live code snippet`,
+    );
+  }
+});
+
 test("Render preview trusts only its assigned hostname", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),
@@ -451,6 +691,128 @@ test("copyable integration examples typecheck", async () => {
     ts.JsxEmit.ReactJSX,
   );
 });
+
+test("the 0.2 interaction-style migration example typechecks", async () => {
+  const migration = await readFile(
+    path.join(publicDocsDir, "guides/migrating-to-0.2.md"),
+    "utf8",
+  );
+
+  for (const removed of ["shape", "cornerRadius", "stroke", "fill"]) {
+    assert.match(migration, new RegExp(`\\b${removed}\\b`));
+  }
+
+  const [, after] = findCodeBlocks(migration, "ts");
+  assert.ok(after, "Missing the migrated BaseInteractionStyle example.");
+  assertTypechecks(after, ".docs-0.2-interaction-migration.ts");
+});
+
+test("every path a document names exists", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkPaths(repository, documents), []);
+});
+
+test("every npm script a document runs is declared", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkNpmScripts(repository, documents), []);
+});
+
+test("every flag a document shows is one its script reads", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkScriptFlags(repository, documents), []);
+});
+
+test("every flag a script declares is one the document beside it shows", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkDeclaredFlags(repository, documents), []);
+});
+
+test("every checksum a document quotes matches the file beside it", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkChecksums(repository, documents), []);
+});
+
+test("every version a document states matches the package manifest", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkVersions(repository, documents), []);
+});
+
+test("every symbol a document imports is exported", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkExports(repository, documents), []);
+});
+
+test("every path a comment or manifest script names exists", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkPaths(repository, sources), []);
+});
+
+test("every npm script a comment or manifest script runs is declared", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkNpmScripts(repository, sources), []);
+});
+
+test("every flag a manifest script passes is one its script reads", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkScriptFlags(repository, sources), []);
+});
+
+test("every flag a script's own comments show is one it reads", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkCommentFlags(repository, sources), []);
+});
+
+test("every checksum a comment quotes matches the file beside it", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkChecksums(repository, sources), []);
+});
+
+test("every version a comment states matches the package manifest", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkVersions(repository, sources), []);
+});
+
+test("every subpath a comment imports is exported", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkExports(repository, sources), []);
+});
+
+let corpus;
+let commentCorpus;
+
+function documentation() {
+  corpus ??= (async () => {
+    const repository = await loadRepository(rootDir);
+
+    return { documents: await loadDocuments(repository), repository };
+  })();
+
+  return corpus;
+}
+
+function commentary() {
+  commentCorpus ??= (async () => {
+    const { repository } = await documentation();
+
+    return { repository, sources: await loadSources(repository) };
+  })();
+
+  return commentCorpus;
+}
 
 function findMarkdownLinks(source) {
   return [...source.matchAll(/!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)]

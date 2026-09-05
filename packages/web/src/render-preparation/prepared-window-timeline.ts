@@ -6,33 +6,22 @@ export interface PreparedRenderTimelineContext {
 }
 
 export interface PreparedWindowTimeline {
-  clear(): void;
   getFrameDistance(frameTime: number, mediaTime: number): number;
   getWindowFrames(
     bufferedFrames: readonly DetectionFrame[],
     mediaTime: number,
+    bufferEndTime: number | null,
   ): readonly DetectionFrame[];
-  rememberFrames(
-    frames: readonly DetectionFrame[],
-    retainedKeys: ReadonlySet<string>,
-  ): void;
   setContext(context: PreparedRenderTimelineContext): void;
 }
 
-export function createPreparedWindowTimeline(options: {
-  readonly getFrameKey: (frame: DetectionFrame) => string;
-}): PreparedWindowTimeline {
-  const knownFrames = new Map<string, DetectionFrame>();
+export function createPreparedWindowTimeline(): PreparedWindowTimeline {
   let timelineContext: PreparedRenderTimelineContext = {
     duration: null,
     loop: false,
   };
 
   return {
-    clear() {
-      knownFrames.clear();
-    },
-
     getFrameDistance(frameTime, mediaTime) {
       if (isLoopingTimeline()) {
         return getLoopDistance(frameTime, mediaTime);
@@ -41,28 +30,20 @@ export function createPreparedWindowTimeline(options: {
       return Math.max(0, frameTime - mediaTime);
     },
 
-    getWindowFrames(bufferedFrames, mediaTime) {
+    getWindowFrames(bufferedFrames, mediaTime, bufferEndTime) {
       if (!isLoopingTimeline()) {
         return bufferedFrames.filter((frame) => frame.mediaTime >= mediaTime);
       }
 
-      return Array.from(knownFrames.values()).sort(
-        (leftFrame, rightFrame) =>
-          getLoopDistance(leftFrame.mediaTime, mediaTime) -
-          getLoopDistance(rightFrame.mediaTime, mediaTime),
-      );
-    },
-
-    rememberFrames(frames, retainedKeys) {
-      for (const frame of frames) {
-        knownFrames.set(options.getFrameKey(frame), frame);
-      }
-
-      for (const key of knownFrames.keys()) {
-        if (!retainedKeys.has(key)) {
-          knownFrames.delete(key);
-        }
-      }
+      return bufferedFrames
+        .filter((frame) =>
+          isAheadWithinBuffer(frame.mediaTime, mediaTime, bufferEndTime),
+        )
+        .sort(
+          (leftFrame, rightFrame) =>
+            getLoopDistance(leftFrame.mediaTime, mediaTime) -
+            getLoopDistance(rightFrame.mediaTime, mediaTime),
+        );
     },
 
     setContext(context) {
@@ -78,6 +59,10 @@ export function createPreparedWindowTimeline(options: {
     );
   }
 
+  /**
+   * Travel forward from `mediaTime` to `frameTime`, wrapping at the media end,
+   * so a frame the playhead has already passed reads as almost a whole lap away.
+   */
   function getLoopDistance(frameTime: number, mediaTime: number) {
     if (!isLoopingTimeline() || timelineContext.duration === null) {
       return Math.max(0, frameTime - mediaTime);
@@ -89,6 +74,23 @@ export function createPreparedWindowTimeline(options: {
     const rawDistance = normalizedFrameTime - normalizedMediaTime;
 
     return rawDistance >= 0 ? rawDistance : rawDistance + duration;
+  }
+
+  /**
+   * The buffer's end time is the far edge of what the playhead reaches next, and
+   * it runs past the media end when the loop point is close. A frame beyond it
+   * is one the playhead already passed, not one a lap of travel away.
+   */
+  function isAheadWithinBuffer(
+    frameTime: number,
+    mediaTime: number,
+    bufferEndTime: number | null,
+  ) {
+    if (bufferEndTime === null) {
+      return true;
+    }
+
+    return mediaTime + getLoopDistance(frameTime, mediaTime) <= bufferEndTime;
   }
 }
 

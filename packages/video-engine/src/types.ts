@@ -1,0 +1,238 @@
+import { PLAYBACK_RATE } from "./constants";
+import type { FrameTimelineData } from "./frame-timeline";
+
+/**
+ * Seconds, as a branded float. Promoted out of `number` so a duration
+ * cannot accidentally be passed where a frame index is expected.
+ */
+export type Sec = number & { readonly __sec: unique symbol };
+
+/** Frames per second. Branded for the same reason as Sec. */
+export type Fps = number & { readonly __fps: unique symbol };
+
+/**
+ * Paints since the source loaded, monotonic within it and reset on source swap.
+ * It counts paints, not source frames: two paints of one media position can
+ * take two sequence numbers. Source-frame identity is carried separately by
+ * the presented frame's frameId and media timestamp.
+ */
+export type PaintSeq = number & { readonly __paintSeq: unique symbol };
+
+export const asSec = (n: number): Sec => n as Sec;
+export const asFps = (n: number): Fps => n as Fps;
+export const asPaintSeq = (n: number): PaintSeq => n as PaintSeq;
+
+export enum SourceKind {
+  Url = "url",
+  Blob = "blob",
+  Stream = "stream",
+}
+
+export interface UrlVideoSource {
+  kind: SourceKind.Url;
+  url: string;
+  /** The engine fetches rather than building an element, so these reach the
+   *  request as the CORS fetch they stand for. Undeclared leaves the request at
+   *  the demuxer's own same-origin default. */
+  crossOrigin?: "anonymous" | "use-credentials";
+}
+
+/**
+ * Mediabunny's own read tuning for a URL source, passed straight through to its
+ * `UrlSource`. Every field absent leaves mediabunny's defaults in place.
+ */
+export interface UrlSourceReadConfig {
+  /** Range requests the demuxer may have in flight at once. */
+  readonly parallelism?: number;
+  /** Ceiling on the bytes mediabunny's own read cache holds. */
+  readonly maxCacheSize?: number;
+}
+
+export interface BlobVideoSource {
+  kind: SourceKind.Blob;
+  blob: Blob;
+}
+
+export interface StreamVideoSource {
+  kind: SourceKind.Stream;
+  /** The load transfers this stream to the worker, which detaches this side's
+   *  reference: afterwards the worker holds the only readable end. */
+  stream: ReadableStream<Uint8Array>;
+  /** Declared container type. Nothing reads it: the demuxer sniffs the bytes,
+   *  and no metadata surface carries it back out. */
+  mimeType: string;
+}
+
+/**
+ * Source descriptor. Discriminated so each backend can route without runtime
+ * sniffing and so the future mediabunny v2 StreamSource slots in as a new
+ * variant rather than a refactor.
+ */
+export type VideoSource = UrlVideoSource | BlobVideoSource | StreamVideoSource;
+
+/**
+ * Which decode machinery a source was opened through: mediabunny's CanvasSink,
+ * mediabunny's VideoSampleSink, or the runtime's own long-lived DecodeSession.
+ * Resolved per source at open time from what the track and the realm support.
+ */
+export type DecodePath = "canvas" | "sample" | "session";
+
+/**
+ * Who owns the pixels. "canvas" is the engine: it holds a display canvas and
+ * paints every frame that earns the screen. "frames" is the host: the engine
+ * holds no canvas, paints nothing, and hands each of those frames out as a
+ * VideoFrame instead, so an external compositor can own the only canvas.
+ */
+export type PresentationMode = "canvas" | "frames";
+
+/**
+ * Coarse-grained engine status. Updates rarely (load, play, pause, end,
+ * error). Sits on its own emit channel so subscribers do not wake up on
+ * 60Hz time ticks.
+ */
+export enum PlaybackStatus {
+  Idle = "IDLE",
+  Loading = "LOADING",
+  Ready = "READY",
+  Playing = "PLAYING",
+  Paused = "PAUSED",
+  Seeking = "SEEKING",
+  Ended = "ENDED",
+  Errored = "ERRORED",
+}
+
+export enum WebVideoEngineErrorCode {
+  DecodeUnsupported = "DECODE_UNSUPPORTED",
+  SourceUnreadable = "SOURCE_UNREADABLE",
+  /**
+   * The demuxer refused the file outright: its container is not one this build
+   * reads, so no track was ever listed and no decoder was ever asked.
+   */
+  ContainerUnreadable = "CONTAINER_UNREADABLE",
+  /**
+   * The container opened and the demuxer parsed no track at all out of it. The
+   * file's streams are in formats it does not carry, so their video cannot be
+   * reached even though it is there.
+   */
+  VideoTrackUnreadable = "VIDEO_TRACK_UNREADABLE",
+  /**
+   * The container opened, its tracks listed, and none of them is video. This
+   * is the only case where the file itself is what lacks video.
+   */
+  NoVideoTrack = "NO_VIDEO_TRACK",
+  BackendCrashed = "BACKEND_CRASHED",
+  Aborted = "ABORTED",
+  /** A canvas was offered to an engine loaded in "frames" presentation mode,
+   *  where the host owns the only canvas. */
+  PresentationMismatch = "PRESENTATION_MISMATCH",
+  /**
+   * The decoder cannot decode this source at all: it refused to configure, it
+   * errored, or it acknowledged decode requests and never produced a frame.
+   * Distinct from BackendCrashed; this one survives every rebuild, so the
+   * runtime stops rebuilding and says so. The usual cause is outside the page:
+   * another tab holding every hardware decoder session the machine has.
+   */
+  DecoderStalled = "DECODER_STALLED",
+  /** A playback rate outside the forward range the engine supports. */
+  RateUnsupported = "RATE_UNSUPPORTED",
+}
+
+/**
+ * Thrown by createScrubCursor / WebVideoEngine.load when decode is unsupported
+ * or the source is unreadable. Branch on `error.code` (WebVideoEngineErrorCode)
+ * to differentiate decode failures from network failures.
+ */
+export class WebVideoEngineError extends Error {
+  readonly code: WebVideoEngineErrorCode;
+  readonly cause?: unknown;
+  constructor(code: WebVideoEngineErrorCode, message: string, cause?: unknown) {
+    super(message);
+    this.code = code;
+    this.cause = cause;
+  }
+}
+
+/** Shared by the facade and the core so a host gets the same refusal wherever
+ *  its canvas is caught. */
+export function canvasBindingRefused(): WebVideoEngineError {
+  return new WebVideoEngineError(
+    WebVideoEngineErrorCode.PresentationMismatch,
+    'presentation "frames" leaves the canvas to the host: this engine paints nothing and hands out VideoFrames instead',
+  );
+}
+
+/**
+ * Validates a requested playback rate and returns it. The facade and the core
+ * both call it, so a rate is refused at whichever boundary it arrives at and
+ * with the same message: the facade posts fire-and-forget, so a refusal raised
+ * only in the worker would reach nobody.
+ *
+ * Reverse is rejected, not clamped: backwards playback is a different decode
+ * problem, and a -1 quietly serviced as +0.25 plays the wrong direction while
+ * reporting success.
+ */
+export function resolvePlaybackRate(rate: number): number {
+  if (
+    !Number.isFinite(rate) ||
+    rate < PLAYBACK_RATE.MIN ||
+    rate > PLAYBACK_RATE.MAX
+  ) {
+    throw new WebVideoEngineError(
+      WebVideoEngineErrorCode.RateUnsupported,
+      `playback rate ${rate} is outside the supported forward range ${PLAYBACK_RATE.MIN}-${PLAYBACK_RATE.MAX}; reverse playback is not supported`,
+    );
+  }
+  return rate;
+}
+
+export interface PlaybackState {
+  status: PlaybackStatus;
+  error: WebVideoEngineError | null;
+}
+
+export interface VideoMetadata {
+  durationMs: number;
+  nativeFps: Fps | null;
+  naturalWidth: number;
+  naturalHeight: number;
+  /** Media time of the first sample, ms. Non-zero on trimmed/offset sources,
+   *  where an annotation timeline that assumes 0 drifts by exactly this. */
+  firstTimestampMs: number;
+  codec: string | null;
+  canDecode: boolean;
+}
+
+/**
+ * Snapshot delivered through the `onReady` lifecycle callback exactly once
+ * per loaded source after metadata resolves.
+ */
+export interface EngineReadySnapshot extends VideoMetadata {
+  /**
+   * Every real frame of the source, by its container tick timestamp. A host
+   * holding this can name any position the engine publishes, and can resolve
+   * one of its own pointer positions to a frame without asking.
+   */
+  readonly timeline: FrameTimelineData;
+  /**
+   * The kind of reader the demuxer was opened over, recorded once the open
+   * succeeded. A host knows what it asked for; only the engine knows what it
+   * got, and the three kinds differ in what they can do afterwards — a stream
+   * cannot be rewound or reopened, and only a URL is fetched.
+   */
+  readonly byteSource?: SourceKind;
+}
+
+/**
+ * Channels the engine store emits on. Pick the channel matching the slice
+ * cadence so consumers do not wake up on unrelated mutations.
+ *
+ *   - time:     emits per paint (raw ms; bucketing lives in hook selectors).
+ *   - frame:    emits per settled cursor frame (frame-index changes).
+ *   - state:    coarse status transitions (load, play, pause, end, error).
+ *   - duration: once per loaded source.
+ *   - seeking:  cursor scrub-in-flight transitions (opt-in indicator).
+ *   - rate:     playback-rate changes. Rare, and on its own channel so a rate
+ *               readout does not wake on status and vice versa.
+ */
+export type EngineChannel =
+  "time" | "frame" | "state" | "duration" | "seeking" | "rate";

@@ -2,8 +2,8 @@
 
 (function () {
   const packageName = "supervision";
-  const packageVersion = "0.1.7";
-  const packageReleaseStatus = "";
+  const packageVersion = "0.2.0-next.1";
+  const packageReleaseStatus = "next preview";
   const kindIconMap = {
     Accessor: "A",
     Class: "C",

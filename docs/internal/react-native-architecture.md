@@ -38,9 +38,9 @@ but the library boundary should not require Expo APIs.
 Mask rendering should follow the same performance principle as web: prepare one
 frame-level ID-mask artifact from semantic detections, then let the native
 renderer upload that artifact and apply style palettes in a shader. The shared
-core concept is raw detection-indexed mask bytes plus palettes and metadata, not
-PNG. PNG is a browser upload optimization; React Native may upload the raw bytes
-directly through Skia or a future native GPU adapter.
+core concept is raw detection-indexed mask bytes plus palettes and metadata,
+which is what the browser uploads as well; React Native may upload the same
+bytes directly through Skia or a future native GPU adapter.
 
 ## Media Direction
 

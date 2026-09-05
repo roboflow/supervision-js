@@ -1,6 +1,7 @@
 import type { DetectionMask, Point } from "supervision-js-core";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import type {
+  PreparedIdMaskPlane,
   PreparedMaskFrameKind,
   PreparedRegionMaskCoverageFrame,
 } from "./mask-frame-artifact";
@@ -40,6 +41,8 @@ export type SerializableMaskInstruction =
 export interface MaskFramePreparationJob {
   readonly instructions: readonly SerializableMaskInstruction[];
   readonly key: string;
+  /** Widest id raster to cook; absent, the instructions' own resolution. */
+  readonly maxRasterWidth?: number;
 }
 
 export interface MaskPreparationWorkerPrepareMessage {
@@ -52,17 +55,20 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly artifactKind?: PreparedMaskFrameKind;
   readonly fillPalette?: Float32Array<ArrayBuffer>;
   readonly hasStroke?: boolean;
-  readonly idMaskData?: Uint8Array<ArrayBuffer>;
+  readonly height?: number;
+  readonly idMaskPlane?: PreparedIdMaskPlane;
   readonly imageBitmap?: ImageBitmap;
   readonly imageData?: ImageData;
   readonly key: string;
   readonly maxStrokeWidth?: number;
-  readonly png?: Uint8Array<ArrayBuffer>;
-  readonly requestId: number;
+  readonly raster?: Uint8Array<ArrayBuffer>;
   readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
+  readonly requestId: number;
+  readonly sourceWidth?: number;
   readonly strokePalette?: Float32Array<ArrayBuffer>;
   readonly strokeWidths?: Float32Array<ArrayBuffer>;
   readonly type: MaskPreparationWorkerMessageType.Complete;
+  readonly width?: number;
 }
 
 export interface MaskPreparationWorkerEmptyMessage {

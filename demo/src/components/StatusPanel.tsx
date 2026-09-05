@@ -17,8 +17,15 @@ import {
   formatMilliseconds,
   formatTime,
   formatTimeRange,
+  toSourceTimeRange,
 } from "../format";
+import { DEMO_INTERACTION_MODE } from "../session/demo-session-renderer";
+import {
+  formatPlaybackRate,
+  isPlaybackRateSustained,
+} from "../session/playback-rate";
 import { selectPreparedWindowArtifact } from "../render-preparation";
+import { readPreparedWindow } from "./prepared-window";
 import { Readout } from "./Readout";
 
 export interface StatusPanelMediaState {
@@ -40,6 +47,7 @@ export const StatusPanel = memo(function StatusPanel({
   hoveredDetectionPick,
   mediaState,
   playbackState,
+  presentedRate,
   renderPreparationDiagnostics,
   rendererState,
   selectedDetectionPick,
@@ -52,12 +60,23 @@ export const StatusPanel = memo(function StatusPanel({
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: StatusPanelMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly presentedRate: number | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly rendererState: MediaRendererState | null;
   readonly selectedDetectionPick: DetectionPickResult | null;
   readonly sessionState: MediaSessionState | null;
   readonly sourceState: MediaSourceState | null;
 }) {
+  const loadedSourceRange = toSourceTimeRange(
+    rendererState?.detectionBuffer.bufferStartTime ?? null,
+    rendererState?.detectionBuffer.bufferEndTime ?? null,
+    sourceState?.duration ?? null,
+  );
+  const requestedSourceRange = toSourceTimeRange(
+    rendererState?.detectionBuffer.requestedStartTime ?? null,
+    rendererState?.detectionBuffer.requestedEndTime ?? null,
+    sourceState?.duration ?? null,
+  );
   const rendererErrorMessage =
     !errorMessage &&
     rendererState?.playbackState === MediaRendererPlaybackState.Error
@@ -73,6 +92,14 @@ export const StatusPanel = memo(function StatusPanel({
   const preparedWindowArtifact = selectPreparedWindowArtifact(
     renderPreparationDiagnostics,
   );
+  const preparedWindow = readPreparedWindow(
+    preparedWindowArtifact,
+    sourceState?.estimatedFrameRate ?? null,
+  );
+  const blockingActivity =
+    sessionState?.activities.find(
+      (activity) => activity.blockingPlayback || activity.blockingPresentation,
+    ) ?? null;
 
   return (
     <section className="status-panel" aria-label="Renderer status">
@@ -82,6 +109,28 @@ export const StatusPanel = memo(function StatusPanel({
           value={fixtureSummary?.fixtureName ?? "loading"}
         />
         <Readout label="State" value={playbackState ?? "-"} />
+        <Readout
+          label="Navigation"
+          value={formatNavigationState(rendererState)}
+        />
+        <Readout
+          label="Speed"
+          tone={
+            rendererState &&
+            !isPlaybackRateSustained(rendererState.playbackRate, presentedRate)
+              ? "danger"
+              : "default"
+          }
+          value={
+            rendererState
+              ? `${formatPlaybackRate(rendererState.playbackRate)} commanded | ${
+                  presentedRate === null
+                    ? "not measured"
+                    : `${presentedRate.toFixed(2)}x presented`
+                }`
+              : "-"
+          }
+        />
         <Readout
           label="Renderer"
           value={rendererState?.rendererBackend ?? "-"}
@@ -113,6 +162,11 @@ export const StatusPanel = memo(function StatusPanel({
           }
         />
         <Readout
+          label="Mask Frame"
+          tone={rendererState?.maskHeldStale ? "danger" : "default"}
+          value={formatMaskFrame(rendererState)}
+        />
+        <Readout
           label="Buffer"
           value={rendererState?.detectionBuffer.status ?? "-"}
         />
@@ -121,8 +175,8 @@ export const StatusPanel = memo(function StatusPanel({
           value={
             rendererState
               ? `${formatTimeRange(
-                  rendererState.detectionBuffer.bufferStartTime,
-                  rendererState.detectionBuffer.bufferEndTime,
+                  loadedSourceRange.startTime,
+                  loadedSourceRange.endTime,
                 )} | ${formatInteger(
                   rendererState.detectionBuffer.frameCount,
                 )} frames | ${formatInteger(
@@ -136,8 +190,8 @@ export const StatusPanel = memo(function StatusPanel({
           value={
             rendererState
               ? formatTimeRange(
-                  rendererState.detectionBuffer.requestedStartTime,
-                  rendererState.detectionBuffer.requestedEndTime,
+                  requestedSourceRange.startTime,
+                  requestedSourceRange.endTime,
                 )
               : "-"
           }
@@ -219,12 +273,10 @@ export const StatusPanel = memo(function StatusPanel({
         <Readout
           label="Prepared Window"
           value={
-            preparedWindowArtifact
+            preparedWindow
               ? `${formatInteger(
-                  preparedWindowArtifact.preparedAheadFrameCount ?? 0,
-                )} frames | ${formatExactTime(
-                  preparedWindowArtifact.preparedAheadSeconds ?? 0,
-                )}`
+                  preparedWindow.cookedFrameCount,
+                )} frames | ${formatExactTime(preparedWindow.cookedSeconds)}`
               : "-"
           }
         />
@@ -266,6 +318,24 @@ export const StatusPanel = memo(function StatusPanel({
           label="Active Frame"
           value={preparedWindowArtifact?.activeFrame?.status ?? "-"}
         />
+        <Readout
+          label="Mask Readiness"
+          tone={preparedWindowArtifact?.gateHold ? "danger" : "default"}
+          value={formatPreparationGateLead(preparedWindowArtifact)}
+        />
+        <Readout
+          label="Mask Wait"
+          tone={
+            rendererState?.renderPreparationGateAbandoned ? "danger" : "default"
+          }
+          value={
+            rendererState
+              ? rendererState.renderPreparationGateAbandoned
+                ? "gave up | playback continuing"
+                : "clear"
+              : "-"
+          }
+        />
         {renderPreparationDiagnostics?.message ? (
           <Readout
             label="Message"
@@ -283,6 +353,19 @@ export const StatusPanel = memo(function StatusPanel({
 
       <StatusGroup title="Session">
         <Readout label="State" value={sessionState?.status ?? "-"} />
+        <Readout
+          label="Current Blocker"
+          tone={blockingActivity ? "danger" : "default"}
+          value={
+            sessionState
+              ? blockingActivity
+                ? [blockingActivity.label, blockingActivity.detail]
+                    .filter(Boolean)
+                    .join(" | ")
+                : "none"
+              : "-"
+          }
+        />
         <Readout
           label="Activities"
           value={
@@ -328,10 +411,21 @@ export const StatusPanel = memo(function StatusPanel({
         />
         <Readout label="Media" value={mediaState.status} />
         <Readout
+          label="Source Read"
+          tone={rendererState?.source.awaitingRead ? "danger" : "default"}
+          value={
+            rendererState
+              ? rendererState.source.awaitingRead
+                ? "waiting for bytes or decode"
+                : "idle"
+              : "-"
+          }
+        />
+        <Readout
           label="Inference"
           value={formatInferenceSummary(fixtureSummary)}
         />
-        <Readout label="Audio" value="video-only source" />
+        <Readout label="Audio" value={formatAudioSummary(sourceState)} />
       </StatusGroup>
 
       {hasErrors ? (
@@ -414,8 +508,7 @@ function InteractionStatusGroup({
   const activePick = selectedDetectionPick ?? hoveredDetectionPick;
 
   return (
-    <StatusGroup title="Selection">
-      <Readout label="Mode" value="paused-only" />
+    <StatusGroup title={`Selection (${DEMO_INTERACTION_MODE})`}>
       <Readout
         label="State"
         value={
@@ -486,6 +579,84 @@ function formatInferenceSummary(fixtureSummary: DemoFixtureSummary | null) {
   return `${fixtureSummary.inferenceLabel} ${formatInteger(
     fixtureSummary.inferenceFrameRate,
   )} fps${maskInfo}`;
+}
+
+/**
+ * Which detection frame the mask raster on screen belongs to, against the frame
+ * the boxes over it were drawn from. A frame whose raster is not ready draws no
+ * mask, so the two naming different frames is a mask over the wrong picture,
+ * stated in seconds.
+ */
+function formatMaskFrame(rendererState: MediaRendererState | null) {
+  if (!rendererState) {
+    return "-";
+  }
+
+  const drawnMaskFrameTime = rendererState.drawnMaskFrameTime ?? null;
+
+  if (drawnMaskFrameTime === null) {
+    return "none";
+  }
+
+  const drawn = formatExactTime(drawnMaskFrameTime);
+
+  if (!rendererState.maskHeldStale) {
+    return drawn;
+  }
+
+  const detectionFrameTime = rendererState.activeDetectionFrameTime;
+
+  if (detectionFrameTime === null) {
+    return `${drawn} | stale`;
+  }
+
+  // Scrubbing backwards, the raster left up belongs to a frame the playhead has
+  // already passed, so it sits later in media time than the frame under it.
+  const offsetMs = (detectionFrameTime - drawnMaskFrameTime) * 1000;
+  const side = offsetMs < 0 ? "ahead" : "behind";
+
+  return `${drawn} | stale | ${formatMilliseconds(Math.abs(offsetMs))} ${side}`;
+}
+
+function formatNavigationState(rendererState: MediaRendererState | null) {
+  if (!rendererState) {
+    return "-";
+  }
+
+  if (rendererState.scrubbing) {
+    return rendererState.seeking ? "scrubbing | seeking" : "scrubbing";
+  }
+
+  return rendererState.seeking ? "seeking" : "settled";
+}
+
+function formatPreparationGateLead(
+  artifact: ReturnType<typeof selectPreparedWindowArtifact>,
+) {
+  if (!artifact) {
+    return "-";
+  }
+
+  const prepared = formatExactTime(artifact.preparedAheadSeconds ?? 0);
+  const required = artifact.gateHold?.requiredAheadSeconds;
+
+  return required === undefined
+    ? `${prepared} ready | clear`
+    : `${prepared} ready | ${formatExactTime(required)} needed`;
+}
+
+function formatAudioSummary(sourceState: MediaSourceState | null) {
+  const audioTrackCount = sourceState?.audioTrackCount ?? null;
+
+  if (audioTrackCount === null) {
+    return "-";
+  }
+
+  return audioTrackCount === 0
+    ? "video-only source"
+    : `${formatInteger(audioTrackCount)} audio ${
+        audioTrackCount === 1 ? "track" : "tracks"
+      }`;
 }
 
 function formatPickTarget(pick: DetectionPickResult | null) {

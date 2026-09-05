@@ -170,6 +170,7 @@ export function createReactNativeLiveIdMaskArtifactWithNativeBuilder(
     nativeFillMs: result.fillMs,
     opacity: result.opacity,
     scale: result.scale,
+    sourceWidth: result.width,
     strokePalette: new Float32Array(result.strokePalette),
     strokeWidths: new Float32Array(result.strokeWidths),
     width: result.width,

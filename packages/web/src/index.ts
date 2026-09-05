@@ -76,6 +76,16 @@ export type {
   DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
+export type {
+  PresentedFrameChannel,
+  PresentedFrameChannelSignal,
+  PresentedFrameChannelStatus,
+  PresentedFrameId,
+  PresentedFramePlayhead,
+  PresentedFrameSeekIntent,
+  PresentedFrameSource,
+  PresentedVideoFrame,
+} from "#renderers/presented-frame-channel";
 export {
   createImageUrlMediaSource,
   createStaticImageMediaSource,
@@ -93,10 +103,24 @@ export {
   isMediaSourceError,
   toMediaSourceError,
 } from "#media/media-errors";
+export {
+  createWebVideoEngineMediaRendererSource,
+  openWebVideoEngineMediaSource,
+  type WebVideoEngineMediaSource,
+  type WebVideoEngineMediaSourceOptions,
+} from "#media/video-engine-media-source";
 
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
+export type {
+  PreparedAnnotationWindowFrame,
+  PreparedAnnotationWindowSnapshot,
+} from "#renderers/prepared-annotation-window";
 export { createMediaSession } from "#sessions/media-session";
+export {
+  resolveMediaSessionDefaults,
+  type ResolvedMediaSessionDefaults,
+} from "#sessions/media-session-defaults";
 export type {
   MediaFrameCapture,
   MediaFrameCaptureOptions,
@@ -352,6 +376,7 @@ export {
   type MediaNormalizationOutputProgress,
   type MediaNormalizationProgress,
   type MediaNormalizationVideoOptions,
+  DEFAULT_NORMALIZATION_FRAME_RATE,
   type MediaProbeIssue,
   type MediaProbeOptions,
   type MediaProbeResult,
@@ -365,6 +390,7 @@ export {
   type MediaSession,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMediaBranch,
   MediaSessionMode,
   MediaSessionStatus,
   type MediaSessionActivity,
@@ -375,6 +401,7 @@ export {
   type MediaSessionDetectionSyncOptions,
   type MediaSessionDetectionWriteOptions,
   type MediaSessionMedia,
+  type MediaSessionMediaPreparation,
   type MediaSessionMediaState,
   type MediaSessionNormalizationState,
   type MediaSessionNormalizationOptions,
@@ -385,7 +412,7 @@ export {
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
-export { MediaErrorKind } from "supervision-js-core";
+export { MediaErrorKind, PlaybackGateReach } from "supervision-js-core";
 export {
   DetectionTimelineOrigin,
   MediaRendererFit,

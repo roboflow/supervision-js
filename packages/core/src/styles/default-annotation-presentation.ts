@@ -26,6 +26,8 @@ const DEFAULT_KEYPOINT_EDGE_WIDTH = 1.5;
 const DEFAULT_KEYPOINT_SHADOW_WIDTH = 3;
 const DEFAULT_KEYPOINT_SHADOW_ALPHA = 0.25;
 const DEFAULT_KEYPOINT_RADIUS = 3.5;
+const DEFAULT_POLYLINE_SHADOW_WIDTH = DEFAULT_OUTLINE_WIDTH + 1;
+const DEFAULT_POLYLINE_SHADOW_ALPHA = 0.55;
 const DEFAULT_LABEL_CORNER_RADIUS = 4;
 const DEFAULT_LABEL_PADDING_X = 6;
 const DEFAULT_LABEL_PADDING_Y = 3;
@@ -276,6 +278,11 @@ export function createDefaultPolylineStyle(
   const getClassColor = createClassColorResolver(options);
 
   return new BasePolylineStyle({
+    shadowStroke: {
+      alpha: DEFAULT_POLYLINE_SHADOW_ALPHA,
+      color: 0x000000,
+      width: DEFAULT_POLYLINE_SHADOW_WIDTH,
+    },
     stroke: (detection) => ({
       alpha: 1,
       color: getClassColor(detection),

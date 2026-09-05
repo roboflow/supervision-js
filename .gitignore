@@ -24,6 +24,11 @@ __pycache__/
 tools/sam3-fixture/output/
 tools/geometry-fixture/output/
 
+# Build intermediates the demo never reads; npm run fixture:sam3:restore
+# rebuilds them from the committed raw-sam3.jsonl captures
+demo/fixtures/basketball_sam3/detections.json
+demo/fixtures/horse_trail/detections.json
+
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
@@ -33,3 +38,9 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+
+# Written by an eval run. A baseline is one machine's numbers, so it stays local.
+tools/demo-eval/report.json
+tools/demo-eval/baseline.json
+

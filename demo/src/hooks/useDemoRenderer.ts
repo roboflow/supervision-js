@@ -3,7 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
-  type RefObject,
+  type RefCallback,
 } from "react";
 import {
   MediaRendererPlaybackState,
@@ -13,14 +13,36 @@ import {
   type MediaRendererState,
   type MediaSessionState,
   type MediaRendererPresentation,
+  type MediaRendererSource,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
+import type { FrameTimelineData } from "supervision/web-video-engine";
+import {
+  createEngineDiagnosticsTap,
+  type EngineDiagnosticsTap,
+} from "../diagnostics/engine-diagnostics-tap";
+import {
+  createPresentedFrameTap,
+  presentedRateWindowMs,
+  type PresentedFrameTap,
+} from "../diagnostics/presented-frame-tap";
+import {
+  samplePresentationDiagnostics,
+  type PresentationDiagnosticsSample,
+} from "../diagnostics/presentation-diagnostics";
 import type {
-  DemoFixtureFrameTransform,
   DemoFixtureDetectionSourceTransform,
+  DemoFixtureFrameTransform,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
+import type { PipelineDescriptor } from "../pipeline/pipeline-descriptor";
+import { createPipelineRecorder } from "../pipeline/pipeline-recorder";
+import {
+  clearLiveReadouts,
+  publishLiveRenderPreparation,
+  publishLiveRendererState,
+} from "./live-readouts";
 import {
   demoFixtures,
   defaultDemoFixture,
@@ -31,9 +53,12 @@ import {
   constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
+  demoPresentationDrawsAnnotations,
   type DemoPresentationAvailability,
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
+import { defaultPlaybackRate } from "../session/playback-rate";
+import { tapFrameTimeline } from "../session/frame-timeline-source";
 import { createFixtureSession } from "../session/fixture-session";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
@@ -51,20 +76,45 @@ import {
   createUploadSession,
   type UploadRunRequest,
 } from "../session/upload-session";
+import {
+  type DemoSessionConfiguration,
+  type DemoSessionOptions,
+} from "../session/session-options";
+import { demoInitialSessionOptions } from "../session/workbench-defaults";
 
 export { DemoSourceMode };
 export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
 
 export interface DemoRendererState {
   readonly canUseRenderer: boolean;
+  readonly sessionConfiguration: DemoSessionConfiguration | null;
+  readonly sessionOptions: DemoSessionOptions;
+  readonly setSessionOptions: (options: DemoSessionOptions) => void;
   readonly detectionSourceState: DemoDetectionSourceState;
-  readonly containerRef: RefObject<HTMLDivElement | null>;
+  readonly containerRef: RefCallback<HTMLDivElement>;
   readonly duration: number | null;
   readonly errorMessage: string | null;
   readonly fixtureSummary: DemoFixtureSummary | null;
+  /**
+   * Every real frame of the open source, in presentation order, by the
+   * container's own timestamps. Null until a source opens, and again once it
+   * closes: a surface holding no table may show a position but never a frame.
+   */
+  readonly frameTimeline: FrameTimelineData | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
+  readonly playbackRate: number;
   readonly playbackState: MediaRendererPlaybackState | null;
+  /** Media seconds the picture covered per wall second, as measured. */
+  readonly presentedRate: number | null;
+  /** The engine's own diagnostics broadcast, for the parity surface. */
+  readonly engineDiagnosticsTap: EngineDiagnosticsTap;
+  /**
+   * The path this session actually took, stamped as it opened. Null until a
+   * session finishes opening, and frozen from then until the next one.
+   */
+  readonly pipelineDescriptor: PipelineDescriptor | null;
+  readonly readPresentationDiagnostics: () => PresentationDiagnosticsSample;
   readonly presentationSettings: DemoPresentationSettings;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly renderQuality: DemoRenderQuality;
@@ -83,19 +133,22 @@ export interface DemoRendererState {
   readonly uploadInferenceState: UploadInferenceState;
   readonly getCurrentTime: () => number;
   readonly onCancelUploadInference: () => void;
+  readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => Promise<void>;
   readonly onStartUploadInference: () => void;
-  readonly onStepFrame: (frameDelta: number) => void;
-  readonly onTogglePlayback: () => Promise<void>;
+  readonly onSetPlaybackRate: (rate: number) => void;
+  readonly onStepFrame: (direction: 1 | -1) => void;
+  readonly onTogglePlayback: () => void;
   readonly onUploadFileChange: (file: File | null) => void;
   readonly onClearSelectedDetection: () => void;
-  readonly pausePlayback: () => void;
-  readonly playPlayback: () => Promise<void>;
   readonly setPresentationSettings: (
     settings: DemoPresentationSettings,
   ) => void;
-  readonly refreshPresentation: () => void;
+  readonly pausePlayback: () => void;
+  readonly playPlayback: () => Promise<void>;
   readonly refreshDetections: () => Promise<void>;
+  readonly refreshPresentation: () => void;
+  readonly reopenSession: () => void;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
@@ -104,10 +157,10 @@ export interface DemoRendererState {
 }
 
 export interface UseDemoRendererOptions {
+  /** Optional docs/demo-only wrap over the fixture's detection source. */
+  readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   /** Optional docs/demo-only transformation over loaded fixture frames. */
   readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
-  /** Optional docs/demo-only source wrapper, such as a post-processor view. */
-  readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   /**
    * Lets focused demo experiences start on a known fixture without first
    * constructing another media session.
@@ -134,12 +187,11 @@ const initialUploadInferenceState: UploadInferenceState = {
   completedFrames: 0,
   errorMessage: null,
   inferredDetections: 0,
-  normalizedRanges: [],
   preparedMedia: null,
   processedRanges: [],
   processingRanges: [],
   status: "idle",
-  statusLabel: "choose media, API key, and prompts",
+  statusLabel: "Choose a file, an API key, and prompts",
   totalFrames: 0,
 };
 
@@ -149,10 +201,10 @@ export function useDemoRenderer(
   const [initialFixture] = useState(() =>
     resolveDemoFixture(options.initialFixtureId),
   );
-  const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
   const [fixtureDetectionSourceTransform] = useState(
     () => options.fixtureDetectionSourceTransform,
   );
+  const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
   const [presentationTransform] = useState(() => options.presentationTransform);
   const [initialPresentationSettings] = useState(() =>
     constrainDemoPresentationSettings(
@@ -164,20 +216,70 @@ export function useDemoRenderer(
       initialFixture.presentationAvailability,
     ),
   );
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [presentedFrameTap] = useState<PresentedFrameTap>(() =>
+    createPresentedFrameTap(),
+  );
+  const [engineDiagnosticsTap] = useState<EngineDiagnosticsTap>(() =>
+    createEngineDiagnosticsTap(),
+  );
+  if (import.meta.env.DEV) {
+    (
+      globalThis as { __demoEngineDiagnostics?: EngineDiagnosticsTap }
+    ).__demoEngineDiagnostics = engineDiagnosticsTap;
+  }
+  const [frameTimeline, setFrameTimeline] = useState<FrameTimelineData | null>(
+    null,
+  );
+  const tapMediaSource = useCallback(
+    (source: MediaRendererSource) =>
+      tapFrameTimeline(
+        engineDiagnosticsTap.tap(presentedFrameTap.tap(source)),
+        setFrameTimeline,
+      ),
+    [engineDiagnosticsTap, presentedFrameTap],
+  );
+  /**
+   * Never returns to false: the session effect tears the session down whenever
+   * it re-runs, and a view-mode switch only takes the viewport off screen.
+   */
+  const [stageAttached, setStageAttached] = useState(false);
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  const [stage] = useState(() =>
+    createDemoStage(document.createElement("div"), () => {
+      setStageAttached(true);
+      // Nothing draws a paused stage: no frame is coming, and putting the
+      // canvas back on the page is not a change the scene renders on.
+      refreshPresentation();
+    }),
+  );
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
   const sessionRef = useRef<MediaSession | null>(null);
   const seekRunRef = useRef(0);
+  const rateChangedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
+  /** Where the reopen an option change forces should resume, when it can. */
+  const restoreTimeRef = useRef<number | null>(null);
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
     initialPresentationSettings,
+  );
+  /** The presentation on screen: the settings above plus composed renderers. */
+  const presentationRef = useRef<MediaRendererPresentation | null>(null);
+  const applyPresentation = useCallback(
+    (settings: DemoPresentationSettings) => {
+      const base = createDemoPresentation(settings);
+      const presentation = presentationTransform?.(base) ?? base;
+      presentationRef.current = presentation;
+      return presentation;
+    },
+    [presentationTransform],
   );
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
   );
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
+  const [presentedRate, setPresentedRate] = useState<number | null>(null);
   const [renderPreparationDiagnostics, setRenderPreparationDiagnostics] =
     useState<RenderPreparationDiagnostics | null>(null);
   const [sessionState, setSessionState] = useState<MediaSessionState | null>(
@@ -217,6 +319,13 @@ export function useDemoRenderer(
   const [uploadRun, setUploadRun] = useState<
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
+  const [sessionOptions, setSessionOptionsState] = useState<DemoSessionOptions>(
+    demoInitialSessionOptions,
+  );
+  const [sessionConfiguration, setSessionConfiguration] =
+    useState<DemoSessionConfiguration | null>(null);
+  const [pipelineDescriptor, setPipelineDescriptor] =
+    useState<PipelineDescriptor | null>(null);
   const activeFixture = resolveDemoFixture(sampleFixtureId);
 
   const syncRendererState = useCallback((renderer: MediaRenderer) => {
@@ -227,17 +336,19 @@ export function useDemoRenderer(
   }, []);
 
   useEffect(() => {
-    const container = containerRef.current;
-
-    if (!container) {
+    if (!stageAttached) {
       return;
     }
 
+    const container = stage.host;
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
+    const pipeline = createPipelineRecorder({ epoch: runId });
+    const tapSessionMediaSource = (source: MediaRendererSource) =>
+      pipeline.tap(tapMediaSource(source));
     let activeSession: MediaSession | undefined;
     let renderer: MediaRenderer | undefined;
-    let lastReadoutAt = 0;
+    let openedSessionConfiguration: DemoSessionConfiguration | null = null;
     let lastPlaybackState: MediaRendererPlaybackState | null = null;
     let lastPublishedPlaybackState: MediaRendererPlaybackState | null = null;
     let cleanedUp = false;
@@ -245,42 +356,82 @@ export function useDemoRenderer(
       sourceMode === DemoSourceMode.Upload ? new AbortController() : undefined;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
     const renderPreparationPublisher = createThrottledPublisher(
-      setRenderPreparationDiagnostics,
+      (diagnostics: RenderPreparationDiagnostics) => {
+        setRenderPreparationDiagnostics(diagnostics);
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __demoRenderPrep?: RenderPreparationDiagnostics }
+          ).__demoRenderPrep = diagnostics;
+        }
+      },
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
+    const publishRenderPreparation = (
+      diagnostics: RenderPreparationDiagnostics,
+    ) => {
+      if (!isActive()) {
+        return;
+      }
+
+      publishLiveRenderPreparation(diagnostics);
+      renderPreparationPublisher.publish(diagnostics);
+    };
     const sessionStatePublisher = createThrottledPublisher(
-      setSessionState,
+      (state: MediaSessionState) => {
+        setSessionState(state);
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __demoSessionState?: MediaSessionState }
+          ).__demoSessionState = state;
+        }
+      },
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
+    // A window straddling a rate change measures neither rate, and the blend
+    // reads as a shortfall the picture is not actually in.
+    const readSettledPresentedRate = () =>
+      performance.now() - rateChangedAtRef.current >= presentedRateWindowMs
+        ? presentedFrameTap.readRate()
+        : null;
+    const rendererStatePublisher = createThrottledPublisher<MediaRendererState>(
+      (state) => {
+        setRendererState(state);
+        setSourceState(state.source);
+        setPresentedRate(readSettledPresentedRate());
+      },
+      isActive,
+      RENDERER_READOUT_INTERVAL_MS,
+    );
+    // Every emission must eventually reach React: a paused step or seek emits
+    // exactly once, and a leading-edge-only throttle that drops it leaves the
+    // readouts describing the previous frame until the next emission, which
+    // while paused never comes.
     const publishRendererState = (
       state: MediaRendererState,
       options: { readonly force?: boolean } = {},
     ) => {
-      const now = performance.now();
-      const playbackStateChanged =
-        state.playbackState !== lastPublishedPlaybackState;
-
-      if (
-        !isActive() ||
-        (!options.force &&
-          !playbackStateChanged &&
-          now - lastReadoutAt < RENDERER_READOUT_INTERVAL_MS)
-      ) {
+      if (!isActive()) {
         return;
       }
 
-      lastReadoutAt = now;
+      publishLiveRendererState(state, readSettledPresentedRate());
+
+      const playbackStateChanged =
+        state.playbackState !== lastPublishedPlaybackState;
+
       lastPublishedPlaybackState = state.playbackState;
-      setRendererState(state);
-      setSourceState(state.source);
+
+      if (options.force || playbackStateChanged) {
+        rendererStatePublisher.publishNow(state);
+        return;
+      }
+
+      rendererStatePublisher.publish(state);
     };
     const onFrame = () => {
-      if (
-        !renderer ||
-        performance.now() - lastReadoutAt < RENDERER_READOUT_INTERVAL_MS
-      ) {
+      if (!renderer) {
         return;
       }
 
@@ -313,14 +464,23 @@ export function useDemoRenderer(
 
     resetRendererView(container, sourceMode);
 
+    const presentation = applyPresentation(presentationSettingsRef.current);
+    const readPresentation = () => presentationRef.current ?? presentation;
+    const onSessionConfiguration = (
+      configuration: DemoSessionConfiguration,
+    ) => {
+      openedSessionConfiguration = configuration;
+      setSessionConfiguration(configuration);
+    };
+
     void (async () => {
       try {
         if (sourceMode === DemoSourceMode.Fixture) {
           const session = await createFixtureSession({
             container,
             definition: activeFixture,
-            fixtureFrameTransform,
             fixtureDetectionSourceTransform,
+            fixtureFrameTransform,
             isActive,
             onDetectionHover: setHoveredDetectionPick,
             onDetectionSelect: setSelectedDetectionPick,
@@ -328,13 +488,17 @@ export function useDemoRenderer(
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
-            onRenderPreparationDiagnostics: renderPreparationPublisher.publish,
+            onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
+            onSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
-            presentationSettings: presentationSettingsRef.current,
-            presentationTransform,
+            presentation,
+            readPresentation,
             renderQuality,
+            pipeline,
+            sessionOptions,
+            tapMediaSource: tapSessionMediaSource,
           });
 
           activeSession = session;
@@ -350,13 +514,17 @@ export function useDemoRenderer(
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
-            onRenderPreparationDiagnostics: renderPreparationPublisher.publish,
+            onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
+            onSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
-            presentationSettings: presentationSettingsRef.current,
+            presentation,
+            pipeline,
             renderQuality,
+            sessionOptions,
+            tapMediaSource: tapSessionMediaSource,
             uploadRun,
           });
 
@@ -375,12 +543,32 @@ export function useDemoRenderer(
 
         sessionRef.current = activeSession ?? null;
         rendererRef.current = renderer;
+        if (import.meta.env.DEV) {
+          (globalThis as { __demoRenderer?: MediaRenderer }).__demoRenderer =
+            renderer;
+        }
         syncRendererState(renderer);
-        await playRenderer(
+        // Every stamp has landed by now and none of them moves again, so the
+        // diagram is built once and never re-rendered while the picture plays.
+        const descriptor = pipeline.seal({
+          configuration: openedSessionConfiguration,
+          media: activeSession?.media ?? null,
+          rendererState: renderer.getState(),
+        });
+
+        setPipelineDescriptor(descriptor);
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __demoPipeline?: PipelineDescriptor }
+          ).__demoPipeline = descriptor;
+        }
+        await restorePlayhead(renderer, restoreTimeRef);
+        await runPlaybackRequest(
+          renderer.play(),
           renderer,
           isActive,
-          setErrorMessage,
           syncRendererState,
+          setErrorMessage,
         );
       } catch (error: unknown) {
         if (isActive()) {
@@ -391,8 +579,11 @@ export function useDemoRenderer(
 
     return () => {
       cleanedUp = true;
+      pipeline.close();
+      clearLiveReadouts();
       renderPreparationPublisher.cancel();
       sessionStatePublisher.cancel();
+      rendererStatePublisher.cancel();
       abortController?.abort();
       rendererRef.current = null;
       sessionRef.current = null;
@@ -404,15 +595,21 @@ export function useDemoRenderer(
     };
   }, [
     activeFixture,
-    fixtureFrameTransform,
+    applyPresentation,
     fixtureDetectionSourceTransform,
-    presentationTransform,
+    fixtureFrameTransform,
+    sessionEpoch,
+    sessionOptions,
     sourceMode,
+    stage,
+    stageAttached,
+    tapMediaSource,
     syncRendererState,
     uploadRun,
   ]);
 
   const playbackState = rendererState?.playbackState ?? null;
+  const playbackRate = rendererState?.playbackRate ?? defaultPlaybackRate;
   const duration = rendererState?.duration ?? fixtureSummary?.duration ?? null;
   const canUseRenderer =
     !!rendererRef.current &&
@@ -423,59 +620,53 @@ export function useDemoRenderer(
     uploadInferenceState.status === "preparing" ||
     uploadInferenceState.status === "running";
 
-  const getCurrentTime = useCallback(
-    () => rendererRef.current?.getState().currentTime ?? 0,
-    [],
-  );
-
-  const pausePlayback = useCallback(() => {
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    renderer.pause();
-    syncRendererState(renderer);
-  }, [syncRendererState]);
-
-  const playPlayback = useCallback(async () => {
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    const playbackState = renderer.getState().playbackState;
-    if (
-      playbackState === MediaRendererPlaybackState.Playing ||
-      playbackState === MediaRendererPlaybackState.Buffering
-    ) {
-      return;
-    }
-
-    try {
-      await renderer.play();
-    } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Unable to start media playback."),
-      );
-    } finally {
-      syncRendererState(renderer);
-    }
-  }, [syncRendererState]);
-
-  const onTogglePlayback = useCallback(async () => {
+  const onTogglePlayback = useCallback(() => {
     const renderer = rendererRef.current;
 
     if (!renderer) {
       return;
     }
 
-    const playbackState = renderer.getState().playbackState;
+    void runPlaybackRequest(
+      renderer.togglePlayback(),
+      renderer,
+      () => rendererRef.current === renderer,
+      syncRendererState,
+      setErrorMessage,
+    );
+  }, [syncRendererState]);
 
-    if (
-      playbackState === MediaRendererPlaybackState.Playing ||
-      playbackState === MediaRendererPlaybackState.Buffering
-    ) {
-      pausePlayback();
+  const getCurrentTime = useCallback(
+    () => rendererRef.current?.getState().currentTime ?? 0,
+    [],
+  );
+
+  const playPlayback = useCallback(async () => {
+    const renderer = rendererRef.current;
+
+    if (!renderer) {
       return;
     }
 
-    await playPlayback();
-  }, [pausePlayback, playPlayback]);
+    await runPlaybackRequest(
+      renderer.play(),
+      renderer,
+      () => rendererRef.current === renderer,
+      syncRendererState,
+      setErrorMessage,
+    );
+  }, [syncRendererState]);
+
+  const pausePlayback = useCallback(() => {
+    const renderer = rendererRef.current;
+
+    if (!renderer) {
+      return;
+    }
+
+    renderer.pause();
+    syncRendererState(renderer);
+  }, [syncRendererState]);
 
   const onSeek = useCallback(
     async (time: number) => {
@@ -489,6 +680,7 @@ export function useDemoRenderer(
       seekRunRef.current = seekRunId;
       setHoveredDetectionPick(null);
       setSelectedDetectionPick(null);
+
       try {
         await renderer.seek(time);
       } catch (error: unknown) {
@@ -504,31 +696,56 @@ export function useDemoRenderer(
     [syncRendererState],
   );
 
+  const onScrub = useCallback((time: number) => {
+    rendererRef.current?.scrub(time);
+  }, []);
+
+  const onSetPlaybackRate = useCallback(
+    (rate: number) => {
+      const renderer = rendererRef.current;
+
+      if (!renderer || renderer.getState().playbackRate === rate) {
+        return;
+      }
+
+      renderer.setPlaybackRate(rate);
+      rateChangedAtRef.current = performance.now();
+      setPresentedRate(null);
+      syncRendererState(renderer);
+    },
+    [syncRendererState],
+  );
+
+  const readPresentationDiagnostics = useCallback(
+    () =>
+      samplePresentationDiagnostics({
+        renderer: rendererRef.current,
+        tap: presentedFrameTap,
+      }),
+    [presentedFrameTap],
+  );
+
   const onStepFrame = useCallback(
-    (frameDelta: number) => {
+    (direction: 1 | -1) => {
       const renderer = rendererRef.current;
 
       if (!renderer) {
         return;
       }
 
-      const state = renderer.getState();
-      const frameRate = fixtureSummary?.inferenceFrameRate ?? 30;
-      const currentFrameIndex =
-        state.activeDetectionFrameIndex ??
-        Math.round(Math.max(0, state.currentTime) * frameRate);
-      const duration = state.duration ?? fixtureSummary?.duration ?? null;
-      const targetTime = Math.max(
-        0,
-        Math.min(
-          (currentFrameIndex + frameDelta) / frameRate,
-          duration ?? Number.POSITIVE_INFINITY,
-        ),
-      );
+      setHoveredDetectionPick(null);
+      setSelectedDetectionPick(null);
+      const stepped =
+        direction === 1 ? renderer.stepForward() : renderer.stepBackward();
 
-      onSeek(targetTime);
+      void stepped
+        .then(() => syncRendererState(renderer))
+        .catch((error: unknown) => {
+          setErrorMessage(getErrorMessage(error, "Unable to step media."));
+          syncRendererState(renderer);
+        });
     },
-    [fixtureSummary, onSeek],
+    [syncRendererState],
   );
 
   const onClearSelectedDetection = useCallback(() => {
@@ -553,6 +770,11 @@ export function useDemoRenderer(
           : undefined,
       );
 
+      const drewAnnotations = Boolean(
+        presentationRef.current &&
+        demoPresentationDrawsAnnotations(presentationRef.current),
+      );
+
       presentationSettingsRef.current = constrainedSettings;
       setPresentationSettingsState(constrainedSettings);
 
@@ -561,35 +783,33 @@ export function useDemoRenderer(
         return;
       }
 
-      const presentation = createDemoPresentation(constrainedSettings);
-      renderer.setPresentation(
-        presentationTransform?.(presentation) ?? presentation,
-      );
+      const presentation = applyPresentation(constrainedSettings);
+      renderer.setPresentation(presentation);
+
+      // Detections stop loading while no layer draws them, and a paused
+      // playhead never asks again on its own, so the first layer switched back
+      // on would otherwise annotate nothing until playback resumed.
+      if (!drewAnnotations && demoPresentationDrawsAnnotations(presentation)) {
+        void renderer.refresh();
+      }
+
       syncRendererState(renderer);
     },
     [
       activeFixture.presentationAvailability,
-      presentationTransform,
+      applyPresentation,
       sourceMode,
       syncRendererState,
     ],
   );
 
-  const refreshPresentation = useCallback(() => {
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    const presentation = createDemoPresentation(
-      presentationSettingsRef.current,
-    );
-    renderer.setPresentation(
-      presentationTransform?.(presentation) ?? presentation,
-    );
-    syncRendererState(renderer);
-  }, [presentationTransform, syncRendererState]);
-
   const refreshDetections = useCallback(async () => {
     const session = sessionRef.current;
-    if (!session) return;
+
+    if (!session) {
+      return;
+    }
+
     try {
       await session.refresh();
     } catch (error: unknown) {
@@ -598,6 +818,19 @@ export function useDemoRenderer(
       syncRendererState(session.renderer);
     }
   }, [syncRendererState]);
+
+  const reopenSession = useCallback(() => {
+    setSessionEpoch((current) => current + 1);
+  }, []);
+
+  const refreshPresentation = useCallback(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.setPresentation(
+      applyPresentation(presentationSettingsRef.current),
+    );
+    syncRendererState(renderer);
+  }, [applyPresentation, syncRendererState]);
 
   const setRenderQualityLive = useCallback(
     (quality: DemoRenderQuality) => {
@@ -616,7 +849,16 @@ export function useDemoRenderer(
     [syncRendererState],
   );
 
+  const setSessionOptions = useCallback((options: DemoSessionOptions) => {
+    restoreTimeRef.current = keepsPlayhead(options)
+      ? readRestorableTime(rendererRef.current)
+      : null;
+    setSessionOptionsState(options);
+  }, []);
+
   const setSourceMode = useCallback((mode: DemoSourceMode) => {
+    restoreTimeRef.current = null;
+
     if (mode === DemoSourceMode.Fixture) {
       uploadAbortRef.current?.abort();
       setUploadRun(null);
@@ -627,12 +869,11 @@ export function useDemoRenderer(
   }, []);
 
   const setSampleFixtureId = useCallback((sampleName: string) => {
+    restoreTimeRef.current = null;
     uploadAbortRef.current?.abort();
     setUploadRun(null);
     setUploadInferenceState(initialUploadInferenceState);
-    const fixture =
-      demoFixtures.find((candidate) => candidate.sampleName === sampleName) ??
-      defaultDemoFixture;
+    const fixture = resolveDemoFixture(sampleName);
     const nextPresentationSettings = constrainDemoPresentationSettings(
       {
         ...defaultDemoPresentationSettings,
@@ -681,7 +922,7 @@ export function useDemoRenderer(
     setUploadInferenceState({
       ...initialUploadInferenceState,
       status: "preparing",
-      statusLabel: "preparing uploaded media",
+      statusLabel: "Opening media",
     });
     setUploadRun({
       apiKey: trimmedApiKey,
@@ -696,7 +937,7 @@ export function useDemoRenderer(
     setUploadInferenceState((current) => ({
       ...current,
       status: "idle",
-      statusLabel: "upload inference canceled",
+      statusLabel: "Model run canceled",
     }));
   }, []);
 
@@ -705,18 +946,21 @@ export function useDemoRenderer(
     nextSourceMode: DemoSourceMode,
   ) {
     container.replaceChildren();
+    presentedFrameTap.reset();
     rendererRef.current = null;
     setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
     setFixtureSummary(null);
+    setFrameTimeline(null);
     setHoveredDetectionPick(null);
     setMediaState({
       errorMessage: null,
       status:
         nextSourceMode === DemoSourceMode.Fixture
           ? activeFixture.mediaLoadingStatusLabel
-          : "waiting for upload inference",
+          : "Nothing loaded yet",
     });
+    setPresentedRate(null);
     setRendererState(null);
     setRenderPreparationDiagnostics(null);
     setSelectedDetectionPick(null);
@@ -752,27 +996,36 @@ export function useDemoRenderer(
 
   return {
     canUseRenderer,
-    containerRef,
+    containerRef: stage.attach,
     detectionSourceState,
     duration,
     errorMessage,
     fixtureSummary,
-    getCurrentTime,
+    frameTimeline,
     hoveredDetectionPick,
     mediaState,
     onCancelUploadInference,
     onClearSelectedDetection,
+    onScrub,
     onSeek,
+    onSetPlaybackRate,
     onStartUploadInference,
     onStepFrame,
     onTogglePlayback,
     onUploadFileChange,
-    pausePlayback,
+    playbackRate,
     playbackState,
-    playPlayback,
     presentationSettings,
-    refreshPresentation,
+    engineDiagnosticsTap,
+    pipelineDescriptor,
+    presentedRate,
+    readPresentationDiagnostics,
+    getCurrentTime,
+    pausePlayback,
+    playPlayback,
     refreshDetections,
+    refreshPresentation,
+    reopenSession,
     presentationAvailability:
       sourceMode === DemoSourceMode.Fixture
         ? activeFixture.presentationAvailability
@@ -783,9 +1036,12 @@ export function useDemoRenderer(
     sampleFixtureId,
     sampleFixtures: demoFixtures,
     selectedDetectionPick,
+    sessionConfiguration,
+    sessionOptions,
     setSampleFixtureId,
     setPresentationSettings,
     setRenderQuality: setRenderQualityLive,
+    setSessionOptions,
     setSourceMode,
     setUploadApiKey,
     setUploadClassNames,
@@ -797,6 +1053,25 @@ export function useDemoRenderer(
     uploadClassNames,
     uploadFileName,
     uploadInferenceState,
+  };
+}
+
+/**
+ * The element the media session draws into. A view-mode switch unmounts the
+ * viewport, and the session, its warm decoder and any inference run in flight
+ * stay bound to this element, which moves to whichever mount is on screen.
+ */
+export function createDemoStage(host: HTMLDivElement, onAttached: () => void) {
+  host.style.height = "100%";
+  host.style.width = "100%";
+
+  return {
+    host,
+    attach(mount: HTMLDivElement | null) {
+      mount?.appendChild(host);
+      onAttached();
+      return () => host.remove();
+    },
   };
 }
 
@@ -856,27 +1131,65 @@ function createThrottledPublisher<Value>(
         intervalMs - elapsedMs,
       );
     },
+    publishNow(value: Value) {
+      pendingValue = value;
+      publishPendingValue();
+    },
   };
 }
 
-async function playRenderer(
+/**
+ * Progressive normalization opens on output that has only been produced from
+ * the start of the clip, so a reopen into it has nowhere to resume to.
+ */
+function keepsPlayhead(options: DemoSessionOptions) {
+  return options.normalize !== true || options.normalizeStream !== true;
+}
+
+function readRestorableTime(renderer: MediaRenderer | null) {
+  const currentTime = renderer?.getState().currentTime;
+
+  return typeof currentTime === "number" && currentTime > 0
+    ? currentTime
+    : null;
+}
+
+async function restorePlayhead(
+  renderer: MediaRenderer,
+  restoreTimeRef: { current: number | null },
+) {
+  const restoreTime = restoreTimeRef.current;
+
+  restoreTimeRef.current = null;
+
+  if (restoreTime === null) {
+    return;
+  }
+
+  await renderer.seek(restoreTime).catch(() => undefined);
+}
+
+/** Says why a playback request the viewer made failed, and settles the readout
+ *  however it went. */
+async function runPlaybackRequest(
+  request: Promise<void>,
   renderer: MediaRenderer,
   isActive: () => boolean,
-  setErrorMessage: (message: string) => void,
   syncRendererState: (renderer: MediaRenderer) => void,
+  setErrorMessage: (message: string) => void,
 ) {
   try {
-    await renderer.play();
-    if (isActive()) {
-      syncRendererState(renderer);
-    }
+    await request;
   } catch (error: unknown) {
     if (isActive()) {
-      syncRendererState(renderer);
       setErrorMessage(
         getErrorMessage(error, "Unable to play the media renderer."),
       );
     }
+  }
+
+  if (isActive()) {
+    syncRendererState(renderer);
   }
 }
 

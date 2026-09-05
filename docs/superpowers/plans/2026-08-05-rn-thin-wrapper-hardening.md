@@ -79,7 +79,7 @@ session and renderer contracts and the example satisfies every rule below:
   image/picture management.
 - Static, saved-video, and live screens each create or bind one session,
   render one package-owned view, and map session state to controls/HUD.
-- The example may retain `instant-cv.ts`: recipe definitions, dwell logic,
+- The example may retain `live-inference.ts`: recipe definitions, dwell logic,
   haptics, rule cards, and product copy are app behavior. It must feed those
   rules through a generic package extension point rather than own the frame
   clock or render packet.
@@ -127,15 +127,15 @@ but the common path should read approximately like this:
 
 ```tsx
 import {
-  createMediaSession,
   useMediaSession,
   MediaSessionView,
 } from "supervision-js-react-native/react";
-import { useVisionCameraMediaSource } from "supervision-js-react-native/adapters/vision-camera";
-import { createExecutorchInstanceSegmentationProcessor } from "supervision-js-react-native/adapters/executorch";
+import { createMediaSession } from "supervision-js-react-native/sessions";
+import { createVisionCameraLiveSource } from "supervision-js-react-native/adapters/vision-camera";
+import { createExecutorchLiveSegmentationProcessor } from "supervision-js-react-native/adapters/executorch";
 
-const source = useVisionCameraMediaSource({ device, isActive });
-const processor = createExecutorchInstanceSegmentationProcessor({
+const source = createVisionCameraLiveSource({ device, isActive });
+const processor = createExecutorchLiveSegmentationProcessor({
   runOnFrame: segmentation.runOnFrame,
 });
 const session = useMediaSession(() =>
@@ -454,8 +454,8 @@ leaking the renderer hot path back into the demo.
 - Add: `packages/react-native/src/presentation/derived-overlay.ts`
 - Add focused worklet and parity tests
 - Modify: `examples/react-native/App.tsx`
-- Modify: `examples/react-native/src/instant-cv.ts` only where adapter wiring
-  requires it
+- Modify: `examples/react-native/src/live-inference.ts` only where adapter
+  wiring requires it
 
 - [ ] Add ExecuTorch processor factories that accept structural `runOnFrame`
       functions and emit the common processor result for instance segmentation and
@@ -476,7 +476,7 @@ leaking the renderer hot path back into the demo.
 - [ ] Remove demo-owned detection serialization, mask filtering, vector-frame
       preparation, pose instruction conversion, and live/video picking helpers.
 
-**Acceptance:** `instant-cv.ts` still defines product rules, but none of its
+**Acceptance:** `live-inference.ts` still defines product rules, but none of its
 callers build masks, Skia pictures, shader uniforms, or present camera frames.
 Standard live, video effects, and Instant CV share the same session renderer.
 
