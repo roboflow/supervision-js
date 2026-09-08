@@ -112,6 +112,7 @@ describe("media renderer core", () => {
 
     expect(scene.setTimelineContext).toHaveBeenCalledWith({
       duration: 0.12,
+      firstTimestamp: 0,
       loop: false,
     });
 
@@ -764,6 +765,7 @@ describe("media renderer core", () => {
     const detectionSource = {
       loadFrames: vi.fn(async () => []),
     };
+    const scene = createScene();
     const renderer = await createMediaRendererCore(
       {
         autoPlay: false,
@@ -780,24 +782,23 @@ describe("media renderer core", () => {
         }),
       } satisfies MediaRendererOptions,
       {
-        createScene: vi.fn(async () => createScene()),
+        createScene: vi.fn(async () => scene),
         openMediaSource: vi.fn(),
       },
     );
 
-    expect(detectionSource.loadFrames).toHaveBeenCalledTimes(2);
+    expect(scene.setTimelineContext).toHaveBeenCalledWith({
+      duration: 5,
+      firstTimestamp: 4.75,
+      loop: true,
+    });
+    expect(detectionSource.loadFrames).toHaveBeenCalledOnce();
     // The renderer hands its media coordinate space to every load so a
     // composing source can project children before it flattens them.
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(
       1,
-      4.25,
+      4.75,
       5,
-      mediaCoordinateSpaceLoadOptions,
-    );
-    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(
-      2,
-      0,
-      1.75,
       mediaCoordinateSpaceLoadOptions,
     );
 

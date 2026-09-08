@@ -326,7 +326,7 @@ export function createMediaPlaybackController(options: {
     const playableEnd =
       options.duration === null
         ? null
-        : options.firstTimestamp + Math.max(options.duration, 0);
+        : Math.max(options.firstTimestamp, options.duration);
     let shouldPresentLoopStartSample = false;
 
     if (playableEnd !== null && requestedMediaTime >= playableEnd) {

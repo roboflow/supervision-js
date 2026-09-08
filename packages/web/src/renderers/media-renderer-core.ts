@@ -889,7 +889,7 @@ export async function createMediaRendererCore(
       }
       const presentedSample = mediaScene.setPresentation(
         currentPresentation,
-        mediaTime,
+        runtimeState.presentedTime() ?? runtimeState.currentTime(),
       );
       if (presentedSample) {
         runtimeState.recordPresentationUpdate(presentedSample);
@@ -1129,14 +1129,13 @@ export async function createMediaRendererCore(
     });
     publishPlaybackActivity();
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
-    detectionTimeline.setTimelineContext?.({
+    const timelineContext = {
       duration: metadata.duration,
+      firstTimestamp: metadata.firstTimestamp,
       loop: options.loop !== false,
-    });
-    mediaScene.setTimelineContext?.({
-      duration: metadata.duration,
-      loop: options.loop !== false,
-    });
+    };
+    detectionTimeline.setTimelineContext?.(timelineContext);
+    mediaScene.setTimelineContext?.(timelineContext);
     mediaScene.initializeMedia(mediaDimensions);
     runtimeState.setSourceReady(metadata);
 
@@ -1404,7 +1403,7 @@ function clampSeekTime(options: {
   const endTime =
     options.duration === null
       ? null
-      : options.firstTimestamp + Math.max(options.duration, 0);
+      : Math.max(options.firstTimestamp, options.duration);
 
   return Math.min(Math.max(mediaTime, startTime), endTime ?? mediaTime);
 }

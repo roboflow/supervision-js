@@ -159,6 +159,8 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
 
 export interface DetectionTimelineContext {
   readonly duration: number | null;
+  /** First playable timestamp on the same media clock as `duration`. */
+  readonly firstTimestamp?: number;
   readonly loop: boolean;
 }
 
@@ -237,9 +239,9 @@ export interface DetectionFrameRetentionOptions {
 /**
  * Per-call preparation context.
  *
- * Only a gated prepare reads `duration` and `firstTimestamp`, which bound the
- * coverage it asks for at the end of media. Everything else the timeline needs
- * about duration and looping arrives through
+ * A gated prepare reads `duration` and `firstTimestamp` to bound coverage at
+ * the end of media. They also remain per-call fallbacks for timelines whose
+ * host has not supplied the complete clock through
  * {@link BufferedDetectionTimeline.setTimelineContext}.
  */
 export interface DetectionBufferPrepareOptions {

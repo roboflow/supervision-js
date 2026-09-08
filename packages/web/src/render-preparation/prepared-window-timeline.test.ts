@@ -16,10 +16,10 @@ function createFrames(frameCount: number, framePitchSeconds: number) {
   })) satisfies DetectionFrame[];
 }
 
-function createLoopingTimeline(duration: number) {
+function createLoopingTimeline(duration: number, firstTimestamp = 0) {
   const timeline = createPreparedWindowTimeline();
 
-  timeline.setContext({ duration, loop: true });
+  timeline.setContext({ duration, firstTimestamp, loop: true });
 
   return timeline;
 }
@@ -56,6 +56,22 @@ describe("prepared window timeline", () => {
         .getWindowFrames(createFrames(10, 0.1), 0.7, 1.25)
         .map((frame) => frame.frameIndex),
     ).toEqual([7, 8, 9, 0, 1, 2]);
+  });
+
+  it("measures and retains a wrapped window from a non-zero media origin", () => {
+    const timeline = createLoopingTimeline(10.25, 0.25);
+    const frames = [9.5, 0.25, 0.5].map((mediaTime, frameIndex) => ({
+      detections: [],
+      frameIndex,
+      mediaTime,
+    }));
+
+    expect(timeline.getFrameDistance(0.25, 9.5)).toBe(0.75);
+    expect(
+      timeline
+        .getWindowFrames(frames, 9.5, 10.5)
+        .map((frame) => frame.mediaTime),
+    ).toEqual([9.5, 0.25, 0.5]);
   });
 
   it("keeps only the frames ahead of the playhead when the media does not loop", () => {

@@ -177,6 +177,62 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it.each([
+    {
+      duration: 10.25,
+      expectedTime: 10.25,
+      firstTimestamp: 0.25,
+      name: "the absolute endpoint of offset media",
+      requestedTime: 99,
+    },
+    {
+      duration: 10,
+      expectedTime: 10,
+      firstTimestamp: 0,
+      name: "the endpoint of zero-origin media",
+      requestedTime: 99,
+    },
+    {
+      duration: null,
+      expectedTime: 99,
+      firstTimestamp: 0.25,
+      name: "the request when the endpoint is unknown",
+      requestedTime: 99,
+    },
+    {
+      duration: 10.25,
+      expectedTime: 0.25,
+      firstTimestamp: 0.25,
+      name: "the first timestamp for a below-origin request",
+      requestedTime: 0,
+    },
+  ])("sends seek and scrub to $name", async (testCase) => {
+    const producer = createProducer();
+    const source = {
+      ...producer.source,
+      metadata: {
+        ...producer.source.metadata,
+        duration: testCase.duration,
+        firstTimestamp: testCase.firstTimestamp,
+      },
+    };
+    const renderer = await createRenderer(producer, createScene(), {
+      source: { open: async () => source },
+    });
+
+    await renderer.seek(testCase.requestedTime);
+    renderer.scrub(testCase.requestedTime);
+
+    expect(producer.commit).toHaveBeenCalledExactlyOnceWith(
+      testCase.expectedTime * 1000,
+    );
+    expect(producer.scrub).toHaveBeenCalledExactlyOnceWith(
+      testCase.expectedTime * 1000,
+      "gesture",
+    );
+    renderer.destroy();
+  });
+
   it("steps a real source frame in both directions", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
@@ -455,6 +511,155 @@ describe("media renderer over a push-based media source", () => {
       expect(buffer.frameCount).toBe(1);
     });
 
+    renderer.destroy();
+  });
+
+  it("refreshes the picture actually displayed after a delayed detection load", async () => {
+    const producer = createProducer();
+    const pending = createDeferred<readonly DetectionFrame[]>();
+    const frames = [0, 1].map((mediaTime) => ({
+      detections: [],
+      frameIndex: mediaTime,
+      mediaTime,
+    }));
+    let version = 0;
+    const source: DetectionFrameSource = {
+      getVersion: () => version,
+      loadFrames: vi.fn(() =>
+        version === 0 ? Promise.resolve(frames) : pending.promise,
+      ),
+    };
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        container: {} as HTMLElement,
+        source: { open: async () => producer.source },
+        detectionSource: source,
+        detectionBuffer: {
+          bufferAheadSeconds: 4,
+          playbackGate: { enabled: false },
+        },
+        renderPreparation: { playbackGate: { enabled: false } },
+      },
+      {
+        openMediaSource: vi.fn(),
+        createScene: async (options) => {
+          options.presentedFrames?.onPresentedFrame((presented) => {
+            options.onPresentationUpdate?.({
+              activeDetectionCount: 0,
+              activeDetectionFrameIndex: null,
+              activeDetectionFrameTime: null,
+              detectionBuffer: createIdleDetectionBufferState(),
+              drawnMaskFrameTime: null,
+              maskHeldStale: false,
+              mediaTime: presented.mediaTimeS,
+              presentedFrameSerial: presented.paintSeq,
+            });
+            presented.frame.close();
+          });
+          return scene;
+        },
+      },
+    );
+    await vi.waitFor(() =>
+      expect(renderer.getState().detectionBuffer.status).toBe("ready"),
+    );
+    expect(renderer.getState().presentedTime).toBe(0);
+    const loads = vi.mocked(source.loadFrames).mock.calls.length;
+    version += 1;
+    const refresh = renderer.refresh();
+    await vi.waitFor(() =>
+      expect(source.loadFrames).toHaveBeenCalledTimes(loads + 1),
+    );
+
+    producer.present(1000);
+    expect(renderer.getState().presentedTime).toBe(1);
+    pending.resolve(frames);
+    await refresh;
+
+    expect(scene.setPresentation).toHaveBeenLastCalledWith(
+      expect.anything(),
+      1,
+    );
+    expect(producer.commit).toHaveBeenCalledTimes(1);
+    expect(producer.getSample).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it("does not stop the producer while an in-range detection revision is loading", async () => {
+    const producer = createProducer();
+    const pendingRevision = createDeferred<readonly DetectionFrame[]>();
+    let version = 0;
+    const source: DetectionFrameSource = {
+      getAvailableRanges: () => [{ endTime: 4, startTime: 0 }],
+      getChangesSince: (committedVersion) => ({
+        ranges:
+          committedVersion < version ? [{ endTime: 2, startTime: 0 }] : [],
+        requiresReload: false,
+        version,
+      }),
+      getVersion: () => version,
+      loadFrames: vi.fn(() =>
+        version === 0
+          ? Promise.resolve([
+              {
+                detections: [{ id: "old" }],
+                endTime: 4,
+                frameIndex: 0,
+                mediaTime: 0,
+              },
+            ])
+          : pendingRevision.promise,
+      ),
+      waitForRange: vi.fn(async () => undefined),
+    };
+    const renderer = await createRenderer(producer, createScene(), {
+      detectionBuffer: {
+        bufferAheadSeconds: 4,
+        bufferBehindSeconds: 0,
+        playbackGate: { enabled: true },
+      },
+      detectionSource: source,
+    });
+    await vi.waitFor(() =>
+      expect(renderer.getState().detectionBuffer).toMatchObject({
+        bufferEndTime: 4,
+        status: "ready",
+      }),
+    );
+    const committedLoadCount = vi.mocked(source.loadFrames).mock.calls.length;
+    version += 1;
+
+    const presented = producer.present(1000);
+    await vi.waitFor(() =>
+      expect(source.loadFrames).toHaveBeenCalledTimes(committedLoadCount + 1),
+    );
+
+    try {
+      await vi.waitFor(() =>
+        expect(presented.frame.close).toHaveBeenCalledOnce(),
+      );
+      expect(producer.beginInteractiveSeek).not.toHaveBeenCalled();
+      expect(producer.endInteractiveSeek).not.toHaveBeenCalled();
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Ready,
+      );
+    } finally {
+      pendingRevision.resolve([
+        {
+          detections: [{ id: "new" }],
+          endTime: 4,
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ]);
+    }
+    await vi.waitFor(() =>
+      expect(renderer.getState().detectionBuffer.detectionCount).toBe(1),
+    );
+
+    expect(producer.beginInteractiveSeek).not.toHaveBeenCalled();
+    expect(producer.endInteractiveSeek).not.toHaveBeenCalled();
     renderer.destroy();
   });
 

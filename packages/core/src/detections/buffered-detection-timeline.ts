@@ -115,6 +115,7 @@ export function createBufferedDetectionTimeline(
     duration: null,
     loop: false,
   };
+  let timelineFirstTimestamp = 0;
   let inFlight:
     | {
         readonly id: number;
@@ -310,8 +311,10 @@ export function createBufferedDetectionTimeline(
       return;
     }
 
+    const loopSpan = duration - timelineFirstTimestamp;
+
     const laps = Math.round(
-      (getComparableMediaTime(mediaTime) - mediaTime) / duration,
+      (getComparableMediaTime(mediaTime) - mediaTime) / loopSpan,
     );
 
     if (laps === 0) {
@@ -320,8 +323,8 @@ export function createBufferedDetectionTimeline(
 
     state = {
       ...state,
-      bufferEndTime: state.bufferEndTime - laps * duration,
-      bufferStartTime: state.bufferStartTime - laps * duration,
+      bufferEndTime: state.bufferEndTime - laps * loopSpan,
+      bufferStartTime: state.bufferStartTime - laps * loopSpan,
     };
     notifyBufferChanged();
   };
@@ -462,27 +465,36 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
+      adoptFirstTimestamp(prepareOptions?.firstTimestamp);
+      const navigationMediaTime = getNavigationMediaTime(mediaTime);
+
       if (shouldWaitForPlaybackGate(prepareOptions)) {
-        await waitForPlaybackGate(mediaTime, prepareOptions);
+        await waitForPlaybackGate(navigationMediaTime, prepareOptions);
 
         if (destroyed) {
           return;
         }
       }
 
-      await refreshBuffer(mediaTime);
-      anchorWindowToPlayhead(mediaTime);
+      await refreshBuffer(navigationMediaTime);
+      anchorWindowToPlayhead(navigationMediaTime);
     },
 
     needsBufferPrepare(mediaTime) {
+      const navigationMediaTime = getNavigationMediaTime(mediaTime);
+
       return (
         !destroyed &&
         isLoadingEnabled() &&
-        (!isBuffered(mediaTime) || !inFlightCovers(mediaTime))
+        (!isInsideBufferedRange(navigationMediaTime) ||
+          !inFlightCovers(navigationMediaTime))
       );
     },
 
     needsPlaybackGateWait(mediaTime, prepareOptions) {
+      adoptFirstTimestamp(prepareOptions?.firstTimestamp);
+      const navigationMediaTime = getNavigationMediaTime(mediaTime);
+
       if (
         destroyed ||
         !isLoadingEnabled() ||
@@ -497,7 +509,7 @@ export function createBufferedDetectionTimeline(
       const availableRanges = options.source.getAvailableRanges();
 
       return !createPlaybackGateCoveragePlan(
-        mediaTime,
+        navigationMediaTime,
         prepareOptions,
       ).sourceRanges.every((range) => isRangeCovered(range, availableRanges));
     },
@@ -507,31 +519,36 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      anchorWindowToPlayhead(mediaTime);
-      supersedeLoadOutside(mediaTime);
+      const navigationMediaTime = getNavigationMediaTime(mediaTime);
 
-      if (!shouldPrefetch(mediaTime)) {
+      anchorWindowToPlayhead(navigationMediaTime);
+      supersedeLoadOutside(navigationMediaTime);
+
+      if (!shouldPrefetch(navigationMediaTime)) {
         return;
       }
 
-      pendingPrefetch = { loadId, mediaTime };
+      pendingPrefetch = { loadId, mediaTime: navigationMediaTime };
       pumpPrefetchQueue();
     },
 
     selectFrame(mediaTime) {
-      if (!isBuffered(mediaTime)) {
+      const navigationMediaTime = getNavigationMediaTime(mediaTime);
+
+      if (!isInsideBufferedRange(navigationMediaTime)) {
         return undefined;
       }
 
       return selectDetectionFrame(
         buffer,
-        getSourceMediaTime(mediaTime),
+        getSourceMediaTime(navigationMediaTime),
         options,
       );
     },
 
     setTimelineContext(context) {
       timelineContext = context;
+      adoptFirstTimestamp(context.firstTimestamp);
       bufferedSourceVersion = null;
       bufferedVersionRange = null;
     },
@@ -724,12 +741,15 @@ export function createBufferedDetectionTimeline(
       0,
       playbackGate?.requiredAheadSeconds ?? 0,
     );
-    const comparableMediaTime = getComparableMediaTime(mediaTime);
+    const comparableMediaTime = Math.max(
+      timelineFirstTimestamp,
+      getComparableMediaTime(mediaTime),
+    );
     const endTime = getRequiredCoverageEndTime({
       // A looping window counts past the end of media and wraps into the
       // replay, so clamping it to duration would ask for less than it needs.
       duration: isLoopingTimeline() ? null : prepareOptions?.duration,
-      firstTimestamp: prepareOptions?.firstTimestamp,
+      firstTimestamp: timelineFirstTimestamp,
       mediaTime: comparableMediaTime,
       requiredAheadSeconds,
     });
@@ -863,7 +883,8 @@ export function createBufferedDetectionTimeline(
    * a looping timeline. A plan is stated on the first lap and the window on the
    * playhead's, so across the loop point the two state the same edge a whole lap
    * apart; measured straight, that reads as a window a full lap stale and
-   * rebuilds it on every frame until the plan stops reaching behind zero.
+   * rebuilds it on every frame until the plan stops reaching behind the first
+   * playable timestamp.
    */
   function getWindowDrift(planTime: number, bufferTime: number) {
     const drift = Math.abs(planTime - bufferTime);
@@ -872,9 +893,10 @@ export function createBufferedDetectionTimeline(
       return drift;
     }
 
-    const wrappedDrift = modulo(drift, timelineContext.duration);
+    const loopSpan = timelineContext.duration - timelineFirstTimestamp;
+    const wrappedDrift = modulo(drift, loopSpan);
 
-    return Math.min(wrappedDrift, timelineContext.duration - wrappedDrift);
+    return Math.min(wrappedDrift, loopSpan - wrappedDrift);
   }
 
   function createLoadPlan(
@@ -885,7 +907,7 @@ export function createBufferedDetectionTimeline(
     const endTime = Math.max(startTime, requestedEndTime);
 
     if (!isLoopingTimeline()) {
-      const clampedStartTime = Math.max(0, startTime);
+      const clampedStartTime = Math.max(timelineFirstTimestamp, startTime);
       const clampedEndTime = Math.max(clampedStartTime, endTime);
 
       return {
@@ -901,12 +923,15 @@ export function createBufferedDetectionTimeline(
     }
 
     const duration = timelineContext.duration ?? 0;
+    const loopSpan = duration - timelineFirstTimestamp;
 
-    if (endTime - startTime >= duration) {
+    if (endTime - startTime >= loopSpan) {
       return {
         endTime: duration,
-        sourceRanges: [{ endTime: duration, startTime: 0 }],
-        startTime: 0,
+        sourceRanges: [
+          { endTime: duration, startTime: timelineFirstTimestamp },
+        ],
+        startTime: timelineFirstTimestamp,
       };
     }
 
@@ -914,12 +939,17 @@ export function createBufferedDetectionTimeline(
     // span and its source ranges while its start reads on the media clock: a
     // window counted in the laps playback accumulated is one no host can hold
     // against a current time.
-    const laps = Math.floor(startTime / duration);
+    const laps = Math.floor((startTime - timelineFirstTimestamp) / loopSpan);
 
     return {
-      endTime: endTime - laps * duration,
-      sourceRanges: getLoopingSourceRanges(startTime, endTime, duration),
-      startTime: startTime - laps * duration,
+      endTime: endTime - laps * loopSpan,
+      sourceRanges: getLoopingSourceRanges(
+        startTime,
+        endTime,
+        duration,
+        timelineFirstTimestamp,
+      ),
+      startTime: startTime - laps * loopSpan,
     };
   }
 
@@ -938,7 +968,7 @@ export function createBufferedDetectionTimeline(
     return (
       timelineContext.loop &&
       timelineContext.duration !== null &&
-      timelineContext.duration > 0
+      timelineContext.duration > timelineFirstTimestamp
     );
   }
 
@@ -952,16 +982,16 @@ export function createBufferedDetectionTimeline(
       return mediaTime;
     }
 
-    const duration = timelineContext.duration;
+    const loopSpan = timelineContext.duration - timelineFirstTimestamp;
 
-    // The representative of mediaTime (mod duration) anchored at the window
+    // The representative of mediaTime (mod the loop span) anchored at the window
     // start. The mapping must depend only on where the window sits, never on
     // how many laps playback has accumulated, or membership drifts away from
     // what the buffer actually holds. A time less than one lap past the
     // anchor never wraps, so ordinary forward playback cannot ratchet.
     return (
       state.bufferStartTime +
-      modulo(mediaTime - state.bufferStartTime, duration)
+      modulo(mediaTime - state.bufferStartTime, loopSpan)
     );
   }
 
@@ -970,11 +1000,40 @@ export function createBufferedDetectionTimeline(
       return mediaTime;
     }
 
-    if (mediaTime >= 0 && mediaTime <= timelineContext.duration) {
+    if (
+      mediaTime >= timelineFirstTimestamp &&
+      mediaTime <= timelineContext.duration
+    ) {
       return mediaTime;
     }
 
-    return modulo(mediaTime, timelineContext.duration);
+    const loopSpan = timelineContext.duration - timelineFirstTimestamp;
+
+    return (
+      timelineFirstTimestamp +
+      modulo(mediaTime - timelineFirstTimestamp, loopSpan)
+    );
+  }
+
+  function getNavigationMediaTime(mediaTime: number) {
+    return Math.max(timelineFirstTimestamp, mediaTime);
+  }
+
+  function adoptFirstTimestamp(firstTimestamp: number | undefined) {
+    if (
+      firstTimestamp === undefined ||
+      !Number.isFinite(firstTimestamp) ||
+      firstTimestamp === timelineFirstTimestamp
+    ) {
+      return;
+    }
+
+    timelineFirstTimestamp = firstTimestamp;
+    loadId += 1;
+    inFlight = undefined;
+    pendingPrefetch = undefined;
+    bufferedSourceVersion = null;
+    bufferedVersionRange = null;
   }
 }
 
@@ -1024,7 +1083,7 @@ function getRequiredCoverageEndTime(options: {
 
   return Math.min(
     requestedEndTime,
-    (options.firstTimestamp ?? 0) + Math.max(options.duration, 0),
+    Math.max(options.firstTimestamp ?? 0, options.duration),
   );
 }
 
@@ -1032,11 +1091,15 @@ function getLoopingSourceRanges(
   startTime: number,
   endTime: number,
   duration: number,
+  firstTimestamp = 0,
 ): readonly DetectionFrameSourceVersionRange[] {
-  const normalizedStartTime = modulo(startTime, duration);
-  const normalizedEndTime = modulo(endTime, duration);
-  const startCycle = Math.floor(startTime / duration);
-  const endCycle = Math.floor(endTime / duration);
+  const loopSpan = duration - firstTimestamp;
+  const normalizedStartTime =
+    firstTimestamp + modulo(startTime - firstTimestamp, loopSpan);
+  const normalizedEndTime =
+    firstTimestamp + modulo(endTime - firstTimestamp, loopSpan);
+  const startCycle = Math.floor((startTime - firstTimestamp) / loopSpan);
+  const endCycle = Math.floor((endTime - firstTimestamp) / loopSpan);
 
   if (startCycle === endCycle) {
     return [{ endTime: normalizedEndTime, startTime: normalizedStartTime }];
@@ -1048,8 +1111,8 @@ function getLoopingSourceRanges(
     ranges.push({ endTime: duration, startTime: normalizedStartTime });
   }
 
-  if (normalizedEndTime > 0) {
-    ranges.push({ endTime: normalizedEndTime, startTime: 0 });
+  if (normalizedEndTime > firstTimestamp) {
+    ranges.push({ endTime: normalizedEndTime, startTime: firstTimestamp });
   }
 
   return ranges;

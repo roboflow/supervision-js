@@ -188,5 +188,6 @@ export interface MediaRendererScene {
 
 export interface MediaRendererSceneTimelineContext {
   readonly duration: number | null;
+  readonly firstTimestamp: number;
   readonly loop: boolean;
 }

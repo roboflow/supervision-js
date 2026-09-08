@@ -2,6 +2,7 @@ import type { DetectionFrame } from "supervision-js-core";
 
 export interface PreparedRenderTimelineContext {
   readonly duration: number | null;
+  readonly firstTimestamp?: number;
   readonly loop: boolean;
 }
 
@@ -52,10 +53,12 @@ export function createPreparedWindowTimeline(): PreparedWindowTimeline {
   };
 
   function isLoopingTimeline() {
+    const firstTimestamp = timelineContext.firstTimestamp ?? 0;
+
     return (
       timelineContext.loop &&
       timelineContext.duration !== null &&
-      timelineContext.duration > 0
+      timelineContext.duration > firstTimestamp
     );
   }
 
@@ -68,12 +71,15 @@ export function createPreparedWindowTimeline(): PreparedWindowTimeline {
       return Math.max(0, frameTime - mediaTime);
     }
 
-    const duration = timelineContext.duration;
-    const normalizedFrameTime = modulo(frameTime, duration);
-    const normalizedMediaTime = modulo(mediaTime, duration);
+    const firstTimestamp = timelineContext.firstTimestamp ?? 0;
+    const loopSpan = timelineContext.duration - firstTimestamp;
+    const normalizedFrameTime =
+      firstTimestamp + modulo(frameTime - firstTimestamp, loopSpan);
+    const normalizedMediaTime =
+      firstTimestamp + modulo(mediaTime - firstTimestamp, loopSpan);
     const rawDistance = normalizedFrameTime - normalizedMediaTime;
 
-    return rawDistance >= 0 ? rawDistance : rawDistance + duration;
+    return rawDistance >= 0 ? rawDistance : rawDistance + loopSpan;
   }
 
   /**

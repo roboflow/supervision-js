@@ -996,6 +996,140 @@ describe("buffered detection timeline", () => {
     });
   });
 
+  it("keeps loop-crossing gate ranges inside a non-zero media origin", async () => {
+    const firstTimestamp = 0.25;
+    const duration = 10.25;
+    const source = {
+      getAvailableRanges: vi.fn(() => [
+        { endTime: duration, startTime: firstTimestamp },
+      ]),
+      loadFrames: vi.fn(async () => []),
+      waitForRange: vi.fn(async () => undefined),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 0,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        requiredAheadSeconds: 1,
+      },
+      source,
+    });
+    timeline.setTimelineContext?.({ duration, loop: true });
+    await timeline.prepare(9.5, {
+      duration,
+      firstTimestamp,
+      gatePlayback: true,
+    });
+
+    expect(source.waitForRange).toHaveBeenCalledTimes(2);
+    expect(source.waitForRange).toHaveBeenNthCalledWith(1, {
+      endTime: duration,
+      startTime: 9.5,
+    });
+    expect(source.waitForRange).toHaveBeenNthCalledWith(2, {
+      endTime: 0.5,
+      startTime: firstTimestamp,
+    });
+    expect(
+      timeline.needsPlaybackGateWait?.(9.5, {
+        duration,
+        firstTimestamp,
+        gatePlayback: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("clamps below-origin gate requests to the first playable timestamp", async () => {
+    const firstTimestamp = 0.25;
+    const duration = 10.25;
+    const source = {
+      getAvailableRanges: vi.fn(() => [
+        { endTime: duration, startTime: firstTimestamp },
+      ]),
+      loadFrames: vi.fn(async (startTime: number) => [
+        {
+          detections: [
+            { id: startTime === 0 ? "stale-origin" : "current-origin" },
+          ],
+          mediaTime: startTime,
+        },
+      ]),
+      waitForRange: vi.fn(async () => undefined),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 0,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        requiredAheadSeconds: 1,
+      },
+      source,
+    });
+    timeline.setTimelineContext?.({ duration, loop: true });
+    await timeline.prepare(0);
+
+    expect(timeline.selectFrame(0)?.detections[0]?.id).toBe("stale-origin");
+    expect(
+      timeline.needsPlaybackGateWait?.(0, {
+        duration,
+        firstTimestamp,
+        gatePlayback: true,
+      }),
+    ).toBe(false);
+    expect(timeline.selectFrame(0)).toBeUndefined();
+
+    await timeline.prepare(0, {
+      duration,
+      firstTimestamp,
+      gatePlayback: true,
+    });
+
+    expect(source.waitForRange).toHaveBeenCalledOnce();
+    expect(source.waitForRange).toHaveBeenCalledWith({
+      endTime: 1.25,
+      startTime: firstTimestamp,
+    });
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+    expect(source.loadFrames).toHaveBeenNthCalledWith(
+      2,
+      firstTimestamp,
+      firstTimestamp,
+    );
+    expect(timeline.getState()).toMatchObject({
+      bufferEndTime: firstTimestamp,
+      bufferStartTime: firstTimestamp,
+    });
+    expect(timeline.selectFrame(0)?.mediaTime).toBe(firstTimestamp);
+    expect(timeline.selectFrame(firstTimestamp)?.mediaTime).toBe(
+      firstTimestamp,
+    );
+  });
+
+  it("uses a non-zero timeline origin before its initial prefetch", async () => {
+    const firstTimestamp = 0.25;
+    const duration = 10.25;
+    const source = {
+      loadFrames: vi.fn(async () => []),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+    timeline.setTimelineContext?.({
+      duration,
+      firstTimestamp,
+      loop: true,
+    });
+    timeline.prefetch(firstTimestamp);
+
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(3));
+    expect(source.loadFrames).toHaveBeenNthCalledWith(1, 9.75, duration);
+    expect(source.loadFrames).toHaveBeenNthCalledWith(2, 9.75, duration);
+    expect(source.loadFrames).toHaveBeenNthCalledWith(3, firstTimestamp, 2.25);
+  });
+
   it("loads a loop-crossing window without waiting when no gate is configured", async () => {
     const source = {
       loadFrames: vi.fn(async () => []),
@@ -1214,6 +1348,59 @@ describe("buffered detection timeline", () => {
     expect(loadFrames).toHaveBeenCalledTimes(2);
     expect(loadFrames).toHaveBeenNthCalledWith(2, 0, 1);
     expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
+  });
+
+  it("keeps a committed frame selectable while its incremental replacement is pending", async () => {
+    const patch = await createPendingIncrementalPatch();
+
+    try {
+      expect(patch.timeline.selectFrame(0.5)?.detections[0]?.id).toBe("old");
+      expect(getBufferedDetectionTimelineFrameSnapshot(patch.timeline)).toEqual(
+        patch.committedFrames,
+      );
+    } finally {
+      patch.resolve();
+      await settlePrefetch();
+    }
+
+    const updatedFrames = getBufferedDetectionTimelineFrameSnapshot(
+      patch.timeline,
+    );
+
+    expect(patch.timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
+    expect(updatedFrames[0]).not.toBe(patch.committedFrames[0]);
+    expect(updatedFrames[1]).toBe(patch.committedFrames[1]);
+    expect(patch.loadFrames).toHaveBeenCalledOnce();
+  });
+
+  it("does not require presentation preparation for a covered frame while its patch is pending", async () => {
+    const patch = await createPendingIncrementalPatch();
+
+    try {
+      expect(patch.timeline.getState().status).toBe(
+        DetectionBufferStatus.Ready,
+      );
+      expect(patch.timeline.needsBufferPrepare?.(0.5)).toBe(false);
+      expect(patch.timeline.needsBufferPrepare?.(4)).toBe(true);
+    } finally {
+      patch.resolve();
+      await settlePrefetch();
+    }
+  });
+
+  it("applies a later overlapping write after an incremental patch already started", async () => {
+    const patch = await createPendingIncrementalPatch();
+
+    await patch.source.appendFrames([
+      { detections: [{ id: "newest" }], endTime: 1, mediaTime: 0 },
+    ]);
+    patch.timeline.prefetch(0.5);
+    patch.resolve();
+
+    await vi.waitFor(() => expect(patch.loadFrames).toHaveBeenCalledTimes(2));
+    await settlePrefetch();
+
+    expect(patch.timeline.selectFrame(0.5)?.detections[0]?.id).toBe("newest");
   });
 
   it("patches progressive appends without repeatedly loading the growing hot window", async () => {
@@ -1632,6 +1819,45 @@ async function settlePrefetch() {
   for (let tick = 0; tick < 12; tick += 1) {
     await Promise.resolve();
   }
+}
+
+async function createPendingIncrementalPatch() {
+  const source = createWritableDetectionFrameSource({
+    datasetId: "pending-patch",
+    store: createMemoryColdDetectionFrameStore(),
+  });
+  const timeline = createBufferedDetectionTimeline({
+    bufferAheadSeconds: 3,
+    bufferBehindSeconds: 0,
+    source,
+  });
+  await source.appendFrames([
+    { detections: [{ id: "old" }], endTime: 1, mediaTime: 0 },
+    { detections: [{ id: "neighbor" }], endTime: 3, mediaTime: 2 },
+  ]);
+  await timeline.prepare(0);
+  const committedFrames = getBufferedDetectionTimelineFrameSnapshot(timeline);
+  const updatedFrames = [
+    { detections: [{ id: "new" }], endTime: 1, mediaTime: 0 },
+  ] satisfies DetectionFrame[];
+  const pendingFrames = createDeferred<readonly DetectionFrame[]>();
+  const originalLoadFrames = source.loadFrames.bind(source);
+  const loadFrames = vi
+    .spyOn(source, "loadFrames")
+    .mockImplementationOnce(() => pendingFrames.promise)
+    .mockImplementation(originalLoadFrames);
+
+  await source.appendFrames(updatedFrames);
+  timeline.prefetch(0.5);
+  await vi.waitFor(() => expect(loadFrames).toHaveBeenCalledOnce());
+
+  return {
+    committedFrames,
+    loadFrames,
+    resolve: () => pendingFrames.resolve(updatedFrames),
+    source,
+    timeline,
+  };
 }
 
 function createLoopingTimeline() {

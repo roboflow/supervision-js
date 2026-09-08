@@ -202,6 +202,40 @@ describe("media playback controller", () => {
     controller.destroy();
   });
 
+  it("ends at the absolute endpoint of offset media while the next sample is pending", async () => {
+    resetMocks();
+    let releaseIterator: (() => void) | undefined;
+    const pendingSample = new Promise<void>((resolve) => {
+      releaseIterator = resolve;
+    });
+    const onEnded = vi.fn();
+    const controller = createMediaPlaybackController({
+      duration: 0.35,
+      firstTimestamp: 0.25,
+      initialMediaTime: 0.25,
+      loop: false,
+      onCurrentTimeChange: vi.fn(),
+      onEnded,
+      onError: vi.fn(),
+      presentSample: vi.fn(),
+      sampleSink: {
+        getSample: mediaMock.getSample,
+        async *samples() {
+          await pendingSample;
+          yield* [];
+        },
+      },
+    });
+
+    controller.play();
+    flushAnimationFrame(101);
+    await Promise.resolve();
+
+    expect(onEnded).toHaveBeenCalledOnce();
+    controller.destroy();
+    releaseIterator?.();
+  });
+
   it("ends live playback when its sample iterator is exhausted", async () => {
     resetMocks();
     mediaMock.samples = [];
