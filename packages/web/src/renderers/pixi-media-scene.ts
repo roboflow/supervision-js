@@ -951,13 +951,14 @@ export async function createPixiMediaScene(
     },
   };
 
-  // The focus fade and the overlay are advanced by a clock: the presented media
-  // time in a push scene, the ticker in a pull one. Drawing them from a walk
-  // that clock did not drive would move them out of turn.
+  // A content redraw updates editing geometry at the same media time without
+  // advancing the focus animation.
   const annotationDrawLayers: FramePresentLayers = {
     ...presentLayers,
     advanceFocus: () => undefined,
-    drawAnnotationOverlay: () => undefined,
+    drawAnnotationOverlay: frameChannel
+      ? presentLayers.drawAnnotationOverlay
+      : () => undefined,
   };
 
   // A viewport-style redraw covers the layers whose geometry is a function of

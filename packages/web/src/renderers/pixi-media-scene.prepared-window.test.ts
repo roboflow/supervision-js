@@ -8,6 +8,7 @@ import {
   createWritableDetectionFrameSource,
   DetectionMaskEncoding,
   FocusTargetMode,
+  MediaInteractionMode,
 } from "supervision-js-core";
 import type {
   AnnotationEditingEngine,
@@ -37,12 +38,17 @@ import type { PresentedVideoFrame } from "./presented-frame-channel";
 import { MediaRendererFit } from "#types/media-renderer";
 
 const pixiMock = vi.hoisted(() => ({
-  graphics: [] as { clear: () => void; rect: () => void }[],
+  graphics: [] as {
+    clear: () => void;
+    rect: () => void;
+    circles: [number, number, number][];
+  }[],
   meshes: [] as {
     shader: { resources: Record<string, unknown> };
     visible: boolean;
   }[],
   render: vi.fn(),
+  tickerAdd: vi.fn<(callback: () => void) => void>(),
 }));
 
 vi.mock("pixi.js", () => {
@@ -75,7 +81,7 @@ vi.mock("pixi.js", () => {
     };
     screen = { height: 360, width: 640 };
     stage = { addChild: vi.fn() };
-    ticker = { add: vi.fn(), remove: vi.fn() };
+    ticker = { add: pixiMock.tickerAdd, remove: vi.fn() };
     cancelResize = vi.fn();
     destroy = vi.fn();
     init = vi.fn(async () => undefined);
@@ -98,7 +104,15 @@ vi.mock("pixi.js", () => {
   }
 
   class Graphics extends Container {
-    clear = vi.fn(() => this);
+    circles: [number, number, number][] = [];
+    clear = vi.fn(() => {
+      this.circles = [];
+      return this;
+    });
+    circle = vi.fn((x: number, y: number, radius: number) => {
+      this.circles.push([x, y, radius]);
+      return this;
+    });
     cut = vi.fn(() => this);
     fill = vi.fn(() => this);
     poly = vi.fn(() => this);
@@ -413,6 +427,7 @@ beforeEach(() => {
   pixiMock.graphics.length = 0;
   pixiMock.meshes.length = 0;
   pixiMock.render.mockClear();
+  pixiMock.tickerAdd.mockClear();
 });
 
 afterEach(() => {
@@ -606,6 +621,102 @@ describe("the prepared annotation window under push presentation", () => {
     source.destroy?.();
   });
 
+  it.each(["replacement", "deletion"] as const)(
+    "updates paused selection handles after same-frame %s without another selection event",
+    async (revision) => {
+      const source = createWritableDetectionFrameSource({
+        datasetId: `paused-handles-${revision}`,
+        store: createMemoryColdDetectionFrameStore(),
+      });
+      const frame: DetectionFrame = {
+        detections: [
+          { id: "selected", rect: { x: 100, y: 100, width: 40, height: 20 } },
+        ],
+        endTime: 2,
+        frameIndex: 30,
+        mediaTime: 1,
+      };
+      await source.appendFrames([frame]);
+      const detectionTimeline = createBufferedDetectionTimeline({ source });
+      const scene = await createScene({
+        detectionTimeline,
+        editingEngine: createGestureEngineStub().engine,
+        maskStyle: null,
+        selectionHandles: true,
+      });
+      const presentation: MediaRendererPresentation = {};
+
+      try {
+        scene.present(1000);
+        scene.scene.setPresentation(presentation, 1);
+        const pick = scene.scene.setSelectedDetection?.(
+          { detectionId: "selected" },
+          1,
+        );
+        expect(pick?.detection.id).toBe("selected");
+        const overlays = pixiMock.graphics.filter(
+          ({ circles }) => circles.length > 0,
+        );
+        expect(overlays).toHaveLength(1);
+        const overlay = overlays[0]!;
+        const centers = () => overlay.circles.map(([x, y]) => [x, y]);
+        const expectedCenters = (x: number) => [
+          [x - 20, 90],
+          [x, 90],
+          [x + 20, 90],
+          [x - 20, 100],
+          [x + 20, 100],
+          [x - 20, 110],
+          [x, 110],
+          [x + 20, 110],
+        ];
+        expect(centers()).toHaveLength(8);
+        expect(centers()).toEqual(expect.arrayContaining(expectedCenters(100)));
+        const beforeRevision = scene.renderCount();
+
+        await source.appendFrames([
+          {
+            ...frame,
+            detections:
+              revision === "deletion"
+                ? []
+                : [
+                    {
+                      id: "selected",
+                      rect: { x: 150, y: 100, width: 40, height: 20 },
+                    },
+                  ],
+          },
+        ]);
+        await detectionTimeline.prepare(1);
+        const refreshed = scene.scene.setPresentation(presentation, 1);
+
+        expect(refreshed).toMatchObject({
+          activeDetectionCount: revision === "deletion" ? 0 : 1,
+          activeDetectionFrameTime: 1,
+        });
+        expect(scene.renderCount()).toBeGreaterThan(beforeRevision);
+        if (revision === "replacement") {
+          expect(centers()).toHaveLength(8);
+          expect(centers()).toEqual(
+            expect.arrayContaining(expectedCenters(150)),
+          );
+        } else {
+          expect(centers()).toEqual([]);
+        }
+
+        await scene.settleCooks();
+        const settled = scene.renderCount();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(scene.renderCount()).toBe(settled);
+      } finally {
+        scene.scene.destroy();
+        detectionTimeline.destroy();
+        source.destroy?.();
+      }
+    },
+  );
+
   it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {
     const diagnostics: RenderPreparationDiagnostics[] = [];
     const scene = await createScene({
@@ -797,6 +908,41 @@ describe("the prepared annotation window under push presentation", () => {
 
     expect(scene.getPreparedAnnotationWindow?.()).toBeNull();
   });
+
+  it.each([false, true])(
+    "leaves pull overlay drawing to the ticker when timings are %s",
+    async (timings) => {
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const detectionTimeline = createTimeline();
+      const previewOverlay = vi.fn(() => null);
+      const scene = await createPixiMediaScene(
+        createSceneOptions({
+          detectionTimeline,
+          diagnostics: timings ? { frameTimings: true } : undefined,
+          previewOverlay,
+        }),
+      );
+      try {
+        scene.initializeMedia({ height: 240, width: 320 });
+        await detectionTimeline.prepare(1);
+        previewOverlay.mockClear();
+
+        scene.presentSample({
+          close: vi.fn(),
+          draw: vi.fn(),
+          duration: 1 / 30,
+          timestamp: 1,
+        });
+        expect(previewOverlay).not.toHaveBeenCalled();
+
+        for (const [tick] of pixiMock.tickerAdd.mock.calls) tick();
+        expect(previewOverlay).toHaveBeenCalledOnce();
+      } finally {
+        scene.destroy();
+        detectionTimeline.destroy();
+      }
+    },
+  );
 });
 
 function maskArtifactStatuses(
@@ -835,6 +981,7 @@ async function createScene(
     readonly maskStyle?: MaskStyle | null;
     readonly polygonStyle?: PolygonStyle;
     readonly prepareDetections?: boolean;
+    readonly selectionHandles?: boolean;
     readonly renderPreparation?: RenderPreparationOptions;
   } = {},
 ) {
@@ -850,9 +997,14 @@ async function createScene(
   const { createPixiMediaScene } = await import("./pixi-media-scene");
   const scene = await createPixiMediaScene(
     createSceneOptions({
+      annotationOverlayStyle: options.selectionHandles ? {} : undefined,
+      canInteract: () => options.selectionHandles === true,
       detectionTimeline,
       editingEngine: options.editingEngine,
       focusStyle: options.focusStyle ?? null,
+      interaction: options.selectionHandles
+        ? { mode: MediaInteractionMode.Always }
+        : undefined,
       maskHaloStyle: options.maskHaloStyle ?? undefined,
       maskStyle:
         options.maskStyle === undefined ? emptyMaskStyle : options.maskStyle,
