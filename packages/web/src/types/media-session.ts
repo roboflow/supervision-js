@@ -389,7 +389,8 @@ export interface MediaSession {
   readonly media: MediaSessionMediaState;
   readonly renderer: MediaRenderer;
   /**
-   * Append semantic detection frames to a session-owned appendable source.
+   * Append semantic detection frames to the selected writable source, supplied
+   * by the caller or created through `detections.appendable`.
    */
   appendDetectionFrames(
     frames: readonly DetectionFrame[],
@@ -461,8 +462,7 @@ export interface MediaSession {
  */
 export interface LiveMediaSession extends MediaSession {
   /**
-   * Append the newest live detection frame to a session-owned appendable
-   * source.
+   * Append the newest live detection frame to the selected writable source.
    *
    * The frame stays active until the next live frame supersedes it, which is
    * closed at the new frame's `mediaTime`. Use this for streams whose producer

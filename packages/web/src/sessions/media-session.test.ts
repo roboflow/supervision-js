@@ -5,7 +5,11 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
-import { DetectionMaskEncoding } from "supervision-js-core";
+import {
+  createMemoryColdDetectionFrameStore,
+  createWritableDetectionFrameSource,
+  DetectionMaskEncoding,
+} from "supervision-js-core";
 import {
   MediaSessionActivityKind,
   MediaSessionStatus,
@@ -121,6 +125,124 @@ describe("media session", () => {
     expect(await session.detectionSource?.loadFrames(0, 1)).toEqual(frames);
 
     session.destroy();
+  });
+
+  it.each(["source", "sources"] as const)(
+    "writes through a caller-owned %s without clearing or destroying it",
+    async (input) => {
+      resetMocks();
+      const { createMediaSession } = await import("../index");
+      const source = createWritableDetectionFrameSource({
+        datasetId: "external-dataset",
+        store: createMemoryColdDetectionFrameStore(),
+      });
+      const clear = vi.spyOn(source, "clear");
+      const destroy = vi.spyOn(source, "destroy");
+      const session = await createMediaSession({
+        container: createContainer(),
+        detections: {
+          ...(input === "source"
+            ? { source }
+            : { sources: [{ id: "external-entry", source }] }),
+          playbackGate: { enabled: false },
+        },
+        media: "sample.mp4",
+        renderer: { autoPlay: false },
+      });
+      const writeOptions = {
+        sourceId: input === "source" ? "external-dataset" : "external-entry",
+      };
+      const refresh = vi
+        .spyOn(session.renderer, "refresh")
+        .mockResolvedValue(undefined);
+
+      await expect(
+        session.appendDetectionFrames(frames, writeOptions),
+      ).resolves.toMatchObject({
+        datasetId: "external-dataset",
+        frameCount: 1,
+      });
+      expect(await source.loadFrames(0, 1)).toEqual(frames);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+      await expect(
+        session.appendLiveDetectionFrame(
+          { detections: [{ id: "live" }], frameIndex: 1, mediaTime: 1 },
+          writeOptions,
+        ),
+      ).resolves.toMatchObject({ frameCount: 2 });
+      await expect(
+        session.finalizeDetectionCoverage(2, writeOptions),
+      ).resolves.toMatchObject({ endTime: 2, frameCount: 2 });
+      expect(session.getDetectionSummary(writeOptions)).toMatchObject({
+        datasetId: "external-dataset",
+        endTime: 2,
+      });
+
+      refresh.mockRestore();
+      session.destroy();
+
+      expect(clear).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+      await expect(source.loadFrames(1, 2)).resolves.toEqual([
+        expect.objectContaining({ detections: [{ id: "live" }], endTime: 2 }),
+      ]);
+      source.destroy();
+    },
+  );
+
+  it("preserves write routing and live-capability errors for external sources", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const legacy = {
+      ...createWritableDetectionFrameSource({
+        datasetId: "legacy-dataset",
+        store: createMemoryColdDetectionFrameStore(),
+      }),
+      appendLiveFrame: undefined,
+      finalizeCoverage: undefined,
+    };
+    const other = createWritableDetectionFrameSource({
+      datasetId: "other-dataset",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        autoRefresh: false,
+        playbackGate: { enabled: false },
+        sources: [
+          { id: "legacy", source: legacy },
+          { id: "other", source: other },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await expect(session.appendDetectionFrames(frames)).rejects.toThrow(
+      "sourceId is required when a media session owns multiple appendable detection sources.",
+    );
+    await expect(
+      session.appendDetectionFrames(frames, { sourceId: "missing" }),
+    ).rejects.toThrow("Unknown appendable detection source: missing.");
+    await expect(
+      session.appendDetectionFrames(frames, { sourceId: "legacy" }),
+    ).resolves.toMatchObject({ datasetId: "legacy-dataset" });
+    expect(other.getSummary()).toBeNull();
+    await expect(
+      session.appendLiveDetectionFrame(frames[0]!, { sourceId: "legacy" }),
+    ).rejects.toThrow(
+      "This detection source does not support live appends or coverage finalization.",
+    );
+    await expect(
+      session.finalizeDetectionCoverage(2, { sourceId: "legacy" }),
+    ).rejects.toThrow(
+      "This detection source does not support live appends or coverage finalization.",
+    );
+
+    session.destroy();
+    legacy.destroy();
+    other.destroy();
   });
 
   it("projects initial detection frames into media space", async () => {
