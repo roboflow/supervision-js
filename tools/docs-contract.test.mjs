@@ -1229,6 +1229,184 @@ async function readNamedExports(file) {
   return names;
 }
 
+test("bounded release recipes are complete and typecheck", async () => {
+  const recipes = await Promise.all(
+    ["timeline-scrubbing", "playing-video-file", "playback-state"].map(
+      async (name) =>
+        readFile(path.join(publicDocsDir, `recipes/${name}.md`), "utf8"),
+    ),
+  );
+  const [scrub, video, state] = recipes.map(
+    (source) => findCodeBlocks(source, "ts")[0],
+  );
+  assert.match(
+    scrub,
+    /pointerdown[\s\S]*pointermove[\s\S]*pointerup[\s\S]*pointercancel[\s\S]*lostpointercapture/,
+  );
+  assert.match(scrub, /frameClock[\s\S]*frameNavigation[\s\S]*showUnsupported/);
+  assert.match(scrub, /lastTarget[\s\S]*pendingTarget/);
+  assert.match(
+    video,
+    /SourceKind\.Blob[\s\S]*SourceKind\.Url[\s\S]*MediaErrorKind\.UnsupportedFormat/,
+  );
+  assert.match(
+    state,
+    /presentedTime[\s\S]*source\.awaitingRead[\s\S]*renderPreparationGateAbandoned/,
+  );
+  assertTypechecks(
+    [
+      'declare const session: import("supervision").LiveMediaSession;',
+      scrub,
+    ].join("\n"),
+    ".docs-recipe-timeline.ts",
+  );
+  assertTypechecks([video].join("\n"), ".docs-recipe-video.ts");
+  assertTypechecks(
+    ['declare const session: import("supervision").MediaSession;', state].join(
+      "\n",
+    ),
+    ".docs-recipe-state.ts",
+  );
+});
+
+test("timeline recipe commits once, owns its pointer and protects newer gestures", async () => {
+  const source = await readFile(
+    path.join(publicDocsDir, "recipes/timeline-scrubbing.md"),
+    "utf8",
+  );
+  const compiled = ts.transpileModule(findCodeBlocks(source, "ts")[0], {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  const exports = {};
+  Function("exports", compiled)(exports);
+  const timeline = new globalThis.EventTarget();
+  const captures = new Set();
+  const fire = (type, properties = {}) =>
+    timeline.dispatchEvent(
+      Object.assign(new globalThis.Event(type, { cancelable: true }), {
+        button: 0,
+        pointerId: 1,
+        seconds: 1,
+        ...properties,
+      }),
+    );
+  timeline.focus = () => {};
+  timeline.setPointerCapture = (id) => captures.add(id);
+  timeline.hasPointerCapture = (id) => captures.has(id);
+  timeline.releasePointerCapture = (id) => {
+    captures.delete(id);
+    fire("lostpointercapture", { pointerId: id });
+  };
+  const moves = [];
+  const scrubs = [];
+  const session = {
+    frameClock: { timeAt: () => 0 },
+    frameNavigation: {
+      scrubToTime(seconds) {
+        scrubs.push(seconds);
+        return {
+          target: { mediaTime: seconds },
+          settled: Promise.resolve({ status: "superseded" }),
+        };
+      },
+      moveToTime(seconds) {
+        const move = { seconds, ...deferred() };
+        moves.push(move);
+        return move.promise;
+      },
+    },
+    getState: () => ({ renderer: { presentedTime: 8 } }),
+  };
+  const control = exports.installTimelineScrubber(
+    session,
+    timeline,
+    (event) => event.seconds,
+    (event) => event.seconds,
+    () => assert.fail("indexed source unexpectedly unsupported"),
+  );
+  const flush = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  fire("pointerdown");
+  fire("pointerdown", { pointerId: 2, seconds: 20 });
+  fire("pointermove", { pointerId: 2, seconds: 21 });
+  fire("pointerup", { pointerId: 2, seconds: 22 });
+  assert.deepEqual(scrubs, [1]);
+  assert.equal(moves.length, 0);
+  fire("pointerup", { seconds: 2 });
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].seconds, 2);
+  assert.equal(captures.size, 0);
+  fire("pointermove", { seconds: 9 });
+  assert.equal(control.knobTime(), 2);
+  moves[0].resolve();
+  await flush();
+  fire("lostpointercapture");
+  fire("pointercancel");
+  assert.equal(moves.length, 1);
+  assert.equal(control.knobTime(), 8);
+
+  fire("pointerdown", { seconds: 3 });
+  fire("pointercancel", { seconds: 99 });
+  assert.equal(moves[1].seconds, 3);
+  fire("pointerdown", { seconds: 4 });
+  moves[1].reject(new globalThis.DOMException("superseded", "AbortError"));
+  await flush();
+  assert.equal(control.knobTime(), 4);
+  fire("lostpointercapture", { seconds: 99 });
+  assert.equal(moves[2].seconds, 4);
+  moves[2].resolve();
+  await flush();
+
+  for (const termination of ["keyup", "Enter", "Escape", "blur"]) {
+    const before = moves.length;
+    fire("keydown", { key: "ArrowRight", seconds: 5 });
+    fire("keydown", { key: "ArrowRight", seconds: 6, repeat: true });
+    assert.equal(control.knobTime(), 6);
+    if (termination === "keyup") fire("keyup", { key: "ArrowRight" });
+    else if (termination === "blur") fire("blur");
+    else fire("keydown", { key: termination });
+    fire("keyup", { key: "ArrowRight" });
+    assert.equal(moves.length, before + 1);
+    assert.equal(moves.at(-1).seconds, 6);
+    moves.at(-1).resolve();
+    await flush();
+  }
+
+  fire("pointerdown", { seconds: 7 });
+  control.destroy();
+  const count = moves.length;
+  assert.equal(moves.at(-1).seconds, 7);
+  assert.equal(captures.size, 0);
+  fire("pointerdown", { seconds: 9 });
+  fire("pointerup", { seconds: 9 });
+  control.destroy();
+  assert.equal(moves.length, count);
+  moves.at(-1).resolve();
+  await flush();
+  assert.equal(control.knobTime(), 8);
+  let unsupported = 0;
+  assert.equal(
+    exports.installTimelineScrubber(
+      { ...session, frameClock: null },
+      timeline,
+      () => 0,
+      () => 0,
+      () => {
+        unsupported += 1;
+      },
+    ),
+    null,
+  );
+  assert.equal(unsupported, 1);
+});
+
 function assertTypechecks(source, filename, jsx) {
   const file = path.resolve(rootDir, filename);
   const options = {

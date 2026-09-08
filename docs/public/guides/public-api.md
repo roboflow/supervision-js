@@ -329,6 +329,10 @@ edit list carries decodable samples ahead of presentation time zero; those are
 not presented, and the session reports `firstTimestamp` as the presentation
 start rather than the negative decode start.
 
+When a detection source uses `MediaStart` conversion, renderer time is
+`detectionTime + firstTimestamp`; source coverage remains in detection-timeline
+coordinates.
+
 ## Editing API
 
 Annotation editing is a supported advanced API at the dedicated subpath:

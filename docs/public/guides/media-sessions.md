@@ -165,6 +165,10 @@ session.subscribe((state) => {
 Use `activities` when the app needs to explain why playback or presentation is
 blocked.
 
+Frame presentation requires a visible document. When the document is hidden,
+presentation-wait budgets pause and resume when it becomes visible. The decoder
+watchdog is separate; its deadlines do not pause with presentation waits.
+
 ### Seeking
 
 A seek moves the playhead at once and the picture follows when the frame
@@ -422,6 +426,9 @@ function onTimelinePointerCancel(seconds: number) {
   void onTimelinePointerUp(seconds);
 }
 ```
+
+For complete pointer, lost-capture, and keyboard event wiring with cleanup, see
+[Timeline Scrubbing](../recipes/timeline-scrubbing.md).
 
 ## Web Video Engine Sources
 
@@ -687,10 +694,11 @@ source and call `session.refresh()`. The session re-reads semantic data and
 re-presents its retained media sample; the app must not decode the frame again,
 copy pixels into a canvas, or fake a seek to trigger a redraw.
 
-Video times are absolute presentation timestamps. `renderer.onFrame` reports
-the canonical `mediaTime`, `frameDuration`, `firstTimestamp`, and decoded media
-dimensions after each newly presented sample. Use those values for timeline
-and frame-key UI rather than maintaining a second decoder clock in the app.
+Video times are absolute presentation timestamps. For pull sources,
+`renderer.onFrame` reports the canonical `mediaTime`, `frameDuration`,
+`firstTimestamp`, and decoded media dimensions. Push-presented indexed sources
+should use `session.frameClock`, `session.frameNavigation`, and
+`state.renderer.presentedTime` instead.
 
 This is the intended integration shape for apps: create one session per media
 item, feed it detections as they become available, navigate through the session,
