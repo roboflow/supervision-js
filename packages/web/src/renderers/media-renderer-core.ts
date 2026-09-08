@@ -1074,15 +1074,19 @@ export async function createMediaRendererCore(
     });
     const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
     protectedPresentedFrames = presentedFrameChannel
-      ? createProtectedPresentedFrameSource(presentedFrameChannel, (error) => {
-          // A scene that can no longer accept pixels cannot recover because
-          // the producer keeps running. Cut off future frames and state
-          // signals before publishing the rendering failure.
-          protectedPresentedFrames?.destroy();
-          transport?.destroy();
-          presentedFrameChannel.pause();
-          if (!runtimeState.isDestroyed()) runtimeState.setRenderError(error);
-        })
+      ? createProtectedPresentedFrameSource(
+          presentedFrameChannel,
+          (error) => {
+            // A scene that can no longer accept pixels cannot recover because
+            // the producer keeps running. Cut off future frames and state
+            // signals before publishing the rendering failure.
+            protectedPresentedFrames?.destroy();
+            transport?.destroy();
+            presentedFrameChannel.pause();
+            if (!runtimeState.isDestroyed()) runtimeState.setRenderError(error);
+          },
+          () => transport?.didPresentFrame(),
+        )
       : undefined;
 
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);

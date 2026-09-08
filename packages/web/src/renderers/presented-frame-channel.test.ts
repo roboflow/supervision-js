@@ -83,7 +83,10 @@ describe("presented frame channel", () => {
       mediaTimeS: 11,
       paintSeq: 1,
     };
-    protectedSource.source.onPresentedFrame((owned) => owned.frame.close());
+    protectedSource.source.onPresentedFrame((owned) => {
+      owned.acknowledgePresentation?.();
+      owned.frame.close();
+    });
     protectedSource.activate(() => null);
     const navigation = protectedSource.beginNavigation();
 
@@ -95,7 +98,7 @@ describe("presented frame channel", () => {
     protectedSource.destroy();
   });
 
-  it("does not acknowledge a handed-off frame after navigation invalidates it", () => {
+  it("waits for the scene acknowledgment before accepting a navigation or first pixels", async () => {
     let emit!: (presented: PresentedVideoFrame) => void;
     const upstream: PresentedFrameSource = {
       onPresentedFrame(handler) {
@@ -103,6 +106,94 @@ describe("presented frame channel", () => {
       },
     };
     const protectedSource = createProtectedPresentedFrameSource(upstream);
+    let acknowledge!: () => void;
+    protectedSource.source.onPresentedFrame((owned) => {
+      acknowledge = owned.acknowledgePresentation!;
+    });
+    protectedSource.activate(() => null);
+    const navigation = protectedSource.beginNavigation();
+    const presented = {
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: 11, ticks: 11000 },
+      mediaTimeS: 11,
+      paintSeq: 1,
+    };
+    let firstSettled = false;
+    let navigationSettled = false;
+    void protectedSource.waitForFirstPresentation().then(() => {
+      firstSettled = true;
+    });
+    void navigation.waitFor(presented.frameId).then(() => {
+      navigationSettled = true;
+    });
+
+    emit(presented);
+    await Promise.resolve();
+
+    expect({ firstSettled, navigationSettled }).toEqual({
+      firstSettled: false,
+      navigationSettled: false,
+    });
+
+    acknowledge();
+
+    await expect(
+      protectedSource.waitForFirstPresentation(),
+    ).resolves.toBeUndefined();
+    await expect(
+      navigation.waitFor(presented.frameId),
+    ).resolves.toBeUndefined();
+    protectedSource.destroy();
+  });
+
+  it("acknowledges the producer before releasing the frontier and does both once", () => {
+    let emit!: (presented: PresentedVideoFrame) => void;
+    const upstream: PresentedFrameSource = {
+      onPresentedFrame(handler) {
+        emit = handler;
+      },
+    };
+    const order: string[] = [];
+    const protectedSource = createProtectedPresentedFrameSource(
+      upstream,
+      vi.fn(),
+      () => {
+        order.push("frontier");
+      },
+    );
+    let acknowledge!: () => void;
+    protectedSource.source.onPresentedFrame((owned) => {
+      acknowledge = owned.acknowledgePresentation!;
+    });
+    protectedSource.activate(() => null);
+
+    emit({
+      acknowledgePresentation: () => order.push("producer"),
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: 11, ticks: 11000 },
+      mediaTimeS: 11,
+      paintSeq: 1,
+    });
+    acknowledge();
+    acknowledge();
+
+    expect(order).toEqual(["producer", "frontier"]);
+    protectedSource.destroy();
+  });
+
+  it("does not acknowledge a handed-off frame after navigation invalidates it", () => {
+    let emit!: (presented: PresentedVideoFrame) => void;
+    const upstream: PresentedFrameSource = {
+      onPresentedFrame(handler) {
+        emit = handler;
+      },
+    };
+    const onPresented = vi.fn();
+    const protectedSource = createProtectedPresentedFrameSource(
+      upstream,
+      vi.fn(),
+      onPresented,
+    );
     const acknowledgePresentation = vi.fn();
     let acknowledge!: () => void;
     protectedSource.source.onPresentedFrame((owned) => {
@@ -121,6 +212,88 @@ describe("presented frame channel", () => {
     acknowledge();
 
     expect(acknowledgePresentation).not.toHaveBeenCalled();
+    expect(onPresented).not.toHaveBeenCalled();
+    protectedSource.destroy();
+  });
+
+  it("reports a producer acknowledgment failure without accepting the frame", async () => {
+    let emit!: (presented: PresentedVideoFrame) => void;
+    const upstream: PresentedFrameSource = {
+      onPresentedFrame(handler) {
+        emit = handler;
+      },
+    };
+    const onPresentationError = vi.fn();
+    const onPresented = vi.fn();
+    const protectedSource = createProtectedPresentedFrameSource(
+      upstream,
+      onPresentationError,
+      onPresented,
+    );
+    let acknowledge!: () => void;
+    protectedSource.source.onPresentedFrame((owned) => {
+      acknowledge = owned.acknowledgePresentation!;
+    });
+    protectedSource.activate(() => null);
+    const navigation = protectedSource.beginNavigation();
+    const presented = {
+      acknowledgePresentation: () => {
+        throw new Error("producer acknowledgment failed");
+      },
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: 11, ticks: 11000 },
+      mediaTimeS: 11,
+      paintSeq: 1,
+    };
+
+    emit(presented);
+    acknowledge();
+
+    await expect(protectedSource.waitForFirstPresentation()).rejects.toThrow(
+      "producer acknowledgment failed",
+    );
+    await expect(navigation.waitFor(presented.frameId)).rejects.toThrow(
+      "producer acknowledgment failed",
+    );
+    expect(onPresented).not.toHaveBeenCalled();
+    protectedSource.destroy();
+  });
+
+  it("owns a rejected post-ack release and reports it", async () => {
+    let emit!: (presented: PresentedVideoFrame) => void;
+    const upstream: PresentedFrameSource = {
+      onPresentedFrame(handler) {
+        emit = handler;
+      },
+    };
+    const onPresentationError = vi.fn();
+    const protectedSource = createProtectedPresentedFrameSource(
+      upstream,
+      onPresentationError,
+      () => Promise.reject(new Error("frontier release failed")),
+    );
+    let acknowledge!: () => void;
+    protectedSource.source.onPresentedFrame((owned) => {
+      acknowledge = owned.acknowledgePresentation!;
+    });
+    protectedSource.activate(() => null);
+
+    emit({
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: 11, ticks: 11000 },
+      mediaTimeS: 11,
+      paintSeq: 1,
+    });
+    acknowledge();
+
+    await expect(
+      protectedSource.waitForFirstPresentation(),
+    ).resolves.toBeUndefined();
+    await vi.waitFor(() =>
+      expect(onPresentationError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "frontier release failed" }),
+      ),
+    );
     protectedSource.destroy();
   });
 
@@ -141,6 +314,7 @@ describe("presented frame channel", () => {
       presentations += 1;
       owned.frame.close();
       if (presentations > 1) throw new Error("later upload failed");
+      owned.acknowledgePresentation?.();
     });
     protectedSource.activate(() => null);
     const first = {

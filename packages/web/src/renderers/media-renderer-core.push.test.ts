@@ -555,6 +555,7 @@ describe("media renderer over a push-based media source", () => {
               mediaTime: presented.mediaTimeS,
               presentedFrameSerial: presented.paintSeq,
             });
+            presented.acknowledgePresentation?.();
             presented.frame.close();
           });
           return scene;
@@ -717,6 +718,7 @@ describe("media renderer over a push-based media source", () => {
         presentations += 1;
         presented.frame.close();
         if (presentations > 1) throw new Error("later scene upload failed");
+        presented.acknowledgePresentation?.();
       },
     );
 
@@ -749,6 +751,7 @@ describe("media renderer over a push-based media source", () => {
         if (presentations > 1) {
           throw new Error("initial replacement upload failed");
         }
+        presented.acknowledgePresentation?.();
       },
     );
 
@@ -1018,6 +1021,45 @@ describe("media renderer over a push-based media source", () => {
       MediaRendererPlaybackState.Playing,
     );
 
+    renderer.destroy();
+  });
+
+  it("resumes a gated producer only after the scene acknowledges its ready frame", async () => {
+    const producer = createProducer();
+    const preparation = createStuckRenderPreparation();
+    let awaitingPresentation: PresentedVideoFrame | undefined;
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      { renderPreparation: { playbackGate: { enabled: true } } },
+      (presented) => {
+        if (presented.mediaTimeS === 0) {
+          presented.acknowledgePresentation?.();
+          presented.frame.close();
+        } else {
+          awaitingPresentation = presented;
+        }
+      },
+    );
+
+    producer.setStatus("PLAYING");
+    producer.setTimeMs(1000);
+    preparation.prepare();
+
+    await vi.waitFor(() => expect(awaitingPresentation).toBeDefined());
+    expect(producer.endInteractiveSeek).not.toHaveBeenCalled();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+
+    awaitingPresentation!.acknowledgePresentation?.();
+    awaitingPresentation!.frame.close();
+    await vi.waitFor(() => {
+      expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Playing,
+      );
+    });
     renderer.destroy();
   });
 
@@ -1599,8 +1641,10 @@ async function createRenderer(
   producer: ReturnType<typeof createProducer>,
   scene: MediaRendererScene,
   overrides: Partial<MediaRendererOptions> = {},
-  presentFrame: (presented: PresentedVideoFrame) => void = (presented) =>
-    presented.frame.close(),
+  presentFrame: (presented: PresentedVideoFrame) => void = (presented) => {
+    presented.acknowledgePresentation?.();
+    presented.frame.close();
+  },
 ) {
   const renderer = await createMediaRendererCore(
     {

@@ -87,13 +87,13 @@ export interface ProtectedPresentedFrameSource {
    *  emit its landing before its command promise resumes, so accepted frame
    *  identities are retained until the caller names the producer's result. */
   beginNavigation(): PresentedFrameNavigation;
-  /** Resolves after the downstream scene has synchronously accepted a frame. */
+  /** Resolves after the downstream scene acknowledges drawing a frame. */
   waitForFirstPresentation(): Promise<void>;
   destroy(): void;
 }
 
 export interface PresentedFrameNavigation {
-  /** Resolves only after the scene has synchronously accepted this frame. */
+  /** Resolves only after the scene acknowledges drawing this frame. */
   waitFor(frameId: PresentedFrameId): Promise<void>;
   /** Releases the acknowledgment when its producer command fails. */
   cancel(): void;
@@ -117,6 +117,7 @@ interface PresentedFrameNavigationTicket {
 export function createProtectedPresentedFrameSource(
   upstream: PresentedFrameSource,
   onPresentationError: (error: unknown) => void = () => undefined,
+  onPresented?: () => Promise<void> | void,
 ): ProtectedPresentedFrameSource {
   let downstream: ((presented: PresentedVideoFrame) => void) | null = null;
   let protect:
@@ -216,31 +217,66 @@ export function createProtectedPresentedFrameSource(
       run.handedOff = true;
       try {
         const acknowledge = frame.acknowledgePresentation;
-        downstream!(
-          acknowledge
-            ? {
-                ...frame,
-                acknowledgePresentation: () => {
+        let acknowledged = false;
+        downstream!({
+          ...frame,
+          acknowledgePresentation: () => {
+            if (
+              acknowledged ||
+              destroyed ||
+              controller.signal.aborted ||
+              run.generation !== generation
+            ) {
+              return;
+            }
+            acknowledged = true;
+            try {
+              acknowledge?.();
+            } catch (error) {
+              failPresentation(error);
+              return;
+            }
+            if (
+              destroyed ||
+              controller.signal.aborted ||
+              run.generation !== generation
+            ) {
+              return;
+            }
+            try {
+              const release = onPresented?.();
+              if (release) {
+                void release.catch((error) => {
                   if (
-                    destroyed ||
-                    controller.signal.aborted ||
-                    run.generation !== generation
+                    !destroyed &&
+                    !controller.signal.aborted &&
+                    run.generation === generation
                   ) {
-                    return;
+                    failPresentation(error);
                   }
-                  acknowledge();
-                },
+                });
               }
-            : frame,
-        );
+            } catch (error) {
+              failPresentation(error);
+              return;
+            }
+            if (
+              destroyed ||
+              controller.signal.aborted ||
+              run.generation !== generation
+            ) {
+              return;
+            }
+            acceptNavigationFrame(frame.frameId);
+            if (!firstPresented) {
+              firstPresented = true;
+              resolveFirstPresentation();
+            }
+          },
+        });
       } catch (error) {
         failPresentation(error);
         return;
-      }
-      acceptNavigationFrame(frame.frameId);
-      if (!firstPresented) {
-        firstPresented = true;
-        resolveFirstPresentation();
       }
     };
 

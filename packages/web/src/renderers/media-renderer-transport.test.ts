@@ -346,7 +346,61 @@ describe("media renderer transport", () => {
     await newer;
   });
 
-  it("releases an older presentation hold when its replacement needs no wait", async () => {
+  it("resumes a ready presentation hold only after the scene acknowledges its frame", async () => {
+    const producer = createProducer();
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => readiness,
+    });
+    const presenting = transport.protectPresentation(
+      1,
+      new AbortController().signal,
+    );
+
+    releaseReadiness();
+    await presenting;
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.didPresentFrame();
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("still waits for scene acknowledgment when the presentation guard rejects", async () => {
+    const producer = createProducer();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () =>
+        Promise.reject(new Error("annotation source failed")),
+    });
+
+    await transport.protectPresentation(1, new AbortController().signal);
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.didPresentFrame();
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("transfers a ready hold to a replacement that needs no wait", async () => {
     const producer = createProducer();
     let releaseFirst = () => {};
     const first = new Promise<void>((resolve) => {
@@ -372,9 +426,34 @@ describe("media renderer transport", () => {
     );
     releaseFirst();
     await older;
-    await vi.waitFor(() =>
-      expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce(),
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.didPresentFrame();
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("returns a failed frontier release to the protected presentation channel", async () => {
+    const producer = createProducer();
+    const failure = new Error("producer did not resume");
+    vi.mocked(producer.channel.endInteractiveSeek).mockRejectedValueOnce(
+      failure,
     );
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => Promise.resolve(),
+    });
+
+    await transport.protectPresentation(1, new AbortController().signal);
+
+    await expect(transport.didPresentFrame()).rejects.toBe(failure);
   });
 
   it.each(["play", "pause"] as const)(

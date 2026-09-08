@@ -20,6 +20,8 @@ export interface MediaRendererTransport {
     mediaTime: number,
     signal: AbortSignal,
   ): Promise<void> | null;
+  /** Releases a ready presentation hold after the scene acknowledges its frame. */
+  didPresentFrame(): Promise<void> | void;
   destroy(): void;
 }
 
@@ -108,6 +110,7 @@ export function createMediaRendererTransport(
   let presentationWait = 0;
   let presentationHold: {
     readonly intent: number;
+    readonly ready: boolean;
     readonly wait: number;
   } | null = null;
   const isHoldingForReadiness = () =>
@@ -452,15 +455,17 @@ export function createMediaRendererTransport(
       const guarded = options.waitForPresentationReadiness(mediaTime, signal);
       if (!guarded) {
         if (presentationHold) {
-          presentationWait += 1;
-          presentationHold = null;
-          void releaseReadinessFreeze().then(publishPlaybackState);
+          presentationHold = {
+            intent: playbackIntent,
+            ready: true,
+            wait: ++presentationWait,
+          };
         }
         return null;
       }
       const wait = ++presentationWait;
       const intent = playbackIntent;
-      presentationHold = { intent, wait };
+      presentationHold = { intent, ready: false, wait };
       readinessFreezeHeld = true;
       channel.beginInteractiveSeek();
       publishPlaybackState();
@@ -472,17 +477,24 @@ export function createMediaRendererTransport(
           // A readiness provider failure degrades annotations, not media. The
           // provider's diagnostics own the error while the frame stays visible.
         } finally {
-          if (presentationHold?.wait === wait) {
-            presentationHold = null;
-          }
-          // An aborted frame hands the existing freeze to a newer frame. A
-          // navigation increments presentationWait and releases explicitly.
           if (wait === presentationWait && !signal.aborted) {
-            await releaseReadinessFreeze();
-            publishPlaybackState();
+            presentationHold = { intent, ready: true, wait };
           }
         }
       })();
+    },
+
+    didPresentFrame() {
+      const hold = presentationHold;
+      if (
+        !hold?.ready ||
+        hold.intent !== playbackIntent ||
+        hold.wait !== presentationWait
+      ) {
+        return;
+      }
+      presentationHold = null;
+      return releaseReadinessFreeze().then(publishPlaybackState);
     },
 
     destroy() {

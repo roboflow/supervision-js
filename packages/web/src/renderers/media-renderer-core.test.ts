@@ -2160,6 +2160,7 @@ function createPresentedSample(mediaTime: number, presentedFrameSerial = 1) {
 
 function acceptPresentedFrames(options: MediaRendererSceneOptions) {
   options.presentedFrames?.onPresentedFrame((presented) => {
+    presented.acknowledgePresentation?.();
     presented.frame.close();
   });
 }
