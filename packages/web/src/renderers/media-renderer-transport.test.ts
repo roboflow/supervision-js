@@ -14,6 +14,76 @@ const TICKS_PER_FRAME = 1001;
 const FRAME_COUNT = 300;
 
 describe("media renderer transport", () => {
+  it("cancels an old commit ticket when a newer scrub arrives before its command completes", async () => {
+    const producer = createProducer();
+    let finishCommit = () => {};
+    const committed = new Promise<void>((resolve) => {
+      finishCommit = resolve;
+    });
+    vi.mocked(producer.channel.commit).mockReturnValueOnce(committed);
+    const waitFor = vi.fn(() => new Promise<void>(() => undefined));
+    const cancel = vi.fn();
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: () => ({ waitFor, cancel }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    const oldCommit = transport.commit(secondsAt(12));
+    await vi.waitFor(() =>
+      expect(producer.channel.commit).toHaveBeenCalledOnce(),
+    );
+    transport.scrub(secondsAt(200));
+    finishCommit();
+    await oldCommit;
+
+    expect(waitFor).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(producer.channel.scrub).toHaveBeenLastCalledWith(
+      secondsAt(200) * 1000,
+      "gesture",
+    );
+  });
+
+  it("does not submit an old release target after a newer scrub", async () => {
+    const producer = createProducer();
+    let release!: () => void;
+    vi.mocked(producer.channel.endInteractiveSeek).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    transport.scrub(secondsAt(12));
+    const oldRelease = transport.commit(secondsAt(12));
+    transport.scrub(secondsAt(250));
+    release();
+    await oldRelease;
+    expect(producer.channel.commit).not.toHaveBeenCalled();
+    expect(producer.channel.scrub).toHaveBeenLastCalledWith(
+      secondsAt(250) * 1000,
+      "gesture",
+    );
+    await transport.commit(secondsAt(250));
+    expect(producer.channel.commit).toHaveBeenCalledExactlyOnceWith(
+      secondsAt(250) * 1000,
+    );
+  });
+
   it("publishes a playhead time that names the frame it came from", () => {
     const producer = createProducer();
     const published: number[] = [];

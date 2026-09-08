@@ -395,7 +395,7 @@ export function createMediaRendererTransport(
       options.invalidatePresentedFrame?.();
       const navigationPresentation = ++presentationWait;
       presentationHold = null;
-      beginPlaybackIntent();
+      const intent = beginPlaybackIntent();
       // Releasing first is what keeps a drag from freezing the picture on
       // release: the producer resumes on its own terms, and the landing decode
       // for a cold region no longer sits between the pointer coming up and
@@ -413,9 +413,14 @@ export function createMediaRendererTransport(
         }
       }
 
+      if (intent !== playbackIntent) return;
       const presentation = options.beginPresentedFrameNavigation?.();
       try {
         await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
+        if (intent !== playbackIntent) {
+          presentation?.cancel();
+          return;
+        }
         await presentation?.waitFor(channel.getPlayhead().frame);
       } catch (error) {
         presentation?.cancel();
