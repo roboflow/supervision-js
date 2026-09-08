@@ -215,6 +215,8 @@ session.subscribe((state) => {
 `scrubbing` means the viewer is still leading the playhead with a gesture;
 `seeking` means a requested position has not reached the screen yet.
 `source.awaitingRead` is true only while a required source read is pending.
+It is source-wide, not a fetch/decode stage for an individual engine seek; see
+[URL seek feedback and responsiveness](application-integration.md#url-seek-feedback-and-responsiveness).
 `renderPreparationGateAbandoned` means its bounded wait expired and playback
 continued without an unavailable prepared annotation.
 

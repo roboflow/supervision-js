@@ -8,8 +8,8 @@ deliberately no getter for the frame on screen: a second reader of "what is
 displayed right now" is a second opinion about the current moment, which is the
 desync this design exists to make impossible.
 
-Everything below is current behavior, not a plan. The atomic present rules are
-law for future edits.
+The atomic present rules are invariants for future edits. Deferred source-read
+capabilities are identified separately below.
 
 ## The Engine Boundary
 
@@ -240,6 +240,36 @@ and nowhere else.
 starting with "never pulls a sample", "drives a drag as scrubs inside one
 gesture and a seek that releases it", and "replays from the start when the
 producer ends and loop is on".
+
+## Deferred Source-Read Capabilities
+
+The engine does not yet provide a network-free media-time coverage map, packet
+source offsets, per-seek fetch/decode attribution, or a guarantee that a target
+needing decoding can bypass an obsolete blocked read. See the
+[application contract](../public/guides/application-integration.md#url-seek-feedback-and-responsiveness)
+for the visible limitations. Logical navigation supersession and physical
+read cancellation are separate contracts.
+
+Upstream MediaBunny tracks buffered-packet introspection in
+[issue 346](https://github.com/Vanilagy/mediabunny/issues/346) and loading feedback
+in [issue 196](https://github.com/Vanilagy/mediabunny/issues/196).
+Its [v2 draft](https://github.com/Vanilagy/mediabunny/pull/220) changes the reader
+and cursor APIs. Those plans are not shipped guarantees or an upgrade deadline;
+the cancellation requirement needs its own validation.
+
+Reopen these capabilities when public APIs or a bounded library-owned design
+can pass all relevant checks:
+
+- Map held bytes to exact presentation intervals on variable-frame-rate,
+  nonzero-origin sources, accounting for reference/configuration dependencies,
+  cache eviction and unsupported containers. Validate packet offsets separately.
+- Attribute a wait to the current target, excluding unrelated prefetch and
+  superseded reads. Distinguish network wait from decode work.
+- Hold an old target's network read, request a new locally servable target, and
+  verify its actual pixels arrive before releasing the old read. Include
+  in-flight and already-completed owners, late callbacks, disposal and errors.
+- Retain one playback decoder and exact frame/annotation identity through seek,
+  pause and playback; recheck packaged workers and scrub/playback performance.
 
 ## Where To See It Running
 

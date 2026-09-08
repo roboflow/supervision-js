@@ -291,8 +291,8 @@ protocol is internal; applications should only use it through
 
 ## Serving Media And Detections Over The Network
 
-A session given a URL never downloads the whole file. It reads the media with
-HTTP range requests, so the origin serving it must answer `Range` with `206
+A URL source reads media with HTTP range requests; optional source residency
+can also prefetch and retain bytes. The origin should answer `Range` with `206
 Partial Content` and advertise `Accept-Ranges: bytes`. An origin that ignores
 `Range` and returns the whole body on every read makes seeking cost a full
 download.
@@ -322,6 +322,29 @@ preceding keyframe, and a longer keyframe interval makes that decode longer. Set
 `detectionBuffer.bufferAheadSeconds` and
 `renderPreparation.maskFrame.prefetchFrameCount` against the latency the
 application actually sees, not against a local file.
+
+### URL Seek Feedback And Responsiveness
+
+The engine does not expose a complete map of media times that can be presented
+without network access, or packet byte offsets on its frame index. A percentage
+of retained bytes is not a buffered timeline: variable-size packets and the
+reference frames needed to decode them prevent that conversion. Detection
+coverage and prepared-mask coverage describe annotations, not available video.
+
+The source-wide `awaitingRead` flag does not identify whether an individual
+engine seek is fetching packets or decoding them. Use exact navigation outcomes
+and `presentedTime` to report when the requested picture has reached the screen;
+do not label a pending seek as network-bound solely from that flag.
+
+A newer target supersedes an older navigation request, but this does not
+guarantee cancellation of an underlying read already in progress. If the newer
+target still needs decoding, it can wait behind an obsolete read even when its
+own encoded bytes are held locally. An exact decoded-frame cache hit can avoid
+that wait; retained encoded bytes alone do not guarantee an instant seek.
+
+These are current limits of the engine-backed source. Applications should not
+promise an offline-playable timeline or an always-instant seek from its byte
+cache diagnostics.
 
 ## Verification Checklist
 
