@@ -1,4 +1,5 @@
 import type { CreateScrubCursorOptions } from "./create-scrub-cursor";
+import type { DecodeDimensions } from "./decode-resolution";
 import type { FrameCacheStats } from "./frame-cache";
 import type { FrameId, FrameTimeline } from "./frame-timeline";
 import type { GopStats } from "./keyframe-index";
@@ -343,6 +344,8 @@ export interface ScrubTrackInfo {
  *   - close is final; reusing a closed cursor is a programming error.
  */
 export interface ScrubCursor {
+  /** Drains old output and changes frame/cache size without reopening decode. */
+  resizeOutput?(dimensions: DecodeDimensions): Promise<boolean>;
   readonly state: ScrubCursorState;
   readonly track: ScrubTrackInfo;
   readonly isIdle: boolean;

@@ -1,6 +1,9 @@
 import type { FrameId, FrameLanding } from "./frame-timeline";
 import type { FrameQuality, SeekIntent } from "./scrub-cursor";
-import type { DecodeResolutionStrategy } from "./decode-resolution";
+import type {
+  DecodeResolutionStrategy,
+  DisplayBoxResolutionOptions,
+} from "./decode-resolution";
 import type { DiagnosticsSnapshot, EngineDiagnostics } from "./diagnostics";
 import type { Rotation } from "./rotation";
 import type { EngineTrace } from "./trace-recorder";
@@ -138,6 +141,11 @@ export type FireAndForgetCommand =
 
 export type AwaitableCommand =
   | {
+      readonly type: "setDisplay";
+      readonly requestId: RequestId;
+      readonly display: DisplayBoxResolutionOptions;
+    }
+  | {
       readonly type: "load";
       readonly requestId: RequestId;
       readonly config: EngineLoadConfig;
@@ -229,6 +237,7 @@ export type ResponseEvent =
       readonly type: "ack";
       readonly requestId: RequestId;
       readonly landing?: FrameLanding;
+      readonly outputChanged?: boolean;
     }
   | {
       readonly type: "stats";

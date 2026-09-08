@@ -21,6 +21,7 @@ import {
 import {
   nativeResolution,
   resolveDecodeDimensions,
+  type DecodeDimensions,
   type DecodeResolutionStrategy,
 } from "./decode-resolution";
 import { FrameTimeline } from "./frame-timeline";
@@ -148,6 +149,7 @@ export type DecodedFrame =
  * which the scheduler reports so a human can see which machinery is decoding.
  */
 export interface FrameProvider {
+  resizeOutput?(dimensions: DecodeDimensions): Promise<void>;
   readonly decodePath: DecodePath;
   readonly track: ScrubTrackInfo;
   readonly keyframeProbe: KeyframeProbe;
@@ -355,6 +357,9 @@ function presentationSessionSource(
         )
       : null;
   return {
+    ...(source.resizeOutput
+      ? { resizeOutput: source.resizeOutput.bind(source) }
+      : {}),
     async frameAt(targetS) {
       return wrap(await source.frameAt(timeline.toSourceTime(targetS)));
     },
@@ -420,6 +425,7 @@ function sampleProvider(handle: SampleSourceHandle): FrameProvider {
   };
   return {
     decodePath: "sample",
+    resizeOutput: async () => undefined,
     // Pool-bound: every outstanding frame is a slot the sink cannot refill.
     playReadAhead: 1,
     track: handle.track,
@@ -455,6 +461,9 @@ function sampleProvider(handle: SampleSourceHandle): FrameProvider {
 function sessionProvider(handle: SessionSourceHandle): FrameProvider {
   return {
     decodePath: "session",
+    ...(handle.session.resizeOutput
+      ? { resizeOutput: handle.session.resizeOutput.bind(handle.session) }
+      : {}),
     playReadAhead: PLAYBACK.READ_AHEAD_CANVAS,
     track: handle.track,
     keyframeProbe: handle.keyframeProbe,

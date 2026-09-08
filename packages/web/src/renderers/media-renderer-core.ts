@@ -1175,9 +1175,17 @@ export async function createMediaRendererCore(
           ? holdForPresentationReadiness
           : undefined,
         invalidatePresentedFrame: () => protectedPresentedFrames?.invalidate(),
-        beginPresentedFrameNavigation: () =>
-          protectedPresentedFrames!.beginNavigation(),
+        beginPresentedFrameNavigation: (preserveCurrent) =>
+          protectedPresentedFrames!.beginNavigation(preserveCurrent),
       });
+      const setDisplay = mediaSource.setDisplay;
+      if (setDisplay) {
+        renderer.setDisplay = async (display) => {
+          if (runtimeState.isDestroyed())
+            throw new Error("Media renderer has been destroyed.");
+          await transport!.resizeOutput(() => setDisplay(display));
+        };
+      }
       protectedPresentedFrames?.activate((presented, signal) =>
         pushPresentationReady
           ? transport!.protectPresentation(presented.mediaTimeS, signal)

@@ -9,6 +9,59 @@ import {
 } from "./presented-frame-channel";
 
 describe("presented frame channel", () => {
+  it("keeps a gated frame during resize without mistaking it for the replacement", async () => {
+    let emit!: (frame: PresentedVideoFrame) => void;
+    const source = createProtectedPresentedFrameSource({
+      onPresentedFrame: (handler) => {
+        emit = handler;
+      },
+    });
+    const drawn: number[] = [];
+    source.source.onPresentedFrame((frame) => {
+      drawn.push(frame.paintSeq);
+      frame.acknowledgePresentation?.();
+      frame.frame.close();
+    });
+    let ready!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    source.activate(() => gate);
+    const frame = {
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: 1, ticks: 1000 },
+      mediaTimeS: 1,
+      paintSeq: 1,
+    };
+    const navigation = source.beginNavigation();
+    let landed = false;
+    void navigation.waitFor(frame.frameId).then(() => {
+      landed = true;
+    });
+    emit(frame);
+    const replacement = source.beginNavigation(true);
+    let resized = false;
+    void replacement.waitFor(frame.frameId).then(() => {
+      resized = true;
+    });
+    expect(frame.frame.close).not.toHaveBeenCalled();
+    expect(drawn).toEqual([]);
+    expect(landed).toBe(false);
+    ready();
+    await vi.waitFor(() => expect(drawn).toEqual([1]));
+    expect(landed).toBe(true);
+    expect(resized).toBe(false);
+    emit({
+      ...frame,
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      paintSeq: 2,
+    });
+    await replacement.waitFor(frame.frameId);
+    expect(drawn).toEqual([1, 2]);
+    expect(resized).toBe(true);
+    source.destroy();
+  });
+
   it("finds the plane a push-based source publishes", () => {
     const engine = createChannel();
 

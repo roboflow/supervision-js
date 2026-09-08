@@ -2,11 +2,13 @@ import { beforeAll, describe, expect, it, vi, type Mock } from "vitest";
 
 import { DIAGNOSTICS, PLAYBACK, HANG_RECOVERY } from "./constants";
 import { boundedKeyframeTimestamps, DecodeScheduler } from "./decode-scheduler";
+import { CanvasSinkScrubCursor } from "./canvas-sink-scrub-cursor";
 import type {
   AnySourceHandle,
   CanvasFrameSource,
   DecodeSourceHandle,
   SampleSourceHandle,
+  SessionSourceHandle,
   WrappedCanvasLike,
 } from "./decode-source";
 import type { SessionFrameSource } from "./decode-session";
@@ -24,6 +26,232 @@ import { installWorkerGlobals } from "../test/fake-engine-deps";
 
 beforeAll(() => {
   installWorkerGlobals();
+});
+
+describe("display output resize", () => {
+  it.each(["cached", "uncached"])(
+    "%s rejects output issued before resizing and clears old-size exact output",
+    async (backend) => {
+      let release: (sample: VideoSampleLike) => void = () => undefined;
+      let entered: () => void = () => undefined;
+      const decoding = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const sample = (timestamp: number): VideoSampleLike => ({
+        timestamp,
+        duration: 1 / 30,
+        rotation: 0,
+        draw: () => undefined,
+        toVideoFrame: () => ({}) as VideoFrame,
+        close: vi.fn(),
+      });
+      const source: SampleSourceHandle = {
+        track: TRACK,
+        keyframeProbe: new FakeKeyframeProbe([]),
+        sampleSink: {
+          async getSample(timestamp) {
+            if (timestamp !== 1) return sample(timestamp);
+            entered();
+            return new Promise((resolve) => {
+              release = resolve;
+            });
+          },
+          async *samples() {},
+          async *samplesAtTimestamps() {},
+        },
+        dispose: vi.fn(async () => undefined),
+      };
+      const scheduler =
+        backend === "cached"
+          ? new DecodeScheduler({ source, cache: makeCache() })
+          : new CanvasSinkScrubCursor(source);
+      await scheduler.open();
+      scheduler.subscribe((frame) => {
+        if (frame.kind === "sample") frame.sample.close();
+      });
+      if (backend === "cached") expect(scheduler.peekCached(0)).not.toBeNull();
+      const pending = scheduler.seekToFrame(TIMELINE.idAt(30));
+      await decoding;
+
+      let resizeSettled = false;
+      const resizing = scheduler
+        .resizeOutput({ width: 160, height: 90 })
+        .then((changed) => {
+          resizeSettled = true;
+          return changed;
+        });
+      await tick();
+      expect(resizeSettled).toBe(false);
+      const stale = sample(1);
+      release(stale);
+      await expect(resizing).resolves.toBe(true);
+      expect(scheduler.peekCached(0)).toBeNull();
+      await expect(pending).resolves.toBeNull();
+      expect(stale.close).toHaveBeenCalledOnce();
+      expect(scheduler.peekCached(1000)).toBeNull();
+      const resized = await scheduler.seekToFrame(TIMELINE.idAt(0));
+      expect(resized).toMatchObject({ timestampS: 0, width: 160, height: 90 });
+      if (backend === "cached")
+        expect(scheduler.peekCached(0)).toMatchObject({
+          width: 160,
+          height: 90,
+        });
+      expect(source.dispose).not.toHaveBeenCalled();
+      await expect(
+        scheduler.resizeOutput({ width: 160, height: 90 }),
+      ).resolves.toBe(false);
+      if (backend === "cached") expect(scheduler.peekCached(0)).not.toBeNull();
+      await scheduler.close();
+    },
+  );
+
+  it.each(["cached", "uncached"])(
+    "%s drains a detached sample iterator before allowing replacement output",
+    async (backend) => {
+      let release: () => void = () => undefined;
+      let entered: () => void = () => undefined;
+      const decoding = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let activeDecoder = false;
+      const sample: VideoSampleLike = {
+        timestamp: 0,
+        duration: 1 / 30,
+        rotation: 0,
+        draw: () => undefined,
+        toVideoFrame: () => ({}) as VideoFrame,
+        close: vi.fn(),
+      };
+      const source: SampleSourceHandle = {
+        track: TRACK,
+        keyframeProbe: new FakeKeyframeProbe([]),
+        sampleSink: {
+          async getSample() {
+            expect(activeDecoder).toBe(false);
+            return { ...sample, close: vi.fn() };
+          },
+          async *samples() {
+            activeDecoder = true;
+            entered();
+            try {
+              await blocked;
+              yield sample;
+            } finally {
+              activeDecoder = false;
+            }
+          },
+          async *samplesAtTimestamps() {},
+        },
+        dispose: vi.fn(async () => undefined),
+      };
+      const cursor =
+        backend === "cached"
+          ? new DecodeScheduler({ source, cache: makeCache() })
+          : new CanvasSinkScrubCursor(source);
+      await cursor.open();
+      cursor.subscribe((frame) => {
+        if (frame.kind === "sample") frame.sample.close();
+      });
+      cursor.attachPlay(0);
+      cursor.next();
+      await decoding;
+      cursor.detachPlay();
+      let completed = false;
+      const resizing = cursor
+        .resizeOutput({ width: 160, height: 90 })
+        .then(() => {
+          completed = true;
+        });
+      await tick();
+      expect(completed).toBe(false);
+      expect(activeDecoder).toBe(true);
+      release();
+      await resizing;
+      expect(activeDecoder).toBe(false);
+      expect(sample.close).toHaveBeenCalledOnce();
+      await cursor.seekToFrame(TIMELINE.idAt(0));
+      expect(source.dispose).not.toHaveBeenCalled();
+      await cursor.close();
+    },
+  );
+
+  it("keeps the resized materialization size after decoder recovery", async () => {
+    let fail = false;
+    const outputs: Array<{ width: number; height: number }> = [];
+    const source = (): SessionSourceHandle => {
+      let dimensions = { width: TRACK.decodeWidth, height: TRACK.decodeHeight };
+      return {
+        track: TRACK,
+        keyframeProbe: new FakeKeyframeProbe([]),
+        session: {
+          async resizeOutput(next) {
+            dimensions = next;
+          },
+          async frameAt(timestamp) {
+            if (fail) {
+              fail = false;
+              throw new Error("decode failed");
+            }
+            outputs.push(dimensions);
+            return {
+              timestamp,
+              duration: 1 / 30,
+              rotation: 0,
+              draw: () => undefined,
+              close: () => undefined,
+              toVideoFrame: () => ({ ...dimensions }) as unknown as VideoFrame,
+            };
+          },
+          async *framesFrom() {},
+          async *framesCovering() {},
+          reachableFromS: -Infinity,
+          framesDecoded: 0,
+        },
+        dispose: async () => undefined,
+      };
+    };
+    const scheduler = new DecodeScheduler({
+      source: source(),
+      cache: makeCache(),
+      reopen: async () => source(),
+    });
+    await scheduler.open();
+    await scheduler.resizeOutput({ width: 160, height: 90 });
+    fail = true;
+    await scheduler.seekToFrame(TIMELINE.idAt(1));
+    await tick();
+    await scheduler.seekToFrame(TIMELINE.idAt(2));
+    expect(outputs.at(-1)).toEqual({ width: 160, height: 90 });
+    await scheduler.close();
+  });
+
+  it.each(["cached", "uncached"])(
+    "%s refuses an output-size change on a canvas-only provider",
+    async (backend) => {
+      const source: DecodeSourceHandle = {
+        track: TRACK,
+        sink: new FakeSink(),
+        keyframeProbe: new FakeKeyframeProbe([]),
+        dispose: vi.fn(async () => undefined),
+      };
+      const cursor =
+        backend === "cached"
+          ? new DecodeScheduler({ source, cache: makeCache() })
+          : new CanvasSinkScrubCursor(source);
+      await cursor.open();
+      await expect(
+        cursor.resizeOutput({ width: 160, height: 90 }),
+      ).rejects.toMatchObject({
+        code: WebVideoEngineErrorCode.PresentationMismatch,
+      });
+      expect(cursor.track.decodeWidth).toBe(320);
+      expect(source.dispose).not.toHaveBeenCalled();
+      await cursor.close();
+    },
+  );
 });
 
 const TRACK: ScrubTrackInfo = {

@@ -23,6 +23,15 @@ for unindexed media. Use `timeAt`, `durationAt`, and `indexAtOrBefore` rather
 than an assumed FPS: the table retains a nonzero first timestamp and final-frame
 duration.
 
+## Display Output
+
+The web video engine source exposes `setDisplay()`, which rejects unless the
+source uses a display-box decode strategy (configured with `display`). Other
+media sources may omit the method. Send the current CSS box and device pixel ratio
+through that existing session or renderer; do not rebuild the session or source
+on every layout change. Calls superseded by a newer size reject with
+`AbortError`.
+
 ## Interaction Highlight Styles
 
 `BaseInteractionStyle` no longer accepts the rectangle-specific `shape`,

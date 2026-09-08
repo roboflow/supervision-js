@@ -1,3 +1,4 @@
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import type {
   DetectionBufferOptions,
   DetectionFrameSource,
@@ -166,6 +167,13 @@ export interface DetectionLabelBounds {
 export interface MediaRenderer extends MediaRendererStateController {
   /** Exact frame timing when the source provides an index; null otherwise. */
   readonly frameClock?: MediaFrameClock | null;
+  /**
+   * Resize engine-backed display-box output without reopening the source.
+   * Resolves after the resized frame is presented; supersession rejects with AbortError.
+   * Available only on sources that support live output sizing.
+   */
+  setDisplay?(display: MediaRendererDisplay): Promise<void>;
+
   play(): Promise<void>;
   pause(): void;
   /**

@@ -1,3 +1,4 @@
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
@@ -383,6 +384,8 @@ export interface MediaSessionDetectionWriteOptions {
 export interface MediaSession {
   /** Exact frame timing when the media source provides an index; null otherwise. */
   readonly frameClock?: MediaFrameClock | null;
+  /** Resize an engine-backed display-box source and await its presented output. */
+  setDisplay?(display: MediaRendererDisplay): Promise<void>;
   /**
    * Detection source used by the renderer. Present when the session was created
    * with static frames, a source, or an appendable source.

@@ -85,6 +85,10 @@ class VisibilityStallingPort implements EngineWorkerPort {
     });
   }
 
+  acknowledge(requestId: number, outputChanged?: boolean): void {
+    this.deliver({ type: "ack", requestId, outputChanged });
+  }
+
   private deliver(event: EngineEvent): void {
     this.listener?.({ data: event } as MessageEvent<EngineEvent>);
   }
@@ -96,6 +100,37 @@ afterEach(() => {
 });
 
 describe("WebVideoEngine presentation visibility", () => {
+  it.each([true, false])(
+    "exposes display resizing and returns the worker output-change result %s",
+    async (changed) => {
+      const port = new VisibilityStallingPort();
+      const engine = new WebVideoEngine(
+        { source: LOAD_CONFIG.source },
+        () => port,
+      );
+      await engine.load();
+      const display = { boxWidth: 640, boxHeight: 360, devicePixelRatio: 1 };
+      let finished = false;
+      const resizing = engine
+        .toHandle()
+        .setDisplay(display)
+        .then((result) => {
+          expect(result).toBe(changed);
+          finished = true;
+        });
+      const command = port.commands.at(-1);
+      expect(command).toMatchObject({ type: "setDisplay", display });
+      if (command?.type !== "setDisplay")
+        throw new Error("expected setDisplay");
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      port.acknowledge(command.requestId, changed);
+      await resizing;
+      expect(finished).toBe(true);
+      await engine.dispose();
+    },
+  );
+
   it("does not register visibility after disposal", async () => {
     const document = new FakeVisibilityDocument();
     vi.stubGlobal("document", document);

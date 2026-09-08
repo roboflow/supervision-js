@@ -3,6 +3,7 @@ import {
   KeyPacketRequirement,
   nalPrefixWidth,
 } from "./key-packet";
+import type { DecodeDimensions } from "./decode-resolution";
 import { drawRotated, type Rotation } from "./rotation";
 import type { VideoSampleLike } from "./scrub-cursor";
 import { WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
@@ -213,6 +214,7 @@ export function sessionDrivable(config: VideoDecoderConfig): boolean {
  * wraps it stays fake-injectable under test.
  */
 export interface SessionFrameSource {
+  resizeOutput?(dimensions: DecodeDimensions): Promise<void>;
   frameAt(targetS: number): Promise<VideoSampleLike | null>;
   framesFrom(startS: number): AsyncGenerator<VideoSampleLike, void, unknown>;
   framesCovering(
@@ -305,9 +307,9 @@ export class DecodeSession implements SessionFrameSource {
 
   private readonly rotation: Rotation;
 
-  private readonly outputWidth: number | undefined;
+  private outputWidth: number | undefined;
 
-  private readonly outputHeight: number | undefined;
+  private outputHeight: number | undefined;
 
   private readonly snapshotFrame: (
     frame: VideoFrame,
@@ -351,6 +353,18 @@ export class DecodeSession implements SessionFrameSource {
     const queued = this.decoded[0];
     if (queued) return queued.timestampS;
     return this.reachable;
+  }
+
+  async resizeOutput({ width, height }: DecodeDimensions): Promise<void> {
+    await this.exclusive(async () => {
+      if (this.closed || this.outputWidth === undefined) return;
+      if (this.outputWidth === width && this.outputHeight === height) return;
+      this.quiesce();
+      this.outputWidth = width;
+      this.outputHeight = height;
+      this.exhausted = true;
+      this.epoch++;
+    });
   }
 
   /** The frame at or before `targetS`, or null when nothing precedes it. */

@@ -120,7 +120,7 @@ export class FrameCache {
   private readonly bucketMs: number;
   private readonly exactBudgetBytes: number;
 
-  constructor(options: FrameCacheOptions) {
+  constructor(private readonly options: FrameCacheOptions) {
     const exactWidth = Math.max(1, Math.round(options.exactWidth));
     const exactHeight = Math.max(1, Math.round(options.exactHeight));
     const aspect = exactWidth / exactHeight;
@@ -153,6 +153,14 @@ export class FrameCache {
       previewHeight,
       PREVIEW_KEY_GRID_MS,
     );
+  }
+
+  resized(width: number, height: number): FrameCache {
+    return new FrameCache({
+      ...this.options,
+      exactWidth: width,
+      exactHeight: height,
+    });
   }
 
   /**

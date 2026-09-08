@@ -124,6 +124,7 @@ export async function openWebVideoEngineMediaSource(
 
     return {
       engine: openedEngine,
+      setDisplay: (display) => openedEngine.setDisplay(display),
       frameClock: createMediaFrameClock(FrameTimeline.from(snapshot.timeline)),
       input: {
         dispose() {

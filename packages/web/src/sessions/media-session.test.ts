@@ -42,6 +42,53 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
+  it("delegates display sizing without replacing its renderer or detections", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const renderers = await import("#renderers/media-renderer");
+    const create = renderers.createMediaRenderer;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const resize = vi.fn(function (this: unknown) {
+      expect(this).toBe(session.renderer);
+      return pending;
+    });
+    const opening = vi
+      .spyOn(renderers, "createMediaRenderer")
+      .mockImplementationOnce(async (options) => {
+        const renderer = await create(options);
+        renderer.setDisplay = resize;
+        return renderer;
+      });
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      detections: { frames },
+      renderer: { autoPlay: false },
+    });
+    try {
+      const source = session.detectionSource;
+      const display = { boxWidth: 640, boxHeight: 360, devicePixelRatio: 2 };
+      let settled = false;
+      const setDisplay = session.setDisplay!;
+      const resizing = setDisplay(display).then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(resize).toHaveBeenCalledExactlyOnceWith(display);
+      finish();
+      await resizing;
+      expect(session.detectionSource).toBe(source);
+      expect(opening).toHaveBeenCalledOnce();
+    } finally {
+      opening.mockRestore();
+      session.destroy();
+    }
+  });
+
   it("delegates an indexed source clock without manufacturing one for pull media", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
@@ -88,6 +135,7 @@ describe("media session", () => {
       renderer: { autoPlay: false },
     });
 
+    expect(session.setDisplay).toBeUndefined();
     session.setPlaybackRate(1.5);
     expect(session.getState().renderer).toMatchObject({ playbackRate: 1.5 });
 

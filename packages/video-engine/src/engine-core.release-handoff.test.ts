@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import * as factory from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
+import { displayBoxResolution } from "./decode-resolution";
 import { asSec } from "./types";
 import type { PresentedFrameEvent } from "./worker-protocol";
 import {
@@ -10,6 +11,7 @@ import {
   LOAD_CONFIG,
   makeFakeCursor,
   makeScrubFrame,
+  replaceProperty,
 } from "../test/fake-engine-deps";
 
 beforeEach(() => {
@@ -50,6 +52,11 @@ async function setup() {
   await engine.load({
     ...LOAD_CONFIG,
     presentation: "frames",
+    decodeStrategy: displayBoxResolution({
+      boxWidth: 1280,
+      boxHeight: 720,
+      devicePixelRatio: 1,
+    }),
   });
   engine.play();
   engine.beginInteractiveSeek();
@@ -178,3 +185,34 @@ it.each(["preview", "neighbor"] as const)(
     }
   },
 );
+
+it("resumes the opening playback walk after display resize detached it", async () => {
+  const { cursor, engine } = await setup();
+  try {
+    cursor.resizeOutput = vi.fn(async ({ width, height }) => {
+      replaceProperty(cursor, "track", {
+        ...cursor.track,
+        decodeWidth: width,
+        decodeHeight: height,
+      });
+      return true;
+    });
+    vi.spyOn(cursor, "seekToFrame").mockImplementation(async (frame) => {
+      const decoded = makeScrubFrame(cursor.track.timeline.timeAt(frame.index));
+      cursor.emitFrame(decoded);
+      return decoded;
+    });
+    engine.endInteractiveSeek();
+    const opening = cursor.attachPlayCalls;
+    const resized = engine.setDisplay({
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 1,
+    });
+    await tick();
+    await expect(resized).resolves.toBe(true);
+    expect(cursor.attachPlayCalls).toBe(opening + 1);
+  } finally {
+    await engine.dispose();
+  }
+});

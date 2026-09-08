@@ -1,3 +1,4 @@
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
 import type { MediaFrameClock } from "#types/media-frame-clock";
 
@@ -57,6 +58,8 @@ export interface DecodedMediaSourceMetadata {
 }
 
 export interface DecodedMediaSource {
+  /** Reconfigure the existing presentation output; true means a replacement frame was delivered. */
+  readonly setDisplay?: (display: MediaRendererDisplay) => Promise<boolean>;
   readonly input: DisposableMediaInput;
   readonly metadata: DecodedMediaSourceMetadata;
   readonly sampleSink: DecodedVideoSampleSink;

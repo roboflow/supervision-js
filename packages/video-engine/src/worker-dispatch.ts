@@ -103,6 +103,11 @@ export async function handleEngineCommand(
         engine.play();
         return { type: "ack", requestId: command.requestId };
       });
+    case "setDisplay":
+      return settle(post, command.requestId, async () => {
+        const outputChanged = await engine.setDisplay(command.display);
+        return { type: "ack", requestId: command.requestId, outputChanged };
+      });
     case "commit":
       return settle(post, command.requestId, async () => {
         const landing = await engine.commit(command.frameIndex);

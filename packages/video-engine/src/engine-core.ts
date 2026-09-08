@@ -2,7 +2,13 @@ import { type MediaClock, PerformanceMediaClock } from "./clock";
 import { DIAGNOSTICS, FRAME_CACHE, HANG_RECOVERY } from "./constants";
 import { createScrubCursor } from "./create-scrub-cursor";
 import { urlRequestInit } from "./decode-source";
-import { nativeResolution } from "./decode-resolution";
+import {
+  nativeResolution,
+  displayBoxResolution,
+  resolveDecodeDimensions,
+  type DecodeResolutionStrategy,
+  type DisplayBoxResolutionOptions,
+} from "./decode-resolution";
 import type { FrameId, FrameLanding, FrameTimeline } from "./frame-timeline";
 import {
   type DiagnosticsSnapshot,
@@ -118,6 +124,17 @@ export interface EngineCoreOptions {
  * the core never emits a competing time that would yank a settled playhead.
  */
 export class EngineCore {
+  private decodeStrategy: DecodeResolutionStrategy = nativeResolution();
+  private displayResize: {
+    tail: Promise<boolean>;
+    request: number;
+    navigation: number;
+    pendingNavigation: boolean;
+    held: boolean;
+    cancelled: boolean;
+    cancel: () => void;
+    aborted: Promise<void>;
+  } | null = null;
   private readonly emit: (event: MirrorEvent) => void;
   private readonly emitDiagnostics: ((event: DiagnosticsEvent) => void) | null;
   private readonly emitPresentedFrame:
@@ -227,6 +244,7 @@ export class EngineCore {
   }
 
   async load(config: EngineLoadConfig): Promise<EngineReadySnapshot> {
+    this.decodeStrategy = config.decodeStrategy ?? nativeResolution();
     this.beginPresentationGeneration();
     this.presentation = config.presentation ?? "canvas";
     this.displayBox =
@@ -319,9 +337,177 @@ export class EngineCore {
     return this.metadata;
   }
 
+  setDisplay(display: DisplayBoxResolutionOptions): Promise<boolean> {
+    const cursor = this.cursor;
+    if (
+      this.presentation !== "frames" ||
+      this.decodeStrategy.kind !== "displayBox" ||
+      !cursor?.resizeOutput
+    ) {
+      return Promise.reject(
+        new WebVideoEngineError(
+          WebVideoEngineErrorCode.PresentationMismatch,
+          "display resizing requires frames presentation with a displayBox strategy",
+        ),
+      );
+    }
+    const resolved = resolveDecodeDimensions(displayBoxResolution(display), {
+      nativeWidth: cursor.track.width,
+      nativeHeight: cursor.track.height,
+      displayWidth: null,
+      devicePixelRatio: display.devicePixelRatio,
+    });
+    if (
+      !this.displayResize &&
+      resolved.width === cursor.track.decodeWidth &&
+      resolved.height === cursor.track.decodeHeight
+    ) {
+      this.displayBox = {
+        cssWidth: display.boxWidth,
+        cssHeight: display.boxHeight,
+        devicePixelRatio: display.devicePixelRatio,
+      };
+      return Promise.resolve(false);
+    }
+    let state = this.displayResize;
+    if (!state) {
+      let cancel = () => {};
+      const aborted = new Promise<void>((resolve) => {
+        cancel = resolve;
+      });
+      state = {
+        tail: Promise.resolve(false),
+        request: 0,
+        navigation: 0,
+        pendingNavigation: false,
+        held: false,
+        cancelled: false,
+        cancel,
+        aborted,
+      };
+      this.displayResize = state;
+    }
+    const active = state;
+    const request = ++active.request;
+    const previous = active.tail;
+    if (active.held) this.abandonAwaitedSeek();
+    const run = (async () => {
+      await previous.catch((error: unknown) => {
+        if (active.cancelled || !isResizeSuperseded(error)) throw error;
+      });
+      if (active.cancelled) throw displayResizeAborted();
+      if (request !== active.request || active.pendingNavigation)
+        throw displayResizeSuperseded();
+      const dimensions = resolved;
+      this.displayBox = {
+        cssWidth: display.boxWidth,
+        cssHeight: display.boxHeight,
+        devicePixelRatio: display.devicePixelRatio,
+      };
+      if (
+        dimensions.width === cursor.track.decodeWidth &&
+        dimensions.height === cursor.track.decodeHeight
+      )
+        return false;
+      const target =
+        this.lastHostFrame ??
+        this.timeline().landingAt(
+          this.timeline().indexAtOrBefore(this.clock.now()),
+        );
+      this.clock.pause();
+      this.clock.seek(target.mediaTimeS);
+      this.controller?.holdOutput();
+      active.held = true;
+      this.abandonAwaitedSeek();
+      this.beginPresentationGeneration();
+      const untilDisposed = <T>(work: Promise<T>): Promise<T> =>
+        Promise.race([
+          work,
+          active.aborted.then(() => {
+            throw displayResizeAborted();
+          }),
+        ]);
+      await untilDisposed(cursor.resizeOutput!(dimensions));
+      if (request !== active.request || active.pendingNavigation)
+        throw displayResizeSuperseded();
+      const wait = this.awaitSeekLanding(target.frame, false, true);
+      void wait.presented.catch(() => undefined);
+      const decoded = await untilDisposed(cursor.seekToFrame(target.frame));
+      if (request !== active.request || active.pendingNavigation) {
+        this.controller?.holdOutput();
+        this.abandonAwaitedSeek();
+        throw displayResizeSuperseded();
+      }
+      if (!decoded)
+        throw new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
+          "resized frame could not be decoded",
+        );
+      this.controller?.releaseOutput();
+      await untilDisposed(wait.presented);
+      if (request !== active.request || active.pendingNavigation)
+        throw displayResizeSuperseded();
+      return true;
+    })();
+    const settled = run
+      .catch((error: unknown) => {
+        if (active.held) {
+          this.abandonAwaitedSeek();
+          this.controller?.holdOutput();
+        }
+        if (!isResizeSuperseded(error)) {
+          this.playing = false;
+          if (!active.cancelled) this.emitStatus(PlaybackStatus.Paused);
+        }
+        throw error;
+      })
+      .finally(() => {
+        if (active.tail !== settled) return;
+        this.displayResize = null;
+        this.controller?.releaseOutput();
+        if (
+          (active.held || !this.clock.playing) &&
+          !active.cancelled &&
+          !active.pendingNavigation &&
+          this.playing
+        ) {
+          this.clock.play();
+          this.controller?.beginPlay(this.clock.now());
+          this.emitStatus(PlaybackStatus.Playing);
+        }
+      });
+    active.tail = settled;
+    return settled;
+  }
+
+  private async afterDisplayResize<T>(
+    run: () => T | Promise<T>,
+    superseded: T,
+  ): Promise<T> {
+    const state = this.displayResize!;
+    const navigation = ++state.navigation;
+    state.pendingNavigation = true;
+    state.held = true;
+    this.controller?.holdOutput();
+    this.abandonAwaitedSeek();
+    this.beginPresentationGeneration();
+    while (this.displayResize === state)
+      await state.tail.catch((error: unknown) => {
+        if (state.cancelled || !isResizeSuperseded(error)) throw error;
+      });
+    if (state.cancelled) throw displayResizeAborted();
+    if (navigation !== state.navigation) return superseded;
+    if (this.playing) this.clock.play();
+    return run();
+  }
+
   play(): void {
     if (!this.cursor || !this.controller) return;
     if (this.decodeFailure) return this.republishFailure();
+    if (this.displayResize) {
+      this.playing = true;
+      return;
+    }
     // Resume-from-end: a play after the clock crossed duration would tick
     // straight to Ended. Snap back to 0 first.
     const durS = this.durationMs / 1000;
@@ -372,7 +558,7 @@ export class EngineCore {
       }
     }
     this.controller?.endPlay();
-    if (wasPlaying) this.abandonAwaitedSeek();
+    if (wasPlaying && !this.displayResize) this.abandonAwaitedSeek();
     if (this.decodeFailure) return this.republishFailure();
     this.emitStatus(PlaybackStatus.Paused);
   }
@@ -412,6 +598,28 @@ export class EngineCore {
    *  thread snapped the gesture and wrote it. Paints a cache preview, then
    *  walks the cursor. */
   scrub(frameIndex: number, intent: SeekIntent = "gesture"): void {
+    if (this.displayResize) {
+      void this.afterDisplayResize(
+        () => this.scrub(frameIndex, intent),
+        undefined,
+      ).catch((error: unknown) => {
+        if (
+          error instanceof WebVideoEngineError &&
+          error.code === WebVideoEngineErrorCode.Aborted
+        )
+          return;
+        this.handleTerminalFailure(
+          error instanceof WebVideoEngineError
+            ? error
+            : new WebVideoEngineError(
+                WebVideoEngineErrorCode.BackendCrashed,
+                "display resize failed",
+                error,
+              ),
+        );
+      });
+      return;
+    }
     if (!this.cursor) return;
     const target = this.timeline().landingAt(frameIndex);
     // A scrub moves the playhead off the last step, so the next step must
@@ -462,6 +670,8 @@ export class EngineCore {
   }
 
   async commit(frameIndex: number): Promise<FrameLanding | null> {
+    if (this.displayResize)
+      return this.afterDisplayResize(() => this.commit(frameIndex), null);
     if (!this.cursor) return null;
     if (this.decodeFailure) throw this.decodeFailure;
     const target = this.timeline().landingAt(frameIndex);
@@ -518,6 +728,8 @@ export class EngineCore {
   }
 
   async seekToKey(timeMs: number): Promise<FrameLanding | null> {
+    if (this.displayResize)
+      return this.afterDisplayResize(() => this.seekToKey(timeMs), null);
     if (!this.cursor) return null;
     if (this.decodeFailure) throw this.decodeFailure;
     const tSec = timeMs / 1000;
@@ -578,6 +790,13 @@ export class EngineCore {
    * other.
    */
   async step(direction: 1 | -1): Promise<FrameLanding | null> {
+    if (this.displayResize) {
+      return this.afterDisplayResize(async () => {
+        const landed = await this.step(direction);
+        if (this.playing) this.controller?.beginPlay(this.clock.now());
+        return landed;
+      }, null);
+    }
     if (!this.cursor || !this.controller) return null;
     const timeline = this.timeline();
     // Base a serialized burst on its own last landing, else on where the
@@ -660,6 +879,10 @@ export class EngineCore {
   }
 
   async dispose(): Promise<void> {
+    if (this.displayResize) {
+      this.displayResize.cancelled = true;
+      this.displayResize.cancel();
+    }
     this.playing = false;
     this.diagnosticsStop();
     // A capture still running is evidence someone asked for; keep it, marked
@@ -1366,4 +1589,26 @@ function nearestKeyframeDistanceS(
 function snapshotCapForWindow(windowMs: number): number {
   const wanted = Math.round((windowMs / 1000) * DIAGNOSTICS.BROADCAST_HZ);
   return Math.min(DIAGNOSTICS.TRACE_SNAPSHOT_CAP, Math.max(1, wanted));
+}
+
+function displayResizeAborted(): WebVideoEngineError {
+  return new WebVideoEngineError(
+    WebVideoEngineErrorCode.Aborted,
+    "display resize aborted by disposal",
+  );
+}
+
+function displayResizeSuperseded(): WebVideoEngineError {
+  return new WebVideoEngineError(
+    WebVideoEngineErrorCode.Aborted,
+    "display resize superseded",
+  );
+}
+
+function isResizeSuperseded(error: unknown): boolean {
+  return (
+    error instanceof WebVideoEngineError &&
+    error.code === WebVideoEngineErrorCode.Aborted &&
+    error.message === "display resize superseded"
+  );
 }

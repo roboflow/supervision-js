@@ -258,6 +258,79 @@ stop the stream tracks. Set `stopTracksOnDispose: true` only when the session
 should own those tracks. A live source cannot seek or loop; ending every video
 track ends playback.
 
+## Live Display Output
+
+For an engine-backed session, set the initial display box and use the same
+pixel-ratio ceiling as the renderer:
+
+```ts
+import {
+  createMediaSession,
+  createWebVideoEngineMediaRendererSource,
+} from "supervision";
+import { SourceKind } from "supervision/web-video-engine";
+
+const maxDevicePixelRatio = 2;
+const media = createWebVideoEngineMediaRendererSource({
+  source: {
+    kind: SourceKind.Url,
+    url: "/media/inspection.mp4",
+  },
+  display: {
+    boxWidth: container.clientWidth,
+    boxHeight: container.clientHeight,
+    devicePixelRatio: window.devicePixelRatio,
+    maxDevicePixelRatio,
+  },
+});
+
+const session = await createMediaSession({
+  container,
+  media,
+  renderer: { maxDevicePixelRatio },
+});
+```
+
+When the viewer's box changes, update this same display-box source through the
+optional `session.setDisplay()` method. It changes the output for this session;
+it does not require a new session or a new media source. Web video engine
+sources expose this method, but resizing rejects unless the source uses a
+display-box decode strategy, as configured with `display` above. Other media
+sources may omit the method.
+
+```ts
+const resizeOutput = session.setDisplay;
+let resizeObserver: ResizeObserver | undefined;
+
+if (resizeOutput) {
+  resizeObserver = new ResizeObserver(() => {
+    const { height, width } = container.getBoundingClientRect();
+    if (width <= 0 || height <= 0) return;
+
+    void resizeOutput({
+      boxWidth: width,
+      boxHeight: height,
+      devicePixelRatio: window.devicePixelRatio,
+      maxDevicePixelRatio,
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      console.error(error);
+    });
+  });
+  resizeObserver.observe(container);
+}
+
+function unmountViewer() {
+  resizeObserver?.disconnect();
+  session.destroy();
+}
+```
+
+Rapid box changes keep only the newest resize; a superseded call rejects with
+`AbortError`. Repeating the current box resolves without a replacement frame.
+When dimensions change, the call resolves after its resized frame is presented,
+while the already-visible frame remains until that replacement arrives.
+
 ## Renderer Quality
 
 By default the renderer rasterizes at the display's pixel ratio up to a ceiling

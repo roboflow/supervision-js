@@ -18,6 +18,89 @@ import type {
 } from "./presented-frame-channel";
 
 describe("media renderer over a push-based media source", () => {
+  it("exposes display resizing only when the push source supports it", async () => {
+    const capableProducer = createProducer();
+    const setDisplay = vi.fn(async () => false);
+    const capable = await createRenderer(capableProducer, createScene(), {
+      source: {
+        open: async () => ({ ...capableProducer.source, setDisplay }),
+      },
+    });
+    const unsupported = await createRenderer(createProducer(), createScene());
+    const display = {
+      boxHeight: 360,
+      boxWidth: 640,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 2,
+    };
+
+    expect(capable.setDisplay).toBeTypeOf("function");
+    expect(unsupported.setDisplay).toBeUndefined();
+    await capable.setDisplay!(display);
+    expect(setDisplay).toHaveBeenCalledExactlyOnceWith(display);
+
+    capable.destroy();
+    unsupported.destroy();
+  });
+
+  it("settles a changed display resize only after its guarded replacement reaches the scene", async () => {
+    const producer = createProducer();
+    const preparation = createStuckRenderPreparation();
+    preparation.cover();
+    const displayed: number[] = [];
+    let replacement: ReturnType<typeof producer.present> | undefined;
+    const setDisplay = vi.fn(async () => {
+      replacement = producer.present(1000);
+      return true;
+    });
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      {
+        renderPreparation: { playbackGate: { enabled: true } },
+        source: {
+          open: async () => ({ ...producer.source, setDisplay }),
+        },
+      },
+      (presented) => {
+        displayed.push(presented.paintSeq);
+        presented.acknowledgePresentation?.();
+        presented.frame.close();
+      },
+    );
+    producer.present(1000);
+    preparation.stall();
+    let settled = false;
+
+    const resizing = renderer.setDisplay!({
+      boxHeight: 360,
+      boxWidth: 640,
+      devicePixelRatio: 2,
+    }).then(() => {
+      settled = true;
+    });
+    await vi.waitFor(() =>
+      expect(preparation.waitForRenderPreparation).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ enabled: true }),
+        expect.any(AbortSignal),
+      ),
+    );
+
+    expect({ displayed, settled }).toEqual({
+      displayed: [1, 2],
+      settled: false,
+    });
+    expect(replacement?.frame.close).not.toHaveBeenCalled();
+
+    preparation.prepare();
+    await resizing;
+
+    expect(displayed).toEqual([1, 2, 3]);
+    expect(replacement?.frame.close).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
   it.each([false, true])(
     "opens with real pixels before future detections arrive (autoplay %s)",
     async (autoPlay) => {

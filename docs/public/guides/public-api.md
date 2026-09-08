@@ -49,6 +49,10 @@ Start here for normal application code:
   `frameCount`, `firstTimestamp`, `endTimestamp`, `duration`, `timeAt`,
   `durationAt`, and `indexAtOrBefore` members use presentation time rather
   than an assumed frame rate;
+- optional `session.setDisplay()` / `renderer.setDisplay()` to resize existing
+  push-presented output without recreating the source or session. Web video
+  engine sources expose it but reject calls unless configured with a
+  display-box decode strategy;
 - media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
   playback rate, and current-presentation `refresh`;
 - `session.captureFrame()` when a host needs an encoded JPEG `Blob` for the

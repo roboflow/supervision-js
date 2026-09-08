@@ -673,6 +673,18 @@ export class ScrubController {
     this.clearPlayQueue();
   }
 
+  holdOutput(): void {
+    this.stop();
+    this.clearStash();
+    this.clearPlayQueue();
+    this.deps.cursor.detachPlay();
+    this.lastDeliveryS = null;
+  }
+
+  releaseOutput(): void {
+    if (!this.disposed && this.sink) this.start();
+  }
+
   /**
    * Cache lookup helper used by the engine on scrub. Asks the cursor for a
    * cached frame near the target and, if it is far enough from what the canvas

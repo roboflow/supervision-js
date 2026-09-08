@@ -14,6 +14,196 @@ const TICKS_PER_FRAME = 1001;
 const FRAME_COUNT = 300;
 
 describe("media renderer transport", () => {
+  it.each([false, true])(
+    "keeps a pending autoplay request through a display resize (%s)",
+    async (changed) => {
+      const producer = createProducer();
+      producer.setStatus("READY");
+      let releaseReadiness = () => {};
+      const readiness = new Promise<void>((resolve) => {
+        releaseReadiness = resolve;
+      });
+      const transport = createMediaRendererTransport({
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+        waitForReadiness: () => readiness,
+      });
+
+      const autoplay = transport.play();
+      await transport.resizeOutput(async () => changed);
+      releaseReadiness();
+      await autoplay;
+
+      expect(producer.channel.play).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not restart pending autoplay after a pause during resize", async () => {
+    const producer = createProducer();
+    producer.setStatus("READY");
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    let finishResize!: (changed: boolean) => void;
+    const resizeResult = new Promise<boolean>((resolve) => {
+      finishResize = resolve;
+    });
+    const resize = vi.fn(() => resizeResult);
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: () => readiness,
+    });
+
+    const autoplay = transport.play();
+    const resizing = transport.resizeOutput(resize);
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledOnce());
+    transport.pause();
+    finishResize(false);
+    releaseReadiness();
+
+    await expect(resizing).rejects.toMatchObject({ name: "AbortError" });
+    await autoplay;
+    expect(producer.channel.play).not.toHaveBeenCalled();
+    expect(producer.channel.pause).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a presentation-gated frame held through a no-op resize", async () => {
+    const producer = createProducer();
+    const frameGuard = new AbortController();
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      invalidatePresentedFrame: () => frameGuard.abort(),
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => readiness,
+    });
+    const presenting = transport.protectPresentation(
+      secondsAt(1),
+      frameGuard.signal,
+    );
+
+    expect(presenting).not.toBeNull();
+    await transport.resizeOutput(async () => false);
+    producer.play(1);
+
+    expect({
+      landedIndex: producer.landedIndex,
+      releases: vi.mocked(producer.channel.endInteractiveSeek).mock.calls
+        .length,
+    }).toEqual({ landedIndex: 0, releases: 0 });
+
+    releaseReadiness();
+    await presenting;
+    producer.play(1);
+
+    expect({
+      landedIndex: producer.landedIndex,
+      releases: vi.mocked(producer.channel.endInteractiveSeek).mock.calls
+        .length,
+    }).toEqual({ landedIndex: 0, releases: 0 });
+
+    await transport.didPresentFrame();
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+    producer.play(1);
+
+    expect(producer.landedIndex).toBe(1);
+  });
+
+  it.each([false, true])(
+    "waits for resized output only when dimensions changed (%s)",
+    async (changed) => {
+      const producer = createProducer();
+      let accept!: () => void;
+      const accepted = new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+      const waitFor = vi.fn(() => accepted);
+      const cancel = vi.fn();
+      const transport = createMediaRendererTransport({
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+        beginPresentedFrameNavigation: () => ({ waitFor, cancel }),
+      });
+      let done = false;
+      const resizing = transport
+        .resizeOutput(async () => changed)
+        .then(() => {
+          done = true;
+        });
+      if (changed) {
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(done).toBe(false);
+        accept();
+      }
+      await resizing;
+      expect(done).toBe(true);
+      expect(waitFor).toHaveBeenCalledTimes(changed ? 1 : 0);
+      if (changed) {
+        expect(waitFor).toHaveBeenCalledWith(
+          producer.channel.getPlayhead().frame,
+        );
+      }
+      expect(cancel).toHaveBeenCalledTimes(changed ? 0 : 1);
+    },
+  );
+
+  it("does not acknowledge resize after a newer navigation", async () => {
+    const producer = createProducer();
+    let finish!: (changed: boolean) => void;
+    const resized = new Promise<boolean>((resolve) => {
+      finish = resolve;
+    });
+    const waitFor = vi.fn(async () => undefined);
+    const cancel = vi.fn();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      beginPresentedFrameNavigation: () => ({ waitFor, cancel }),
+    });
+    const resize = vi.fn(() => resized);
+    const resizing = transport.resizeOutput(resize);
+    const result = expect(resizing).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledOnce());
+    transport.scrub(secondsAt(200));
+    finish(true);
+    await result;
+    expect(waitFor).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("cancels an old commit ticket when a newer scrub arrives before its command completes", async () => {
     const producer = createProducer();
     let finishCommit = () => {};

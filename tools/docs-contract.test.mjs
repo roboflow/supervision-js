@@ -707,6 +707,26 @@ test("the indexed frame-clock example typechecks", async () => {
   );
 });
 
+test("live display output resize examples typecheck", async () => {
+  const guide = await readFile(
+    path.join(publicDocsDir, "guides/media-sessions.md"),
+    "utf8",
+  );
+  const examples = findCodeBlocks(guide, "ts");
+  const setup = examples.find((source) =>
+    source.includes("const maxDevicePixelRatio = 2"),
+  );
+  const resize = examples.find((source) =>
+    source.includes("const resizeOutput = session.setDisplay"),
+  );
+  assert.ok(setup, "Missing display-box source example.");
+  assert.ok(resize, "Missing live output resize example.");
+  assertTypechecks(
+    ["declare const container: HTMLElement;", setup, resize].join("\n"),
+    ".docs-live-output-resize.ts",
+  );
+});
+
 test("the 0.2 interaction-style migration example typechecks", async () => {
   const migration = await readFile(
     path.join(publicDocsDir, "guides/migrating-to-0.2.md"),

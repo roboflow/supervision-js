@@ -5,6 +5,7 @@ import {
   openFrameProvider,
 } from "./decode-source";
 import type { FrameId } from "./frame-timeline";
+import type { DecodeDimensions } from "./decode-resolution";
 import {
   type ScrubCursor,
   ScrubCursorState,
@@ -12,7 +13,12 @@ import {
   type ScrubFrameListener,
   type ScrubTrackInfo,
 } from "./scrub-cursor";
-import { asSec, type Sec } from "./types";
+import {
+  asSec,
+  type Sec,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
+} from "./types";
 
 /**
  * Uncached cursor seam: a thin latest-wins queue and play-mode forward iterator
@@ -35,7 +41,9 @@ import { asSec, type Sec } from "./types";
  */
 export class CanvasSinkScrubCursor implements ScrubCursor {
   private readonly provider: FrameProvider;
-  private readonly trackInfo: ScrubTrackInfo;
+  private trackInfo: ScrubTrackInfo;
+  private outputGeneration = 0;
+  private readonly outputReads = new Set<Promise<unknown>>();
   private readonly disposeSource: () => Promise<void>;
 
   /**
@@ -82,6 +90,49 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
     );
   }
 
+  async resizeOutput({ width, height }: DecodeDimensions): Promise<boolean> {
+    if (!this.provider.resizeOutput) {
+      throw new WebVideoEngineError(
+        WebVideoEngineErrorCode.PresentationMismatch,
+        "this decode source cannot resize frame output in place",
+      );
+    }
+    if (
+      this.closed ||
+      (width === this.trackInfo.decodeWidth &&
+        height === this.trackInfo.decodeHeight)
+    )
+      return false;
+    this.outputGeneration++;
+    this.pendingSeekTargetS = null;
+    const returning = this.iterator?.return();
+    this.iterator = null;
+    this.nextPending = 0;
+    this.lastEmittedFrame = null;
+    await Promise.allSettled([
+      ...this.outputReads,
+      ...(returning ? [returning] : []),
+    ]);
+    if (this.closed) return false;
+    await this.provider.resizeOutput({ width, height });
+    if (this.closed) return false;
+    this.trackInfo = {
+      ...this.trackInfo,
+      decodeWidth: width,
+      decodeHeight: height,
+    };
+    return true;
+  }
+
+  private trackOutputRead<T>(read: Promise<T>): Promise<T> {
+    this.outputReads.add(read);
+    void read.then(
+      () => this.outputReads.delete(read),
+      () => this.outputReads.delete(read),
+    );
+    return read;
+  }
+
   async open(): Promise<void> {
     // Seed the first paint via the same random-access path used for every
     // seek. Cheaper than a one-shot iterator just for the seed. Seed at the
@@ -109,10 +160,14 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
    */
   async seekToFrame(frame: FrameId): Promise<ScrubFrame | null> {
     if (this.closed) return null;
-    const decoded = await this.provider.getFrame(
-      this.trackInfo.timeline.timeAt(frame.index),
+    const outputGeneration = this.outputGeneration;
+    const decoded = await this.trackOutputRead(
+      this.provider.getFrame(this.trackInfo.timeline.timeAt(frame.index)),
     );
-    if (this.closed || !decoded) return null;
+    if (this.closed || outputGeneration !== this.outputGeneration || !decoded) {
+      if (decoded?.kind === "sample") decoded.sample.close();
+      return null;
+    }
     this.emitFrame(decoded);
     return this.lastEmittedFrame;
   }
@@ -143,12 +198,12 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
 
   attachPlay(startS: number): void {
     if (this.closed) return;
-    void this.iterator?.return();
+    if (this.iterator) void this.trackOutputRead(this.iterator.return());
     this.iterator = this.provider.frames(startS);
   }
 
   detachPlay(): void {
-    void this.iterator?.return();
+    if (this.iterator) void this.trackOutputRead(this.iterator.return());
     this.iterator = null;
   }
 
@@ -193,6 +248,7 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.outputReads.clear();
     this.pendingSeekTargetS = null;
     this.currentState = ScrubCursorState.Closed;
     this.listeners.clear();
@@ -224,10 +280,12 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
 
   private async runSeek(t: Sec, keyOnly: boolean): Promise<void> {
     if (this.closed) return;
+    const outputGeneration = this.outputGeneration;
     this.currentState = ScrubCursorState.Seeking;
-    const frame = await this.provider.getFrame(t);
-    if (this.closed) return;
-    if (frame) this.emitFrame(frame, keyOnly);
+    const frame = await this.trackOutputRead(this.provider.getFrame(t));
+    if (this.closed || outputGeneration !== this.outputGeneration) {
+      if (frame?.kind === "sample") frame.sample.close();
+    } else if (frame) this.emitFrame(frame, keyOnly);
     if (!this.closed) this.currentState = ScrubCursorState.Idle;
   }
 
@@ -237,7 +295,7 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
     // Skip while a seek is in flight; the seek emits the settled frame and
     // otherwise we would race the iterator state.
     if (this.seekDraining) return;
-    const next = (await iterator.next()).value ?? null;
+    const next = (await this.trackOutputRead(iterator.next())).value ?? null;
     if (this.closed || iterator !== this.iterator || !next) {
       if (next?.kind === "sample") next.sample.close();
       return;

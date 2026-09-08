@@ -352,6 +352,55 @@ describe("DecodeSession chunks", () => {
 });
 
 describe("DecodeSession frames", () => {
+  it("resizes the same frame's owned pixels without replacing its decoder or retaining old-size output", async () => {
+    const snapshots: Array<{ width: number; height: number; closed: boolean }> =
+      [];
+    const { session, decoders } = openSession(0, 0, {
+      outputWidth: 160,
+      outputHeight: 90,
+      snapshotFrame: (frame, width, height) => {
+        const snapshot = {
+          width,
+          height,
+          closed: false,
+          timestamp: frame.timestamp,
+          duration: frame.duration,
+          close() {
+            this.closed = true;
+          },
+          clone() {
+            return this;
+          },
+        };
+        snapshots.push(snapshot);
+        return snapshot as unknown as VideoFrame;
+      },
+    });
+    const first = await session.frameAt(0.4);
+    expect(first?.toVideoFrame()).toMatchObject({ width: 160, height: 90 });
+    first?.close();
+    const oldSnapshots = snapshots.slice();
+
+    await session.resizeOutput({ width: 320, height: 180 });
+    expect(oldSnapshots.every((frame) => frame.closed)).toBe(true);
+    const enlarged = await session.frameAt(0.4);
+    expect(enlarged?.timestamp).toBe(first?.timestamp);
+    expect(enlarged?.toVideoFrame()).toMatchObject({ width: 320, height: 180 });
+    enlarged?.close();
+    await session.resizeOutput({ width: 160, height: 90 });
+    const smaller = await session.frameAt(0.4);
+    expect(smaller?.timestamp).toBe(first?.timestamp);
+    expect(smaller?.toVideoFrame()).toMatchObject({ width: 160, height: 90 });
+    smaller?.close();
+    expect(decoders).toHaveLength(1);
+    expect(decoders[0].closes).toBe(0);
+    const resets = decoders[0].resets;
+    await session.resizeOutput({ width: 160, height: 90 });
+    expect(decoders[0].resets).toBe(resets);
+    session.close();
+    expect(decoders[0].closes).toBe(1);
+  });
+
   it("owns decoder output pixels before queueing them", async () => {
     const snapshots: Array<{ width: number; height: number }> = [];
     const { session, decoders } = openSession(0, 0, {

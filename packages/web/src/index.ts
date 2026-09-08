@@ -118,6 +118,7 @@ export type {
   PreparedAnnotationWindowSnapshot,
 } from "#renderers/prepared-annotation-window";
 export { createMediaSession } from "#sessions/media-session";
+export type { MediaRendererDisplay } from "#types/media-renderer-display";
 export {
   resolveMediaSessionDefaults,
   type ResolvedMediaSessionDefaults,

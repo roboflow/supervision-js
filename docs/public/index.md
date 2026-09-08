@@ -64,6 +64,7 @@
         <p>
           Give a session a container and media. It prepares the renderer, exposes state for your UI, and provides playback and detection controls without asking React or your app to run another frame loop.
           Indexed media sources also expose exact frame times and durations through <code>session.frameClock</code>.
+          Display-box video engine sources can resize their output through <code>session.setDisplay()</code> while keeping the same session.
         </p>
         <a href="documents/Core_Concepts.Media_Sessions.html">Learn how media sessions work <span aria-hidden="true">→</span></a>
       </div>

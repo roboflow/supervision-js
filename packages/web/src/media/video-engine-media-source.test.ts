@@ -32,6 +32,7 @@ const engine = vi.hoisted(() => ({
   dispose: vi.fn(async () => undefined),
   load: vi.fn(),
   onPresentedFrame: vi.fn(),
+  setDisplay: vi.fn(async () => true),
   options: [] as unknown[],
   presentedHandler: null as
     | ((presented: {
@@ -65,6 +66,7 @@ const engineModule = vi.hoisted(() => async () => ({
     readonly dispose = engine.dispose;
     readonly load = engine.load;
     onPresentedFrame = engine.onPresentedFrame;
+    setDisplay = engine.setDisplay;
 
     constructor(options: unknown) {
       engine.options.push(options);
@@ -155,6 +157,16 @@ async function collectTimestamps(
 }
 
 describe("video engine media source", () => {
+  it("resizes through the existing playback engine without opening another reader", async () => {
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
+    const display = { boxWidth: 800, boxHeight: 600, devicePixelRatio: 2 };
+    await expect(source.setDisplay?.(display)).resolves.toBe(true);
+    expect(engine.setDisplay).toHaveBeenCalledExactlyOnceWith(display);
+    expect(engine.options).toHaveLength(1);
+    expect(engine.load).toHaveBeenCalledOnce();
+    expect(analysis.open).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     engine.options.length = 0;

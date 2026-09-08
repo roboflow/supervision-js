@@ -85,8 +85,10 @@ export interface ProtectedPresentedFrameSource {
   invalidate(): void;
   /** Opens an acknowledgment for one settling navigation. The producer may
    *  emit its landing before its command promise resumes, so accepted frame
-   *  identities are retained until the caller names the producer's result. */
-  beginNavigation(): PresentedFrameNavigation;
+   *  identities are retained until the caller names the producer's result.
+   *  Geometry-only replacements preserve the current guarded frame and any
+   *  navigation already waiting; only a newly delivered frame acknowledges them. */
+  beginNavigation(preserveCurrent?: boolean): PresentedFrameNavigation;
   /** Resolves after the downstream scene acknowledges drawing a frame. */
   waitForFirstPresentation(): Promise<void>;
   destroy(): void;
@@ -101,6 +103,7 @@ export interface PresentedFrameNavigation {
 
 interface PresentedFrameNavigationTicket {
   readonly accepted: Set<string>;
+  readonly afterGeneration: number;
   readonly promise: Promise<void>;
   readonly reject: (error: unknown) => void;
   readonly resolve: () => void;
@@ -134,7 +137,7 @@ export function createProtectedPresentedFrameSource(
     closed: boolean;
     handedOff: boolean;
   } | null = null;
-  let navigation: PresentedFrameNavigationTicket | null = null;
+  const navigations = new Set<PresentedFrameNavigationTicket>();
   let generation = 0;
   let destroyed = false;
   let firstPresented = false;
@@ -158,27 +161,31 @@ export function createProtectedPresentedFrameSource(
     `${frameId.index}:${frameId.ticks}`;
 
   const settleNavigation = (
-    ticket: NonNullable<typeof navigation>,
+    ticket: PresentedFrameNavigationTicket,
     error?: unknown,
   ) => {
     if (ticket.settled) return;
     ticket.settled = true;
-    if (navigation === ticket) navigation = null;
+    navigations.delete(ticket);
     if (error === undefined) ticket.resolve();
     else ticket.reject(error);
   };
 
-  const acceptNavigationFrame = (frameId: PresentedFrameId) => {
-    const ticket = navigation;
-    if (!ticket || ticket.settled) return;
+  const acceptNavigationFrame = (
+    frameId: PresentedFrameId,
+    frameGeneration: number,
+  ) => {
     const accepted = frameKey(frameId);
-    ticket.accepted.add(accepted);
-    if (ticket.target === accepted) settleNavigation(ticket);
+    for (const ticket of navigations) {
+      if (frameGeneration <= ticket.afterGeneration) continue;
+      ticket.accepted.add(accepted);
+      if (ticket.target === accepted) settleNavigation(ticket);
+    }
   };
 
   const failPresentation = (error: unknown) => {
     if (!firstPresented) rejectFirstPresentation(error);
-    if (navigation) settleNavigation(navigation, error);
+    for (const ticket of navigations) settleNavigation(ticket, error);
     if (firstPresented) onPresentationError(error);
   };
 
@@ -267,7 +274,7 @@ export function createProtectedPresentedFrameSource(
             ) {
               return;
             }
-            acceptNavigationFrame(frame.frameId);
+            acceptNavigationFrame(frame.frameId, run.generation);
             if (!firstPresented) {
               firstPresented = true;
               resolveFirstPresentation();
@@ -338,14 +345,16 @@ export function createProtectedPresentedFrameSource(
       cancelActive();
       pending?.frame.close();
       pending = null;
-      if (navigation) settleNavigation(navigation);
+      for (const ticket of navigations) settleNavigation(ticket);
     },
-    beginNavigation() {
-      generation += 1;
-      cancelActive();
-      pending?.frame.close();
-      pending = null;
-      if (navigation) settleNavigation(navigation);
+    beginNavigation(preserveCurrent = false) {
+      if (!preserveCurrent) {
+        generation += 1;
+        cancelActive();
+        pending?.frame.close();
+        pending = null;
+        for (const ticket of navigations) settleNavigation(ticket);
+      }
       let resolve!: () => void;
       let reject!: (error: unknown) => void;
       const promise = new Promise<void>((onResolve, onReject) => {
@@ -357,13 +366,14 @@ export function createProtectedPresentedFrameSource(
       void promise.catch(() => undefined);
       const ticket: PresentedFrameNavigationTicket = {
         accepted: new Set<string>(),
+        afterGeneration: generation,
         promise,
         reject,
         resolve,
         settled: false,
         target: null,
       };
-      navigation = ticket;
+      navigations.add(ticket);
       return {
         waitFor(frameId) {
           if (ticket.settled) return ticket.promise;
@@ -384,7 +394,7 @@ export function createProtectedPresentedFrameSource(
       cancelActive();
       pending?.frame.close();
       pending = null;
-      if (navigation) settleNavigation(navigation);
+      for (const ticket of navigations) settleNavigation(ticket);
       upstream.onPresentedFrame((presented) => presented.frame.close());
       if (!firstPresented) resolveFirstPresentation();
     },

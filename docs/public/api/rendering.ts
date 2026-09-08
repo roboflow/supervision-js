@@ -27,6 +27,7 @@ export {
   type MediaFrameCapture,
   type MediaFrameCaptureOptions,
   type MediaFrameClock,
+  type MediaRendererDisplay,
   type MediaFrameDiagnostics,
   type MediaFrameRenderTimings,
   type AnnotationVisibility,

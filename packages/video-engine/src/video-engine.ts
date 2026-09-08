@@ -1,5 +1,8 @@
 import { DIAGNOSTICS, HANG_RECOVERY } from "./constants";
-import type { DecodeResolutionStrategy } from "./decode-resolution";
+import type {
+  DecodeResolutionStrategy,
+  DisplayBoxResolutionOptions,
+} from "./decode-resolution";
 import type { DiagnosticsSnapshot, EngineDiagnostics } from "./diagnostics";
 import { DiagnosticsStore } from "./diagnostics-store";
 import {
@@ -288,6 +291,20 @@ export class WebVideoEngine {
 
   play = async (): Promise<void> => {
     await this.request((requestId) => ({ type: "play", requestId }));
+  };
+
+  /** Changes frames-mode display output without reopening the video. Resolves
+   * with true after worker delivery, or false for unchanged output dimensions.
+   * The host still acknowledges its actual presentation. */
+  setDisplay = async (
+    display: DisplayBoxResolutionOptions,
+  ): Promise<boolean> => {
+    const response = await this.request(
+      (requestId) => ({ type: "setDisplay", requestId, display }),
+      [],
+      true,
+    );
+    return response.type === "ack" && response.outputChanged === true;
   };
 
   pause = (): void => {
@@ -602,6 +619,7 @@ export class WebVideoEngine {
   toHandle(): WebVideoEngineHandle {
     if (this.cachedHandle) return this.cachedHandle;
     this.cachedHandle = {
+      setDisplay: this.setDisplay,
       play: this.play,
       pause: this.pause,
       togglePlayback: this.togglePlayback,
@@ -1008,6 +1026,7 @@ export type PresentedFrameHandler = (presented: PresentedFrame) => void;
  * getPlaybackState.
  */
 export interface WebVideoEngineHandle {
+  setDisplay(display: DisplayBoxResolutionOptions): Promise<boolean>;
   play(): Promise<void>;
   pause(): void;
   togglePlayback(): void;

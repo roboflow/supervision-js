@@ -1,4 +1,5 @@
 import { DIAGNOSTICS, PLAYBACK, HANG_RECOVERY } from "./constants";
+import type { DecodeDimensions } from "./decode-resolution";
 import {
   type AnySourceHandle,
   type DecodedFrame,
@@ -194,9 +195,12 @@ enum AccessMode {
  */
 export class DecodeScheduler implements ScrubCursor {
   private provider: FrameProvider;
-  private readonly cache: FrameCache;
+  private cache: FrameCache;
   private keyframeIndex: KeyframeIndex;
-  private readonly trackInfo: ScrubTrackInfo;
+  private trackInfo: ScrubTrackInfo;
+  private outputGeneration = 0;
+  private resizingOutput = false;
+  private readonly outputReads = new Set<Promise<unknown>>();
   private readonly exactTolMs: number;
   private readonly previewTolMs: number;
   private readonly now: () => number;
@@ -323,6 +327,50 @@ export class DecodeScheduler implements ScrubCursor {
       this.pendingSeekTargetS === null &&
       !this.seekDraining
     );
+  }
+
+  async resizeOutput({ width, height }: DecodeDimensions): Promise<boolean> {
+    if (!this.provider.resizeOutput) {
+      throw new WebVideoEngineError(
+        WebVideoEngineErrorCode.PresentationMismatch,
+        "this decode source cannot resize frame output in place",
+      );
+    }
+    if (
+      this.closed ||
+      (width === this.trackInfo.decodeWidth &&
+        height === this.trackInfo.decodeHeight)
+    )
+      return false;
+    this.outputGeneration++;
+    this.resizingOutput = true;
+    this.pendingSeekTargetS = null;
+    const returning = this.iterator?.return();
+    this.iterator = null;
+    this.nextPending = 0;
+    this.abandonPrefetch();
+    this.lastEmittedFrame = null;
+    try {
+      await this.prefetchTask?.catch(() => undefined);
+      await Promise.allSettled([
+        ...this.outputReads,
+        ...(returning ? [returning] : []),
+      ]);
+      if (this.closed) return false;
+      await this.provider.resizeOutput({ width, height });
+      if (this.closed) return false;
+      this.trackInfo = {
+        ...this.trackInfo,
+        decodeWidth: width,
+        decodeHeight: height,
+      };
+      const oldCache = this.cache;
+      this.cache = oldCache.resized(width, height);
+      oldCache.clear();
+      return true;
+    } finally {
+      this.resizingOutput = false;
+    }
   }
 
   async open(): Promise<void> {
@@ -564,7 +612,9 @@ export class DecodeScheduler implements ScrubCursor {
     this.enterMode(AccessMode.Playing);
     // Signal any running sweep to bail; the first pull awaits its teardown.
     this.abandonPrefetch();
-    void this.iterator?.return();
+    if (this.iterator) {
+      void this.trackOutputRead(this.iterator.return());
+    }
     this.iterator = this.provider.frames(startS);
     // Reset the in-flight latch for the new session. An old-iterator pull may
     // still be settling; its finally is iterator-identity-aware (see next()),
@@ -577,7 +627,9 @@ export class DecodeScheduler implements ScrubCursor {
   }
 
   detachPlay(): void {
-    void this.iterator?.return();
+    if (this.iterator) {
+      void this.trackOutputRead(this.iterator.return());
+    }
     this.iterator = null;
     // A pull in flight at detach never decrements, since its finally only
     // fires for the iterator it was issued against. Left stranded, the count
@@ -623,10 +675,11 @@ export class DecodeScheduler implements ScrubCursor {
     if (this.closed) return null;
     this.enterMode(AccessMode.Stepping);
     this.abandonPrefetch();
+    const outputGeneration = this.outputGeneration;
     const decoded = await this.withDecodeWatchdog(
       this.provider.getFrame(this.trackInfo.timeline.timeAt(frame.index)),
     );
-    if (this.closed || !decoded) {
+    if (this.closed || outputGeneration !== this.outputGeneration || !decoded) {
       if (decoded?.kind === "sample") decoded.sample.close();
       return null;
     }
@@ -659,6 +712,7 @@ export class DecodeScheduler implements ScrubCursor {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.outputReads.clear();
     this.abandonPrefetch();
     this.pendingSeekTargetS = null;
     this.currentState = ScrubCursorState.Closed;
@@ -734,6 +788,7 @@ export class DecodeScheduler implements ScrubCursor {
   }
 
   private async runExactSeek(t: Sec): Promise<void> {
+    const outputGeneration = this.outputGeneration;
     this.exactSeeks += 1;
     const ms = t * 1000;
     const cached = this.cache.getForFrame(
@@ -758,7 +813,7 @@ export class DecodeScheduler implements ScrubCursor {
       painted && cached.tier === FrameTier.Preview ? this.now() : null;
     const startedAt = this.now();
     const frame = await this.withDecodeWatchdog(this.provider.getFrame(t));
-    if (this.closed || !frame) {
+    if (this.closed || outputGeneration !== this.outputGeneration || !frame) {
       if (frame?.kind === "sample") frame.sample.close();
       return;
     }
@@ -832,13 +887,14 @@ export class DecodeScheduler implements ScrubCursor {
   }
 
   private async runKeySeek(t: Sec): Promise<void> {
+    const outputGeneration = this.outputGeneration;
     this.keySeeks += 1;
     // getFrame already anchors on the enclosing keyframe, so re-anchoring the
     // request collapses every target within a GOP onto that one frame. A
     // source carrying a single keyframe answers its whole timeline with the
     // first frame.
     const frame = await this.withDecodeWatchdog(this.provider.getFrame(t));
-    if (this.closed || !frame) {
+    if (this.closed || outputGeneration !== this.outputGeneration || !frame) {
       if (frame?.kind === "sample") frame.sample.close();
       return;
     }
@@ -893,7 +949,16 @@ export class DecodeScheduler implements ScrubCursor {
    * decoder having a bad moment from one that will never answer again.
    */
   private withDecodeWatchdog<T>(decode: Promise<T>): Promise<T | null> {
-    return this.watchdogged(decode, true);
+    return this.watchdogged(this.trackOutputRead(decode), true);
+  }
+
+  private trackOutputRead<T>(read: Promise<T>): Promise<T> {
+    this.outputReads.add(read);
+    void read.then(
+      () => this.outputReads.delete(read),
+      () => this.outputReads.delete(read),
+    );
+    return read;
   }
 
   /**
@@ -1035,6 +1100,11 @@ export class DecodeScheduler implements ScrubCursor {
           return;
         }
         this.provider = openFrameProvider(handle);
+        this.outputReads.clear();
+        await this.provider.resizeOutput?.({
+          width: this.trackInfo.decodeWidth,
+          height: this.trackInfo.decodeHeight,
+        });
         // Disposing the old input invalidated the old probe, so the index
         // has to be rebuilt against the new one. It starts empty, and
         // nothing else re-walks it: the source's keyframes are exactly
@@ -1112,6 +1182,7 @@ export class DecodeScheduler implements ScrubCursor {
    * is never used twice at once, then runs under a captured generation token.
    */
   private schedulePrefetch(aroundS: Sec): void {
+    if (this.resizingOutput) return;
     if (this.mode === AccessMode.Playing) return;
     this.abandonPrefetch();
     const gen = this.prefetchGen;
@@ -1235,7 +1306,7 @@ export class DecodeScheduler implements ScrubCursor {
         result = await this.pullSwept(iter, gen);
       }
     } finally {
-      void iter.return();
+      void this.trackOutputRead(iter.return());
     }
   }
 

@@ -13,6 +13,7 @@ export interface MediaRendererTransport {
   togglePlayback(): Promise<void>;
   scrub(mediaTime: number): void;
   commit(mediaTime: number): Promise<void>;
+  resizeOutput(resize: () => Promise<boolean>): Promise<void>;
   step(direction: 1 | -1): Promise<void>;
   setPlaybackRate(rate: number): void;
   /** Holds a producer frame before the scene can display it. */
@@ -78,7 +79,9 @@ export interface MediaRendererTransportOptions {
   readonly invalidatePresentedFrame?: () => void;
   /** Opens an acknowledgment that settles after the scene accepts the frame
    *  where the producer's navigation landed. */
-  readonly beginPresentedFrameNavigation?: () => PresentedFrameNavigation;
+  readonly beginPresentedFrameNavigation?: (
+    preserveCurrent?: boolean,
+  ) => PresentedFrameNavigation;
 }
 
 /**
@@ -108,6 +111,7 @@ export function createMediaRendererTransport(
   let readinessFreezeHeld = false;
   let activeReadinessWait: AbortController | undefined;
   let presentationWait = 0;
+  let displayResize = 0;
   let presentationHold: {
     readonly intent: number;
     readonly ready: boolean;
@@ -426,6 +430,35 @@ export function createMediaRendererTransport(
         await presentation?.waitFor(channel.getPlayhead().frame);
       } catch (error) {
         presentation?.cancel();
+        throw error;
+      }
+    },
+
+    async resizeOutput(resize) {
+      const intent = playbackIntent;
+      const request = ++displayResize;
+      const assertCurrent = () => {
+        if (intent !== playbackIntent || request !== displayResize)
+          throw new DOMException(
+            "Display resize was superseded.",
+            "AbortError",
+          );
+      };
+      // Geometry does not change the viewer's play/pause or annotation gate.
+      // A replacement enters through the same guard as every other frame.
+      const presentation = options.beginPresentedFrameNavigation?.(true);
+      try {
+        const changed = await resize();
+        assertCurrent();
+        if (changed) {
+          await presentation?.waitFor(channel.getPlayhead().frame);
+          assertCurrent();
+        } else {
+          presentation?.cancel();
+        }
+      } catch (error) {
+        presentation?.cancel();
+        assertCurrent();
         throw error;
       }
     },
