@@ -612,6 +612,18 @@ export class ScrubController {
    * crosses the duration.
    */
   beginPlay(startS: number): void {
+    const { timeline } = this.deps.cursor.track;
+    if (
+      this.playSessionLive &&
+      this.deps.clock.playing &&
+      this.lastDeliveryS !== null &&
+      !this.paintedSincePlay &&
+      timeline.indexAtOrBefore(this.playAnchorS) ===
+        timeline.indexAtOrBefore(startS)
+    ) {
+      return;
+    }
+    if (this.lastDeliveryS !== null) this.endPlay();
     this.endedFired = false;
     this.playAnchorS = startS;
     // The realtime needles are per-session rates, not lifetime totals: a
@@ -701,10 +713,32 @@ export class ScrubController {
         return false;
       }
     }
+    return this.paintCached(hit);
+  }
+
+  /** A new commit needs its own presentation even when its exact pixels were
+   *  already shown by the preceding scrub. Approximate neighbors cannot answer it. */
+  presentExactFromCache(timestampMs: number): boolean {
+    if (!this.sink) return false;
+    const hit = this.deps.cursor.peekCached(timestampMs);
+    const { timeline } = this.deps.cursor.track;
+    if (
+      !hit ||
+      hit.quality !== "exact" ||
+      timeline.indexOfDecoded(hit.timestampS) !==
+        timeline.indexAtOrBefore(timestampMs / 1000)
+    ) {
+      return false;
+    }
+    return this.paintCached(hit);
+  }
+
+  private paintCached(hit: ScrubFrame): boolean {
+    if (!this.sink) return false;
     // A cache hit is always a canvas blit, never a live sample, so there is
     // no close obligation here.
     const presented = this.sink.present(hit);
-    this.lastPaintedMs = hitMs;
+    this.lastPaintedMs = Math.round(hit.timestampS * 1000);
     this.lastPaintedQuality = hit.quality;
     // This is a full frame on the display canvas and the user sees the
     // picture change, so it is a paint. Reporting only decoded frames left

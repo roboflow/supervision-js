@@ -442,7 +442,6 @@ export class EngineCore {
     // The cache paint each seek path tries first can already have put the
     // crisp frame up, and then the wait is over before the walk restarts.
     if (!this.awaitedSeek) this.closePlaySeekWait();
-    this.controller?.endPlay();
     this.controller?.beginPlay(tSec);
   }
 
@@ -470,7 +469,9 @@ export class EngineCore {
     this.lastStepLanded = null;
     const wait = this.awaitSeekLanding(target.frame, false, true);
     this.clock.seek(tSec);
-    this.controller?.tryPaintFromCache(tSec * 1000);
+    if (!this.controller?.presentExactFromCache(tSec * 1000)) {
+      this.controller?.tryPaintFromCache(tSec * 1000);
+    }
     // While playing, moving the playhead means re-anchoring the playback
     // walk, exactly as scrub does. Seeking the cursor instead leaves the walk
     // where it was, so playback carries on from the old position and the seek
