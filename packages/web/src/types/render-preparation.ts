@@ -155,9 +155,9 @@ export interface RenderPreparationMaskFrameOptions {
 export interface RenderPreparationPlaybackGateOptions {
   /**
    * Pause playback while required artifacts are unprepared. A session turns
-   * this on by default, so a preview opens with its annotations rather than
-   * opening bare; `playbackGate: false` on the session turns it off. A renderer
-   * created directly leaves it off.
+   * this on by default for playback. Its initial opening frame may appear
+   * before annotations arrive. `playbackGate: false` on the session turns it
+   * off. A renderer created directly leaves it off.
    */
   readonly enabled?: boolean;
   /**
@@ -195,6 +195,9 @@ export interface RenderPreparationPlaybackGateOptions {
    * Ceiling on the lead the two thresholds above may ask for, in seconds of
    * timeline. Defaults to none, which asks only that the frame about to be
    * presented is no longer pending.
+   *
+   * This is unrelated to the detection playback gate's field of the same name,
+   * which is a minimum coverage lead.
    *
    * It buys no cooked frames: how far ahead preparation cooks and how much of
    * that it keeps are the prepared window's own prefetch and cache spans, sized
@@ -313,8 +316,8 @@ export interface RenderPreparationOptions {
    * reports the furthest any of its gates reaches.
    *
    * A renderer created directly leaves this off. `createMediaSession()` turns it
-   * on, so a session opens with its annotations rather than opening bare; pass
-   * `playbackGate: false` to the session to opt out. See
+   * on for playback; the initial opening frame does not wait for future
+   * annotations. Pass `playbackGate: false` to the session to opt out. See
    * {@link RenderPreparationPlaybackGateOptions}.
    */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;

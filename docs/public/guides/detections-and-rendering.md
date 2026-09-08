@@ -26,9 +26,11 @@ runtime artifacts.
 
 ## What The Two Playback Gates Wait For
 
-Both gates are on by default. The two gates are not annotations against masks. A mask is one geometry a
-detection can carry, beside boxes, polygons, polylines, and keypoints, so both
-gates are about detections. They differ in which stage above they wait on.
+The render-preparation gate is on by default. The detection-coverage gate is on
+by default for appendable detections and opt-in for other detection inputs. The
+two gates are not annotations against masks. A mask is one geometry a detection
+can carry, beside boxes, polygons, polylines, and keypoints, so both gates are
+about detections. They differ in which stage above they wait on.
 
 - The detection-coverage gate, `detections.playbackGate`, waits for **arrival**:
   whether this frame's detections have reached the source at all, or are still

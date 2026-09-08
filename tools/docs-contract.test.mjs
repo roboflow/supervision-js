@@ -692,6 +692,57 @@ test("copyable integration examples typecheck", async () => {
   );
 });
 
+test("display-feedback guidance uses session state across media providers", async () => {
+  const mediaSessions = await readFile(
+    path.join(publicDocsDir, "guides/media-sessions.md"),
+    "utf8",
+  );
+  const reactRecipe = await readFile(
+    path.join(publicDocsDir, "recipes/react-integration.md"),
+    "utf8",
+  );
+  const publicApi = await readFile(
+    path.join(publicDocsDir, "guides/public-api.md"),
+    "utf8",
+  );
+
+  assert.match(
+    reactRecipe,
+    /session\.subscribe\(setSessionState\)[\s\S]*state\.renderer\?\.presentedTime/,
+  );
+  assert.match(publicApi, /subscribe to session state[\s\S]*presentedTime/);
+  assert.doesNotMatch(
+    reactRecipe,
+    /renderer\.onFrame[\s\S]{0,120}presented timestamp/,
+  );
+
+  const feedback = findCodeBlocks(mediaSessions, "ts").find((source) =>
+    source.includes('querySelector<HTMLOutputElement>("#displayed-time")'),
+  );
+  assert.ok(
+    feedback,
+    "Missing provider-independent playback feedback example.",
+  );
+  for (const field of [
+    "presentedTime",
+    "seeking",
+    "scrubbing",
+    "awaitingRead",
+    "renderPreparationGateAbandoned",
+  ])
+    assert.ok(
+      feedback.includes(field),
+      `Missing playback feedback for ${field}`,
+    );
+  assertTypechecks(
+    [
+      'declare const session: import("supervision").MediaSession;',
+      feedback,
+    ].join("\n"),
+    ".docs-playback-feedback.ts",
+  );
+});
+
 test("the indexed frame-clock example typechecks", async () => {
   const guide = await readFile(
     path.join(publicDocsDir, "guides/media-sessions.md"),
@@ -702,28 +753,9 @@ test("the indexed frame-clock example typechecks", async () => {
   );
   assert.ok(example, "Missing indexed frame-clock example.");
   assertTypechecks(
-    'declare const session: import("supervision").MediaSession;\n' + example,
+    'export {};\ndeclare const session: import("supervision").MediaSession;\n' +
+      example,
     ".docs-frame-clock.ts",
-  );
-});
-
-test("live display output resize examples typecheck", async () => {
-  const guide = await readFile(
-    path.join(publicDocsDir, "guides/media-sessions.md"),
-    "utf8",
-  );
-  const examples = findCodeBlocks(guide, "ts");
-  const setup = examples.find((source) =>
-    source.includes("const maxDevicePixelRatio = 2"),
-  );
-  const resize = examples.find((source) =>
-    source.includes("const resizeOutput = session.setDisplay"),
-  );
-  assert.ok(setup, "Missing display-box source example.");
-  assert.ok(resize, "Missing live output resize example.");
-  assertTypechecks(
-    ["declare const container: HTMLElement;", setup, resize].join("\n"),
-    ".docs-live-output-resize.ts",
   );
 });
 
@@ -737,9 +769,255 @@ test("the 0.2 interaction-style migration example typechecks", async () => {
     assert.match(migration, new RegExp(`\\b${removed}\\b`));
   }
 
-  const [, after] = findCodeBlocks(migration, "ts");
+  const examples = findCodeBlocks(migration, "ts");
+  const removedGate = examples.find((source) =>
+    source.includes("minimumAheadSeconds"),
+  );
+  const after = examples.find((source) =>
+    source.includes("const highlight = new BaseBoxStyle"),
+  );
+  assert.ok(removedGate, "Missing the removed playback-gate example.");
   assert.ok(after, "Missing the migrated BaseInteractionStyle example.");
+  assertTypechecks(removedGate, ".docs-0.2-removed-gate.ts");
   assertTypechecks(after, ".docs-0.2-interaction-migration.ts");
+});
+
+test("the 0.1.7 upgrade documents both playback gates and added feedback", async () => {
+  const migration = await readFile(
+    path.join(publicDocsDir, "guides/migrating-to-0.2.md"),
+    "utf8",
+  );
+  for (const field of [
+    "minimumAheadSeconds",
+    "requiredAheadSeconds",
+    "stopBelowWallSeconds",
+    "resumeMarginWallSeconds",
+    "presentedTime",
+    "drawnMaskFrameTime",
+    "maskHeldStale",
+    "playbackGateReach",
+    "renderPreparationGateAbandoned",
+    "seeking",
+    "scrubbing",
+    "awaitingRead",
+    "frameClock",
+    "frameNavigation",
+    "setDisplay",
+    "AbortError",
+  ])
+    assert.ok(
+      migration.includes(field),
+      `Missing upgrade guidance for ${field}`,
+    );
+  assert.match(migration, /ceiling/);
+  assert.match(migration, /floor/);
+  assert.match(migration, /maxWaitSeconds: 10/);
+  assert.match(migration, /maxWaitSeconds: 2/);
+  assert.match(migration, /maxWaitSeconds: Infinity/);
+});
+
+test("media-session streaming, frame navigation, and engine examples typecheck", async () => {
+  const guide = await readFile(
+    path.join(publicDocsDir, "guides/media-sessions.md"),
+    "utf8",
+  );
+  const examples = findCodeBlocks(guide, "ts");
+  const streaming = examples.find((source) =>
+    source.includes("consumePredictions"),
+  );
+  const frameNavigation = examples.find((source) =>
+    source.includes("navigation.moveToFrame"),
+  );
+  const drag = examples.find((source) => source.includes("finishTimelineDrag"));
+  const appendable = examples.find(
+    (source) =>
+      source.includes("appendable: {") &&
+      source.includes('datasetId: "camera-1"'),
+  );
+  const borrowedCleanup = examples.find((source) =>
+    source.includes("source.destroy"),
+  );
+  const mountCleanup = examples.find(
+    (source) =>
+      source.includes("media: fileOrUrl") &&
+      source.includes("function unmountViewer"),
+  );
+  const resize = examples.find((source) =>
+    source.includes("const resizeOutput = session.setDisplay"),
+  );
+  const engine = examples.find((source) =>
+    source.includes("createWebVideoEngineMediaRendererSource"),
+  );
+  const errors = examples.find((source) =>
+    source.includes("showUnsupportedVideoMessage"),
+  );
+
+  for (const sourceShape of [
+    "detections.frames",
+    "detections.source",
+    "detections.appendable",
+    "detections.sources",
+  ])
+    assert.ok(
+      guide.includes(sourceShape),
+      `Missing source choice ${sourceShape}`,
+    );
+  assert.match(guide, /appendable[\s\S]{0,180}2 s[\s\S]{0,80}10 s/);
+  assert.match(guide, /render-preparation gate[\s\S]{0,80}2 s/);
+  assert.match(
+    guide,
+    /detection-coverage gate is on\s+by default for appendable detections and off for other detection inputs unless\s+explicitly enabled/,
+  );
+  assert.match(guide, /do not add a host\s+debounce/);
+  assert.match(
+    guide,
+    /renderer\?\.seeking !== true \|\| renderer\.scrubbing === true/,
+  );
+  assert.match(frameNavigation ?? "", /moveToFrame\(nextFrame\)/);
+
+  assert.ok(streaming, "Missing caller-owned streaming example.");
+  assert.ok(frameNavigation, "Missing frame-navigation example.");
+  assert.ok(drag, "Missing latest-wins drag termination example.");
+  assert.ok(appendable, "Missing session-owned appendable example.");
+  assert.ok(borrowedCleanup, "Missing borrowed-source cleanup example.");
+  assert.ok(mountCleanup, "Missing session mount cleanup example.");
+  assert.ok(resize, "Missing live output resize example.");
+  assert.ok(engine, "Missing web video engine source example.");
+  assert.ok(errors, "Missing media error example.");
+
+  assertTypechecks(
+    [
+      "declare const container: HTMLElement;",
+      "declare const media: string;",
+      'declare const predictionFrames: AsyncIterable<import("supervision").DetectionFrame>;',
+      streaming,
+    ].join("\n"),
+    ".docs-session-streaming.ts",
+  );
+  assertTypechecks(
+    [
+      "export {};",
+      'declare const session: import("supervision").LiveMediaSession;',
+      frameNavigation,
+    ].join("\n"),
+    ".docs-frame-navigation.ts",
+  );
+  assertTypechecks(
+    [
+      "export {};",
+      'declare const session: import("supervision").LiveMediaSession;',
+      drag,
+    ].join("\n"),
+    ".docs-frame-drag.ts",
+  );
+  assertTypechecks(
+    [
+      "declare const container: HTMLElement;",
+      "declare const media: string;",
+      appendable,
+    ].join("\n"),
+    ".docs-session-appendable.ts",
+  );
+  assertTypechecks(
+    [
+      'declare const session: import("supervision").LiveMediaSession;',
+      "declare const source: { destroy(): void };",
+      borrowedCleanup,
+    ].join("\n"),
+    ".docs-borrowed-source-cleanup.ts",
+  );
+  assertTypechecks(
+    [
+      "declare const container: HTMLElement;",
+      "declare const fileOrUrl: string;",
+      mountCleanup,
+    ].join("\n"),
+    ".docs-session-mount-cleanup.ts",
+  );
+  assertTypechecks(
+    [
+      'declare const session: import("supervision").LiveMediaSession;',
+      "declare const container: HTMLElement;",
+      "declare const maxDevicePixelRatio: number;",
+      resize,
+    ].join("\n"),
+    ".docs-live-output-resize.ts",
+  );
+  assertTypechecks(
+    ["declare const container: HTMLElement;", engine].join("\n"),
+    ".docs-engine-source.ts",
+  );
+  assertTypechecks(
+    [
+      "declare const container: HTMLElement;",
+      'declare const media: import("supervision").MediaSessionMedia;',
+      "declare function showUnsupportedVideoMessage(): void;",
+      "declare function showMediaOpenError(): void;",
+      errors,
+    ].join("\n"),
+    ".docs-media-errors.ts",
+  );
+});
+
+test("the documented drag finalizer cannot clear a newer gesture", async () => {
+  const guide = await readFile(
+    path.join(publicDocsDir, "guides/media-sessions.md"),
+    "utf8",
+  );
+  const drag = findCodeBlocks(guide, "ts").find((source) =>
+    source.includes("finishTimelineDrag"),
+  );
+  assert.ok(drag, "Missing latest-wins drag termination example.");
+
+  const createRecipe = compileRecipe(drag);
+  const firstMove = deferred();
+  const secondMove = deferred();
+  const scrubFailure = new Error("scrub failed");
+  const reported = [];
+  let move = 0;
+  const session = {
+    frameNavigation: {
+      moveToTime() {
+        move += 1;
+        return move === 1 ? firstMove.promise : secondMove.promise;
+      },
+      scrubToTime(seconds) {
+        return {
+          target: { index: seconds, mediaTime: seconds, duration: 1 },
+          settled:
+            seconds === 2
+              ? Promise.reject(scrubFailure)
+              : Promise.resolve({ status: "superseded" }),
+        };
+      },
+    },
+    getState() {
+      return { renderer: { currentTime: 9, presentedTime: 8 } };
+    },
+  };
+  const recipe = createRecipe(session, {
+    error(error) {
+      reported.push(error);
+    },
+  });
+
+  recipe.beginTimelineDrag();
+  recipe.onTimelineMove(1);
+  const oldFinalizer = recipe.onTimelinePointerUp(1);
+  recipe.beginTimelineDrag();
+  recipe.onTimelineMove(2);
+  firstMove.reject(new globalThis.DOMException("superseded", "AbortError"));
+  await oldFinalizer;
+  await Promise.resolve();
+
+  assert.equal(recipe.timelineKnobTime(), 2);
+  assert.deepEqual(reported, [scrubFailure]);
+
+  recipe.onTimelinePointerCancel(2);
+  secondMove.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(recipe.timelineKnobTime(), 8);
 });
 
 test("every path a document names exists", async () => {
@@ -872,6 +1150,38 @@ function findCodeBlocks(source, language) {
       new RegExp("```" + language + "\\n([\\s\\S]*?)\\n```", "g"),
     ),
   ].map((match) => match[1]);
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function compileRecipe(source) {
+  const wrapped = `
+    function createRecipe(session, console) {
+      ${source}
+      return {
+        beginTimelineDrag,
+        onTimelineMove,
+        onTimelinePointerCancel,
+        onTimelinePointerUp,
+        timelineKnobTime,
+      };
+    }
+  `;
+  const compiled = ts.transpileModule(wrapped, {
+    compilerOptions: {
+      module: ts.ModuleKind.None,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  return Function(`${compiled}\nreturn createRecipe;`)();
 }
 
 async function listFiles(directory, extension) {

@@ -47,26 +47,31 @@ The default path is intentionally boring:
 - detections are optional;
 - render preparation uses the built-in worker strategy when available;
 - state is available through `getState()` and `subscribe()`;
-- playback waits for annotations, so a frame and the marks that belong to it
-  reach the screen together rather than the picture filling in afterwards;
+- playback gates can wait for annotations before advancing, so a playing frame
+  and the marks that belong to it reach the screen together;
 - advanced buffering, retention, interaction, and diagnostics are opt-in.
 
-Both gates are on by default. Pass `playbackGate: false` when starting quickly
-matters more than annotations.
-It turns off both the detection-coverage and the render-preparation gates; left
-on, the session reports a buffering activity while it waits. The detection gate
-applies to a session with appendable detections, and `playbackGate: true` turns
-it on for any session. Both gates hold every frame. A source the renderer pulls
-samples from waits between decoding and drawing. A source that presents its own
-frames, which is what `openWebVideoEngineMediaSource` returns, is stopped when
-detection coverage or prepared artifacts are missing and started again when the
-wait settles.
+Opening a session does not wait for annotations that will arrive later. The
+factory returns after the media is ready to show, so its initial poster/frame
+can be bare even when autoplay is waiting behind a gate. That makes it safe to
+mount controls and begin an inference stream immediately; the gate still
+protects subsequent playback while required annotations are unavailable.
 
-Video files are opened through `createWebVideoEngineMediaRendererSource`, which
-decodes and seeks frames, then hands each selected frame and its media time to
-the renderer. The renderer composites matching annotations and acknowledges the
-frame once displayed. Passing a URL or a `Blob` directly keeps the renderer
-pulling samples instead.
+The render-preparation gate is on by default. The detection-coverage gate is on
+by default for appendable detections and off for other detection inputs unless
+explicitly enabled. Pass `playbackGate: false` when advancing quickly matters
+more than annotations. It turns off both gates; while either enabled gate waits,
+the session reports a buffering activity. A source the renderer pulls samples
+from waits between decoding and drawing. A source that presents its own frames,
+which is what `openWebVideoEngineMediaSource` returns, is stopped when detection
+coverage or prepared artifacts are missing and started again when the wait
+settles.
+
+For indexed file playback, explicitly create a
+`createWebVideoEngineMediaRendererSource`. It decodes and seeks frames, then
+hands each selected frame and its media time to the renderer. The renderer
+composites matching annotations and acknowledges the frame once displayed.
+Passing a URL or a `Blob` directly keeps the renderer pulling samples instead.
 
 ## Reading The Resolved Defaults
 
@@ -110,10 +115,33 @@ The container must already be attached and have a non-zero size. The renderer
 appends its own canvas and tracks container resizing. In SSR applications,
 create the session only on the client after mount.
 
+Destroy the session when that mounted viewer goes away. It removes the
+renderer-owned canvas and releases its media resources without removing other
+children of the container:
+
+```ts
+import { createMediaSession } from "supervision";
+
+const session = await createMediaSession({ container, media: fileOrUrl });
+
+function unmountViewer() {
+  session.destroy();
+}
+```
+
 ## State
 
 Session state reports whether the media is loading, ready, playing, paused,
 buffering, processing, destroyed, or errored.
+
+During opening, the state passed to `onState` has `status: "loading"` and a
+null `renderer`; the session controller does not exist until the creation
+promise resolves. If opening fails, the promise rejects and `onState` receives
+the terminal error state. An opening promise has no cancellation method. A host
+that unmounts or swaps media while it is pending should mark that request
+disposed, then destroy the session immediately if it later resolves. The
+[React Integration](../recipes/react-integration.md) recipe shows that cleanup
+pattern.
 
 It also includes activity details such as media normalization, detection loading,
 playback buffering, and render artifact preparation. Apps can use this to show
@@ -153,11 +181,69 @@ session.subscribe((state) => {
 Every tick of a scrub sets it, so an app that draws it owes the viewer a delay
 before it appears, or a drag will strobe.
 
-## Streaming Detections
-
-Use `detections.appendable` when predictions arrive over time:
+Use `presentedTime` for the timestamp of the pixels on screen. `currentTime`
+can already name a newer playhead position while those pixels are still being
+fetched or decoded:
 
 ```ts
+const displayedTime =
+  document.querySelector<HTMLOutputElement>("#displayed-time")!;
+const seekIndicator = document.querySelector<HTMLElement>("#seeking")!;
+const scrubIndicator = document.querySelector<HTMLElement>("#scrubbing")!;
+const sourceReadIndicator =
+  document.querySelector<HTMLElement>("#source-reading")!;
+const incompleteAnnotations = document.querySelector<HTMLElement>(
+  "#incomplete-annotations",
+)!;
+
+session.subscribe((state) => {
+  const renderer = state.renderer;
+
+  displayedTime.value =
+    renderer?.presentedTime === null || renderer?.presentedTime === undefined
+      ? "No frame"
+      : `${renderer.presentedTime.toFixed(3)} s`;
+  seekIndicator.hidden =
+    renderer?.seeking !== true || renderer.scrubbing === true;
+  scrubIndicator.hidden = renderer?.scrubbing !== true;
+  sourceReadIndicator.hidden = renderer?.source.awaitingRead !== true;
+  incompleteAnnotations.hidden =
+    renderer?.renderPreparationGateAbandoned !== true;
+});
+```
+
+`scrubbing` means the viewer is still leading the playhead with a gesture;
+`seeking` means a requested position has not reached the screen yet.
+`source.awaitingRead` is true only while a required source read is pending.
+`renderPreparationGateAbandoned` means its bounded wait expired and playback
+continued without an unavailable prepared annotation.
+
+## Streaming Detections
+
+Choose one detection input per session:
+
+| Input                   | Ownership and writes                                                                                      | Detection gate default                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `detections.frames`     | Static frames supplied at creation.                                                                       | Off unless explicitly enabled.                                           |
+| `detections.source`     | Borrowed readable or writable source. Write through the session for automatic refresh.                    | Off unless explicitly enabled.                                           |
+| `detections.appendable` | Session-owned writable source. Append through the session.                                                | On, with 2 s of required coverage and a 10 s wait bound.                 |
+| `detections.sources`    | Several ordered entries; each can supply frames, a borrowed source, or a session-owned appendable source. | On when an entry is appendable; otherwise off unless explicitly enabled. |
+
+The render-preparation gate is on for every session by default and has a 2 s
+wait bound. Top-level `playbackGate: false` disables both gates; each gate's
+own `enabled` value can override that choice.
+
+`detections.source` and `detections.sources[].source` are borrowed, not
+owned. The application remains responsible for their lifetime, including
+calling `destroy()` when its source offers it. Sources created with
+`appendable` are session-owned instead.
+
+Use `detections.appendable` when predictions arrive over time and the session
+should own the source:
+
+```ts
+import { createMediaSession } from "supervision";
+
 const session = await createMediaSession({
   container,
   media,
@@ -168,23 +254,63 @@ const session = await createMediaSession({
   },
 });
 
-await session.appendDetectionFrames(frames);
+await session.appendDetectionFrames([{ mediaTime: 0, detections: [] }]);
 ```
 
 This keeps the public API focused on app-level behavior while the library owns
 storage, buffering, and rendering mechanics.
 
+### Start Streaming After Opening
+
+An application can provide its own writable source before opening, then start
+streaming as soon as the session is available. Write through the session so it
+can update the displayed frame and any enabled playback gate:
+
+```ts
+import {
+  createMediaSession,
+  createMemoryColdDetectionFrameStore,
+  createWritableDetectionFrameSource,
+} from "supervision";
+
+const source = createWritableDetectionFrameSource({
+  datasetId: "camera-1",
+  store: createMemoryColdDetectionFrameStore(),
+});
+
+const session = await createMediaSession({
+  container,
+  media,
+  detections: { source },
+});
+
+async function consumePredictions() {
+  for await (const frame of predictionFrames) {
+    await session.appendLiveDetectionFrame(frame);
+  }
+  await session.finalizeDetectionCoverage();
+}
+
+void consumePredictions();
+```
+
+`autoRefresh` defaults to `true` and applies to writes made through the
+session: it redraws when a write can change the displayed result. Set
+`detections.autoRefresh: false` when the host will call `session.refresh()` at
+the times it chooses. If the application mutates an external source directly,
+it must call `session.refresh()` itself when that change should be visible.
+
+When the viewer and external source have the same lifetime, dispose them in
+that order after stopping the producer:
+
+```ts
+session.destroy();
+source.destroy();
+```
+
 Appended frames are validated as semantic detection data. Styling and prepared
 render artifacts are not ingested here; the renderer derives those from the
 current presentation and hot detection window.
-
-Detection input has three preferred shapes:
-
-- `frames` for static detections known at session creation;
-- `source` for caller-owned range loading;
-- `appendable` for streaming inference results written over time.
-
-Use only one of those shapes per session.
 
 ## Exact Frame Navigation
 
@@ -200,18 +326,22 @@ covering that time, then resolves only once that exact frame is presented.
 
 ```ts
 const clock = session.frameClock;
-const frameNavigation = session.frameNavigation;
+const navigation = session.frameNavigation;
 
-async function goToInspectionFrame() {
-  if (!clock || !frameNavigation) return;
-
+if (clock && navigation) {
   const inspectionFrame = 240;
-  await frameNavigation.moveToFrame(inspectionFrame);
-  const frameAtClick = clock.indexAtOrBefore(12.5);
-  await frameNavigation.moveToTime(clock.timeAt(frameAtClick));
-}
+  await navigation.moveToFrame(inspectionFrame);
 
-void goToInspectionFrame();
+  const frameAtClick = clock.indexAtOrBefore(12.5);
+  await navigation.moveToTime(clock.timeAt(frameAtClick));
+
+  const presentedTime = session.getState().renderer?.presentedTime;
+  if (presentedTime !== null && presentedTime !== undefined) {
+    const currentFrame = clock.indexAtOrBefore(presentedTime);
+    const nextFrame = Math.min(clock.frameCount - 1, currentFrame + 1);
+    await navigation.moveToFrame(nextFrame);
+  }
+}
 ```
 
 `frameCount`, `firstTimestamp`, `endTimestamp`, and `duration` describe the
@@ -226,15 +356,29 @@ the final timestamp when a source begins at a nonzero media time.
 resolved target immediately and a `settled` promise. Scrubs are latest-wins: a
 new scrub resolves the earlier promise with `{ status: "superseded" }`; it does
 not reject it. On release, make one `moveToTime()` call for the final exact
-landing. Sharing that promise makes pointer-up and cancellation termination
+landing. Call the scrub method for every pointer position; do not add a host
+debounce because the navigation capability already supersedes older targets.
+Sharing the final promise makes pointer-up and cancellation termination
 idempotent. A final move can reject when a later operation supersedes it, so an
-event handler should consume `AbortError` and report other failures:
+event handler should consume `AbortError` and report other failures. While the
+gesture is active, display its returned target before falling back to
+`presentedTime`; this keeps the timeline knob under the pointer while the
+picture catches up:
 
 ```ts
 let finishDrag: Promise<unknown> | null = null;
+let scrubTargetTime: number | null = null;
+let gesture = 0;
+
+function reportNavigationError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return;
+  console.error(error);
+}
 
 function onTimelineMove(seconds: number) {
-  session.frameNavigation?.scrubToTime(seconds);
+  const scrub = session.frameNavigation?.scrubToTime(seconds);
+  scrubTargetTime = scrub?.target.mediaTime ?? seconds;
+  void scrub?.settled.catch(reportNavigationError);
 }
 
 function finishTimelineDrag(seconds: number) {
@@ -244,85 +388,45 @@ function finishTimelineDrag(seconds: number) {
 }
 
 function beginTimelineDrag() {
+  gesture += 1;
   finishDrag = null;
+  scrubTargetTime = null;
+}
+
+function timelineKnobTime() {
+  return (
+    scrubTargetTime ??
+    session.getState().renderer?.presentedTime ??
+    session.getState().renderer?.currentTime ??
+    0
+  );
 }
 
 async function onTimelinePointerUp(seconds: number) {
+  const finishingGesture = gesture;
+  const finishing = finishTimelineDrag(seconds);
   try {
-    await finishTimelineDrag(seconds);
+    await finishing;
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") return;
-    console.error(error);
+    reportNavigationError(error);
+  } finally {
+    if (finishingGesture === gesture && finishing === finishDrag) {
+      scrubTargetTime = null;
+    }
   }
 }
 
 function onTimelinePointerCancel(seconds: number) {
-  void finishTimelineDrag(seconds).catch((error) => {
-    if (error instanceof DOMException && error.name === "AbortError") return;
-    console.error(error);
-  });
+  void onTimelinePointerUp(seconds);
 }
 ```
 
-## Live Browser MediaStreams
+## Web Video Engine Sources
 
-Use `createMediaStreamRendererSource()` when a host already receives live media
-from `getUserMedia()`, WebRTC, or another browser `MediaStream` producer:
-
-```ts
-import {
-  createMediaSession,
-  createMediaStreamRendererSource,
-  DetectionFrameRetentionMode,
-  MediaSessionMode,
-} from "supervision";
-
-const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
-const media = createMediaStreamRendererSource(mediaStream, {
-  maxBufferedFrames: 8,
-  timestampOrigin: "first-frame",
-});
-
-const session = await createMediaSession({
-  container,
-  media,
-  mode: MediaSessionMode.Stream,
-  detections: {
-    appendable: {
-      datasetId: "camera-1",
-      retention: {
-        mode: DetectionFrameRetentionMode.MemoryOnly,
-        windowSeconds: 60,
-      },
-    },
-  },
-  renderer: {
-    autoPlay: true,
-    loop: false,
-  },
-});
-```
-
-The adapter uses an internal video element as a browser decode clock, snapshots
-presented frames into a bounded queue, and gives the renderer each frame's media
-presentation timestamp. Pixi remains the only visible composition surface, so
-media and detections share one rendering clock.
-
-By default, timestamps preserve the browser's MediaStream clock. Use
-`timestampOrigin: "first-frame"` when detections arrive over a separate channel
-whose PTS values are also rebased to their first result. Both timelines then
-start at zero while preserving the real gaps between later frames.
-
-The host owns the supplied `MediaStream` and its transport lifecycle by default.
-Destroying the session releases snapshots and the internal decoder but does not
-stop the stream tracks. Set `stopTracksOnDispose: true` only when the session
-should own those tracks. A live source cannot seek or loop; ending every video
-track ends playback.
-
-## Live Display Output
-
-For an engine-backed session, set the initial display box and use the same
-pixel-ratio ceiling as the renderer:
+Use the web video engine source when the application needs its indexed file
+playback and frame navigation. It accepts a URL or an uploaded `Blob`; pass the
+visible box and the same DPR ceiling used by the renderer so decoding matches
+the pixels the viewer can show:
 
 ```ts
 import {
@@ -391,6 +495,90 @@ Rapid box changes keep only the newest resize; a superseded call rejects with
 `AbortError`. Repeating the current box resolves without a replacement frame.
 When dimensions change, the call resolves after its resized frame is presented,
 while the already-visible frame remains until that replacement arrives.
+
+For an uploaded file, replace the `source` value with
+`{ kind: SourceKind.Blob, blob: file }`. A `ReadableStream` is not accepted by
+this renderer source; use the engine directly if the application must consume
+one.
+
+Handle open failures through the stable media error kind rather than matching
+decoder text:
+
+```ts
+import {
+  createMediaSession,
+  getMediaErrorKind,
+  MediaErrorKind,
+} from "supervision";
+
+try {
+  await createMediaSession({ container, media });
+} catch (error) {
+  if (getMediaErrorKind(error) === MediaErrorKind.UnsupportedFormat) {
+    showUnsupportedVideoMessage();
+  } else {
+    showMediaOpenError();
+  }
+}
+```
+
+`renderer.muted` is deprecated and has no effect. Sessions are video-only, so
+do not use it to control application audio.
+
+## Live Browser MediaStreams
+
+Use `createMediaStreamRendererSource()` when a host already receives live media
+from `getUserMedia()`, WebRTC, or another browser `MediaStream` producer:
+
+```ts
+import {
+  createMediaSession,
+  createMediaStreamRendererSource,
+  DetectionFrameRetentionMode,
+  MediaSessionMode,
+} from "supervision";
+
+const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+const media = createMediaStreamRendererSource(mediaStream, {
+  maxBufferedFrames: 8,
+  timestampOrigin: "first-frame",
+});
+
+const session = await createMediaSession({
+  container,
+  media,
+  mode: MediaSessionMode.Stream,
+  detections: {
+    appendable: {
+      datasetId: "camera-1",
+      retention: {
+        mode: DetectionFrameRetentionMode.MemoryOnly,
+        windowSeconds: 60,
+      },
+    },
+  },
+  renderer: {
+    autoPlay: true,
+    loop: false,
+  },
+});
+```
+
+The adapter uses an internal video element as a browser decode clock, snapshots
+presented frames into a bounded queue, and gives the renderer each frame's media
+presentation timestamp. Pixi remains the only visible composition surface, so
+media and detections share one rendering clock.
+
+By default, timestamps preserve the browser's MediaStream clock. Use
+`timestampOrigin: "first-frame"` when detections arrive over a separate channel
+whose PTS values are also rebased to their first result. Both timelines then
+start at zero while preserving the real gaps between later frames.
+
+The host owns the supplied `MediaStream` and its transport lifecycle by default.
+Destroying the session releases snapshots and the internal decoder but does not
+stop the stream tracks. Set `stopTracksOnDispose: true` only when the session
+should own those tracks. A live source cannot seek or loop; ending every video
+track ends playback.
 
 ## Renderer Quality
 

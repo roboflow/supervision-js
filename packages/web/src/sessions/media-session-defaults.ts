@@ -40,10 +40,11 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
 } satisfies DetectionBufferOptions;
 
 /**
- * Playback waits for annotations unless a host says otherwise, so a viewer sees
- * a frame and the marks that belong to it together rather than a picture that
- * fills in afterwards. `playbackGate: false` on the session, or either gate's
- * own `enabled`, turns it off.
+ * Once a session is open, playback waits for annotations unless a host says
+ * otherwise, so a viewer sees a frame and the marks that belong to it together.
+ * Opening itself may show a bare initial frame while future annotations arrive.
+ * `playbackGate: false` on the session, or either gate's own `enabled`, turns
+ * it off.
  */
 const DETECTION_PLAYBACK_GATE_DEFAULTS = {
   enabled: true,

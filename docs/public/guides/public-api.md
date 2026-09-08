@@ -198,7 +198,12 @@ not the first thing most users should reach for:
 - `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses
-  `coordinateSpace` to project each child before composing;
+  `coordinateSpace` to project each child before composing. A
+  `WritableDetectionFrameSource` is accepted anywhere a session accepts
+  `detections.source` or a `detections.sources[].source`; the session borrows
+  that source and never disposes it. Write through the session when it should
+  refresh the visible result, or call `session.refresh()` after a direct source
+  mutation. `detections.autoRefresh: false` leaves every redraw to the host;
 - `LiveMediaSession`, the shape `createMediaSession()` returns. It guarantees
   `appendLiveDetectionFrame()` and `finalizeDetectionCoverage()`, which stay
   optional on `MediaSession` so controllers and test doubles written against the
@@ -378,8 +383,10 @@ props into `session.setPresentation()` or session options.
 
 It should not own media decoding, media timing, frame stepping, render loops,
 detection buffering, inference ingestion, worker orchestration, or Pixi
-composition. Timeline UI should consume session state and `renderer.onFrame`,
-then call session navigation methods.
+composition. Timeline UI should subscribe to session state and read
+`state.renderer?.presentedTime` for the displayed timestamp, then call session
+navigation methods. `renderer.onFrame` is a per-sample diagnostic callback for
+pulled renderers, not a provider-independent display clock.
 
 The browser package remains vanilla TypeScript/JavaScript. React wrappers should
 wrap `MediaSession`; they should not shape media timing, rendering, buffering,

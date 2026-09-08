@@ -37,23 +37,26 @@ const session = await createMediaSession({
 for await (const frames of streamInferenceFrames(file)) {
   await session.appendDetectionFrames(frames);
 }
+await session.finalizeDetectionCoverage();
 ```
 
-A session holds for its predictions and for the artifacts that draw them by
-default, so a preview opens annotated rather than opening bare and filling in.
-Pass `playbackGate: false` to `createMediaSession` when you would rather the
+Gates are on by default, but opening does not wait for predictions that will
+arrive later. The initial media frame can be bare. Subsequent playback waits
+for detection coverage and prepared annotations, subject to each gate's wait
+limit. Pass `playbackGate: false` to `createMediaSession` when you would rather the
 picture keep moving and the annotations land as they arrive: a frame the source
 does not cover yet then presents without annotations and draws them when the
 append covering it lands, so inference falling behind slows annotations rather
 than the video.
 That one switch answers for `detections.playbackGate` and
 `renderer.renderPreparation.playbackGate` together; set either one's `enabled`
-to answer for that gate alone, or its `requiredAheadSeconds` to tune the
-lookahead it waits for.
+to answer for that gate alone. Detection `requiredAheadSeconds` is the coverage
+needed ahead of playback. Preparation `requiredAheadSeconds` caps the prepared
+lead a stop may accumulate; it is not a minimum needed to resume.
 
 ### Which Sources The Gate Reaches
 
-Both gates hold every frame for as long as playback runs. For the `media` inputs
+After opening, both gates apply while playback runs. For the `media` inputs
 above, a URL, a `File`, or a `Blob`, the renderer pulls a decoded sample and
 holds it before drawing.
 

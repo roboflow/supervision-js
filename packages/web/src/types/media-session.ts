@@ -277,8 +277,9 @@ export interface MediaSessionOptions {
   readonly detections?: MediaSessionDetectionOptions;
   /**
    * Buffered playback: hold the picture until the frame it is about to show has
-   * both its detections and its prepared annotation artifacts, so a preview
-   * opens annotated rather than opening bare and filling in.
+   * both its detections and its prepared annotation artifacts. Opening still
+   * presents an initial media frame so the session can accept future appends;
+   * these gates hold subsequent playback, not session creation.
    *
    * On by default. `false` starts playback at once and draws annotations as
    * they land, which suits a host that cares about cadence more than overlays.

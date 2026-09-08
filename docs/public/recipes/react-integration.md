@@ -33,6 +33,7 @@ export function SupervisionViewer({ media, frames }: SupervisionViewerProps) {
   const [sessionState, setSessionState] = useState<MediaSessionState | null>(
     null,
   );
+  const presentedTime = sessionState?.renderer?.presentedTime ?? null;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -91,7 +92,9 @@ export function SupervisionViewer({ media, frames }: SupervisionViewerProps) {
           width: "100%",
         }}
       />
-      <output>{sessionState?.status ?? "loading"}</output>
+      <output>
+        {presentedTime === null ? "loading" : `${presentedTime.toFixed(3)} s`}
+      </output>
     </section>
   );
 }
@@ -106,11 +109,14 @@ await sessionRef.current?.stepForward();
 sessionRef.current?.setPlaybackRate(1.25);
 ```
 
-Provide `renderer.onFrame` when the host needs the canonical presented timestamp
-or decoded dimensions. Do not decode video in a React hook and pass canvases
-back into the renderer. If a mutable detection source changes for the current
-frame, call `session.refresh()`; that is semantic invalidation, while the
-session remains responsible for media retention and redraw ordering.
+Use `session.subscribe()` and `state.renderer?.presentedTime` when UI needs the
+timestamp of pixels currently on screen. The state updates for pulled and
+push-presented media; `currentTime` can be ahead while a seek settles.
+`renderer.onFrame` is a per-sample diagnostic callback for pulled renderers,
+not a provider-independent display clock. Do not decode video in a React hook
+and pass canvases back into the renderer. If a mutable detection source changes
+for the current frame, call `session.refresh()`; that is semantic invalidation,
+while the session remains responsible for media retention and redraw ordering.
 
 Keep `frames` referentially stable when its contents have not changed; otherwise
 the effect correctly treats it as a new input and rebuilds the session. For

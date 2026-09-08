@@ -194,6 +194,9 @@ export interface DetectionPlaybackGateOptions {
    * Detection lead required ahead of the playback time before an enabled gate
    * lets playback continue. Defaults to none, which asks only that the frame
    * about to be presented is covered.
+   *
+   * The render-preparation gate has a field with the same name, but there it is
+   * a ceiling that can shorten a preparation stop rather than a coverage floor.
    */
   readonly requiredAheadSeconds?: number;
   /**
