@@ -1174,7 +1174,9 @@ export async function createMediaRendererCore(
           protectedPresentedFrames!.beginNavigation(),
       });
       protectedPresentedFrames?.activate((presented, signal) =>
-        transport!.protectPresentation(presented.mediaTimeS, signal),
+        pushPresentationReady
+          ? transport!.protectPresentation(presented.mediaTimeS, signal)
+          : null,
       );
       if (initialPlaybackRate !== 1) {
         transport.setPlaybackRate(initialPlaybackRate);
@@ -1199,7 +1201,10 @@ export async function createMediaRendererCore(
       runtimeState.setReady();
 
       if (options.autoPlay ?? true) {
-        await renderer.play();
+        // Opening exposes the writer even when autoplay awaits future detections.
+        void renderer.play().catch((error) => {
+          if (!runtimeState.isDestroyed()) runtimeState.setRenderError(error);
+        });
       }
 
       return renderer;

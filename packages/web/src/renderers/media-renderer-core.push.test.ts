@@ -18,6 +18,68 @@ import type {
 } from "./presented-frame-channel";
 
 describe("media renderer over a push-based media source", () => {
+  it.each([false, true])(
+    "opens with real pixels before future detections arrive (autoplay %s)",
+    async (autoPlay) => {
+      vi.useFakeTimers();
+      const producer = createProducer();
+      const coverage = createDeferred<void>();
+      let available = false;
+      const source: DetectionFrameSource = {
+        getAvailableRanges: () =>
+          available ? [{ startTime: 0, endTime: 4 }] : [],
+        loadFrames: async () =>
+          available ? [{ mediaTime: 0, endTime: 4, detections: [] }] : [],
+        waitForRange: () => coverage.promise,
+      };
+      let opened: Awaited<ReturnType<typeof createRenderer>> | undefined;
+      const paint = vi.fn((frame: PresentedVideoFrame) => {
+        frame.acknowledgePresentation?.();
+        frame.frame.close();
+      });
+      const opening = createRenderer(
+        producer,
+        createScene(),
+        {
+          autoPlay,
+          detectionSource: source,
+          detectionBuffer: {
+            playbackGate: { enabled: true, maxWaitSeconds: Infinity },
+          },
+        },
+        paint,
+      ).then((renderer) => {
+        opened = renderer;
+        return renderer;
+      });
+      try {
+        await vi.advanceTimersByTimeAsync(100);
+        expect(opened).toBeDefined();
+        expect(paint).toHaveBeenCalledOnce();
+        expect(producer.play).not.toHaveBeenCalled();
+        expect(opened!.getState().playbackState).toBe(
+          autoPlay
+            ? MediaRendererPlaybackState.Buffering
+            : MediaRendererPlaybackState.Ready,
+        );
+        available = true;
+        coverage.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+        if (autoPlay) expect(producer.play).toHaveBeenCalledOnce();
+        else {
+          await opened!.play();
+          expect(producer.play).toHaveBeenCalledOnce();
+        }
+      } finally {
+        available = true;
+        coverage.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+        (await opening).destroy();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("never pulls a sample", async () => {
     const producer = createProducer();
     const scene = createScene();
