@@ -348,6 +348,11 @@ export function createMediaRendererTransport(
       // A pause ends the producer's mechanical hold, so it lands ahead of the
       // releases a readiness hold or an open gesture still owe.
       channel.pause();
+      // A gate may already have mechanically paused the producer, so its
+      // no-op pause emits no state signal to retire Buffering.
+      if (channel.getStatus() === "PAUSED") {
+        publishPlaybackState();
+      }
       void releaseReadinessFreeze();
       void releaseGesture();
     },

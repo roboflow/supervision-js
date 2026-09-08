@@ -712,6 +712,98 @@ describe("mid-playback readiness holds", () => {
     expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
   });
 
+  it("reports paused when the producer was already paused by a presentation gate", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    const frameGuard = new AbortController();
+    let releasePresentation = () => {};
+    const presentationReady = new Promise<void>((resolve) => {
+      releasePresentation = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      invalidatePresentedFrame: () => frameGuard.abort(),
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => presentationReady,
+    });
+    const presenting = transport.protectPresentation(
+      secondsAt(1),
+      frameGuard.signal,
+    );
+
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Buffering);
+
+    transport.pause();
+    const afterFirstPause = playbackStates.at(-1);
+    releasePresentation();
+    await presenting;
+    transport.pause();
+    const afterSecondPause = playbackStates.at(-1);
+
+    vi.mocked(producer.channel.commit).mockImplementationOnce(async () => {
+      producer.setStatus("SEEKING");
+      producer.setStatus("PAUSED");
+    });
+    await transport.commit(secondsAt(1));
+
+    expect({
+      afterFirstPause,
+      afterSecondPause,
+      afterSeek: playbackStates.at(-1),
+      producerStatus: producer.channel.getStatus(),
+    }).toStrictEqual({
+      afterFirstPause: MediaRendererPlaybackState.Paused,
+      afterSecondPause: MediaRendererPlaybackState.Paused,
+      afterSeek: MediaRendererPlaybackState.Paused,
+      producerStatus: "PAUSED",
+    });
+  });
+
+  it("does not restart a looping producer whose pause command still reads ended", () => {
+    const producer = createProducer();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: true,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    producer.setStatus("ENDED");
+    vi.mocked(producer.channel.play).mockClear();
+    vi.mocked(producer.channel.pause).mockImplementationOnce(() => undefined);
+
+    transport.pause();
+
+    expect(producer.channel.play).not.toHaveBeenCalled();
+  });
+
+  it("does not replace an errored producer state while its pause command is pending", () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    producer.setStatus("ERRORED");
+    vi.mocked(producer.channel.pause).mockImplementationOnce(() => undefined);
+
+    transport.pause();
+
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Error);
+  });
+
   it("gives the producer back when the wait a play made fails under it", async () => {
     const producer = createProducer();
     const transport = createMediaRendererTransport({
@@ -771,7 +863,15 @@ function createProducer() {
     getSeeking: () => seeking,
     getStatus: () => status,
     onPresentedFrame: vi.fn(),
-    pause: vi.fn(),
+    pause: vi.fn(() => {
+      frozen = false;
+      if (status === "PAUSED") {
+        return;
+      }
+
+      status = "PAUSED";
+      announce();
+    }),
     play: vi.fn(async () => undefined),
     scrub: vi.fn(),
     setPlaybackRate: vi.fn(),
