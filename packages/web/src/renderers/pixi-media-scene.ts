@@ -1518,6 +1518,7 @@ export async function createPixiMediaScene(
     },
 
     destroy() {
+      if (isDestroyed) return;
       isDestroyed = true;
       if (displayFrameHandle !== null) {
         cancelDisplayFrame(displayFrameHandle);
@@ -1565,6 +1566,7 @@ export async function createPixiMediaScene(
           textureSource: true,
         },
       );
+      backdrop.remove();
     },
   };
 
