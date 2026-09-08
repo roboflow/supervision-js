@@ -692,6 +692,21 @@ test("copyable integration examples typecheck", async () => {
   );
 });
 
+test("the indexed frame-clock example typechecks", async () => {
+  const guide = await readFile(
+    path.join(publicDocsDir, "guides/media-sessions.md"),
+    "utf8",
+  );
+  const example = findCodeBlocks(guide, "ts").find((source) =>
+    source.includes("const clock = session.frameClock"),
+  );
+  assert.ok(example, "Missing indexed frame-clock example.");
+  assertTypechecks(
+    'declare const session: import("supervision").MediaSession;\n' + example,
+    ".docs-frame-clock.ts",
+  );
+});
+
 test("the 0.2 interaction-style migration example typechecks", async () => {
   const migration = await readFile(
     path.join(publicDocsDir, "guides/migrating-to-0.2.md"),

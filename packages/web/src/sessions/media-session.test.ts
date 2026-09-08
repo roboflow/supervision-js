@@ -42,6 +42,42 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
+  it("delegates an indexed source clock without manufacturing one for pull media", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const { openMediabunnyMediaSource } =
+      await import("#media/mediabunny-media-source");
+    const frameClock = {
+      frameCount: 2,
+      firstTimestamp: 0,
+      endTimestamp: 0.08,
+      duration: 0.08,
+      timeAt: (index: number) => index * 0.04,
+      durationAt: () => 0.04,
+      indexAtOrBefore: (time: number) => (time < 0.04 ? 0 : 1),
+    };
+    const open = vi.fn(async () => ({
+      ...(await openMediabunnyMediaSource("sample.mp4")),
+      frameClock,
+    }));
+    const indexed = await createMediaSession({
+      container: createContainer(),
+      media: { open },
+      renderer: { autoPlay: false },
+    });
+    expect(indexed.frameClock).toBe(frameClock);
+    expect(indexed.renderer.frameClock).toBe(frameClock);
+    indexed.destroy();
+    const pull = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+    expect(pull.frameClock).toBeNull();
+    expect(pull.renderer.frameClock).toBeNull();
+    pull.destroy();
+  });
+
   it("owns video navigation, playback rate, and current-frame refresh", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");

@@ -192,6 +192,7 @@ export async function createMediaRendererCore(
       options.onState?.(state);
     },
   });
+  let frameClock: MediaRenderer["frameClock"] = null;
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
@@ -702,6 +703,9 @@ export async function createMediaRendererCore(
   };
 
   const renderer: MediaRenderer = {
+    get frameClock() {
+      return frameClock;
+    },
     async play() {
       if (runtimeState.isDestroyed()) {
         throw new Error("Media renderer has been destroyed.");
@@ -1035,6 +1039,7 @@ export async function createMediaRendererCore(
     }
 
     const mediaSource = await openRendererMediaSource(options, providers);
+    frameClock = mediaSource.frameClock ?? null;
     mediaInput = mediaSource.input;
     sampleSink = mediaSource.sampleSink;
 

@@ -186,6 +186,23 @@ Detection input has three preferred shapes:
 
 Use only one of those shapes per session.
 
+## Exact Frame Timing
+
+An indexed source can expose `session.frameClock` and
+`session.renderer.frameClock`. The value is `null` when no indexed presentation
+table is available. `timeAt` and `durationAt` retain variable-frame-rate
+boundaries, while `indexAtOrBefore` clamps a finite media time to the source
+ends.
+
+```ts
+const clock = session.frameClock;
+if (clock) {
+  const frameIndex = clock.indexAtOrBefore(12.5);
+  const exactStart = clock.timeAt(frameIndex);
+  const exactDuration = clock.durationAt(frameIndex);
+}
+```
+
 ## Live Browser MediaStreams
 
 Use `createMediaStreamRendererSource()` when a host already receives live media

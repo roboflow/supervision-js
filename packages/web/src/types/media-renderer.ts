@@ -18,6 +18,7 @@ import type {
 } from "supervision-js-core";
 import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import type { MediaFrameClock } from "#types/media-frame-clock";
 import type {
   AnnotationEditingEngine,
   PreviewOverlayData,
@@ -163,6 +164,8 @@ export interface DetectionLabelBounds {
  * preparation and detection buffering yourself.
  */
 export interface MediaRenderer extends MediaRendererStateController {
+  /** Exact frame timing when the source provides an index; null otherwise. */
+  readonly frameClock?: MediaFrameClock | null;
   play(): Promise<void>;
   pause(): void;
   /**

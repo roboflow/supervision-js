@@ -26,6 +26,7 @@ export {
   type DetectionLabelBounds,
   type MediaFrameCapture,
   type MediaFrameCaptureOptions,
+  type MediaFrameClock,
   type MediaFrameDiagnostics,
   type MediaFrameRenderTimings,
   type AnnotationVisibility,

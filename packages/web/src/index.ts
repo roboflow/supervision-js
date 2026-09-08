@@ -76,6 +76,7 @@ export type {
   DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
+export type { MediaFrameClock } from "#types/media-frame-clock";
 export type {
   PresentedFrameChannel,
   PresentedFrameChannelSignal,

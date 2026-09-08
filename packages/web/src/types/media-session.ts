@@ -37,6 +37,7 @@ import type {
   MediaSourceState,
 } from "#types/media-renderer";
 import type { RenderPreparationDiagnostics } from "#types/render-preparation";
+import type { MediaFrameClock } from "#types/media-frame-clock";
 
 export {
   MediaSessionActivityKind,
@@ -380,6 +381,8 @@ export interface MediaSessionDetectionWriteOptions {
  * Public controller for one renderer-owned media item.
  */
 export interface MediaSession {
+  /** Exact frame timing when the media source provides an index; null otherwise. */
+  readonly frameClock?: MediaFrameClock | null;
   /**
    * Detection source used by the renderer. Present when the session was created
    * with static frames, a source, or an appendable source.

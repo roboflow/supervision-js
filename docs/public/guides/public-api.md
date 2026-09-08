@@ -44,6 +44,11 @@ Start here for normal application code:
 - `MediaSessionState`
 - `MediaSessionStatus`
 - `MediaSessionActivity`
+- `MediaFrameClock` and optional `session.frameClock` / `renderer.frameClock`
+  for exact indexed timing. The clock is `null` for unindexed media; its
+  `frameCount`, `firstTimestamp`, `endTimestamp`, `duration`, `timeAt`,
+  `durationAt`, and `indexAtOrBefore` members use presentation time rather
+  than an assumed frame rate;
 - media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
   playback rate, and current-presentation `refresh`;
 - `session.captureFrame()` when a host needs an encoded JPEG `Blob` for the

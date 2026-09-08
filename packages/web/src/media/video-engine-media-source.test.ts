@@ -50,7 +50,12 @@ const analysis = vi.hoisted(() => ({
   open: vi.fn(),
 }));
 
-const engineModule = vi.hoisted(() => () => ({
+const engineModule = vi.hoisted(() => async () => ({
+  FrameTimeline: (
+    await vi.importActual<typeof import("#web-video-engine")>(
+      "#web-video-engine",
+    )
+  ).FrameTimeline,
   SourceKind: { Blob: "blob", Stream: "stream", Url: "url" },
   displayBoxResolution: (options: unknown) => ({
     kind: "displayBox",
@@ -81,6 +86,11 @@ const READY_SNAPSHOT: ReadySnapshot = {
   durationMs: 4000,
   firstTimestampMs: 40,
   nativeFps: 25,
+  timeline: {
+    tickRate: 1000,
+    ticks: Float64Array.from({ length: 99 }, (_, index) => 40 + index * 40),
+    lastDurationTicks: 40,
+  },
   naturalHeight: 1080,
   naturalWidth: 1920,
 };
@@ -180,6 +190,14 @@ describe("video engine media source", () => {
       videoTrackCount: 1,
     });
     expect(source.engine).toBeDefined();
+    expect(source.frameClock).toMatchObject({
+      frameCount: 99,
+      firstTimestamp: 0.04,
+      endTimestamp: 4,
+      duration: 3.96,
+    });
+    expect(source.frameClock?.timeAt(1)).toBe(0.08);
+    expect(source.frameClock?.indexAtOrBefore(0.08)).toBe(1);
   });
 
   it("opens a blob source through the engine and the analysis entry", async () => {

@@ -1,4 +1,5 @@
 import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
+import type { MediaFrameClock } from "#types/media-frame-clock";
 
 export interface DecodedVideoSample {
   readonly timestamp: number;
@@ -66,4 +67,6 @@ export interface DecodedMediaSource {
    * serves thumbnails and one-off grabs.
    */
   readonly engine?: PresentedFrameChannel;
+  /** Exact timing when the source already owns a presentation frame index. */
+  readonly frameClock?: MediaFrameClock;
 }

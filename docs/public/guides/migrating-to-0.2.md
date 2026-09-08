@@ -16,6 +16,13 @@ npm install supervision@next
 The engine remains a subpath of `supervision`; do not add a separate engine or
 core package dependency.
 
+## Indexed Frame Clocks
+
+Indexed sources can expose `frameClock` on a session and renderer. It is `null`
+for unindexed media. Use `timeAt`, `durationAt`, and `indexAtOrBefore` rather
+than an assumed FPS: the table retains a nonzero first timestamp and final-frame
+duration.
+
 ## Interaction Highlight Styles
 
 `BaseInteractionStyle` no longer accepts the rectangle-specific `shape`,

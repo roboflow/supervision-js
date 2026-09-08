@@ -23,6 +23,7 @@ import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
 import { MediaErrorKind } from "supervision-js-core";
 
 import { resolveDisplayPixelRatio } from "./display-pixel-ratio";
+import { createMediaFrameClock } from "./media-frame-clock";
 import {
   rethrowEngineImportFailure,
   VIDEO_ENGINE_ANALYSIS_ENTRY,
@@ -101,7 +102,8 @@ export async function openWebVideoEngineMediaSource(
     ReturnType<typeof retainFramesUntilSubscribed> | undefined;
 
   try {
-    const { WebVideoEngine, displayBoxResolution } = await importEngineEntry();
+    const { WebVideoEngine, displayBoxResolution, FrameTimeline } =
+      await importEngineEntry();
     const { display, frameDecodeStrategy, ...engineOptions } = options;
     engine = new WebVideoEngine({
       decodeStrategy: display ? displayBoxResolution(display) : undefined,
@@ -122,6 +124,7 @@ export async function openWebVideoEngineMediaSource(
 
     return {
       engine: openedEngine,
+      frameClock: createMediaFrameClock(FrameTimeline.from(snapshot.timeline)),
       input: {
         dispose() {
           retainedFrames?.dispose();
