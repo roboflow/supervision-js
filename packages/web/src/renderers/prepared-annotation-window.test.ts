@@ -182,7 +182,7 @@ describe("prepared annotation window", () => {
     expect(window.getReadinessToken(0)).toBe(revisedToken);
     expect(window.getReadinessToken(1.05)).toBe(unrelatedToken);
     timeline.destroy();
-    source.destroy();
+    source.destroy?.();
   });
 
   it("keeps the token across unchanged rolling loads and updates it for a reloaded revision", async () => {

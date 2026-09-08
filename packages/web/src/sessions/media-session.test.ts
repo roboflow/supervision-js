@@ -270,7 +270,7 @@ describe("media session", () => {
       await expect(source.loadFrames(1, 2)).resolves.toEqual([
         expect.objectContaining({ detections: [{ id: "live" }], endTime: 2 }),
       ]);
-      source.destroy();
+      source.destroy?.();
     },
   );
 
@@ -325,8 +325,8 @@ describe("media session", () => {
     );
 
     session.destroy();
-    legacy.destroy();
-    other.destroy();
+    legacy.destroy?.();
+    other.destroy?.();
   });
 
   it("projects initial detection frames into media space", async () => {

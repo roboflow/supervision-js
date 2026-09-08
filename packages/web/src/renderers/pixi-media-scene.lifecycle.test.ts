@@ -136,7 +136,9 @@ describe("Pixi media scene lifecycle", () => {
     host.appendChild(sentinel);
     const { createPixiMediaScene } = await import("./pixi-media-scene");
 
-    const first = await createPixiMediaScene(createOptions(host));
+    const first = await createPixiMediaScene(
+      createOptions(host as unknown as HTMLElement),
+    );
     const firstBackdrop = host.children.at(-1);
     expect(host.children).toEqual([sentinel, firstBackdrop]);
 
@@ -147,7 +149,9 @@ describe("Pixi media scene lifecycle", () => {
     first.destroy();
     expect(host.children).toEqual([sentinel]);
 
-    const second = await createPixiMediaScene(createOptions(host));
+    const second = await createPixiMediaScene(
+      createOptions(host as unknown as HTMLElement),
+    );
     expect(host.children).toEqual([sentinel, host.children.at(-1)]);
     second.destroy();
     expect(host.children).toEqual([sentinel]);

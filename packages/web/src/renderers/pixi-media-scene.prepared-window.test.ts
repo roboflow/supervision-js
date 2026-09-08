@@ -603,7 +603,7 @@ describe("the prepared annotation window under push presentation", () => {
     expect(scene.renderCount()).toBe(beforeEdit + 1);
     scene.scene.destroy();
     detectionTimeline.destroy();
-    source.destroy();
+    source.destroy?.();
   });
 
   it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {

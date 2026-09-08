@@ -1,5 +1,9 @@
 import { SourceKind } from "#web-video-engine";
-import type { BlobVideoSource, UrlVideoSource } from "#web-video-engine";
+import type {
+  BlobVideoSource,
+  FrameTimelineData,
+  UrlVideoSource,
+} from "#web-video-engine";
 import type { PresentedVideoFrame } from "#renderers/presented-frame-channel";
 import { MediaErrorKind } from "supervision-js-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +23,7 @@ type ReadySnapshot = {
   readonly nativeFps: number | null;
   readonly naturalHeight: number;
   readonly naturalWidth: number;
+  readonly timeline: FrameTimelineData;
 };
 
 type FakeFrame = {

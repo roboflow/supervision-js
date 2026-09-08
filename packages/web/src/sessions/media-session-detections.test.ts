@@ -64,8 +64,8 @@ describe("session detection sources", () => {
       ["first", first],
       ["second", second],
     ]);
-    first.destroy();
-    second.destroy();
+    first.destroy?.();
+    second.destroy?.();
   });
 
   it("does not destroy an external source when a later owned source fails to open", async () => {
@@ -95,7 +95,7 @@ describe("session detection sources", () => {
     ).rejects.toThrow("clear failed");
 
     expect(destroy).not.toHaveBeenCalled();
-    external.destroy();
+    external.destroy?.();
   });
 
   it("waits only for the sources marked required for coverage", async () => {
