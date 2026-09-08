@@ -16,12 +16,15 @@ npm install supervision@next
 The engine remains a subpath of `supervision`; do not add a separate engine or
 core package dependency.
 
-## Indexed Frame Clocks
+## Indexed Frame Navigation
 
-Indexed sources can expose `frameClock` on a session and renderer. It is `null`
-for unindexed media. Use `timeAt`, `durationAt`, and `indexAtOrBefore` rather
-than an assumed FPS: the table retains a nonzero first timestamp and final-frame
-duration.
+Indexed push-presented sources can expose optional `frameClock` and
+`frameNavigation` properties on the session and renderer. Keep time-based
+controls for sources where either is `null`. `moveToFrame(index)` lands an
+exact index; `moveToTime(seconds)` resolves the covering indexed frame. For a
+drag, use `scrubToFrame()` or `scrubToTime()` while the pointer moves, then one
+`moveToTime()` on release. A later scrub settles the earlier one as
+`{ status: "superseded" }`, rather than rejecting it.
 
 ## Display Output
 

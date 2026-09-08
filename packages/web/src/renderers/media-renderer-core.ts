@@ -46,6 +46,7 @@ import {
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
+import { createMediaFrameNavigation } from "./media-frame-navigation";
 import {
   createMediaRendererTransport,
   type MediaRendererTransport,
@@ -193,6 +194,8 @@ export async function createMediaRendererCore(
     },
   });
   let frameClock: MediaRenderer["frameClock"] = null;
+  let frameNavigation:
+    ReturnType<typeof createMediaFrameNavigation> | undefined;
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
@@ -267,6 +270,7 @@ export async function createMediaRendererCore(
         runtimeState.setLoading();
         break;
       case MediaRendererPlaybackState.Error:
+        frameNavigation?.cancel();
         runtimeState.setRenderError(new Error("Media playback failed."));
         break;
       default:
@@ -702,11 +706,55 @@ export async function createMediaRendererCore(
     });
   };
 
+  const seekMediaTime = async (mediaTime: number) => {
+    if (runtimeState.isDestroyed()) {
+      throw new Error("Media renderer has been destroyed.");
+    }
+    if (runtimeState.isError()) {
+      throw new Error(
+        runtimeState.errorMessage() ?? "Media renderer is in error state.",
+      );
+    }
+    const targetTime = clampSeekTime({
+      duration: runtimeState.duration(),
+      firstTimestamp,
+      mediaTime,
+    });
+    endSeekGesture();
+    if (transport) {
+      await transport.commit(targetTime);
+      return;
+    }
+    await seekPullSample(targetTime);
+  };
+
+  const scrubMediaTime = (mediaTime: number) => {
+    if (runtimeState.isDestroyed() || runtimeState.isError()) return;
+    const targetTime = clampSeekTime({
+      duration: runtimeState.duration(),
+      firstTimestamp,
+      mediaTime,
+    });
+    isSeekGestureInFlight = true;
+    publishPlaybackActivity();
+    if (transport) {
+      transport.scrub(targetTime);
+      return;
+    }
+    pendingPullScrubTime = targetTime;
+    if (pullScrubReadInFlight) navigationVersion += 1;
+    schedulePullScrubPreview();
+  };
+
   const renderer: MediaRenderer = {
     get frameClock() {
       return frameClock;
     },
+    get frameNavigation() {
+      return frameNavigation?.api ?? null;
+    },
     async play() {
+      frameNavigation?.cancel();
       if (runtimeState.isDestroyed()) {
         throw new Error("Media renderer has been destroyed.");
       }
@@ -744,6 +792,7 @@ export async function createMediaRendererCore(
     },
 
     pause() {
+      frameNavigation?.cancel();
       if (runtimeState.isDestroyed()) {
         return;
       }
@@ -764,6 +813,7 @@ export async function createMediaRendererCore(
     },
 
     async togglePlayback() {
+      frameNavigation?.cancel();
       if (runtimeState.isDestroyed()) {
         return;
       }
@@ -784,65 +834,22 @@ export async function createMediaRendererCore(
     },
 
     async seek(mediaTime) {
-      if (runtimeState.isDestroyed()) {
-        throw new Error("Media renderer has been destroyed.");
-      }
-
-      if (runtimeState.isError()) {
-        throw new Error(
-          runtimeState.errorMessage() ?? "Media renderer is in error state.",
-        );
-      }
-
-      const targetTime = clampSeekTime({
-        duration: runtimeState.duration(),
-        firstTimestamp,
-        mediaTime,
-      });
-
-      endSeekGesture();
-
-      if (transport) {
-        await transport.commit(targetTime);
-        return;
-      }
-
-      await seekPullSample(targetTime);
+      frameNavigation?.cancel();
+      await seekMediaTime(mediaTime);
     },
 
     scrub(mediaTime) {
-      if (runtimeState.isDestroyed() || runtimeState.isError()) {
-        return;
-      }
-
-      const targetTime = clampSeekTime({
-        duration: runtimeState.duration(),
-        firstTimestamp,
-        mediaTime,
-      });
-
-      isSeekGestureInFlight = true;
-      publishPlaybackActivity();
-
-      if (transport) {
-        transport.scrub(targetTime);
-        return;
-      }
-
-      pendingPullScrubTime = targetTime;
-
-      if (pullScrubReadInFlight) {
-        navigationVersion += 1;
-      }
-
-      schedulePullScrubPreview();
+      frameNavigation?.cancel();
+      scrubMediaTime(mediaTime);
     },
 
     async stepForward() {
+      frameNavigation?.cancel();
       await stepToAdjacentSample("forward");
     },
 
     async stepBackward() {
+      frameNavigation?.cancel();
       await stepToAdjacentSample("backward");
     },
 
@@ -1014,6 +1021,7 @@ export async function createMediaRendererCore(
       }
 
       cancelPullScrubPreview();
+      frameNavigation?.destroy();
       runtimeState.markDestroyed();
       protectedPresentedFrames?.destroy();
       transport?.destroy();
@@ -1086,10 +1094,13 @@ export async function createMediaRendererCore(
             // the producer keeps running. Cut off future frames and state
             // signals before publishing the rendering failure.
             protectedPresentedFrames?.destroy();
+            frameNavigation?.destroy(error);
             transport?.destroy();
             presentedFrameChannel.pause();
             if (!runtimeState.isDestroyed()) runtimeState.setRenderError(error);
           },
+          (id, mediaTime) =>
+            frameNavigation?.presented({ index: id.index, mediaTime }),
           () => transport?.didPresentFrame(),
         )
       : undefined;
@@ -1185,6 +1196,24 @@ export async function createMediaRendererCore(
             throw new Error("Media renderer has been destroyed.");
           await transport!.resizeOutput(() => setDisplay(display));
         };
+      }
+      if (frameClock) {
+        frameNavigation = createMediaFrameNavigation({
+          clock: frameClock,
+          seek: seekMediaTime,
+          scrub(mediaTime) {
+            if (runtimeState.isDestroyed()) {
+              throw new Error("Media renderer has been destroyed.");
+            }
+            if (runtimeState.isError()) {
+              throw new Error(
+                runtimeState.errorMessage() ??
+                  "Media renderer is in error state.",
+              );
+            }
+            scrubMediaTime(mediaTime);
+          },
+        });
       }
       protectedPresentedFrames?.activate((presented, signal) =>
         pushPresentationReady

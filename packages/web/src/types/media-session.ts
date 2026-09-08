@@ -39,6 +39,7 @@ import type {
 } from "#types/media-renderer";
 import type { RenderPreparationDiagnostics } from "#types/render-preparation";
 import type { MediaFrameClock } from "#types/media-frame-clock";
+import type { MediaFrameNavigation } from "#types/media-frame-navigation";
 
 export {
   MediaSessionActivityKind,
@@ -384,6 +385,8 @@ export interface MediaSessionDetectionWriteOptions {
 export interface MediaSession {
   /** Exact frame timing when the media source provides an index; null otherwise. */
   readonly frameClock?: MediaFrameClock | null;
+  /** Indexed moves and observable scrub landings for push-based indexed sources. */
+  readonly frameNavigation?: MediaFrameNavigation | null;
   /** Resize an engine-backed display-box source and await its presented output. */
   setDisplay?(display: MediaRendererDisplay): Promise<void>;
   /**

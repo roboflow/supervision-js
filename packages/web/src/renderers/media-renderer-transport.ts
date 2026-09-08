@@ -422,12 +422,17 @@ export function createMediaRendererTransport(
       if (intent !== playbackIntent) return;
       const presentation = options.beginPresentedFrameNavigation?.();
       try {
+        const before = channel.getPlayhead().frame;
         await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
         if (intent !== playbackIntent) {
           presentation?.cancel();
           return;
         }
-        await presentation?.waitFor(channel.getPlayhead().frame);
+        const after = channel.getPlayhead().frame;
+        await presentation?.waitFor(
+          after,
+          before.index === after.index && before.ticks === after.ticks,
+        );
       } catch (error) {
         presentation?.cancel();
         throw error;

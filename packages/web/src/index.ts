@@ -119,6 +119,12 @@ export type {
 } from "#renderers/prepared-annotation-window";
 export { createMediaSession } from "#sessions/media-session";
 export type { MediaRendererDisplay } from "#types/media-renderer-display";
+export type {
+  MediaFrameLanding,
+  MediaFrameNavigation,
+  MediaFrameScrub,
+  MediaFrameScrubSettlement,
+} from "#types/media-frame-navigation";
 export {
   resolveMediaSessionDefaults,
   type ResolvedMediaSessionDefaults,

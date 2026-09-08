@@ -326,6 +326,7 @@ export async function createMediaSession(
 
     return {
       frameClock: renderer.frameClock ?? null,
+      frameNavigation: renderer.frameNavigation ?? null,
       setDisplay: renderer.setDisplay?.bind(renderer),
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,

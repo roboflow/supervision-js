@@ -186,20 +186,81 @@ Detection input has three preferred shapes:
 
 Use only one of those shapes per session.
 
-## Exact Frame Timing
+## Exact Frame Navigation
 
-An indexed source can expose `session.frameClock` and
-`session.renderer.frameClock`. The value is `null` when no indexed presentation
-table is available. `timeAt` and `durationAt` retain variable-frame-rate
-boundaries, while `indexAtOrBefore` clamps a finite media time to the source
-ends.
+Indexed media sources expose exact presentation timing as `session.frameClock`
+and `session.renderer.frameClock`. It is `null` when the source has no frame
+index, so applications should keep their existing time-based controls as a
+fallback. Its companion, `session.frameNavigation`, is available when that
+indexed source can also present indexed moves; it is `null` otherwise.
+
+Use a frame index when the product already knows the exact frame it wants. Use
+a media time when the input is time-based: `moveToTime()` chooses the frame
+covering that time, then resolves only once that exact frame is presented.
 
 ```ts
 const clock = session.frameClock;
-if (clock) {
-  const frameIndex = clock.indexAtOrBefore(12.5);
-  const exactStart = clock.timeAt(frameIndex);
-  const exactDuration = clock.durationAt(frameIndex);
+const frameNavigation = session.frameNavigation;
+
+async function goToInspectionFrame() {
+  if (!clock || !frameNavigation) return;
+
+  const inspectionFrame = 240;
+  await frameNavigation.moveToFrame(inspectionFrame);
+  const frameAtClick = clock.indexAtOrBefore(12.5);
+  await frameNavigation.moveToTime(clock.timeAt(frameAtClick));
+}
+
+void goToInspectionFrame();
+```
+
+`frameCount`, `firstTimestamp`, `endTimestamp`, and `duration` describe the
+presentation timeline. `timeAt(index)` and `durationAt(index)` use exact frame
+boundaries, including variable frame rate and a final frame with a distinct
+duration. `indexAtOrBefore(mediaTime)` finds the covering frame and clamps a
+finite media time to the indexed ends. `duration` is the span from
+`firstTimestamp` to `endTimestamp`; it is not necessarily the same value as
+the final timestamp when a source begins at a nonzero media time.
+
+`scrubToFrame()` and `scrubToTime()` are for a moving pointer. They return the
+resolved target immediately and a `settled` promise. Scrubs are latest-wins: a
+new scrub resolves the earlier promise with `{ status: "superseded" }`; it does
+not reject it. On release, make one `moveToTime()` call for the final exact
+landing. Sharing that promise makes pointer-up and cancellation termination
+idempotent. A final move can reject when a later operation supersedes it, so an
+event handler should consume `AbortError` and report other failures:
+
+```ts
+let finishDrag: Promise<unknown> | null = null;
+
+function onTimelineMove(seconds: number) {
+  session.frameNavigation?.scrubToTime(seconds);
+}
+
+function finishTimelineDrag(seconds: number) {
+  finishDrag ??=
+    session.frameNavigation?.moveToTime(seconds) ?? Promise.resolve();
+  return finishDrag;
+}
+
+function beginTimelineDrag() {
+  finishDrag = null;
+}
+
+async function onTimelinePointerUp(seconds: number) {
+  try {
+    await finishTimelineDrag(seconds);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    console.error(error);
+  }
+}
+
+function onTimelinePointerCancel(seconds: number) {
+  void finishTimelineDrag(seconds).catch((error) => {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    console.error(error);
+  });
 }
 ```
 

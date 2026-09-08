@@ -18,6 +18,256 @@ import type {
 } from "./presented-frame-channel";
 
 describe("media renderer over a push-based media source", () => {
+  it("returns the displayed indexed frame and observable scrub outcome without pulling samples", async () => {
+    const producer = createProducer();
+    const clock = {
+      frameCount: 4,
+      firstTimestamp: 0,
+      endTimestamp: 4,
+      duration: 4,
+      timeAt: (index: number) => index,
+      durationAt: () => 1,
+      indexAtOrBefore: (time: number) =>
+        Math.min(3, Math.max(0, Math.floor(time))),
+    };
+    const painted: number[] = [];
+    const renderer = await createRenderer(
+      producer,
+      createScene(),
+      {
+        source: {
+          open: async () => ({ ...producer.source, frameClock: clock }),
+        },
+      },
+      (frame) => {
+        painted.push(frame.frameId.index);
+        frame.acknowledgePresentation?.();
+        frame.frame.close();
+      },
+    );
+    const navigation = renderer.frameNavigation;
+    expect(navigation).toBeDefined();
+    expect(await navigation!.moveToFrame(3)).toEqual({
+      index: 3,
+      mediaTime: 3,
+      duration: 1,
+    });
+    expect(painted.at(-1)).toBe(3);
+    const older = navigation!.scrubToFrame(1);
+    const current = navigation!.scrubToTime(2.4);
+    expect(await older.settled).toEqual({ status: "superseded" });
+    producer.present(2000);
+    expect(await current.settled).toEqual({
+      status: "landed",
+      frame: { index: 2, mediaTime: 2, duration: 1 },
+    });
+    const cancelled = navigation!.scrubToFrame(1);
+    renderer.pause();
+    expect(await cancelled.settled).toEqual({ status: "superseded" });
+    expect(producer.getSample).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it("keeps an exact move pending while its frame waits for the scene to draw", async () => {
+    const producer = createProducer();
+    const clock = {
+      frameCount: 4,
+      firstTimestamp: 0,
+      endTimestamp: 4,
+      duration: 4,
+      timeAt: (index: number) => index,
+      durationAt: () => 1,
+      indexAtOrBefore: (time: number) =>
+        Math.min(3, Math.max(0, Math.floor(time))),
+    };
+    let pending: PresentedVideoFrame | undefined;
+    const renderer = await createRenderer(
+      producer,
+      createScene(),
+      {
+        source: {
+          open: async () => ({ ...producer.source, frameClock: clock }),
+        },
+      },
+      (frame) => {
+        if (frame.frameId.index === 0) {
+          frame.acknowledgePresentation?.();
+          frame.frame.close();
+        } else pending = frame;
+      },
+    );
+    let settled = false;
+    const moving = renderer.frameNavigation!.moveToFrame(3).then((frame) => {
+      settled = true;
+      return frame;
+    });
+    await vi.waitFor(() => expect(pending).toBeDefined());
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    pending!.acknowledgePresentation?.();
+    pending!.frame.close();
+    await expect(moving).resolves.toEqual({
+      index: 3,
+      mediaTime: 3,
+      duration: 1,
+    });
+    renderer.destroy();
+  });
+
+  it("settles a pending frame scrub when the producer enters Error", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene(), {
+      source: {
+        open: async () => ({
+          ...producer.source,
+          frameClock: {
+            duration: 4,
+            durationAt: () => 1,
+            endTimestamp: 4,
+            firstTimestamp: 0,
+            frameCount: 4,
+            indexAtOrBefore: (time: number) =>
+              Math.min(3, Math.max(0, Math.floor(time))),
+            timeAt: (index: number) => index,
+          },
+        }),
+      },
+    });
+    const scrub = renderer.frameNavigation!.scrubToFrame(2);
+    let outcome: Awaited<typeof scrub.settled> | "pending" = "pending";
+    void scrub.settled.then((settled) => {
+      outcome = settled;
+    });
+
+    producer.setStatus("ERRORED");
+    await Promise.resolve();
+
+    expect(outcome).toEqual({ status: "superseded" });
+    renderer.destroy();
+  });
+
+  it("terminates frame navigation started after the producer enters Error", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene(), {
+      source: {
+        open: async () => ({
+          ...producer.source,
+          frameClock: {
+            duration: 4,
+            durationAt: () => 1,
+            endTimestamp: 4,
+            firstTimestamp: 0,
+            frameCount: 4,
+            indexAtOrBefore: (time: number) =>
+              Math.min(3, Math.max(0, Math.floor(time))),
+            timeAt: (index: number) => index,
+          },
+        }),
+      },
+    });
+    const navigation = renderer.frameNavigation!;
+    producer.setStatus("ERRORED");
+
+    await expect(navigation.moveToFrame(2)).rejects.toThrow(
+      "Media playback failed.",
+    );
+    expect(() => navigation.scrubToFrame(2)).toThrow("Media playback failed.");
+    renderer.destroy();
+  });
+
+  it("terminates frame navigation started after renderer destruction", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene(), {
+      source: {
+        open: async () => ({
+          ...producer.source,
+          frameClock: {
+            duration: 4,
+            durationAt: () => 1,
+            endTimestamp: 4,
+            firstTimestamp: 0,
+            frameCount: 4,
+            indexAtOrBefore: (time: number) =>
+              Math.min(3, Math.max(0, Math.floor(time))),
+            timeAt: (index: number) => index,
+          },
+        }),
+      },
+    });
+    const navigation = renderer.frameNavigation!;
+
+    renderer.destroy();
+
+    await expect(navigation.moveToFrame(2)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(() => navigation.scrubToFrame(2)).toThrow(
+      "Media frame navigation was destroyed.",
+    );
+  });
+
+  it("settles an indexed scrub from the exact frame the scene already accepted", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene(), {
+      source: {
+        open: async () => ({
+          ...producer.source,
+          frameClock: {
+            duration: 4,
+            durationAt: () => 1,
+            endTimestamp: 4,
+            firstTimestamp: 0,
+            frameCount: 4,
+            indexAtOrBefore: (time: number) =>
+              Math.min(3, Math.max(0, Math.floor(time))),
+            timeAt: (index: number) => index,
+          },
+        }),
+      },
+    });
+
+    const scrub = renderer.frameNavigation!.scrubToFrame(0);
+
+    await expect(scrub.settled).resolves.toEqual({
+      frame: { duration: 1, index: 0, mediaTime: 0 },
+      status: "landed",
+    });
+    expect(producer.scrub).toHaveBeenLastCalledWith(0, "gesture");
+    expect(producer.getSample).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it("settles an indexed move when the producer retains the accepted current frame", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene(), {
+      source: {
+        open: async () => ({
+          ...producer.source,
+          frameClock: {
+            duration: 4,
+            durationAt: () => 1,
+            endTimestamp: 4,
+            firstTimestamp: 0,
+            frameCount: 4,
+            indexAtOrBefore: (time: number) =>
+              Math.min(3, Math.max(0, Math.floor(time))),
+            timeAt: (index: number) => index,
+          },
+        }),
+      },
+    });
+    producer.commit.mockImplementationOnce(async () => undefined);
+
+    await expect(renderer.frameNavigation!.moveToFrame(0)).resolves.toEqual({
+      duration: 1,
+      index: 0,
+      mediaTime: 0,
+    });
+    expect(producer.commit).toHaveBeenLastCalledWith(0);
+    renderer.destroy();
+  });
+
   it("exposes display resizing only when the push source supports it", async () => {
     const capableProducer = createProducer();
     const setDisplay = vi.fn(async () => false);

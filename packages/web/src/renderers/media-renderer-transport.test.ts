@@ -503,7 +503,11 @@ describe("media renderer transport", () => {
     "keeps a settling %s pending until the scene accepts its landing",
     async (_name, navigate) => {
       const producer = createProducer();
-      if (_name === "step") {
+      if (_name === "commit") {
+        vi.mocked(producer.channel.commit).mockImplementationOnce(async () => {
+          producer.land(12);
+        });
+      } else {
         vi.mocked(producer.channel.step).mockImplementationOnce(async () => {
           producer.land(1);
         });
@@ -534,6 +538,7 @@ describe("media renderer transport", () => {
       await vi.waitFor(() =>
         expect(waitFor).toHaveBeenCalledWith(
           producer.channel.getPlayhead().frame,
+          ...(_name === "commit" ? [false] : []),
         ),
       );
 
@@ -544,6 +549,31 @@ describe("media renderer transport", () => {
       expect(settled).toBe(true);
     },
   );
+
+  it("opts into current-frame acknowledgment only for an unchanged commit", async () => {
+    const producer = createProducer();
+    const waitFor = vi.fn(async () => undefined);
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: () => ({
+        cancel: vi.fn(),
+        waitFor,
+      }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    await transport.commit(secondsAt(0));
+
+    expect(waitFor).toHaveBeenCalledExactlyOnceWith(
+      producer.channel.getPlayhead().frame,
+      true,
+    );
+  });
 
   it("settles a boundary step without waiting for a frame the producer does not emit", async () => {
     const producer = createProducer();

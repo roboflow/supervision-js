@@ -20,6 +20,7 @@ import type {
 import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
 import type { MediaFrameClock } from "#types/media-frame-clock";
+import type { MediaFrameNavigation } from "#types/media-frame-navigation";
 import type {
   AnnotationEditingEngine,
   PreviewOverlayData,
@@ -167,6 +168,8 @@ export interface DetectionLabelBounds {
 export interface MediaRenderer extends MediaRendererStateController {
   /** Exact frame timing when the source provides an index; null otherwise. */
   readonly frameClock?: MediaFrameClock | null;
+  /** Indexed moves and observable scrub landings for push-based indexed sources. */
+  readonly frameNavigation?: MediaFrameNavigation | null;
   /**
    * Resize engine-backed display-box output without reopening the source.
    * Resolves after the resized frame is presented; supersession rejects with AbortError.

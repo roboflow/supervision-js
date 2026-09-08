@@ -14,6 +14,7 @@ import {
   MediaSessionActivityKind,
   MediaSessionStatus,
 } from "#types/media-session";
+import type { MediaFrameNavigation } from "../index";
 
 import {
   createContainer,
@@ -42,6 +43,42 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
+  it("delegates the renderer's exact frame-navigation capability by identity", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const renderers = await import("#renderers/media-renderer");
+    const create = renderers.createMediaRenderer;
+    const frameNavigation: MediaFrameNavigation = {
+      moveToFrame: vi.fn(),
+      moveToTime: vi.fn(),
+      scrubToFrame: vi.fn(),
+      scrubToTime: vi.fn(),
+    };
+    const opening = vi
+      .spyOn(renderers, "createMediaRenderer")
+      .mockImplementationOnce(async (options) => {
+        const renderer = await create(options);
+        Object.defineProperty(renderer, "frameNavigation", {
+          configurable: true,
+          value: frameNavigation,
+        });
+        return renderer;
+      });
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    try {
+      expect(session.frameNavigation).toBe(frameNavigation);
+      expect(session.frameNavigation).toBe(session.renderer.frameNavigation);
+    } finally {
+      opening.mockRestore();
+      session.destroy();
+    }
+  });
+
   it("delegates display sizing without replacing its renderer or detections", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
@@ -122,6 +159,8 @@ describe("media session", () => {
     });
     expect(pull.frameClock).toBeNull();
     expect(pull.renderer.frameClock).toBeNull();
+    expect(pull.frameNavigation).toBeNull();
+    expect(pull.renderer.frameNavigation).toBeNull();
     pull.destroy();
   });
 

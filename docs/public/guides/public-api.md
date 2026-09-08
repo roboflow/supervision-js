@@ -49,6 +49,10 @@ Start here for normal application code:
   `frameCount`, `firstTimestamp`, `endTimestamp`, `duration`, `timeAt`,
   `durationAt`, and `indexAtOrBefore` members use presentation time rather
   than an assumed frame rate;
+- `MediaFrameNavigation` and optional `session.frameNavigation` /
+  `renderer.frameNavigation` for exact indexed moves and latest-wins scrubs on
+  push-presented indexed sources. Use the ordinary time controls when it is
+  `null`;
 - optional `session.setDisplay()` / `renderer.setDisplay()` to resize existing
   push-presented output without recreating the source or session. Web video
   engine sources expose it but reject calls unless configured with a

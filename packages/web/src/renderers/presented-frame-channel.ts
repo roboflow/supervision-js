@@ -96,7 +96,7 @@ export interface ProtectedPresentedFrameSource {
 
 export interface PresentedFrameNavigation {
   /** Resolves only after the scene acknowledges drawing this frame. */
-  waitFor(frameId: PresentedFrameId): Promise<void>;
+  waitFor(frameId: PresentedFrameId, allowCurrent?: boolean): Promise<void>;
   /** Releases the acknowledgment when its producer command fails. */
   cancel(): void;
 }
@@ -120,6 +120,7 @@ interface PresentedFrameNavigationTicket {
 export function createProtectedPresentedFrameSource(
   upstream: PresentedFrameSource,
   onPresentationError: (error: unknown) => void = () => undefined,
+  onAccepted?: (frameId: PresentedFrameId, mediaTime: number) => void,
   onPresented?: () => Promise<void> | void,
 ): ProtectedPresentedFrameSource {
   let downstream: ((presented: PresentedVideoFrame) => void) | null = null;
@@ -139,6 +140,7 @@ export function createProtectedPresentedFrameSource(
   } | null = null;
   const navigations = new Set<PresentedFrameNavigationTicket>();
   let generation = 0;
+  let lastAcceptedKey: string | null = null;
   let destroyed = false;
   let firstPresented = false;
   let resolveFirstPresentation!: () => void;
@@ -274,6 +276,8 @@ export function createProtectedPresentedFrameSource(
             ) {
               return;
             }
+            lastAcceptedKey = frameKey(frame.frameId);
+            onAccepted?.(frame.frameId, frame.mediaTimeS);
             acceptNavigationFrame(frame.frameId, run.generation);
             if (!firstPresented) {
               firstPresented = true;
@@ -375,10 +379,19 @@ export function createProtectedPresentedFrameSource(
       };
       navigations.add(ticket);
       return {
-        waitFor(frameId) {
+        waitFor(frameId, allowCurrent = false) {
           if (ticket.settled) return ticket.promise;
           ticket.target = frameKey(frameId);
           if (ticket.accepted.has(ticket.target)) settleNavigation(ticket);
+          if (
+            allowCurrent &&
+            lastAcceptedKey === ticket.target &&
+            generation === ticket.afterGeneration &&
+            pending === null &&
+            active === null
+          ) {
+            settleNavigation(ticket);
+          }
           return ticket.promise;
         },
         cancel() {
