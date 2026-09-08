@@ -652,6 +652,7 @@ export class ScrubController {
     this.lastPresentTickS = null;
     this.resetCadenceTracking();
     this.clearPlayQueue();
+    this.clearStash();
     this.deps.cursor.attachPlay(startS);
     this.deps.cursor.next();
   }

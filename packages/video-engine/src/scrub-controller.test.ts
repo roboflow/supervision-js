@@ -245,6 +245,49 @@ describe("ScrubController", () => {
     controller.dispose();
   });
 
+  it("pausing playback cannot repaint a seek frame queued before playback", async () => {
+    const cursor = new FakeCursor();
+    const clock = new FakeClock();
+    const onPaint = vi.fn();
+    const closeOldSeek = vi.fn();
+    const controller = new ScrubController({
+      cursor,
+      clock,
+      onPaint,
+      onEnded: () => undefined,
+      cacheSkipNearMs: 100,
+    });
+    try {
+      controller.bindCanvas(makeCanvas());
+      await flushRaf();
+      cursor.emit(sampleFrameAt(0, closeOldSeek));
+      clock.play(1);
+      controller.beginPlay(1);
+      cursor.emit(canvasFrameAt(1));
+      await flushRaf();
+      clock.setT(2);
+      cursor.emit(canvasFrameAt(2));
+      await flushRaf();
+      expect(controller.getLastPaintedMs()).toBe(2000);
+
+      clock.pause();
+      controller.endPlay();
+      await flushRaf();
+      expect(controller.getLastPaintedMs()).toBe(2000);
+      expect(onPaint.mock.calls.map(([frame]) => frame.timestampS)).toEqual([
+        1, 2,
+      ]);
+      expect(closeOldSeek).toHaveBeenCalledTimes(1);
+
+      cursor.emit(canvasFrameAt(3));
+      await flushRaf();
+      expect(controller.getLastPaintedMs()).toBe(3000);
+    } finally {
+      controller.dispose();
+    }
+    expect(closeOldSeek).toHaveBeenCalledTimes(1);
+  });
+
   it("a play session opens on the frame it was anchored on, however long the walk took to reopen", async () => {
     const cursor = new FakeCursor();
     const clock = new FakeClock();
