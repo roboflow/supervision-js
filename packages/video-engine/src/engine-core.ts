@@ -32,6 +32,10 @@ import {
   type SourceResidency,
 } from "./source-residency";
 import {
+  createPausableDeadline,
+  type PausableDeadline,
+} from "./pausable-deadline";
+import {
   asSec,
   canvasBindingRefused,
   type EngineReadySnapshot,
@@ -69,7 +73,7 @@ interface AwaitedSeek {
   readonly rejectOnFailure: boolean;
   readonly reject: (error: WebVideoEngineError) => void;
   /** Ends a command whose cursor settled without ever painting its answer. */
-  readonly presentationTimer: ReturnType<typeof setTimeout>;
+  readonly presentationDeadline: PausableDeadline;
 }
 
 interface SeekLandingWait {
@@ -177,6 +181,8 @@ export class EngineCore {
   private lastHostFrame: FrameLanding | null = null;
   /** Rejects an older refresh that completes after a newer one in one epoch. */
   private lastHostPaintSeq = 0;
+  /** Main-thread visibility pauses only the wait for host presentation. */
+  private presentationVisible = true;
   /** Mirrors WebVideoEngine's interactive-seek latch: true when a drag paused a
    *  playing engine, so endInteractiveSeek knows to resume. */
   private resumeAfterInteractiveSeek = false;
@@ -734,35 +740,48 @@ export class EngineCore {
       return { generation, presented: Promise.resolve(null) };
     }
     const presented = new Promise<FrameLanding | null>((resolve, reject) => {
-      const presentationTimer = setTimeout(() => {
-        const awaited = this.awaitedSeek;
-        if (
-          !awaited ||
-          awaited.generation !== generation ||
-          !this.isCurrentSeek(generation)
-        ) {
-          return;
-        }
-        this.awaitedSeek = null;
-        const error = new WebVideoEngineError(
-          WebVideoEngineErrorCode.DecoderStalled,
-          "video decode settled without presenting the requested frame",
-        );
-        if (awaited.rejectOnFailure) awaited.reject(error);
-        else awaited.resolve(null);
-      }, HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS);
+      const presentationDeadline = createPausableDeadline(
+        HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS,
+        () => {
+          const awaited = this.awaitedSeek;
+          if (
+            !awaited ||
+            awaited.generation !== generation ||
+            !this.isCurrentSeek(generation)
+          ) {
+            return;
+          }
+          this.awaitedSeek = null;
+          const error = new WebVideoEngineError(
+            WebVideoEngineErrorCode.DecoderStalled,
+            "video decode settled without presenting the requested frame",
+          );
+          if (awaited.rejectOnFailure) awaited.reject(error);
+          else awaited.resolve(null);
+        },
+      );
       const awaited: AwaitedSeek = {
         generation,
         keyOnly,
-        presentationTimer,
+        presentationDeadline,
         reject: (error) => reject(error),
         rejectOnFailure,
         resolve,
         target,
       };
       this.awaitedSeek = awaited;
+      if (!this.presentationVisible) presentationDeadline.pause();
     });
     return { generation, presented };
+  }
+
+  /** Main-thread document visibility; decoding/watchdogs remain active. */
+  setPresentationVisibility(visible: boolean): void {
+    this.presentationVisible = visible;
+    const awaited = this.awaitedSeek;
+    if (!awaited) return;
+    if (visible) awaited.presentationDeadline.resume();
+    else awaited.presentationDeadline.pause();
   }
 
   private isCurrentSeek(generation: number): boolean {
@@ -779,7 +798,7 @@ export class EngineCore {
     const awaited = this.awaitedSeek;
     if (!awaited) return;
     this.awaitedSeek = null;
-    clearTimeout(awaited.presentationTimer);
+    awaited.presentationDeadline.cancel();
     awaited.resolve(null);
   }
 
@@ -789,7 +808,7 @@ export class EngineCore {
     const awaited = this.awaitedSeek;
     if (!awaited) return;
     this.awaitedSeek = null;
-    clearTimeout(awaited.presentationTimer);
+    awaited.presentationDeadline.cancel();
     if (awaited.rejectOnFailure) awaited.reject(error);
     else awaited.resolve(null);
   }
@@ -895,7 +914,7 @@ export class EngineCore {
     if (answeredSeek && this.awaitedSeek === answeredSeek) {
       this.seekLanded = frameId;
       this.awaitedSeek = null;
-      clearTimeout(answeredSeek.presentationTimer);
+      answeredSeek.presentationDeadline.cancel();
       this.closePlaySeekWait();
       // Paused paints normally never move the playhead, but the landing
       // of an awaited seek is the one paint that says where the request

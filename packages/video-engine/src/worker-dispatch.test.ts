@@ -89,6 +89,20 @@ describe("handleEngineCommand", () => {
     expect(clock.playing).toBe(true);
   });
 
+  it("forwards presentation visibility without a response", async () => {
+    const { engine, posts, post } = setup();
+    const setVisibility = vi.spyOn(engine, "setPresentationVisibility");
+
+    await handleEngineCommand(
+      engine,
+      { type: "setPresentationVisibility", visible: false },
+      post,
+    );
+
+    expect(setVisibility).toHaveBeenCalledWith(false);
+    expect(posts).toEqual([]);
+  });
+
   it("commit forwards the frame, awaits idle, and posts an ack", async () => {
     const { engine, posts, cursor, clock, post } = setup();
     await engine.load(LOAD_CONFIG);

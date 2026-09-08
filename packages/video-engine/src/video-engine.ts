@@ -27,6 +27,10 @@ import {
 import { createEngineWorker } from "./worker-bridge";
 import { MirrorStore } from "./mirror-store";
 import {
+  createPausableDeadline,
+  type PausableDeadline,
+} from "./pausable-deadline";
+import {
   applyMirrorEvent,
   type AwaitableCommand,
   deserializeEngineError,
@@ -178,9 +182,15 @@ export class WebVideoEngine {
     {
       resolve: (response: ResponseEvent) => void;
       reject: (reason: unknown) => void;
-      timer: ReturnType<typeof setTimeout>;
+      deadline: PausableDeadline;
+      pausesForPresentation: boolean;
     }
   >();
+  private presentationVisible = true;
+  private listeningForPresentationVisibility = false;
+  private readonly onPresentationVisibilityChange = (): void => {
+    this.syncPresentationVisibility();
+  };
   private nextRequestId: RequestId = 1;
   private metadata: EngineReadySnapshot | null = null;
   /** The loaded source's frame table, held here so a gesture is resolved to a
@@ -230,6 +240,7 @@ export class WebVideoEngine {
       urlSource: this.options.urlSource,
     };
     try {
+      this.startPresentationVisibilityTracking();
       const response = await this.request(
         (requestId) => ({ type: "load", requestId, config }),
         transfer,
@@ -245,6 +256,7 @@ export class WebVideoEngine {
       this.writePlayheadAt(0);
       return this.metadata;
     } catch (cause) {
+      if (this.metadata === null) this.stopPresentationVisibilityTracking();
       const error = toEngineError(cause);
       // Aborted is dispose draining this request, and dispose has already
       // settled the store on Idle. Anything else is a real load failure the
@@ -354,11 +366,15 @@ export class WebVideoEngine {
   commit = async (target: SeekTarget): Promise<void> => {
     const index = this.snap(target);
     this.writePlayheadAt(index);
-    const response = await this.request((requestId) => ({
-      type: "commit",
-      requestId,
-      frameIndex: index,
-    }));
+    const response = await this.request(
+      (requestId) => ({
+        type: "commit",
+        requestId,
+        frameIndex: index,
+      }),
+      [],
+      true,
+    );
     // The snap above said which frame was aimed at; the ack says which one
     // the walk reached, and a long GOP can make those differ.
     if (response.type === "ack" && response.landing) {
@@ -370,11 +386,15 @@ export class WebVideoEngine {
     const timeline = this.requireTimeline();
     const index = this.snap(target);
     this.writePlayheadAt(index);
-    const response = await this.request((requestId) => ({
-      type: "seekToKey",
-      requestId,
-      timeMs: timeline.timeAt(index) * 1000,
-    }));
+    const response = await this.request(
+      (requestId) => ({
+        type: "seekToKey",
+        requestId,
+        timeMs: timeline.timeAt(index) * 1000,
+      }),
+      [],
+      true,
+    );
     if (response.type === "ack" && response.landing) {
       this.writePlayhead(response.landing);
     }
@@ -544,6 +564,7 @@ export class WebVideoEngine {
    * starts another worker.
    */
   async dispose(): Promise<void> {
+    this.stopPresentationVisibilityTracking();
     const port = this.port;
     this.disposed = true;
     if (!port) {
@@ -735,7 +756,7 @@ export class WebVideoEngine {
   private settle(response: ResponseEvent): void {
     const pending = this.pending.get(response.requestId);
     if (!pending) return;
-    clearTimeout(pending.timer);
+    pending.deadline.cancel();
     this.pending.delete(response.requestId);
     if (response.type === "error") {
       pending.reject(deserializeEngineError(response.error));
@@ -764,6 +785,7 @@ export class WebVideoEngine {
   private request(
     build: (requestId: RequestId) => AwaitableCommand,
     transfer: Transferable[] = [],
+    pausesForPresentation = false,
   ): Promise<ResponseEvent> {
     const port = this.ensurePort();
     if (!port) {
@@ -781,21 +803,30 @@ export class WebVideoEngine {
       // watchdog could not recover) would otherwise hang this promise
       // forever, leaving the UI on a permanent spinner. Reject after a
       // generous bound and drop the entry so the caller surfaces an error.
-      const timer = setTimeout(() => {
-        if (!this.pending.has(requestId)) return;
-        this.pending.delete(requestId);
-        reject(
-          new WebVideoEngineError(
-            WebVideoEngineErrorCode.BackendCrashed,
-            "web video engine command timed out waiting for the worker",
-          ),
-        );
-      }, HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS);
-      this.pending.set(requestId, { resolve, reject, timer });
+      const deadline = createPausableDeadline(
+        HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS,
+        () => {
+          if (!this.pending.has(requestId)) return;
+          this.pending.delete(requestId);
+          reject(
+            new WebVideoEngineError(
+              WebVideoEngineErrorCode.BackendCrashed,
+              "web video engine command timed out waiting for the worker",
+            ),
+          );
+        },
+      );
+      this.pending.set(requestId, {
+        resolve,
+        reject,
+        deadline,
+        pausesForPresentation,
+      });
+      if (pausesForPresentation && !this.presentationVisible) deadline.pause();
       try {
         port.postMessage(build(requestId), transfer);
       } catch (cause) {
-        clearTimeout(timer);
+        deadline.cancel();
         this.pending.delete(requestId);
         reject(
           new WebVideoEngineError(
@@ -817,10 +848,46 @@ export class WebVideoEngine {
 
   private rejectAllPending(reason: unknown): void {
     for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
+      pending.deadline.cancel();
       pending.reject(reason);
     }
     this.pending.clear();
+  }
+
+  private startPresentationVisibilityTracking(): void {
+    if (this.disposed || typeof document === "undefined") return;
+    if (!this.listeningForPresentationVisibility) {
+      document.addEventListener(
+        "visibilitychange",
+        this.onPresentationVisibilityChange,
+      );
+      this.listeningForPresentationVisibility = true;
+    }
+    this.syncPresentationVisibility();
+  }
+
+  private stopPresentationVisibilityTracking(): void {
+    if (
+      typeof document === "undefined" ||
+      !this.listeningForPresentationVisibility
+    )
+      return;
+    document.removeEventListener(
+      "visibilitychange",
+      this.onPresentationVisibilityChange,
+    );
+    this.listeningForPresentationVisibility = false;
+  }
+
+  private syncPresentationVisibility(): void {
+    const visible = !document.hidden;
+    this.presentationVisible = visible;
+    for (const pending of this.pending.values()) {
+      if (!pending.pausesForPresentation) continue;
+      if (visible) pending.deadline.resume();
+      else pending.deadline.pause();
+    }
+    this.post({ type: "setPresentationVisibility", visible });
   }
 
   /**

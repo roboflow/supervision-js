@@ -108,6 +108,7 @@ describe("isMirrorEvent", () => {
 describe("diagnostics protocol shapes are clone-safe", () => {
   it("the new commands carry only plain data", () => {
     const commands: EngineCommand[] = [
+      { type: "setPresentationVisibility", visible: false },
       { type: "diagnosticsStart", hz: 10 },
       { type: "diagnosticsStop" },
       { type: "traceArm", windowMs: 60000 },

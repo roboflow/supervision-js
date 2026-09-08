@@ -109,6 +109,7 @@ export interface BindCanvasCommand {
 export type FireAndForgetCommand =
   | BindCanvasCommand
   | { readonly type: "unbindCanvas" }
+  | { readonly type: "setPresentationVisibility"; readonly visible: boolean }
   | {
       readonly type: "scrub";
       readonly frameIndex: number;

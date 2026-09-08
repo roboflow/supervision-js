@@ -55,6 +55,9 @@ export async function handleEngineCommand(
     case "unbindCanvas":
       engine.setCanvas(null);
       return;
+    case "setPresentationVisibility":
+      engine.setPresentationVisibility(command.visible);
+      return;
     case "scrub":
       engine.scrub(command.frameIndex, command.intent);
       return;
