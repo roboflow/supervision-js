@@ -57,6 +57,8 @@ export function createPreparedAnnotationWindow(options: {
   const spanFrameCount = resolvePreparedWindowFrameCount({
     renderPreparation: options.renderPreparation,
   });
+  const frameRevisions = new WeakMap<DetectionFrame, number>();
+  let nextFrameRevision = 0;
 
   const getPreparedFrame = (mediaTime: number) =>
     options.detectionTimeline.selectFrame(mediaTime) ?? null;
@@ -69,12 +71,16 @@ export function createPreparedAnnotationWindow(options: {
 
     getReadinessToken(mediaTime) {
       const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+      if (detectionFrame && !frameRevisions.has(detectionFrame)) {
+        frameRevisions.set(detectionFrame, ++nextFrameRevision);
+      }
+      const revision = detectionFrame ? frameRevisions.get(detectionFrame) : 0;
       const cooks = options
         .getLayers()
         .map((layer) => (layer.isArtifactPrepared(mediaTime) ? "1" : "0"))
         .join("");
 
-      return `${detectionFrame?.frameIndex ?? "time"}:${detectionFrame?.mediaTime ?? "none"}:${cooks}`;
+      return `${detectionFrame?.frameIndex ?? "time"}:${detectionFrame?.mediaTime ?? "none"}:${revision}:${cooks}`;
     },
 
     getSnapshot() {

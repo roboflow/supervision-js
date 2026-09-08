@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
+  createMemoryColdDetectionFrameStore,
+  createWritableDetectionFrameSource,
 } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
@@ -133,6 +135,100 @@ describe("prepared annotation window", () => {
 
     expect(window.getReadinessToken(0)).not.toBe(owed);
     expect(window.getSnapshot().frames[0]).toMatchObject({ prepared: false });
+  });
+
+  it("updates a revised frame's token and retains unrelated tokens after incremental writes", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "readiness-revision",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const first: DetectionFrame = {
+      detections: [{ id: "before" }],
+      endTime: 0.1,
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    await source.appendFrames([
+      first,
+      { detections: [], endTime: 1.1, frameIndex: 10, mediaTime: 1 },
+    ]);
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+    await timeline.prepare(0);
+    const window = createPreparedAnnotationWindow({
+      detectionTimeline: timeline,
+      getLayers: () => [],
+      getPlayheadMediaTime: () => 0,
+    });
+    const initialToken = window.getReadinessToken(0);
+    const unrelatedToken = window.getReadinessToken(1.05);
+
+    await source.appendFrames([{ ...first, detections: [{ id: "after" }] }]);
+    await timeline.prepare(0);
+
+    expect(window.getPreparedFrame(0)?.detections[0]?.id).toBe("after");
+    expect(window.getReadinessToken(0)).not.toBe(initialToken);
+    expect(window.getReadinessToken(1.05)).toBe(unrelatedToken);
+
+    const revisedToken = window.getReadinessToken(0);
+    await source.appendFrames([
+      { detections: [], endTime: 11, frameIndex: 100, mediaTime: 10 },
+    ]);
+    await timeline.prepare(0);
+
+    expect(window.getReadinessToken(0)).toBe(revisedToken);
+    expect(window.getReadinessToken(1.05)).toBe(unrelatedToken);
+    timeline.destroy();
+    source.destroy();
+  });
+
+  it("keeps the token across unchanged rolling loads and updates it for a reloaded revision", async () => {
+    let sourceVersion = 0;
+    let sourceFrames: readonly DetectionFrame[] = [
+      {
+        detections: [{ id: "before" }],
+        endTime: 2,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ];
+    const source = {
+      getVersion: () => sourceVersion,
+      loadFrames: vi.fn(async () => sourceFrames),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 0.5,
+      source,
+    });
+    await timeline.prepare(0);
+    const window = createPreparedAnnotationWindow({
+      detectionTimeline: timeline,
+      getLayers: () => [],
+      getPlayheadMediaTime: () => 0.5,
+    });
+    const initialToken = window.getReadinessToken(0.5);
+    const initialFrame = window.getPreparedFrame(0.5);
+
+    timeline.prefetch(0.5);
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(5.5));
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+    expect(window.getPreparedFrame(0.5)).toBe(initialFrame);
+    expect(window.getReadinessToken(0.5)).toBe(initialToken);
+
+    sourceFrames = [{ ...sourceFrames[0]!, detections: [{ id: "after" }] }];
+    sourceVersion += 1;
+    await timeline.prepare(0.5);
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(3);
+    expect(window.getPreparedFrame(0.5)?.detections[0]?.id).toBe("after");
+    expect(window.getReadinessToken(0.5)).not.toBe(initialToken);
+    timeline.destroy();
   });
 });
 

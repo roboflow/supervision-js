@@ -4,6 +4,8 @@ import {
   BaseFocusStyle,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
+  createMemoryColdDetectionFrameStore,
+  createWritableDetectionFrameSource,
   DetectionMaskEncoding,
   FocusTargetMode,
 } from "supervision-js-core";
@@ -214,7 +216,7 @@ const documentMock = {
   addEventListener: vi.fn(),
   createElement: (tagName: string) =>
     tagName === "div"
-      ? { appendChild: vi.fn(), style: {} }
+      ? { appendChild: vi.fn(), remove: vi.fn(), style: {} }
       : {
           getContext: () => ({ drawImage: vi.fn() }),
           height: 0,
@@ -562,6 +564,48 @@ describe("the prepared annotation window under push presentation", () => {
     expect(pixiMock.render).toHaveBeenCalledTimes(settled);
   });
 
+  it("renders a revised box on the paused frame without a presentation change", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "paused-box-revision",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const frame: DetectionFrame = {
+      detections: [{ id: "box", rect: makeRect() }],
+      endTime: 2,
+      frameIndex: 30,
+      mediaTime: 1,
+    };
+    await source.appendFrames([frame]);
+    const detectionTimeline = createBufferedDetectionTimeline({ source });
+    const scene = await createScene({ detectionTimeline, maskStyle: null });
+    const presentation: MediaRendererPresentation = {};
+    scene.present(1000);
+    scene.scene.setPresentation(presentation, 1);
+    const beforeEdit = scene.renderCount();
+
+    await source.appendFrames([
+      {
+        ...frame,
+        detections: [{ id: "box", rect: { ...makeRect(), x: 40 } }],
+      },
+    ]);
+    await detectionTimeline.prepare(1);
+    scene.scene.setPresentation(presentation, 1);
+
+    expect(boxGraphics().rect).toHaveBeenLastCalledWith(30, 0, 20, 30);
+    expect(scene.renderCount()).toBe(beforeEdit + 1);
+    expect(pixiMock.render).toHaveBeenCalledTimes(beforeEdit + 1);
+
+    await detectionTimeline.prepare(1);
+    scene.scene.setPresentation(presentation, 1);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(scene.renderCount()).toBe(beforeEdit + 1);
+    scene.scene.destroy();
+    detectionTimeline.destroy();
+    source.destroy();
+  });
+
   it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {
     const diagnostics: RenderPreparationDiagnostics[] = [];
     const scene = await createScene({
@@ -786,6 +830,7 @@ async function createScene(
     readonly editingEngine?: AnnotationEditingEngine;
     readonly focusStyle?: FocusStyle | null;
     readonly detectionFrames?: readonly DetectionFrame[];
+    readonly detectionTimeline?: BufferedDetectionTimeline;
     readonly maskHaloStyle?: MaskHaloStyle | null;
     readonly maskStyle?: MaskStyle | null;
     readonly polygonStyle?: PolygonStyle;
@@ -793,7 +838,8 @@ async function createScene(
     readonly renderPreparation?: RenderPreparationOptions;
   } = {},
 ) {
-  const detectionTimeline = createTimeline(options.detectionFrames);
+  const detectionTimeline =
+    options.detectionTimeline ?? createTimeline(options.detectionFrames);
 
   if (options.prepareDetections !== false) {
     await detectionTimeline.prepare(1);
