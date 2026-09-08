@@ -692,10 +692,8 @@ export class ScrubController {
    * calls cursor.seekTo to land the full-res frame; the cursor's emit listener
    * stashes it for the next tick.
    *
-   * The skip-near-current check rejects hits whose timestamp falls within
-   * cacheSkipNearMs of the currently-displayed frame. This is the knob
-   * consumers tune to control single-frame-step UX: a higher value forces a
-   * fresh decode on tighter movements, a value of 0 always serves the cache.
+   * Nearby approximate hits respect cacheSkipNearMs. An exact hit for the
+   * requested frame can advance immediately, without waiting for a decode.
    */
   tryPaintFromCache(timestampMs: number): boolean {
     if (!this.sink) return false;
@@ -703,7 +701,15 @@ export class ScrubController {
     if (!hit) return false;
     const hitMs = Math.round(hit.timestampS * 1000);
     if (this.lastPaintedMs !== null) {
-      if (Math.abs(hitMs - this.lastPaintedMs) < this.deps.cacheSkipNearMs)
+      const { timeline } = this.deps.cursor.track;
+      const exactTarget =
+        hit.quality === "exact" &&
+        timeline.indexOfDecoded(hit.timestampS) ===
+          timeline.indexAtOrBefore(timestampMs / 1000);
+      if (
+        !exactTarget &&
+        Math.abs(hitMs - this.lastPaintedMs) < this.deps.cacheSkipNearMs
+      )
         return false;
       // And it has to be an improvement on what is showing, measured from
       // where the user is pointing. The check above measures only distance

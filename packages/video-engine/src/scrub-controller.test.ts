@@ -1261,6 +1261,35 @@ describe("ScrubController paint reporting", () => {
     controller.dispose();
   });
 
+  it.each([
+    { quality: "exact" as const, index: 61, accepted: true },
+    { quality: "preview" as const, index: 61, accepted: false },
+    { quality: "exact" as const, index: 62, accepted: false },
+  ])(
+    "admits only the requested exact cached frame within the skip window: $quality $index",
+    async ({ quality, index, accepted }) => {
+      const { cursor, controller, painted } = withCache(canvasFrameAt(2));
+      try {
+        await flushRaf();
+        expect(controller.tryPaintFromCache(2000)).toBe(true);
+        const target = {
+          ...canvasFrameAt(cursor.track.timeline.timeAt(index)),
+          quality,
+        };
+        cursor.peekCached = () => target;
+
+        expect(controller.tryPaintFromCache(2034)).toBe(accepted);
+        expect(painted).toEqual(
+          accepted ? [expect.anything(), target] : [expect.anything()],
+        );
+        expect(controller.tryPaintFromCache(2034)).toBe(false);
+        expect(painted).toHaveLength(accepted ? 2 : 1);
+      } finally {
+        controller.dispose();
+      }
+    },
+  );
+
   it("a frame served from the cache is reported like any other paint", async () => {
     setDiagnosticsEnabled(true);
     const hit = canvasFrameAt(4);
