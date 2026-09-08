@@ -1274,32 +1274,251 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
-  it("steps through decoded samples without a host-owned decoder", async () => {
+  it("steps through nonzero-origin VFR samples at native timestamp resolution", async () => {
     resetMocks();
 
-    const samples = [
-      createMockSample(0, 0.04),
-      createMockSample(0.04, 0.04),
-      createMockSample(0.08, 0.04),
-    ] as unknown as DecodedVideoSample[];
+    const source = createCoveringSampleSource(
+      [
+        { duration: 0.25, timestamp: 0.5 },
+        { duration: 0.0000001, timestamp: 0.75 },
+        { duration: 0.4499999, timestamp: 0.7500001 },
+        { duration: 0.1, timestamp: 1.2 },
+      ],
+      { metadata: { timeResolution: 10_000_000 } },
+    );
+    const scene = createScene();
     const renderer = await createMediaRendererCore(
       {
         autoPlay: false,
         container: {} as HTMLElement,
         loop: false,
-        source: createSource(samples),
+        source,
       } satisfies MediaRendererOptions,
       {
-        createScene: vi.fn(async () => createScene()),
+        createScene: vi.fn(async () => scene),
         openMediaSource: vi.fn(),
       },
     );
 
+    expect(renderer.getState().currentTime).toBe(0.5);
+
     await renderer.stepForward();
-    expect(renderer.getState().currentTime).toBe(0.04);
+    expect(renderer.getState().currentTime).toBe(0.75);
+
+    await renderer.stepForward();
+    expect(renderer.getState().currentTime).toBe(0.7500001);
 
     await renderer.stepBackward();
-    expect(renderer.getState().currentTime).toBe(0);
+    expect(renderer.getState().currentTime).toBe(0.75);
+
+    await renderer.stepBackward();
+    expect(renderer.getState().currentTime).toBe(0.5);
+
+    vi.mocked(scene.presentSample).mockClear();
+    await renderer.stepBackward();
+    expect(renderer.getState().currentTime).toBe(0.5);
+    expect(scene.presentSample).not.toHaveBeenCalled();
+
+    renderer.destroy();
+  });
+
+  it.each([undefined, -1, 0, Number.NaN, Number.POSITIVE_INFINITY])(
+    "keeps the backward fallback for a custom source resolution of %s",
+    async (timeResolution) => {
+      resetMocks();
+
+      const source = createCoveringSampleSource(
+        [
+          { duration: 0.04, timestamp: 0.5 },
+          { duration: 0.04, timestamp: 0.54 },
+        ],
+        {
+          metadata: timeResolution === undefined ? {} : { timeResolution },
+        },
+      );
+      const renderer = await createMediaRendererCore(
+        {
+          autoPlay: false,
+          container: {} as HTMLElement,
+          loop: false,
+          source,
+        } satisfies MediaRendererOptions,
+        {
+          createScene: vi.fn(async () => createScene()),
+          openMediaSource: vi.fn(),
+        },
+      );
+
+      await renderer.stepForward();
+      await renderer.stepBackward();
+
+      expect(renderer.getState().currentTime).toBe(0.5);
+
+      renderer.destroy();
+    },
+  );
+
+  it("closes the covering sample and iterator at the forward boundary", async () => {
+    resetMocks();
+
+    const iteratorSamples: DecodedVideoSample[] = [];
+    const iteratorClosed = vi.fn();
+    const source = createCoveringSampleSource(
+      [
+        { duration: 0.25, timestamp: 0.5 },
+        { duration: 0.25, timestamp: 0.75 },
+      ],
+      {
+        onIteratorClose: iteratorClosed,
+        onSample(sample, read) {
+          if (read === "iterator") iteratorSamples.push(sample);
+        },
+      },
+    );
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    iteratorSamples.length = 0;
+    iteratorClosed.mockClear();
+    await renderer.seek(0.75);
+    vi.mocked(scene.presentSample).mockClear();
+    await renderer.stepForward();
+
+    expect(renderer.getState().currentTime).toBe(0.75);
+    expect(scene.presentSample).not.toHaveBeenCalled();
+    expect(iteratorClosed).toHaveBeenCalledOnce();
+    expect(iteratorSamples).toHaveLength(1);
+    expect(iteratorSamples[0]!.close).toHaveBeenCalledOnce();
+
+    renderer.destroy();
+  });
+
+  it("closes a forward sample returned after newer navigation wins", async () => {
+    resetMocks();
+
+    const firstReadGate = createDeferred<void>();
+    let enterFirstRead!: () => void;
+    const firstReadEntered = new Promise<void>((resolve) => {
+      enterFirstRead = resolve;
+    });
+    let blockIterator = false;
+    const iteratorReads: number[] = [];
+    const iteratorSamples: DecodedVideoSample[] = [];
+    const source = createCoveringSampleSource(
+      [
+        { duration: 0.25, timestamp: 0.5 },
+        { duration: 0.45, timestamp: 0.75 },
+        { duration: 0.1, timestamp: 1.2 },
+      ],
+      {
+        async beforeIteratorSample(index) {
+          if (!blockIterator) return;
+          iteratorReads.push(index);
+          if (index !== 0) return;
+          enterFirstRead();
+          await firstReadGate.promise;
+        },
+        onSample(sample, read) {
+          if (read === "iterator") iteratorSamples.push(sample);
+        },
+      },
+    );
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    iteratorSamples.length = 0;
+    blockIterator = true;
+    const step = renderer.stepForward();
+    await firstReadEntered;
+    await renderer.seek(1.2);
+    firstReadGate.resolve();
+    await step;
+
+    expect(renderer.getState().currentTime).toBe(1.2);
+    expect(scene.presentSample).toHaveBeenLastCalledWith(
+      expect.objectContaining({ timestamp: 1.2 }),
+    );
+    expect(iteratorReads).toEqual([0]);
+    expect(iteratorSamples).toHaveLength(1);
+    expect(iteratorSamples[0]!.close).toHaveBeenCalledOnce();
+
+    renderer.destroy();
+  });
+
+  it("waits for detection preparation before presenting a forward sample", async () => {
+    resetMocks();
+
+    const prepareGate = createDeferred<void>();
+    let enterPrepare!: () => void;
+    const prepareEntered = new Promise<void>((resolve) => {
+      enterPrepare = resolve;
+    });
+    const detectionSource = {
+      loadFrames: vi.fn(async (startTime: number) => {
+        if (startTime !== 0.75) return [];
+        enterPrepare();
+        await prepareGate.promise;
+        return [];
+      }),
+    };
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionBuffer: {
+          bufferAheadSeconds: 0,
+          bufferBehindSeconds: 0,
+          frameRate: 30,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+        detectionSource,
+        loop: false,
+        source: createCoveringSampleSource([
+          { duration: 0.25, timestamp: 0.5 },
+          { duration: 0.25, timestamp: 0.75 },
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    vi.mocked(scene.presentSample).mockClear();
+    const step = renderer.stepForward();
+    await prepareEntered;
+
+    expect(renderer.getState().currentTime).toBe(0.5);
+    expect(scene.presentSample).not.toHaveBeenCalled();
+
+    prepareGate.resolve();
+    await step;
+
+    expect(renderer.getState().currentTime).toBe(0.75);
+    expect(scene.presentSample).toHaveBeenCalledOnce();
 
     renderer.destroy();
   });
@@ -2100,6 +2319,76 @@ function createSource(
   return {
     open: vi.fn(async () => source),
   };
+}
+
+function createCoveringSampleSource(
+  frames: readonly { readonly duration: number; readonly timestamp: number }[],
+  options: {
+    readonly beforeIteratorSample?: (index: number) => Promise<void>;
+    readonly metadata?: Partial<DecodedMediaSource["metadata"]>;
+    readonly onIteratorClose?: () => void;
+    readonly onSample?: (
+      sample: DecodedVideoSample,
+      read: "get" | "iterator",
+    ) => void;
+  } = {},
+): MediaRendererOptions["source"] {
+  const indexAtOrBefore = (timestamp: number) => {
+    for (let index = frames.length - 1; index >= 0; index -= 1) {
+      if (frames[index]!.timestamp <= timestamp) return index;
+    }
+    return -1;
+  };
+  const createSample = (index: number, read: "get" | "iterator") => {
+    const sample = createMockSample(
+      frames[index]!.timestamp,
+      frames[index]!.duration,
+    ) as unknown as DecodedVideoSample;
+    options.onSample?.(sample, read);
+    return sample;
+  };
+  const source: DecodedMediaSource = {
+    input: { dispose: vi.fn() },
+    metadata: {
+      audioTrackCount: 0,
+      canRead: true,
+      duration:
+        frames.length === 0
+          ? null
+          : frames.at(-1)!.timestamp + frames.at(-1)!.duration,
+      firstTimestamp: frames[0]?.timestamp ?? 0,
+      formatMimeType: "video/mp4",
+      formatName: "MP4",
+      mimeType: "video/mp4",
+      primaryVideoHeight: 720,
+      primaryVideoWidth: 1280,
+      trackCount: 1,
+      videoTrackCount: 1,
+      ...options.metadata,
+    },
+    sampleSink: {
+      async getSample(timestamp) {
+        const index = indexAtOrBefore(timestamp);
+        return index === -1 ? null : createSample(index, "get");
+      },
+      async *samples(startTimestamp = 0, endTimestamp = Infinity) {
+        const coveringIndex = indexAtOrBefore(startTimestamp);
+        const startIndex = Math.max(0, coveringIndex);
+
+        try {
+          for (let index = startIndex; index < frames.length; index += 1) {
+            if (frames[index]!.timestamp >= endTimestamp) break;
+            await options.beforeIteratorSample?.(index);
+            yield createSample(index, "iterator");
+          }
+        } finally {
+          options.onIteratorClose?.();
+        }
+      },
+    },
+  };
+
+  return { open: vi.fn(async () => source) };
 }
 
 function createPullRendererOptions(

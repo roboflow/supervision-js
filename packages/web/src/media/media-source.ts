@@ -53,6 +53,8 @@ export interface DecodedMediaSourceMetadata {
   readonly primaryVideoWidth: number;
   readonly primaryVideoHeight: number;
   readonly firstTimestamp: number;
+  /** Native timestamp ticks per second. */
+  readonly timeResolution?: number;
   readonly estimatedFrameRate?: number | null;
   readonly estimatedFrameCount?: number | null;
 }

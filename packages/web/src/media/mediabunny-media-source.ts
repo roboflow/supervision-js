@@ -74,13 +74,19 @@ export async function openMediabunnyMediaSource(
             })
             .catch(() => null)
         : Promise.resolve(null);
-    const [displayWidth, displayHeight, firstTimestamp, packetStats] =
-      await Promise.all([
-        primaryVideoTrack.getDisplayWidth(),
-        primaryVideoTrack.getDisplayHeight(),
-        primaryVideoTrack.getFirstTimestamp(),
-        packetStatsPromise,
-      ]);
+    const [
+      displayWidth,
+      displayHeight,
+      firstTimestamp,
+      timeResolution,
+      packetStats,
+    ] = await Promise.all([
+      primaryVideoTrack.getDisplayWidth(),
+      primaryVideoTrack.getDisplayHeight(),
+      primaryVideoTrack.getFirstTimestamp(),
+      primaryVideoTrack.getTimeResolution(),
+      packetStatsPromise,
+    ]);
 
     const duration = isUrlSourceInput(sourceInput)
       ? metadataDuration
@@ -110,6 +116,7 @@ export async function openMediabunnyMediaSource(
         mimeType,
         primaryVideoHeight: displayHeight,
         primaryVideoWidth: displayWidth,
+        timeResolution,
         trackCount: tracks.length,
         videoTrackCount: videoTracks.length,
       },

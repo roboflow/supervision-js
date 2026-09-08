@@ -204,6 +204,7 @@ export async function createMediaRendererCore(
   let pushPresentationReady = false;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
+  let sampleTimeResolution: number | null = null;
   let navigationVersion = 0;
   let outstandingSourceReads = 0;
   let pendingPullScrubTime: number | null = null;
@@ -1059,6 +1060,12 @@ export async function createMediaRendererCore(
     const { metadata } = mediaSource;
 
     firstTimestamp = metadata.firstTimestamp;
+    sampleTimeResolution =
+      metadata.timeResolution !== undefined &&
+      Number.isFinite(metadata.timeResolution) &&
+      metadata.timeResolution > 0
+        ? metadata.timeResolution
+        : null;
     // One central projection step for every detection input this renderer can
     // receive: static frames, a caller-owned source, or a composite source.
     // Media dimensions are known here, so a producer can declare its own
@@ -1340,26 +1347,46 @@ export async function createMediaRendererCore(
     playbackController.pause();
     runtimeState.setPaused();
     const currentTime = runtimeState.currentTime();
-    const epsilon = 1e-6;
     let sample: DecodedVideoSample | null = null;
 
     try {
       if (direction === "backward") {
+        if (currentTime <= firstTimestamp) {
+          return;
+        }
+        const stepSeconds =
+          sampleTimeResolution === null ? 1e-6 : 1 / sampleTimeResolution;
         sample = await trackSourceRead(
           sampleSink.getSample(
-            Math.max(firstTimestamp, currentTime - epsilon),
+            Math.max(firstTimestamp, currentTime - stepSeconds),
             {
               skipLiveWait: true,
             },
           ),
         );
       } else {
-        const iterator = sampleSink.samples(currentTime + epsilon, undefined, {
+        const iterator = sampleSink.samples(currentTime, undefined, {
           skipLiveWait: true,
         });
         try {
-          const result = await trackSourceRead(iterator.next());
-          sample = result.done ? null : result.value;
+          while (true) {
+            const result = await trackSourceRead(iterator.next());
+            if (result.done) {
+              break;
+            }
+            if (
+              requestVersion !== navigationVersion ||
+              runtimeState.isDestroyed()
+            ) {
+              result.value.close();
+              return;
+            }
+            if (result.value.timestamp > currentTime) {
+              sample = result.value;
+              break;
+            }
+            result.value.close();
+          }
         } finally {
           await iterator.return?.();
         }

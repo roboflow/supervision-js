@@ -670,6 +670,7 @@ export function resetMocks() {
     getDisplayHeight: mediaMock.getDisplayHeight,
     getDisplayWidth: mediaMock.getDisplayWidth,
     getFirstTimestamp: mediaMock.getFirstTimestamp,
+    getTimeResolution: vi.fn(async () => 1_000_000),
     type: "video",
   };
   mediaMock.getPrimaryVideoTrack.mockResolvedValue(mediaMock.primaryVideoTrack);
