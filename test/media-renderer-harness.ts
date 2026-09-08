@@ -692,7 +692,7 @@ export function resetMocks() {
   domMock.createElement.mockClear();
   domMock.createElement.mockImplementation((tagName: string) => {
     if (tagName === "div") {
-      return { appendChild: domMock.appendChild, style: {} };
+      return { appendChild: domMock.appendChild, remove: vi.fn(), style: {} };
     }
 
     if (tagName !== "canvas") {
