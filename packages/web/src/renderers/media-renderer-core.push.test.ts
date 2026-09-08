@@ -80,6 +80,63 @@ describe("media renderer over a push-based media source", () => {
     },
   );
 
+  it("ignores a failed autoplay wait after the viewer has paused", async () => {
+    const producer = createProducer();
+    const coverage = createDeferred<void>();
+    const source: DetectionFrameSource = {
+      getAvailableRanges: () => [],
+      loadFrames: async () => [],
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const renderer = await createRenderer(producer, createScene(), {
+      autoPlay: true,
+      detectionSource: source,
+      detectionBuffer: {
+        playbackGate: { enabled: true, maxWaitSeconds: Infinity },
+      },
+    });
+    await vi.waitFor(() => expect(source.waitForRange).toHaveBeenCalled());
+    renderer.pause();
+    producer.setStatus("PAUSED");
+    coverage.reject(new Error("obsolete autoplay coverage failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
+    );
+    expect(producer.play).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it("reports a failed autoplay wait while that play is still current", async () => {
+    const producer = createProducer();
+    const coverage = createDeferred<void>();
+    const source: DetectionFrameSource = {
+      getAvailableRanges: () => [],
+      loadFrames: async () => [],
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const renderer = await createRenderer(producer, createScene(), {
+      autoPlay: true,
+      detectionSource: source,
+      detectionBuffer: {
+        playbackGate: { enabled: true, maxWaitSeconds: Infinity },
+      },
+    });
+    await vi.waitFor(() => expect(source.waitForRange).toHaveBeenCalled());
+
+    coverage.reject(new Error("current autoplay coverage failed"));
+
+    await vi.waitFor(() =>
+      expect(renderer.getState()).toMatchObject({
+        playbackState: MediaRendererPlaybackState.Error,
+        source: { errorMessage: "current autoplay coverage failed" },
+      }),
+    );
+    expect(producer.play).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
   it("never pulls a sample", async () => {
     const producer = createProducer();
     const scene = createScene();

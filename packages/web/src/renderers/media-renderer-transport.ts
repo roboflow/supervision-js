@@ -310,6 +310,8 @@ export function createMediaRendererTransport(
             readinessWait.signal,
           );
           readinessLanded = true;
+        } catch (error) {
+          if (intent === playbackIntent) throw error;
         } finally {
           if (activeReadinessWait === readinessWait) {
             activeReadinessWait = undefined;
