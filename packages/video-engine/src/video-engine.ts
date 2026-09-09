@@ -201,6 +201,8 @@ export class WebVideoEngine {
   private timeline: FrameTimeline | null = null;
   private transferredCanvas: HTMLCanvasElement | null = null;
   private presentedFrameHandler: PresentedFrameHandler | null = null;
+  private navigationIntent = 0;
+  private stepIntent: number | null = null;
   /** Deliveries counted toward the one frame-ownership check, frozen past it,
    *  and the frame that check reads. Weak, so watching costs the frame no
    *  lifetime: a host that closes and drops it leaves nothing to find, which is
@@ -290,6 +292,7 @@ export class WebVideoEngine {
   };
 
   play = async (): Promise<void> => {
+    this.beginNavigationIntent();
     await this.request((requestId) => ({ type: "play", requestId }));
   };
 
@@ -308,10 +311,12 @@ export class WebVideoEngine {
   };
 
   pause = (): void => {
+    this.beginNavigationIntent();
     this.post({ type: "pause" });
   };
 
   togglePlayback = (): void => {
+    this.beginNavigationIntent();
     this.post({ type: "togglePlayback" });
   };
 
@@ -346,6 +351,7 @@ export class WebVideoEngine {
    * "none": that backend has no access modes to switch and no prefetch to aim.
    */
   scrub = (target: SeekTarget, intent?: SeekIntent): void => {
+    this.beginNavigationIntent();
     const index = this.snap(target);
     this.writePlayheadAt(index);
     this.post({ type: "scrub", frameIndex: index, intent });
@@ -381,6 +387,7 @@ export class WebVideoEngine {
    * settled frame.
    */
   commit = async (target: SeekTarget): Promise<void> => {
+    const intent = this.beginNavigationIntent();
     const index = this.snap(target);
     this.writePlayheadAt(index);
     const response = await this.request(
@@ -394,7 +401,11 @@ export class WebVideoEngine {
     );
     // The snap above said which frame was aimed at; the ack says which one
     // the walk reached, and a long GOP can make those differ.
-    if (response.type === "ack" && response.landing) {
+    if (
+      intent === this.navigationIntent &&
+      response.type === "ack" &&
+      response.landing
+    ) {
       this.writePlayhead(response.landing);
     }
   };
@@ -433,20 +444,39 @@ export class WebVideoEngine {
    * on any surface.
    */
   step = (direction: 1 | -1): Promise<void> => {
-    const run = (): Promise<void> => this.runStep(direction);
+    const intent = this.beginStepIntent();
+    const run = (): Promise<void> =>
+      intent === this.navigationIntent
+        ? this.runStep(direction, intent)
+        : Promise.resolve();
     this.stepChain = this.stepChain.then(run, run);
     return this.stepChain;
   };
 
-  private async runStep(direction: 1 | -1): Promise<void> {
+  private async runStep(direction: 1 | -1, intent: number): Promise<void> {
     const response = await this.request((requestId) => ({
       type: "step",
       requestId,
       direction,
     }));
-    if (response.type === "ack" && response.landing) {
+    if (
+      intent === this.navigationIntent &&
+      response.type === "ack" &&
+      response.landing
+    ) {
       this.writePlayhead(response.landing);
     }
+  }
+
+  private beginNavigationIntent(): number {
+    this.stepIntent = null;
+    return ++this.navigationIntent;
+  }
+
+  private beginStepIntent(): number {
+    if (this.stepIntent !== null) return this.stepIntent;
+    this.stepIntent = ++this.navigationIntent;
+    return this.stepIntent;
   }
 
   /**

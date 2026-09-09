@@ -158,13 +158,22 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
    * lands on that frame and no other. Nothing here walks, compares or skips,
    * so a step across a frame boundary needs no epsilon.
    */
-  async seekToFrame(frame: FrameId): Promise<ScrubFrame | null> {
+  async seekToFrame(
+    frame: FrameId,
+    isPresentationCurrent?: () => boolean,
+  ): Promise<ScrubFrame | null> {
     if (this.closed) return null;
+    this.outputGeneration += 1;
     const outputGeneration = this.outputGeneration;
     const decoded = await this.trackOutputRead(
       this.provider.getFrame(this.trackInfo.timeline.timeAt(frame.index)),
     );
-    if (this.closed || outputGeneration !== this.outputGeneration || !decoded) {
+    if (
+      this.closed ||
+      outputGeneration !== this.outputGeneration ||
+      isPresentationCurrent?.() === false ||
+      !decoded
+    ) {
       if (decoded?.kind === "sample") decoded.sample.close();
       return null;
     }

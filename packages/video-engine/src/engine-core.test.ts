@@ -4,7 +4,7 @@ import type { MediaClock } from "./clock";
 import { DIAGNOSTICS, HANG_RECOVERY } from "./constants";
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
-import { FrameTimeline } from "./frame-timeline";
+import { FrameTimeline, type FrameLanding } from "./frame-timeline";
 import { setDiagnosticsEnabled } from "./scrub-controller";
 import {
   ScrubCursorState,
@@ -96,6 +96,17 @@ function flushRaf(): Promise<void> {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => resolve());
   });
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 /** Scheduler stats whose only live field is the discovered keyframe lane. */
@@ -608,6 +619,119 @@ describe("EngineCore", () => {
     // Past the last frame of the fake's 1000-frame table.
     clock.seek(35);
     expect(await engine.step(1)).toBeNull();
+    await engine.dispose();
+  });
+
+  it("does not let an older step change the settled base after a newer commit", async () => {
+    const clock = new FakeClock();
+    const { engine, cursor, events } = setup(clock);
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+    const stepDecode = deferred<ScrubFrame | null>();
+    const seekToFrame = cursor.seekToFrame.bind(cursor);
+    replaceProperty(
+      cursor,
+      "seekToFrame",
+      vi.fn((frame, isPresentationCurrent) => {
+        if (cursor.seekToFrameCalls.length !== 0) return seekToFrame(frame);
+        cursor.seekToFrameCalls.push(frame);
+        return stepDecode.promise.then((decoded) => {
+          if (!decoded || isPresentationCurrent?.() === false) return null;
+          cursor.emitFrame(decoded);
+          return decoded;
+        });
+      }),
+    );
+
+    const oldStep = engine.step(1);
+    await vi.waitFor(() => expect(cursor.seekToFrameCalls).toHaveLength(1));
+    const latest = engine.commit(FRAME(7));
+    cursor.emit(asSec(7));
+    await flushRaf();
+    await expect(latest).resolves.toMatchObject({ mediaTimeS: 7 });
+    stepDecode.resolve(makeScrubFrame(1 / 30));
+
+    await expect(oldStep).resolves.toBeNull();
+    await flushRaf();
+    expect(clock.now()).toBe(7);
+    expect(
+      events.filter((event) => event.type === "frame").at(-1),
+    ).toMatchObject({ frameId: { index: FRAME(7) } });
+    await expect(engine.step(1)).resolves.toMatchObject({
+      frame: { index: FRAME(7) + 1 },
+    });
+    await engine.dispose();
+  });
+
+  it("releases an older commit when a newer step takes ownership", async () => {
+    const clock = new FakeClock();
+    const { engine, cursor } = setup(clock);
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+    let oldLanding: FrameLanding | null | undefined;
+
+    const oldCommit = engine.commit(FRAME(7)).then((landing) => {
+      oldLanding = landing;
+      return landing;
+    });
+    const latest = engine.step(-1);
+    await vi.waitFor(() => expect(oldLanding).toBeNull());
+    const landingBeforeAnyPaint = oldLanding;
+
+    cursor.emit(asSec(7));
+    await flushRaf();
+    cursor.emit(asSec(6));
+    await flushRaf();
+    await Promise.all([oldCommit, latest]);
+
+    expect(landingBeforeAnyPaint).toBeNull();
+    expect(clock.now()).toBe((FRAME(7) - 1) / 30);
+    await engine.dispose();
+  });
+
+  it("does not let a step settling after pause move the resting playhead", async () => {
+    const clock = new FakeClock();
+    const { engine, cursor } = setup(clock);
+    await engine.load(LOAD_CONFIG);
+    const stepDecode = deferred<ScrubFrame | null>();
+    replaceProperty(
+      cursor,
+      "seekToFrame",
+      vi.fn(() => stepDecode.promise),
+    );
+
+    const oldStep = engine.step(1);
+    await vi.waitFor(() => expect(cursor.seekToFrame).toHaveBeenCalledOnce());
+    engine.pause();
+    stepDecode.resolve(makeScrubFrame(1 / 30));
+
+    await expect(oldStep).resolves.toBeNull();
+    expect(clock.now()).toBe(0);
+    await engine.dispose();
+  });
+
+  it("does not let a step settling after play replace playback output", async () => {
+    const clock = new FakeClock();
+    const { engine, cursor } = setup(clock);
+    await engine.load(LOAD_CONFIG);
+    const stepDecode = deferred<ScrubFrame | null>();
+    replaceProperty(
+      cursor,
+      "seekToFrame",
+      vi.fn((_frame, isPresentationCurrent) =>
+        stepDecode.promise.then((decoded) =>
+          decoded && isPresentationCurrent?.() !== false ? decoded : null,
+        ),
+      ),
+    );
+
+    const oldStep = engine.step(1);
+    await vi.waitFor(() => expect(cursor.seekToFrame).toHaveBeenCalledOnce());
+    engine.play();
+    stepDecode.resolve(makeScrubFrame(1 / 30));
+
+    await expect(oldStep).resolves.toBeNull();
+    expect(clock.playing).toBe(true);
     await engine.dispose();
   });
 

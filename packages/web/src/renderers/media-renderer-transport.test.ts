@@ -274,6 +274,114 @@ describe("media renderer transport", () => {
     );
   });
 
+  it.each(["commit", "scrub", "pause"] as const)(
+    "does not submit a step superseded by a newer %s while releasing a drag",
+    async (action) => {
+      const producer = createProducer();
+      let release!: () => void;
+      vi.mocked(producer.channel.endInteractiveSeek).mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const transport = createMediaRendererTransport({
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+      });
+
+      transport.scrub(secondsAt(12));
+      const oldStep = transport.step(1);
+      if (action === "commit") await transport.commit(secondsAt(200));
+      else if (action === "scrub") transport.scrub(secondsAt(200));
+      else transport.pause();
+      release();
+      await oldStep;
+
+      expect(producer.channel.step).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels an old step ticket when a newer commit arrives before its command completes", async () => {
+    const producer = createProducer();
+    let finishStep = () => {};
+    vi.mocked(producer.channel.step).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStep = () => {
+            producer.land(1);
+            resolve();
+          };
+        }),
+    );
+    vi.mocked(producer.channel.commit).mockImplementationOnce(async () => {
+      producer.land(7);
+    });
+    const oldWaitFor = vi.fn(() => new Promise<void>(() => undefined));
+    const oldCancel = vi.fn();
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: vi
+        .fn()
+        .mockReturnValueOnce({ cancel: oldCancel, waitFor: oldWaitFor })
+        .mockReturnValueOnce({ cancel: vi.fn(), waitFor: vi.fn() }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    const oldStep = transport.step(1);
+    await vi.waitFor(() =>
+      expect(producer.channel.step).toHaveBeenCalledOnce(),
+    );
+    await transport.commit(secondsAt(7));
+    finishStep();
+    await oldStep;
+
+    expect(oldWaitFor).not.toHaveBeenCalled();
+    expect(oldCancel).toHaveBeenCalledOnce();
+  });
+
+  it("does not submit a step superseded while releasing a readiness freeze", async () => {
+    const producer = createProducer();
+    let releaseFreeze!: () => void;
+    vi.mocked(producer.channel.endInteractiveSeek).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFreeze = resolve;
+        }),
+    );
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      holdForReadiness: () => new Promise<void>(() => undefined),
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    producer.play(1);
+
+    const oldStep = transport.step(1);
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce(),
+    );
+    transport.pause();
+    releaseFreeze();
+    await oldStep;
+
+    expect(producer.channel.step).not.toHaveBeenCalled();
+  });
+
   it("publishes a playhead time that names the frame it came from", () => {
     const producer = createProducer();
     const published: number[] = [];
@@ -596,6 +704,27 @@ describe("media renderer transport", () => {
     expect(producer.landedIndex).toBe(0);
     expect(waitFor).not.toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("advances every frame in an unopposed concurrent step burst", async () => {
+    const producer = createProducer();
+    vi.mocked(producer.channel.step).mockImplementation(async (direction) => {
+      producer.land(producer.landedIndex + direction);
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    await Promise.all(Array.from({ length: 4 }, () => transport.step(1)));
+
+    expect(producer.channel.step).toHaveBeenCalledTimes(4);
+    expect(producer.landedIndex).toBe(4);
   });
 
   it("keeps the newer presentation hold when an older guard aborts", async () => {

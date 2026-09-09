@@ -12,10 +12,11 @@ import type { MediaClock } from "./clock";
 import { HANG_RECOVERY } from "./constants";
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
-import { FrameTimeline } from "./frame-timeline";
+import { FrameTimeline, type FrameLanding } from "./frame-timeline";
 import { setDiagnosticsEnabled } from "./scrub-controller";
 import { TRACE_SCHEMA } from "./trace-recorder";
 import {
+  asFps,
   PlaybackStatus,
   SourceKind,
   WebVideoEngineError,
@@ -94,6 +95,76 @@ class FakeWorkerPort implements EngineWorkerPort {
   private deliver(event: EngineEvent): void {
     this.listener?.({ data: event } as MessageEvent<EngineEvent>);
   }
+}
+
+class ControlledWorkerPort implements EngineWorkerPort {
+  readonly commands: EngineCommand[] = [];
+  private listener: ((event: MessageEvent<EngineEvent>) => void) | null = null;
+  private readonly timeline = FrameTimeline.uniform(30, 300);
+
+  postMessage(command: EngineCommand): void {
+    this.commands.push(command);
+    if (command.type === "load") {
+      this.deliver({
+        type: "ready",
+        requestId: command.requestId,
+        metadata: {
+          durationMs: 10000,
+          nativeFps: asFps(30),
+          naturalWidth: 1280,
+          naturalHeight: 720,
+          firstTimestampMs: 0,
+          codec: null,
+          canDecode: true,
+          timeline: this.timeline.toData(),
+          byteSource: SourceKind.Url,
+        },
+      });
+    } else if (command.type === "dispose") {
+      this.deliver({ type: "ack", requestId: command.requestId });
+    }
+  }
+
+  addEventListener(
+    _type: "message",
+    listener: (event: MessageEvent<EngineEvent>) => void,
+  ): void {
+    this.listener = listener;
+  }
+
+  terminate(): void {}
+
+  ack(requestId: number, landing?: FrameLanding): void {
+    this.deliver({ type: "ack", requestId, landing });
+  }
+
+  landingAt(index: number): FrameLanding {
+    return this.timeline.landingAt(index);
+  }
+
+  lastCommand<T extends EngineCommand["type"]>(
+    type: T,
+  ): Extract<EngineCommand, { type: T }> | undefined {
+    for (let index = this.commands.length - 1; index >= 0; index--) {
+      const command = this.commands[index];
+      if (command?.type === type)
+        return command as Extract<EngineCommand, { type: T }>;
+    }
+    return undefined;
+  }
+
+  private deliver(event: EngineEvent): void {
+    this.listener?.({ data: event } as MessageEvent<EngineEvent>);
+  }
+}
+
+function setupControlled(): {
+  engine: WebVideoEngine;
+  port: ControlledWorkerPort;
+} {
+  const port = new ControlledWorkerPort();
+  const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => port);
+  return { engine, port };
 }
 
 function setup(source: VideoSource = LOAD_CONFIG.source): {
@@ -405,6 +476,122 @@ describe("WebVideoEngine", () => {
     expect(engine.getPlayhead().frame.index).toBe(2);
     await engine.dispose();
   });
+
+  it("keeps a newer commit when an older step responds last", async () => {
+    const { engine, port } = setupControlled();
+    await engine.load();
+
+    const oldStep = engine.step(1);
+    await vi.waitFor(() =>
+      expect(port.commands.some((command) => command.type === "step")).toBe(
+        true,
+      ),
+    );
+    const commit = engine.commit(port.landingAt(7).frame);
+    const commitCommand = port.lastCommand("commit");
+    const stepCommand = port.lastCommand("step");
+    if (!commitCommand || !stepCommand) throw new Error("commands not posted");
+
+    port.ack(commitCommand.requestId, port.landingAt(7));
+    await commit;
+    port.ack(stepCommand.requestId, port.landingAt(1));
+    await oldStep;
+
+    expect(engine.getPlayhead()).toEqual(port.landingAt(7));
+    await engine.dispose();
+  });
+
+  it("keeps a newer step when an older commit responds last", async () => {
+    const { engine, port } = setupControlled();
+    await engine.load();
+
+    const oldCommit = engine.commit(port.landingAt(7).frame);
+    const step = engine.step(1);
+    await vi.waitFor(() =>
+      expect(port.commands.some((command) => command.type === "step")).toBe(
+        true,
+      ),
+    );
+    const commitCommand = port.lastCommand("commit");
+    const stepCommand = port.lastCommand("step");
+    if (!commitCommand || !stepCommand) throw new Error("commands not posted");
+
+    port.ack(stepCommand.requestId, port.landingAt(8));
+    await step;
+    port.ack(commitCommand.requestId, port.landingAt(7));
+    await oldCommit;
+
+    expect(engine.getPlayhead()).toEqual(port.landingAt(8));
+    await engine.dispose();
+  });
+
+  it.each([
+    ["scrub", (engine: WebVideoEngine): void => engine.scrub(1000)],
+    ["pause", (engine: WebVideoEngine): void => engine.pause()],
+    ["toggle", (engine: WebVideoEngine): void => engine.togglePlayback()],
+  ])(
+    "does not dispatch a queued step after a newer %s",
+    async (_name, move) => {
+      const { engine, port } = setupControlled();
+      await engine.load();
+
+      const oldStep = engine.step(1);
+      move(engine);
+      await Promise.resolve();
+      const stepCommand = port.lastCommand("step");
+      if (stepCommand) port.ack(stepCommand.requestId, port.landingAt(1));
+      await oldStep;
+
+      expect(stepCommand).toBeUndefined();
+      await engine.dispose();
+    },
+  );
+
+  it("does not dispatch a queued step after a newer play", async () => {
+    const { engine, port } = setupControlled();
+    await engine.load();
+
+    const oldStep = engine.step(1);
+    const play = engine.play();
+    const playCommand = port.lastCommand("play");
+    if (!playCommand) throw new Error("play not posted");
+    port.ack(playCommand.requestId);
+    await play;
+    await Promise.resolve();
+    const stepCommand = port.lastCommand("step");
+    if (stepCommand) port.ack(stepCommand.requestId, port.landingAt(1));
+    await oldStep;
+
+    expect(stepCommand).toBeUndefined();
+    await engine.dispose();
+  });
+
+  it.each([
+    ["scrub", (engine: WebVideoEngine): void => engine.scrub(1000), 30],
+    ["pause", (engine: WebVideoEngine): void => engine.pause(), 0],
+    ["toggle", (engine: WebVideoEngine): void => engine.togglePlayback(), 0],
+  ])(
+    "does not apply an older step response after a newer %s",
+    async (_name, move, expectedFrame) => {
+      const { engine, port } = setupControlled();
+      await engine.load();
+
+      const oldStep = engine.step(1);
+      await vi.waitFor(() =>
+        expect(port.commands.some((command) => command.type === "step")).toBe(
+          true,
+        ),
+      );
+      move(engine);
+      const stepCommand = port.lastCommand("step");
+      if (!stepCommand) throw new Error("step not posted");
+      port.ack(stepCommand.requestId, port.landingAt(1));
+      await oldStep;
+
+      expect(engine.getPlayhead()).toEqual(port.landingAt(expectedFrame));
+      await engine.dispose();
+    },
+  );
 
   it("dispose acks, closes the cursor, terminates the worker, and goes Idle", async () => {
     const { engine, cursor, getPort } = setup();

@@ -22,7 +22,10 @@ import {
   type VideoSampleLike,
 } from "./scrub-cursor";
 import { asSec, WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
-import { installWorkerGlobals } from "../test/fake-engine-deps";
+import {
+  FakeVideoSample,
+  installWorkerGlobals,
+} from "../test/fake-engine-deps";
 
 beforeAll(() => {
   installWorkerGlobals();
@@ -747,6 +750,101 @@ describe("DecodeScheduler", () => {
       expect(back?.timestampS).toBe(1);
       expect(frames.map((f) => f.timestampS)).toEqual([2, 1]);
       expect(sink.getCanvasCalls.slice(-2)).toEqual([2, 1]);
+    });
+
+    it("does not emit an old step decode after a newer cache-hit seek", async () => {
+      let releaseStep!: () => void;
+      const blockedStep = new Promise<void>((resolve) => {
+        releaseStep = resolve;
+      });
+      const { scheduler, cache } = setup({
+        gateDecode: async (timestampS) => {
+          if (timestampS === 1 / 30) await blockedStep;
+        },
+      });
+      await scheduler.open();
+      cache.putExact(TIMELINE.idAt(210), 7000, SRC, 320, 180);
+      const frames = record(scheduler);
+      frames.length = 0;
+      let presentationCurrent = true;
+
+      const oldStep = scheduler.seekToFrame(
+        TIMELINE.idAt(1),
+        () => presentationCurrent,
+      );
+      await tick();
+      presentationCurrent = false;
+      scheduler.seekTo(asSec(7));
+      await scheduler.idle();
+      releaseStep();
+      await oldStep;
+
+      expect(frames.map((frame) => frame.timestampS)).toEqual([7]);
+      await scheduler.close();
+    });
+
+    it("does not emit an old seek decode after a newer step", async () => {
+      let releaseSeek!: () => void;
+      const blockedSeek = new Promise<void>((resolve) => {
+        releaseSeek = resolve;
+      });
+      const { scheduler } = setup({
+        gateDecode: async (timestampS) => {
+          if (timestampS === 7) await blockedSeek;
+        },
+      });
+      await scheduler.open();
+      const frames = record(scheduler);
+      frames.length = 0;
+
+      scheduler.seekTo(asSec(7));
+      await tick();
+      await scheduler.seekToFrame(TIMELINE.idAt(1));
+      releaseSeek();
+      await scheduler.idle();
+
+      expect(frames.map((frame) => frame.timestampS)).toEqual([1 / 30]);
+      await scheduler.close();
+    });
+
+    it("closes a step sample whose presentation ownership changed during decode", async () => {
+      let releaseStep!: () => void;
+      const blockedStep = new Promise<void>((resolve) => {
+        releaseStep = resolve;
+      });
+      const stale = new FakeVideoSample(1 / 30, 1 / 30);
+      const source: SampleSourceHandle = {
+        track: TRACK,
+        keyframeProbe: new FakeKeyframeProbe([]),
+        sampleSink: {
+          async getSample(timestamp) {
+            if (timestamp === 0) return new FakeVideoSample(0, 1 / 30);
+            await blockedStep;
+            return stale;
+          },
+          async *samples() {},
+          async *samplesAtTimestamps() {},
+        },
+        dispose: vi.fn(async () => undefined),
+      };
+      const scheduler = new DecodeScheduler({ source, cache: makeCache() });
+      await scheduler.open();
+      scheduler.subscribe((frame) => {
+        if (frame.kind === "sample") frame.sample.close();
+      });
+      let presentationCurrent = true;
+
+      const oldStep = scheduler.seekToFrame(
+        TIMELINE.idAt(1),
+        () => presentationCurrent,
+      );
+      await tick();
+      presentationCurrent = false;
+      releaseStep();
+
+      await expect(oldStep).resolves.toBeNull();
+      expect(stale.closeCount).toBe(1);
+      await scheduler.close();
     });
 
     it("play pulls advance forward and seed only the coarse tier", async () => {

@@ -105,6 +105,7 @@ export function createMediaRendererTransport(
   // play the hold is waiting for, so a pause taken during it is not undone by
   // the readiness that arrives afterwards.
   let playbackIntent = 0;
+  let stepIntent: number | null = null;
   /** Intent a readiness wait belongs to, or null while none is running. */
   let readinessHoldIntent: number | null = null;
   /** Whether a readiness hold still owes the producer its release. */
@@ -129,8 +130,15 @@ export function createMediaRendererTransport(
   const beginPlaybackIntent = () => {
     activeReadinessWait?.abort();
     activeReadinessWait = undefined;
+    stepIntent = null;
 
     return ++playbackIntent;
+  };
+
+  const beginStepIntent = () => {
+    if (stepIntent !== null) return stepIntent;
+    stepIntent = beginPlaybackIntent();
+    return stepIntent;
   };
 
   const publishSeekSignals = () => {
@@ -472,15 +480,21 @@ export function createMediaRendererTransport(
       options.invalidatePresentedFrame?.();
       const navigationPresentation = ++presentationWait;
       presentationHold = null;
-      beginPlaybackIntent();
+      const intent = beginStepIntent();
       await releaseGesture();
+      if (intent !== playbackIntent) return;
       if (navigationPresentation === presentationWait) {
         await releaseReadinessFreeze();
       }
+      if (intent !== playbackIntent) return;
       const presentation = options.beginPresentedFrameNavigation?.();
       const before = channel.getPlayhead().frame;
       try {
         await channel.step(direction);
+        if (intent !== playbackIntent) {
+          presentation?.cancel();
+          return;
+        }
         const after = channel.getPlayhead().frame;
         if (before.index === after.index && before.ticks === after.ticks) {
           // A boundary step intentionally emits no replacement frame. The

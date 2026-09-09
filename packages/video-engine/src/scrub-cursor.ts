@@ -362,12 +362,13 @@ export interface ScrubCursor {
   /** Detach the forward-playback iterator. */
   detachPlay(): void;
   /**
-   * Decode the named frame of the source and emit it through the listener
-   * chain. Returns the emitted ScrubFrame, or null at a boundary or once
-   * closed. Steps are index arithmetic on the frame table, so a caller names
-   * the frame it wants and not a time near it.
+   * Pending output is released without listener delivery when
+   * isPresentationCurrent returns false after decode.
    */
-  seekToFrame(frame: FrameId): Promise<ScrubFrame | null>;
+  seekToFrame(
+    frame: FrameId,
+    isPresentationCurrent?: () => boolean,
+  ): Promise<ScrubFrame | null>;
   idle(): Promise<void>;
   /**
    * Resolves at the seek drain's next settle: whichever target it is servicing

@@ -185,6 +185,7 @@ export class EngineCore {
    *  flight and publishes itself as the playhead. */
   private awaitedSeek: AwaitedSeek | null = null;
   private seekGeneration = 0;
+  private stepCommandGeneration = 0;
   /** Wall stamp of a seek being served by re-anchoring the playback walk, or
    *  null when no such seek is waiting on its crisp frame. */
   private playSeekStartedAtMs: number | null = null;
@@ -508,6 +509,7 @@ export class EngineCore {
       this.playing = true;
       return;
     }
+    this.stepCommandGeneration += 1;
     // Resume-from-end: a play after the clock crossed duration would tick
     // straight to Ended. Snap back to 0 first.
     const durS = this.durationMs / 1000;
@@ -557,6 +559,7 @@ export class EngineCore {
         });
       }
     }
+    this.stepCommandGeneration += 1;
     this.controller?.endPlay();
     if (wasPlaying && !this.displayResize) this.abandonAwaitedSeek();
     if (this.decodeFailure) return this.republishFailure();
@@ -809,9 +812,21 @@ export class EngineCore {
       timeline.idAt(timeline.indexAtOrBefore(this.clock.now()));
     const target = timeline.landingAt(base.index + direction);
     if (target.frame.index === base.index) return null;
-    this.beginPresentationGeneration();
-    const next = await this.cursor.seekToFrame(target.frame);
-    if (!next) return null;
+    this.abandonAwaitedSeek();
+    const commandGeneration = ++this.stepCommandGeneration;
+    const generation = this.beginPresentationGeneration();
+    const next = await this.cursor.seekToFrame(
+      target.frame,
+      () =>
+        this.isCurrentSeek(generation) &&
+        commandGeneration === this.stepCommandGeneration,
+    );
+    if (
+      !next ||
+      !this.isCurrentSeek(generation) ||
+      commandGeneration !== this.stepCommandGeneration
+    )
+      return null;
     this.lastStepLanded = target.frame;
     this.clock.seek(target.mediaTimeS);
     this.pushTraceEvent({

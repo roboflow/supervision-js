@@ -39,10 +39,14 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 class FakeSink implements CanvasFrameSource {
   readonly getCanvasCalls: number[] = [];
 
-  constructor(private readonly frames: number[] = []) {}
+  constructor(
+    private readonly frames: number[] = [],
+    private readonly gate?: (timestampS: number) => Promise<void>,
+  ) {}
 
   async getCanvas(timestampS: number): Promise<WrappedCanvasLike | null> {
     this.getCanvasCalls.push(timestampS);
+    await this.gate?.(timestampS);
     return { canvas: SRC, timestamp: timestampS };
   }
 
@@ -163,6 +167,68 @@ describe("CanvasSinkScrubCursor", () => {
       (await cursor.seekToFrame(TRACK.timeline.idAt(30)))?.timestampS,
     ).toBe(1);
     expect(sink.getCanvasCalls).toEqual([0, 2, 1]);
+  });
+
+  it("does not emit an old step decode after a newer seek", async () => {
+    let releaseStep!: () => void;
+    const blockedStep = new Promise<void>((resolve) => {
+      releaseStep = resolve;
+    });
+    const sink = new FakeSink([], async (timestampS) => {
+      if (timestampS === 1 / 30) await blockedStep;
+    });
+    const cursor = new CanvasSinkScrubCursor({
+      track: TRACK,
+      sink,
+      keyframeProbe: NOOP_PROBE,
+      dispose: async () => undefined,
+    });
+    await cursor.open();
+    const frames = record(cursor);
+    frames.length = 0;
+    let presentationCurrent = true;
+
+    const oldStep = cursor.seekToFrame(
+      TRACK.timeline.idAt(1),
+      () => presentationCurrent,
+    );
+    await tick();
+    presentationCurrent = false;
+    cursor.seekTo(asSec(7 / 30));
+    await cursor.idle();
+    releaseStep();
+    await oldStep;
+
+    expect(frames.map((frame) => frame.timestampS)).toEqual([7 / 30]);
+    await cursor.close();
+  });
+
+  it("does not emit an old seek decode after a newer step", async () => {
+    let releaseSeek!: () => void;
+    const blockedSeek = new Promise<void>((resolve) => {
+      releaseSeek = resolve;
+    });
+    const sink = new FakeSink([], async (timestampS) => {
+      if (timestampS === 7 / 30) await blockedSeek;
+    });
+    const cursor = new CanvasSinkScrubCursor({
+      track: TRACK,
+      sink,
+      keyframeProbe: NOOP_PROBE,
+      dispose: async () => undefined,
+    });
+    await cursor.open();
+    const frames = record(cursor);
+    frames.length = 0;
+
+    cursor.seekTo(asSec(7 / 30));
+    await tick();
+    await cursor.seekToFrame(TRACK.timeline.idAt(1));
+    releaseSeek();
+    await cursor.idle();
+
+    expect(frames.map((frame) => frame.timestampS)).toEqual([1 / 30]);
+    await cursor.close();
   });
 
   it("play pulls advance forward", async () => {

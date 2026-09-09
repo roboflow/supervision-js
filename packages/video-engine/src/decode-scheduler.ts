@@ -671,15 +671,24 @@ export class DecodeScheduler implements ScrubCursor {
    * reuses whatever decode position the session already holds, with no
    * iterator opened per press.
    */
-  async seekToFrame(frame: FrameId): Promise<ScrubFrame | null> {
+  async seekToFrame(
+    frame: FrameId,
+    isPresentationCurrent?: () => boolean,
+  ): Promise<ScrubFrame | null> {
     if (this.closed) return null;
+    this.outputGeneration += 1;
     this.enterMode(AccessMode.Stepping);
     this.abandonPrefetch();
     const outputGeneration = this.outputGeneration;
     const decoded = await this.withDecodeWatchdog(
       this.provider.getFrame(this.trackInfo.timeline.timeAt(frame.index)),
     );
-    if (this.closed || outputGeneration !== this.outputGeneration || !decoded) {
+    if (
+      this.closed ||
+      outputGeneration !== this.outputGeneration ||
+      isPresentationCurrent?.() === false ||
+      !decoded
+    ) {
       if (decoded?.kind === "sample") decoded.sample.close();
       return null;
     }
