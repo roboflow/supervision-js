@@ -1,8 +1,10 @@
-import { type MediaSessionMediaState } from "supervision";
-import type { WrappedCanvas } from "mediabunny";
+import type {
+  DecodedVideoSample,
+  DecodedVideoSampleSink,
+  MediaRenderer,
+} from "supervision";
 
 export const TARGET_UPLOAD_FRAME_RATE = 30;
-export const NORMALIZED_UPLOAD_VIDEO_BITRATE = 8_000_000;
 const IMAGE_MEDIA_DURATION_SECONDS = 1;
 const IMAGE_MEDIA_BITRATE = 8_000_000;
 const DEFAULT_JPEG_QUALITY = 0.9;
@@ -20,7 +22,6 @@ export interface PreparedUploadMedia {
   readonly frameRate: number;
   readonly height: number;
   readonly kind: UploadedMediaKind;
-  readonly normalizationCompletion: Promise<void> | null;
   readonly sourceFile: File | null;
   readonly statusLabel: string;
   readonly width: number;
@@ -35,31 +36,21 @@ export interface ExtractedInferenceFrame {
 
 export function createPreparedUploadedVideoMedia(options: {
   readonly file: File;
-  readonly media: MediaSessionMediaState;
+  readonly renderer: MediaRenderer;
 }): PreparedUploadMedia {
-  const metadata = options.media.inputMetadata;
-
-  if (!metadata) {
-    throw new Error("Uploaded video session did not expose input metadata.");
-  }
-
-  const duration = metadata.duration ?? 0;
-  const width = metadata.primaryVideoWidth ?? 0;
-  const height = metadata.primaryVideoHeight ?? 0;
+  const state = options.renderer.getState();
+  const duration = state.duration ?? 0;
 
   return {
     blob: null,
     duration,
     frameCount: Math.max(1, Math.ceil(duration * TARGET_UPLOAD_FRAME_RATE)),
     frameRate: TARGET_UPLOAD_FRAME_RATE,
-    height,
+    height: state.mediaHeight,
     kind: UploadedMediaKind.Video,
-    normalizationCompletion: getNormalizationCompletion(options.media),
     sourceFile: options.file,
-    statusLabel: `upload stream-normalizing WebM ${TARGET_UPLOAD_FRAME_RATE}fps | ${formatMbps(
-      NORMALIZED_UPLOAD_VIDEO_BITRATE,
-    )}`,
-    width,
+    statusLabel: `upload played from source ${options.file.type || "video"}`,
+    width: state.mediaWidth,
   };
 }
 
@@ -91,7 +82,6 @@ export async function prepareUploadedImageMedia(options: {
       frameRate: TARGET_UPLOAD_FRAME_RATE,
       height: canvas.height,
       kind: UploadedMediaKind.Image,
-      normalizationCompletion: null,
       sourceFile: null,
       statusLabel: "image upload encoded as one-frame WebM",
       width: canvas.width,
@@ -101,88 +91,128 @@ export async function prepareUploadedImageMedia(options: {
   }
 }
 
+/**
+ * Frames are queried on a synthetic `frameRate` grid rather than the media's
+ * own, because that grid is what the session pairs detections against.
+ */
 export async function* extractInferenceFrameBatches(options: {
   readonly media: PreparedUploadMedia;
+  readonly sampleSink: DecodedVideoSampleSink;
   readonly batchSize?: number;
   readonly quality?: number;
   readonly signal?: AbortSignal;
 }): AsyncGenerator<readonly ExtractedInferenceFrame[], void, unknown> {
-  const { ALL_FORMATS, BlobSource, CanvasSink, Input, WEBM } =
-    await import("mediabunny");
-  const sourceBlob = options.media.blob ?? options.media.sourceFile;
+  const batchSize = options.batchSize ?? DEFAULT_FRAME_BATCH_SIZE;
+  const quality = options.quality ?? DEFAULT_JPEG_QUALITY;
+  const canvas = new OffscreenCanvas(options.media.width, options.media.height);
+  const context = canvas.getContext("2d", { alpha: false });
 
-  if (!sourceBlob) {
-    throw new Error("Prepared upload media has no readable inference source.");
+  if (!context) {
+    throw new Error("Unable to create upload inference canvas.");
   }
 
-  const input = new Input({
-    formats: options.media.blob ? [WEBM] : ALL_FORMATS,
-    source: new BlobSource(sourceBlob),
-  });
+  for (
+    let startFrameIndex = 0;
+    startFrameIndex < options.media.frameCount;
+    startFrameIndex += batchSize
+  ) {
+    throwIfAborted(options.signal);
 
-  try {
-    const videoTrack = await input.getPrimaryVideoTrack();
+    const count = Math.min(
+      batchSize,
+      options.media.frameCount - startFrameIndex,
+    );
+    const timestamps = Array.from(
+      { length: count },
+      (_, offset) => (startFrameIndex + offset + 0.5) / options.media.frameRate,
+    );
+    const frames: ExtractedInferenceFrame[] = [];
+    let offset = 0;
 
-    if (!videoTrack) {
-      throw new Error("Prepared upload media has no video track.");
-    }
+    for await (const sample of readBatchSamples(
+      options.sampleSink,
+      timestamps,
+    )) {
+      const frameIndex = startFrameIndex + offset;
 
-    const sink = new CanvasSink(videoTrack, { poolSize: 4 });
-    const batchSize = options.batchSize ?? DEFAULT_FRAME_BATCH_SIZE;
-    const quality = options.quality ?? DEFAULT_JPEG_QUALITY;
+      offset += 1;
 
-    for (
-      let startFrameIndex = 0;
-      startFrameIndex < options.media.frameCount;
-      startFrameIndex += batchSize
-    ) {
-      throwIfAborted(options.signal);
-      const count = Math.min(
-        batchSize,
-        options.media.frameCount - startFrameIndex,
-      );
-      const frameIndexes = Array.from(
-        { length: count },
-        (_, offset) => startFrameIndex + offset,
-      );
-      const sampleQueryTimes = frameIndexes.map(
-        (frameIndex) => (frameIndex + 0.5) / options.media.frameRate,
-      );
-      const frames: ExtractedInferenceFrame[] = [];
-      let frameOffset = 0;
-
-      for await (const wrappedCanvas of sink.canvasesAtTimestamps(
-        sampleQueryTimes,
-        { skipLiveWait: true },
-      )) {
+      if (!sample) {
         throwIfAborted(options.signal);
-        const frameIndex = frameIndexes[frameOffset];
-
-        frameOffset += 1;
-
-        if (frameIndex === undefined) {
-          break;
-        }
-
-        if (!wrappedCanvas) {
-          throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
-        }
-
-        frames.push(
-          await createExtractedInferenceFrame({
-            frameIndex,
-            quality,
-            wrappedCanvas,
-          }),
-        );
+        throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
       }
 
-      if (frames.length > 0) {
-        yield frames;
+      const { duration, timestamp } = sample;
+
+      try {
+        throwIfAborted(options.signal);
+        sample.draw(context, 0, 0, canvas.width, canvas.height);
+      } finally {
+        sample.close();
       }
+
+      throwIfAborted(options.signal);
+
+      frames.push({
+        duration: sampledFrameCoverage(
+          timestamp,
+          duration,
+          frameIndex,
+          options.media,
+        ),
+        frameIndex,
+        imageBase64: await canvasToJpegBase64(canvas, quality),
+        mediaTime: timestamp,
+      });
     }
-  } finally {
-    input.dispose();
+
+    if (frames.length > 0) {
+      yield frames;
+    }
+  }
+}
+
+/**
+ * How long a sampled frame's detections stand.
+ *
+ * A frame is decoded at its own display time but stands in for the whole grid
+ * step the sample was asked for, and the two differ: a clip faster than the
+ * grid displays each frame for less than a step, so coverage taken from the
+ * display duration stops short of the next sample and the track a viewer sees
+ * as continuous is recorded as a comb of slivers with a hole between every
+ * pair. Reaching the next sample's request time closes them at any frame rate,
+ * and a slower clip keeps its own longer duration.
+ */
+function sampledFrameCoverage(
+  mediaTime: number,
+  sampleDuration: number,
+  frameIndex: number,
+  media: PreparedUploadMedia,
+) {
+  const nextSampleTime = Math.min(
+    (frameIndex + 1.5) / media.frameRate,
+    media.duration,
+  );
+
+  return Math.max(sampleDuration, nextSampleTime - mediaTime);
+}
+
+function readBatchSamples(
+  sampleSink: DecodedVideoSampleSink,
+  timestamps: readonly number[],
+): AsyncGenerator<DecodedVideoSample | null, void, unknown> {
+  return (
+    sampleSink.samplesAtTimestamps?.(timestamps, { skipLiveWait: true }) ??
+    readSamplesOneAtATime(sampleSink, timestamps)
+  );
+}
+
+async function* readSamplesOneAtATime(
+  sampleSink: DecodedVideoSampleSink,
+  timestamps: readonly number[],
+): AsyncGenerator<DecodedVideoSample | null, void, unknown> {
+  for (const timestamp of timestamps) {
+    yield await sampleSink.getSample(timestamp, { skipLiveWait: true });
   }
 }
 
@@ -217,53 +247,11 @@ async function encodeCanvasAsWebM(
   return new Blob([target.buffer], { type: "video/webm" });
 }
 
-async function createExtractedInferenceFrame(options: {
-  readonly frameIndex: number;
-  readonly quality: number;
-  readonly wrappedCanvas: WrappedCanvas;
-}): Promise<ExtractedInferenceFrame> {
-  return {
-    duration: options.wrappedCanvas.duration,
-    frameIndex: options.frameIndex,
-    imageBase64: await canvasToJpegBase64(
-      options.wrappedCanvas.canvas,
-      options.quality,
-    ),
-    mediaTime: options.wrappedCanvas.timestamp,
-  };
-}
-
-async function canvasToJpegBase64(
-  canvas: HTMLCanvasElement | OffscreenCanvas,
-  quality: number,
-) {
-  const blob =
-    canvas instanceof HTMLCanvasElement
-      ? await htmlCanvasToBlob(canvas, quality)
-      : await canvas.convertToBlob({ quality, type: "image/jpeg" });
+async function canvasToJpegBase64(canvas: OffscreenCanvas, quality: number) {
+  const blob = await canvas.convertToBlob({ quality, type: "image/jpeg" });
   const dataUrl = await blobToDataUrl(blob);
 
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
-}
-
-async function htmlCanvasToBlob(
-  canvas: HTMLCanvasElement,
-  quality: number,
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("Unable to encode upload frame as JPEG."));
-          return;
-        }
-
-        resolve(blob);
-      },
-      "image/jpeg",
-      quality,
-    );
-  });
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -288,18 +276,4 @@ function throwIfAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) {
     throw new Error("Upload media processing was aborted.");
   }
-}
-
-function getNormalizationCompletion(media: MediaSessionMediaState) {
-  const normalizedMedia = media.normalizedMedia;
-
-  if (normalizedMedia && "completion" in normalizedMedia) {
-    return normalizedMedia.completion.then(() => undefined);
-  }
-
-  return null;
-}
-
-function formatMbps(bitrate: number) {
-  return `${bitrate / 1_000_000}Mbps`;
 }

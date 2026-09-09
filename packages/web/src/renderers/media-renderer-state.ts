@@ -1,3 +1,4 @@
+import type { PlaybackGateReach } from "supervision-js-core";
 import {
   createLoadingMediaSourceState,
   createReadyMediaSourceState,
@@ -18,6 +19,7 @@ import type { PresentedMediaSample } from "./media-renderer-scene";
 
 interface MediaRendererRuntimeStateOptions {
   readonly fit: MediaRendererFit;
+  readonly getPlaybackGateReach: () => PlaybackGateReach;
   readonly playbackRate: number;
   readonly getDetectionBufferState: () => DetectionBufferState;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
@@ -27,11 +29,13 @@ interface MediaRendererRuntimeStateOptions {
 
 export interface MediaRendererRuntimeState {
   currentTime(): number;
+  presentedTime(): number | null;
   duration(): number | null;
   errorMessage(): string | null;
   isDestroyed(): boolean;
   isError(): boolean;
   isPlaybackActive(): boolean;
+  playbackRate(): number;
   isBuffering(): boolean;
   isPlaying(): boolean;
   emitSourceState(): void;
@@ -40,14 +44,29 @@ export interface MediaRendererRuntimeState {
     width: number;
   };
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
-  setCurrentTime(currentTime: number): void;
+  /** Whether the picture is stopped on a read the source has not answered. */
+  setSourceAwaitingRead(awaitingRead: boolean): void;
+  /**
+   * Whether the render-preparation gate has given up on artifacts it stopped
+   * playback for.
+   */
+  setRenderPreparationGateAbandoned(abandoned: boolean): void;
+  /** A playhead that moved. Emits, so a readout follows a seek before its
+   *  frame lands. */
+  recordPlayheadTime(currentTime: number): void;
   setPlaybackRate(playbackRate: number): void;
   setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
+  /** What the scene put on screen, whether on its own or on a repaint the
+   *  renderer asked for. Counts a frame not counted before, so a redraw counts
+   *  nothing and one media time presented twice counts twice. */
   recordPresentationUpdate(sample: PresentedMediaSample): void;
   setReady(): void;
+  setLoading(): void;
   setPlaying(): void;
   setBuffering(): void;
+  setSeeking(seeking: boolean): void;
+  setScrubbing(scrubbing: boolean): void;
   setPaused(): void;
   setRenderError(error: unknown): void;
   markDestroyed(): void;
@@ -70,10 +89,18 @@ export function createMediaRendererRuntimeState(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let rendererBackend: string | null = null;
+  /** Frames put on screen, not paints. */
   let presentedFrames = 0;
+  let presentedTime: number | null = null;
+  let presentedFrameSerial = 0;
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
+  let drawnMaskFrameTime: number | null = null;
+  let maskHeldStale = false;
+  let renderPreparationGateAbandoned = false;
+  let seeking = false;
+  let scrubbing = false;
   let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
   let currentFrameDuration = 0;
   let destroyed = false;
@@ -97,13 +124,20 @@ export function createMediaRendererRuntimeState(
     currentTime,
     playbackRate,
     detectionBuffer: options.getDetectionBufferState(),
+    drawnMaskFrameTime,
     duration,
     fit: options.fit,
     lastFrameRenderTimings,
+    maskHeldStale,
     mediaHeight,
     mediaWidth,
+    playbackGateReach: options.getPlaybackGateReach(),
     playbackState,
     presentedFrames,
+    presentedTime,
+    renderPreparationGateAbandoned,
+    scrubbing,
+    seeking,
     rendererBackend,
     source: { ...sourceState },
   });
@@ -138,9 +172,28 @@ export function createMediaRendererRuntimeState(
     options.onState?.(createStateSnapshot());
   };
 
+  const adoptPresentedSample = (
+    sample: PresentedMediaSample,
+    adoptCurrentTime: boolean,
+  ) => {
+    if (adoptCurrentTime) {
+      currentTime = sample.mediaTime;
+    }
+    presentedTime = sample.mediaTime;
+    activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
+    activeDetectionFrameTime = sample.activeDetectionFrameTime;
+    activeDetectionCount = sample.activeDetectionCount;
+    drawnMaskFrameTime = sample.drawnMaskFrameTime;
+    maskHeldStale = sample.maskHeldStale;
+  };
+
   return {
     currentTime() {
       return currentTime;
+    },
+
+    presentedTime() {
+      return presentedTime;
     },
 
     duration() {
@@ -192,11 +245,42 @@ export function createMediaRendererRuntimeState(
       emitSourceState();
     },
 
-    setCurrentTime(nextCurrentTime) {
+    setSourceAwaitingRead(awaitingRead) {
+      if (sourceState.awaitingRead === awaitingRead) {
+        return;
+      }
+
+      setSourceState({ awaitingRead });
+      emitState();
+    },
+
+    setRenderPreparationGateAbandoned(abandoned) {
+      if (renderPreparationGateAbandoned === abandoned) {
+        return;
+      }
+
+      renderPreparationGateAbandoned = abandoned;
+      emitState();
+    },
+
+    playbackRate() {
+      return playbackRate;
+    },
+
+    recordPlayheadTime(nextCurrentTime) {
+      if (currentTime === nextCurrentTime) {
+        return;
+      }
+
       currentTime = nextCurrentTime;
+      emitState();
     },
 
     setPlaybackRate(nextPlaybackRate) {
+      if (playbackRate === nextPlaybackRate) {
+        return;
+      }
+
       playbackRate = nextPlaybackRate;
       emitState();
     },
@@ -206,12 +290,10 @@ export function createMediaRendererRuntimeState(
     },
 
     recordPresentedSample(sample) {
-      currentTime = sample.mediaTime;
       currentFrameDuration = sample.duration ?? currentFrameDuration;
       presentedFrames += 1;
-      activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
-      activeDetectionFrameTime = sample.activeDetectionFrameTime;
-      activeDetectionCount = sample.activeDetectionCount;
+      presentedFrameSerial = sample.presentedFrameSerial;
+      adoptPresentedSample(sample, true);
       lastFrameRenderTimings = sample.renderTimings ?? null;
 
       options.onFrame?.(createFrameDiagnostics(sample));
@@ -219,10 +301,14 @@ export function createMediaRendererRuntimeState(
     },
 
     recordPresentationUpdate(sample) {
-      currentTime = sample.mediaTime;
-      activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
-      activeDetectionFrameTime = sample.activeDetectionFrameTime;
-      activeDetectionCount = sample.activeDetectionCount;
+      const isNewPresentedFrame =
+        sample.presentedFrameSerial !== presentedFrameSerial;
+      if (isNewPresentedFrame) {
+        presentedFrames += 1;
+        presentedFrameSerial = sample.presentedFrameSerial;
+      }
+
+      adoptPresentedSample(sample, isNewPresentedFrame);
       lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
 
       emitState();
@@ -230,6 +316,11 @@ export function createMediaRendererRuntimeState(
 
     setReady() {
       playbackState = MediaRendererPlaybackState.Ready;
+      emitState();
+    },
+
+    setLoading() {
+      playbackState = MediaRendererPlaybackState.Loading;
       emitState();
     },
 
@@ -245,6 +336,24 @@ export function createMediaRendererRuntimeState(
 
     setPaused() {
       playbackState = MediaRendererPlaybackState.Paused;
+      emitState();
+    },
+
+    setSeeking(next) {
+      if (next === seeking) {
+        return;
+      }
+
+      seeking = next;
+      emitState();
+    },
+
+    setScrubbing(next) {
+      if (next === scrubbing) {
+        return;
+      }
+
+      scrubbing = next;
       emitState();
     },
 

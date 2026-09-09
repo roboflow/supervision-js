@@ -2,6 +2,7 @@ import type { VideoCodec } from "mediabunny";
 
 import { collectInputMetadata } from "#media/media-metadata";
 import {
+  DEFAULT_NORMALIZATION_FRAME_RATE,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   MediaProbeIssueCode,
@@ -15,16 +16,15 @@ import {
 } from "#types/media-normalization";
 import { includeDefined } from "supervision-js-core";
 
-const DEFAULT_FRAME_RATE = 30;
 const DEFAULT_MEDIA_PROBE_TARGETS: readonly MediaProbeTargetProfile[] = [
   {
     container: MediaNormalizationContainer.WebM,
-    frameRate: DEFAULT_FRAME_RATE,
+    frameRate: DEFAULT_NORMALIZATION_FRAME_RATE,
     videoCodec: MediaNormalizationVideoCodec.Vp9,
   },
   {
     container: MediaNormalizationContainer.WebM,
-    frameRate: DEFAULT_FRAME_RATE,
+    frameRate: DEFAULT_NORMALIZATION_FRAME_RATE,
     videoCodec: MediaNormalizationVideoCodec.Vp8,
   },
 ];
@@ -176,7 +176,7 @@ async function selectMediaProbeTarget(options: {
     if (canEncode) {
       return {
         ...target,
-        frameRate: target.frameRate ?? DEFAULT_FRAME_RATE,
+        frameRate: target.frameRate ?? DEFAULT_NORMALIZATION_FRAME_RATE,
       };
     }
   }

@@ -74,7 +74,7 @@ const session = await createMediaSession({
           datasetId: "video-123-predictions",
         },
         id: PREDICTIONS_SOURCE_ID,
-        requiredForPlayback: true,
+        requiredForCoverage: true,
       },
       {
         appendable: {
@@ -103,7 +103,7 @@ const session = await createMediaSession({
           }),
           maskStyle: null,
         },
-        requiredForPlayback: false,
+        requiredForCoverage: false,
       },
     ],
   },
@@ -129,9 +129,21 @@ await session.replaceDetectionFrames(draftFrames, {
 });
 ```
 
-The prediction source is required for playback, so a playback gate can wait for
-prediction coverage. The draft source is optional, so a missing or empty draft
-window does not block playback.
+`requiredForCoverage` picks which entries the composed source's `waitForRange`
+fans out to: predictions here, not drafts. Awaiting `waitForRange` on
+`session.detectionSource` therefore returns once predictions cover the range,
+while drafts may still be loading. That call is yours to make and works on any
+session, whatever media backs it.
+
+An enabled `detections.playbackGate` awaits that same waiter. Both playback
+gates hold every frame for as long as playback runs. A media source the renderer
+pulls decoded samples from, such as a URL or a `Blob`, waits between decoding
+and drawing. A source that presents its own frames owns the playhead, which is
+what `createWebVideoEngineMediaRendererSource` returns and what most video
+sessions run on. The renderer stops that producer when required detections or
+prepared artifacts are missing and starts it again when the wait settles. Both
+gates are on by default, and `playbackGate: false` on `createMediaSession` turns
+both off.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
 later and appear on top.
@@ -207,7 +219,12 @@ const source = createCompositeDetectionFrameSource({
 - Use multiple sources when the app needs separate ownership, separate writes,
   separate retention, separate presentation, or source-aware interaction.
 - Keep source IDs stable and app-owned.
-- Use `requiredForPlayback: false` for optional overlays that should never stall
-  media playback.
+- Set `requiredForCoverage: false` when a source should not hold the coverage
+  wait, whether that wait is your own `waitForRange` call on
+  `session.detectionSource` or an enabled `detections.playbackGate`. Your own
+  call works on any session; the gate is on by default and holds a media source
+  the renderer pulls decoded samples from frame by frame, while a source that
+  presents its own frames, such as `createWebVideoEngineMediaRendererSource`, is
+  stopped and restarted at each frame it cannot cover.
 - Do not combine `detections.sources` with single-source inputs such as
   `frames`, `source`, or `appendable`.

@@ -14,7 +14,9 @@ import {
   type RegionEffectsPlaygroundSettings,
   type RegionEffectsPlaygroundTarget as RegionEffectsPlaygroundTargetValue,
 } from "../docs-region-effects";
+import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 import { RendererViewport } from "./RendererViewport";
 
 export function DocsRegionEffectsPlayground() {
@@ -32,15 +34,7 @@ export function DocsRegionEffectsPlayground() {
   );
   const demo = useDemoRenderer({
     initialFixtureId: "basketball_sam3",
-    initialPresentationSettings: {
-      boxesEnabled: false,
-      focusEnabled: false,
-      keypointsEnabled: false,
-      labelsEnabled: false,
-      masksEnabled: false,
-      polygonsEnabled: false,
-      polylinesEnabled: false,
-    },
+    initialPresentationSettings: docsRegionPlaygroundPresentationSettings,
     presentationTransform,
   });
   const isPlaying =
@@ -57,6 +51,11 @@ export function DocsRegionEffectsPlayground() {
   const snippet = useMemo(
     () => createRegionEffectsPlaygroundSnippet(settings),
     [settings],
+  );
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
   );
   const updateSettings = useCallback(
     (next: RegionEffectsPlaygroundSettings) => {
@@ -98,9 +97,8 @@ export function DocsRegionEffectsPlayground() {
       <section className="docs-layer-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
       </section>
 

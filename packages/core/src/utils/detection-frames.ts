@@ -19,61 +19,95 @@ interface NearestFrameIndexSelection {
   readonly frame: DetectionFrame | undefined;
 }
 
+type IndexedDetectionFrame = DetectionFrame & { readonly frameIndex: number };
+
+/**
+ * A playhead compared by time can arrive perturbed by whatever plane it crossed
+ * to get here: a producer that publishes whole milliseconds reports a source
+ * frame at 5.033333s as 5.033s, and even an exact producer loses a bit to a
+ * seconds-to-milliseconds-and-back trip. A frame starting within that reach may
+ * already be on screen while one starting past it cannot.
+ *
+ * Selection by identity carries none of this, which is why it lives in its own
+ * function and not in a smaller number here.
+ */
+const PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS = 0.0005;
+
 export function copySortedDetectionFrames(
   detectionFrames: readonly DetectionFrame[] | undefined,
 ): DetectionFrame[] {
   validateDetectionFrames(detectionFrames ?? []);
 
   return (detectionFrames ?? [])
-    .map((frame) => ({
-      detections: frame.detections.map((detection) => ({
-        ...detection,
-        attributes: detection.attributes
-          ? [...detection.attributes]
-          : undefined,
-        keypoints: detection.keypoints
-          ? {
-              boxRelative: detection.keypoints.boxRelative
-                ? [...detection.keypoints.boxRelative]
-                : undefined,
-              edges: detection.keypoints.edges.map(
-                (edge) => [edge[0], edge[1]] as const,
-              ),
-              points: detection.keypoints.points.map((point) => ({ ...point })),
-              visibility: detection.keypoints.visibility
-                ? [...detection.keypoints.visibility]
-                : undefined,
-            }
-          : undefined,
-        mask: detection.mask ? { ...detection.mask } : undefined,
-        metadata: detection.metadata
-          ? copyDetectionMetadata(detection.metadata)
-          : undefined,
-        polygon: detection.polygon
-          ? {
-              points: detection.polygon.points.map((point) => ({ ...point })),
-            }
-          : undefined,
-        polyline: detection.polyline
-          ? {
-              points: detection.polyline.points.map((point) => ({ ...point })),
-            }
-          : undefined,
-        rect: detection.rect ? { ...detection.rect } : undefined,
-      })),
-      coordinateSpace: frame.coordinateSpace
-        ? { ...frame.coordinateSpace }
-        : undefined,
-      endTime: frame.endTime,
-      frameIndex: frame.frameIndex,
-      mediaTime: frame.mediaTime,
-    }))
+    .map(copyDetectionFrame)
     .sort((left, right) => left.mediaTime - right.mediaTime);
 }
+
+/**
+ * One frame's deep copy, for a caller that already knows which frames it is
+ * keeping and only needs the ones it does not hold.
+ */
+export function copyDetectionFrame(frame: DetectionFrame): DetectionFrame {
+  return {
+    detections: frame.detections.map((detection) => ({
+      ...detection,
+      attributes: detection.attributes ? [...detection.attributes] : undefined,
+      keypoints: detection.keypoints
+        ? {
+            boxRelative: detection.keypoints.boxRelative
+              ? [...detection.keypoints.boxRelative]
+              : undefined,
+            edges: detection.keypoints.edges.map(
+              (edge) => [edge[0], edge[1]] as const,
+            ),
+            points: detection.keypoints.points.map((point) => ({ ...point })),
+            visibility: detection.keypoints.visibility
+              ? [...detection.keypoints.visibility]
+              : undefined,
+          }
+        : undefined,
+      mask: detection.mask ? { ...detection.mask } : undefined,
+      metadata: detection.metadata
+        ? copyDetectionMetadata(detection.metadata)
+        : undefined,
+      polygon: detection.polygon
+        ? {
+            points: detection.polygon.points.map((point) => ({ ...point })),
+          }
+        : undefined,
+      polyline: detection.polyline
+        ? {
+            points: detection.polyline.points.map((point) => ({ ...point })),
+          }
+        : undefined,
+      rect: detection.rect ? { ...detection.rect } : undefined,
+    })),
+    coordinateSpace: frame.coordinateSpace
+      ? { ...frame.coordinateSpace }
+      : undefined,
+    endTime: frame.endTime,
+    frameIndex: frame.frameIndex,
+    mediaTime: frame.mediaTime,
+  };
+}
+
+/** Returned by the plain copier when it meets a value only structuredClone can
+ *  carry, so the caller pays for that only when the metadata needs it. */
+const NOT_PLAIN = Symbol("not-plain-metadata");
 
 function copyDetectionMetadata(
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
+  // Detection metadata is almost always a handful of strings and numbers, and a
+  // window rebuild copies it once per detection, tens of thousands of times a
+  // second while scrubbing. structuredClone serialises; walking the object does
+  // not, so it is the fallback rather than the default.
+  const plain = copyPlainMetadata(metadata);
+
+  if (plain !== NOT_PLAIN) {
+    return plain as Record<string, unknown>;
+  }
+
   const clone = (
     globalThis as {
       readonly structuredClone?: <TValue>(value: TValue) => TValue;
@@ -85,6 +119,48 @@ function copyDetectionMetadata(
   }
 
   return copyMetadataValue(metadata) as Record<string, unknown>;
+}
+
+function copyPlainMetadata(value: unknown): unknown | typeof NOT_PLAIN {
+  if (value === null || typeof value !== "object") {
+    return typeof value === "function" || typeof value === "symbol"
+      ? NOT_PLAIN
+      : value;
+  }
+
+  if (Array.isArray(value)) {
+    const copied: unknown[] = [];
+
+    for (const entry of value) {
+      const child = copyPlainMetadata(entry);
+
+      if (child === NOT_PLAIN) {
+        return NOT_PLAIN;
+      }
+
+      copied.push(child);
+    }
+
+    return copied;
+  }
+
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
+    return NOT_PLAIN;
+  }
+
+  const copied: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    const child = copyPlainMetadata(entry);
+
+    if (child === NOT_PLAIN) {
+      return NOT_PLAIN;
+    }
+
+    copied[key] = child;
+  }
+
+  return copied;
 }
 
 function copyMetadataValue(value: unknown): unknown {
@@ -107,19 +183,26 @@ function copyMetadataValue(value: unknown): unknown {
 export function validateDetectionFrames(
   detectionFrames: readonly DetectionFrame[],
 ): void {
-  for (const [frameOffset, frame] of detectionFrames.entries()) {
-    validateNumber(frame.mediaTime, `frames[${frameOffset}].mediaTime`, {
+  for (
+    let frameOffset = 0;
+    frameOffset < detectionFrames.length;
+    frameOffset += 1
+  ) {
+    const frame = detectionFrames[frameOffset];
+    const framePath = () => `frames[${frameOffset}]`;
+
+    validateNumber(frame.mediaTime, () => `${framePath()}.mediaTime`, {
       min: 0,
     });
 
     if (frame.endTime !== undefined) {
-      validateNumber(frame.endTime, `frames[${frameOffset}].endTime`, {
+      validateNumber(frame.endTime, () => `${framePath()}.endTime`, {
         exclusiveMin: frame.mediaTime,
       });
     }
 
     if (frame.frameIndex !== undefined) {
-      validateNumber(frame.frameIndex, `frames[${frameOffset}].frameIndex`, {
+      validateNumber(frame.frameIndex, () => `${framePath()}.frameIndex`, {
         integer: true,
         min: 0,
       });
@@ -128,48 +211,56 @@ export function validateDetectionFrames(
     if (frame.coordinateSpace !== undefined) {
       validateNumber(
         frame.coordinateSpace.width,
-        `frames[${frameOffset}].coordinateSpace.width`,
+        () => `${framePath()}.coordinateSpace.width`,
         { exclusiveMin: 0 },
       );
       validateNumber(
         frame.coordinateSpace.height,
-        `frames[${frameOffset}].coordinateSpace.height`,
+        () => `${framePath()}.coordinateSpace.height`,
         { exclusiveMin: 0 },
       );
     }
 
-    for (const [detectionOffset, detection] of frame.detections.entries()) {
-      const detectionPath = `frames[${frameOffset}].detections[${detectionOffset}]`;
+    for (
+      let detectionOffset = 0;
+      detectionOffset < frame.detections.length;
+      detectionOffset += 1
+    ) {
+      const detection = frame.detections[detectionOffset];
+      const detectionPath = () =>
+        `${framePath()}.detections[${detectionOffset}]`;
 
       if (detection.confidence !== undefined) {
-        validateNumber(detection.confidence, `${detectionPath}.confidence`, {
-          max: 1,
-          min: 0,
-        });
+        validateNumber(
+          detection.confidence,
+          () => `${detectionPath()}.confidence`,
+          { max: 1, min: 0 },
+        );
       }
 
       if (detection.zIndex !== undefined) {
-        validateNumber(detection.zIndex, `${detectionPath}.zIndex`);
+        validateNumber(detection.zIndex, () => `${detectionPath()}.zIndex`);
       }
 
       if (detection.trackerId !== undefined) {
-        validateNumber(detection.trackerId, `${detectionPath}.trackerId`, {
-          integer: true,
-          min: 0,
-        });
+        validateNumber(
+          detection.trackerId,
+          () => `${detectionPath()}.trackerId`,
+          { integer: true, min: 0 },
+        );
       }
 
       if (
         detection.sourceId !== undefined &&
         typeof detection.sourceId !== "string"
       ) {
-        throw new Error(`${detectionPath}.sourceId must be a string.`);
+        throw new Error(`${detectionPath()}.sourceId must be a string.`);
       }
 
       if (detection.sourceDetectionIndex !== undefined) {
         validateNumber(
           detection.sourceDetectionIndex,
-          `${detectionPath}.sourceDetectionIndex`,
+          () => `${detectionPath()}.sourceDetectionIndex`,
           {
             integer: true,
             min: 0,
@@ -178,26 +269,34 @@ export function validateDetectionFrames(
       }
 
       if (detection.rect) {
-        validateNumber(detection.rect.x, `${detectionPath}.rect.x`);
-        validateNumber(detection.rect.y, `${detectionPath}.rect.y`);
-        validateNumber(detection.rect.width, `${detectionPath}.rect.width`, {
-          exclusiveMin: 0,
-        });
-        validateNumber(detection.rect.height, `${detectionPath}.rect.height`, {
-          exclusiveMin: 0,
-        });
+        validateNumber(detection.rect.x, () => `${detectionPath()}.rect.x`);
+        validateNumber(detection.rect.y, () => `${detectionPath()}.rect.y`);
+        validateNumber(
+          detection.rect.width,
+          () => `${detectionPath()}.rect.width`,
+          { exclusiveMin: 0 },
+        );
+        validateNumber(
+          detection.rect.height,
+          () => `${detectionPath()}.rect.height`,
+          { exclusiveMin: 0 },
+        );
       }
-      validatePoints(detection.polygon?.points, `${detectionPath}.polygon`, 3);
+      validatePoints(
+        detection.polygon?.points,
+        () => `${detectionPath()}.polygon`,
+        3,
+      );
       validatePoints(
         detection.polyline?.points,
-        `${detectionPath}.polyline`,
+        () => `${detectionPath()}.polyline`,
         2,
       );
 
       if (detection.keypoints) {
         validatePoints(
           detection.keypoints.points,
-          `${detectionPath}.keypoints`,
+          () => `${detectionPath()}.keypoints`,
           1,
         );
 
@@ -207,22 +306,32 @@ export function validateDetectionFrames(
             detection.keypoints.points.length
         ) {
           throw new Error(
-            `${detectionPath}.keypoints.visibility must match points length.`,
+            `${detectionPath()}.keypoints.visibility must match points length.`,
           );
         }
 
-        for (const [edgeOffset, edge] of detection.keypoints.edges.entries()) {
-          const edgePath = `${detectionPath}.keypoints.edges[${edgeOffset}]`;
+        const edges = detection.keypoints.edges;
 
-          for (const [endpointOffset, endpoint] of edge.entries()) {
-            validateNumber(endpoint, `${edgePath}[${endpointOffset}]`, {
+        for (let edgeOffset = 0; edgeOffset < edges.length; edgeOffset += 1) {
+          const edge = edges[edgeOffset];
+          const edgePath = () =>
+            `${detectionPath()}.keypoints.edges[${edgeOffset}]`;
+
+          for (
+            let endpointOffset = 0;
+            endpointOffset < edge.length;
+            endpointOffset += 1
+          ) {
+            const endpoint = edge[endpointOffset];
+
+            validateNumber(endpoint, () => `${edgePath()}[${endpointOffset}]`, {
               integer: true,
               min: 0,
             });
 
             if (endpoint >= detection.keypoints.points.length) {
               throw new Error(
-                `${edgePath}[${endpointOffset}] is out of range.`,
+                `${edgePath()}[${endpointOffset}] is out of range.`,
               );
             }
           }
@@ -230,26 +339,35 @@ export function validateDetectionFrames(
       }
 
       if (detection.mask) {
-        validateNumber(detection.mask.width, `${detectionPath}.mask.width`, {
-          integer: true,
-          exclusiveMin: 0,
-        });
-        validateNumber(detection.mask.height, `${detectionPath}.mask.height`, {
-          integer: true,
-          exclusiveMin: 0,
-        });
+        validateNumber(
+          detection.mask.width,
+          () => `${detectionPath()}.mask.width`,
+          { integer: true, exclusiveMin: 0 },
+        );
+        validateNumber(
+          detection.mask.height,
+          () => `${detectionPath()}.mask.height`,
+          { integer: true, exclusiveMin: 0 },
+        );
 
         if (detection.mask.counts.length === 0) {
-          throw new Error(`${detectionPath}.mask.counts must not be empty.`);
+          throw new Error(`${detectionPath()}.mask.counts must not be empty.`);
         }
       }
     }
   }
 }
 
+/**
+ * Where a rejected value sits, named only when one is rejected. A window of
+ * segmentation frames carries hundreds of thousands of polygon points, and
+ * naming every one of them costs more than reading them all does.
+ */
+type ValidationPath = () => string;
+
 function validatePoints(
   points: readonly { readonly x: number; readonly y: number }[] | undefined,
-  path: string,
+  path: ValidationPath,
   minimumLength: number,
 ) {
   if (!points) {
@@ -258,44 +376,50 @@ function validatePoints(
 
   if (points.length < minimumLength) {
     throw new Error(
-      `${path}.points must contain at least ${minimumLength} points.`,
+      `${path()}.points must contain at least ${minimumLength} points.`,
     );
   }
 
-  for (const [pointOffset, point] of points.entries()) {
-    validateNumber(point.x, `${path}.points[${pointOffset}].x`);
-    validateNumber(point.y, `${path}.points[${pointOffset}].y`);
+  for (let pointOffset = 0; pointOffset < points.length; pointOffset += 1) {
+    const point = points[pointOffset];
+
+    validateNumber(point.x, () => `${path()}.points[${pointOffset}].x`);
+    validateNumber(point.y, () => `${path()}.points[${pointOffset}].y`);
   }
 }
 
+const NO_BOUNDS = {} as const;
+
 function validateNumber(
   value: number,
-  path: string,
+  path: ValidationPath,
   options: {
     readonly exclusiveMin?: number;
     readonly integer?: boolean;
     readonly max?: number;
     readonly min?: number;
-  } = {},
+  } = NO_BOUNDS,
 ) {
   if (!Number.isFinite(value)) {
-    throw new Error(`${path} must be a finite number.`);
+    throw new Error(`${path()} must be a finite number.`);
   }
 
   if (options.integer && !Number.isInteger(value)) {
-    throw new Error(`${path} must be an integer.`);
+    throw new Error(`${path()} must be an integer.`);
   }
 
   if (options.min !== undefined && value < options.min) {
-    throw new Error(`${path} must be greater than or equal to ${options.min}.`);
+    throw new Error(
+      `${path()} must be greater than or equal to ${options.min}.`,
+    );
   }
 
   if (options.exclusiveMin !== undefined && value <= options.exclusiveMin) {
-    throw new Error(`${path} must be greater than ${options.exclusiveMin}.`);
+    throw new Error(`${path()} must be greater than ${options.exclusiveMin}.`);
   }
 
   if (options.max !== undefined && value > options.max) {
-    throw new Error(`${path} must be less than or equal to ${options.max}.`);
+    throw new Error(`${path()} must be less than or equal to ${options.max}.`);
   }
 }
 
@@ -319,7 +443,6 @@ export function selectDetectionFrame(
       detectionFrames,
       mediaTime,
       options.frameRate,
-      options.frameIndexOriginTime,
     );
 
     if (selection.isApplicable) {
@@ -372,6 +495,109 @@ function selectIntervalDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
   mediaTime: number,
 ) {
+  const selectedFrame = findLastStartedDetectionFrame(
+    detectionFrames,
+    mediaTime,
+  );
+
+  return selectedFrame && isDetectionFrameActive(selectedFrame, mediaTime)
+    ? selectedFrame
+    : undefined;
+}
+
+/**
+ * The grid frame a playhead is standing on, or nothing.
+ *
+ * A frame at index `n` speaks for one step of the inference grid and no more,
+ * so it is on screen from its own media time until the next index is due. An
+ * index the source never produced leaves that step blank: the frames on either
+ * side describe media the playhead is not on, and a source still being written
+ * has a playback gate to hold the picture rather than a neighbour to borrow.
+ *
+ * A grid the source labelled only in part is still that source describing this
+ * media, so the frame the playhead stands on is the last one to have started,
+ * whether or not an index names it. The step it is held to is measured from the
+ * labelled frames alone.
+ */
+function selectNearestFrameIndexDetectionFrame(
+  detectionFrames: readonly DetectionFrame[],
+  mediaTime: number,
+  frameRate: number | undefined,
+): NearestFrameIndexSelection {
+  if (!frameRate || !Number.isFinite(frameRate) || frameRate <= 0) {
+    return { frame: undefined, isApplicable: false };
+  }
+
+  const firstIndexedFrame = findIndexedDetectionFrame(detectionFrames, 1);
+  const lastIndexedFrame = findIndexedDetectionFrame(detectionFrames, -1);
+
+  if (!firstIndexedFrame || !lastIndexedFrame) {
+    return { frame: undefined, isApplicable: false };
+  }
+
+  const gridStep =
+    measureGridStep(firstIndexedFrame, lastIndexedFrame) ?? 1 / frameRate;
+  const startedFrame = findLastStartedDetectionFrame(
+    detectionFrames,
+    mediaTime,
+  );
+
+  return {
+    frame:
+      startedFrame &&
+      mediaTime + PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS <
+        startedFrame.mediaTime + gridStep
+        ? startedFrame
+        : undefined,
+    isApplicable: true,
+  };
+}
+
+/**
+ * A grid step read off the frames instead of taken from `frameRate`.
+ *
+ * `frameRate` is what a manifest or an upload target says the grid is, and a
+ * clip whose real rate differs walks a step further out of position for every
+ * second that plays. The buffered frames carry the times the media itself
+ * reported, and measuring across the widest index span present divides the
+ * producer's millisecond rounding by that span.
+ */
+function measureGridStep(
+  firstIndexedFrame: IndexedDetectionFrame,
+  lastIndexedFrame: IndexedDetectionFrame,
+) {
+  const indexSpan = lastIndexedFrame.frameIndex - firstIndexedFrame.frameIndex;
+  const step =
+    (lastIndexedFrame.mediaTime - firstIndexedFrame.mediaTime) / indexSpan;
+
+  return indexSpan > 0 && Number.isFinite(step) && step > 0 ? step : undefined;
+}
+
+function findIndexedDetectionFrame(
+  detectionFrames: readonly DetectionFrame[],
+  direction: 1 | -1,
+) {
+  const startOffset = direction === 1 ? 0 : detectionFrames.length - 1;
+
+  for (
+    let offset = startOffset;
+    offset >= 0 && offset < detectionFrames.length;
+    offset += direction
+  ) {
+    const frame = detectionFrames[offset];
+
+    if (isIndexedDetectionFrame(frame)) {
+      return frame;
+    }
+  }
+
+  return undefined;
+}
+
+function findLastStartedDetectionFrame(
+  detectionFrames: readonly DetectionFrame[],
+  mediaTime: number,
+) {
   let selectedFrame: DetectionFrame | undefined;
   let low = 0;
   let high = detectionFrames.length - 1;
@@ -380,7 +606,7 @@ function selectIntervalDetectionFrame(
     const middle = Math.floor((low + high) / 2);
     const frame = detectionFrames[middle];
 
-    if (frame.mediaTime <= mediaTime) {
+    if (hasDetectionFrameStarted(frame, mediaTime)) {
       selectedFrame = frame;
       low = middle + 1;
     } else {
@@ -388,64 +614,22 @@ function selectIntervalDetectionFrame(
     }
   }
 
-  return selectedFrame && isDetectionFrameActive(selectedFrame, mediaTime)
-    ? selectedFrame
-    : undefined;
+  return selectedFrame;
 }
 
-function selectNearestFrameIndexDetectionFrame(
-  detectionFrames: readonly DetectionFrame[],
-  mediaTime: number,
-  frameRate: number | undefined,
-  frameIndexOriginTime: number | undefined,
-): NearestFrameIndexSelection {
-  if (!frameRate || !Number.isFinite(frameRate) || frameRate <= 0) {
-    return { frame: undefined, isApplicable: false };
-  }
+function isIndexedDetectionFrame(
+  frame: DetectionFrame,
+): frame is IndexedDetectionFrame {
+  return frame.frameIndex !== undefined;
+}
 
-  const firstIndexedFrame = detectionFrames.find(
-    (frame) => frame.frameIndex !== undefined,
-  );
-
-  if (!firstIndexedFrame || firstIndexedFrame.frameIndex === undefined) {
-    return { frame: undefined, isApplicable: false };
-  }
-
-  const originTime =
-    frameIndexOriginTime !== undefined
-      ? frameIndexOriginTime
-      : firstIndexedFrame.mediaTime - firstIndexedFrame.frameIndex / frameRate;
-  const targetFrameIndex = Math.round((mediaTime - originTime) * frameRate);
-  let nearestFrame: DetectionFrame | undefined;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
-  for (const frame of detectionFrames) {
-    if (frame.frameIndex === undefined) {
-      continue;
-    }
-
-    const distance = Math.abs(frame.frameIndex - targetFrameIndex);
-
-    if (
-      distance < nearestDistance ||
-      (distance === nearestDistance &&
-        nearestFrame?.frameIndex !== undefined &&
-        frame.frameIndex > nearestFrame.frameIndex)
-    ) {
-      nearestFrame = frame;
-      nearestDistance = distance;
-    }
-  }
-
-  return {
-    frame: nearestDistance <= 1 ? nearestFrame : undefined,
-    isApplicable: true,
-  };
+function hasDetectionFrameStarted(frame: DetectionFrame, mediaTime: number) {
+  return frame.mediaTime - PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS <= mediaTime;
 }
 
 function isDetectionFrameActive(frame: DetectionFrame, mediaTime: number) {
   return (
-    frame.mediaTime <= mediaTime &&
+    hasDetectionFrameStarted(frame, mediaTime) &&
     (frame.endTime === undefined || mediaTime < frame.endTime)
   );
 }

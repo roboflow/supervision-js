@@ -18,9 +18,11 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
+  RenderPreparationGateHoldReason,
   RenderPreparationWorkerStatus,
+  type RenderPreparationGateHoldDiagnostics,
   type RenderPreparationOptions,
-  type RenderPreparationPlaybackGateOptions,
+  type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { canReuseMaskStyleArtifacts } from "supervision-js-core";
 
@@ -30,6 +32,11 @@ const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
 const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 const PREPARED_WINDOW_REFILL_RATIO = 5 / 7;
+/** One cook per four frames, the top of the playback-rate ladder on 60Hz. */
+const MAX_PRESENTED_FRAME_STRIDE = 4;
+/** A jump that repeats. One on its own is a seek, and it lands somewhere. */
+const DRAGGED_PLAYHEAD_JUMP_COUNT = 2;
+const PRESENTED_FRAME_STRIDE_SAMPLE_COUNT = 4;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
 
@@ -62,10 +69,43 @@ export enum PreparedRenderFrameMaskStatus {
 
 export interface PreparedRenderWindow {
   getFrame(mediaTime: number): PreparedRenderFrame | undefined;
+  /**
+   * Whether this window's artifact for a media time is cooked, scheduling
+   * nothing. True when there is nothing to cook: no style, no frame there.
+   */
+  isArtifactPrepared(mediaTime: number): boolean;
+  /**
+   * Frames preparation has finished, counted up across the window's life. Read
+   * twice, it separates preparation that is slow from preparation that is
+   * stuck: the count moves for a cook that lands however far behind the
+   * playhead it is, and a cook that lands and is then evicted still counts.
+   */
+  getPreparationProgress(): number;
+  /**
+   * Whether `waitForReady` would wait, answered without scheduling anything.
+   * Asked on every playhead move of a source that has to be stopped to be
+   * held, where opening a wait that resolves immediately still costs the stop.
+   */
+  needsPlaybackGateWait(
+    mediaTime: number,
+    options: ResolvedRenderPreparationGateThresholds,
+  ): boolean;
+  /**
+   * Resolves once the media time may be presented. `signal` is how a caller
+   * that has moved on says so: aborting resolves the wait and drops the hold it
+   * was placing on preparation, because a caller that walked away re-checks
+   * whatever it does next anyway. Without one, an abandoned wait holds forever.
+   */
   waitForReady(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
+    signal?: AbortSignal,
   ): Promise<void>;
+  /**
+   * Whether the playhead is moving. A window over a resting playhead covers a
+   * paused margin instead of the full prefetch span.
+   */
+  setPlaybackActive(active: boolean): void;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
@@ -73,6 +113,19 @@ export interface PreparedRenderWindow {
 
 export type { PreparedMaskFrame } from "./mask-frame-preparer";
 export type { PreparedRenderTimelineContext } from "./prepared-window-timeline";
+
+/** How many frames ahead of the playhead a prepared window aims to cover. */
+export function resolvePreparedWindowFrameCount(options: {
+  readonly prefetchFrameCount?: number;
+  readonly renderPreparation?: RenderPreparationOptions;
+}) {
+  return Math.max(
+    0,
+    options.prefetchFrameCount ??
+      options.renderPreparation?.maskFrame?.prefetchFrameCount ??
+      DEFAULT_MASK_PREFETCH_FRAME_COUNT,
+  );
+}
 
 export function createPreparedRenderWindow(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
@@ -82,6 +135,8 @@ export function createPreparedRenderWindow(options: {
   readonly onMaskFrameEvicted?: (key: string) => void;
   readonly onMaskFramePrepared?: (maskFrame: PreparedMaskFrame) => void;
   readonly onMaskFramesCleared?: () => void;
+  /** Fires whenever what the window covers may have changed. */
+  readonly onPreparedWindowChange?: () => void;
   readonly prefetchFrameCount?: number;
   readonly preparedWindowScanIntervalSeconds?: number;
   readonly renderPreparation?: RenderPreparationOptions;
@@ -90,22 +145,23 @@ export function createPreparedRenderWindow(options: {
     readonly maskStyle: MaskStyle;
     readonly mediaTime: number;
   }) => readonly SerializableMaskInstruction[];
+  /**
+   * The widest id raster a cook may produce. A function because the raster is
+   * sized against media dimensions the caller only learns once its display
+   * exists, which is after this window does.
+   */
+  readonly resolveMaxRasterWidth?: () => number | undefined;
 }): PreparedRenderWindow {
   const maskFrameOptions = options.renderPreparation?.maskFrame;
   const maxMaskFrameCacheSize = Math.max(
     1,
-    options.maxMaskFrameCacheSize ??
-      maskFrameOptions?.maxCacheFrameCount ??
-      DEFAULT_MASK_FRAME_CACHE_SIZE,
+    Math.floor(
+      options.maxMaskFrameCacheSize ??
+        maskFrameOptions?.maxCacheFrameCount ??
+        DEFAULT_MASK_FRAME_CACHE_SIZE,
+    ) || DEFAULT_MASK_FRAME_CACHE_SIZE,
   );
-  const prefetchFrameCount = Math.max(
-    0,
-    options.prefetchFrameCount ??
-      maskFrameOptions?.prefetchFrameCount ??
-      DEFAULT_MASK_PREFETCH_FRAME_COUNT,
-  );
-  const refillThresholdFrameCount =
-    getPreparedWindowRefillThresholdFrameCount(prefetchFrameCount);
+  const prefetchFrameCount = resolvePreparedWindowFrameCount(options);
   const preparedWindowScanIntervalSeconds = Math.max(
     0,
     options.preparedWindowScanIntervalSeconds ??
@@ -123,21 +179,35 @@ export function createPreparedRenderWindow(options: {
   const workerCount = getBrowserMaskPreparationWorkerCount(
     maskFrameOptions?.workerCount,
   );
+  const pausedPrefetchFrameCount = getPausedPreparedWindowFrameCount({
+    prefetchFrameCount,
+    scheduleBatchSize,
+  });
+  const refillThresholdFrameCount =
+    getPreparedWindowRefillThresholdFrameCount(prefetchFrameCount);
+  const pausedRefillThresholdFrameCount =
+    getPreparedWindowRefillThresholdFrameCount(pausedPrefetchFrameCount);
 
+  let isPlaybackActive = true;
   let maskStyle = options.maskStyle ?? null;
   const maskFramePreparer = createPreparer();
   let lastPreparedBufferSignature: string | null = null;
   let lastPreparedWindowMediaTime: number | null = null;
   let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
   let lastPreparedTargetFrames: readonly DetectionFrame[] = [];
-  const timeline = createPreparedWindowTimeline({ getFrameKey });
+  const timeline = createPreparedWindowTimeline();
   let activeMaskFrame: {
     readonly key: string;
     readonly mediaTime: number;
   } | null = null;
   let activeMaskFrameSignature: string | null = null;
+  const presentedFrameStrideSamples: number[] = [];
+  let previousActiveFrameMediaTime: number | null = null;
+  let consecutivePlayheadJumpCount = 0;
+  let isPlayheadSettled = true;
   let isDestroyed = false;
   let generation = 0;
+  let preparationProgress = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
   const pendingMaskFrames = new Map<string, PendingMaskFrame>();
   const queuedMaskFrameKeys: string[] = [];
@@ -147,6 +217,10 @@ export function createPreparedRenderWindow(options: {
   // timeline key therefore represents a source revision for that artifact.
   const observedMaskFrames = new Map<string, DetectionFrame>();
   const readinessWaiters = new Set<() => void>();
+  const activeReadinessWaits = new Set<{
+    readonly mediaTime: number;
+    readonly resumeAtSeconds: number;
+  }>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
   let terminalPreparationError: Error | null = null;
 
@@ -272,6 +346,7 @@ export function createPreparedRenderWindow(options: {
 
       if (instructions.length === 0) {
         emptyMaskFrameKeys.add(key);
+        preparationProgress += 1;
         pendingMaskFrames.delete(key);
         inFlightMaskFrames.delete(job);
         schedulePreparedTargetBatch();
@@ -280,7 +355,11 @@ export function createPreparedRenderWindow(options: {
       }
 
       void maskFramePreparer
-        .prepare({ instructions, key })
+        .prepare({
+          instructions,
+          key,
+          maxRasterWidth: options.resolveMaxRasterWidth?.(),
+        })
         .then((maskFrame) => {
           inFlightMaskFrames.delete(job);
           const pendingJob = pendingMaskFrames.get(key);
@@ -303,6 +382,7 @@ export function createPreparedRenderWindow(options: {
 
           if (!maskFrame) {
             emptyMaskFrameKeys.add(key);
+            preparationProgress += 1;
             schedulePreparedTargetBatch();
             emitDiagnostics();
             pumpMaskFrameQueue();
@@ -310,6 +390,7 @@ export function createPreparedRenderWindow(options: {
           }
 
           preparedMaskFrames.set(key, maskFrame);
+          preparationProgress += 1;
           evictPreparedMaskFrames();
           options.onMaskFramePrepared?.(maskFrame);
           schedulePreparedTargetBatch();
@@ -419,6 +500,35 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
+  function dropQueuedMaskFramesBeyondTargets() {
+    const targetKeys = new Set(lastPreparedTargetFrames.map(getFrameKey));
+
+    for (let index = queuedMaskFrameKeys.length - 1; index >= 0; index -= 1) {
+      const key = queuedMaskFrameKeys[index];
+
+      if (!key || targetKeys.has(key)) {
+        continue;
+      }
+
+      queuedMaskFrameKeys.splice(index, 1);
+      pendingMaskFrames.delete(key);
+    }
+  }
+
+  function rescanPreparedWindow() {
+    if (!activeMaskFrame) {
+      return;
+    }
+
+    const { mediaTime } = activeMaskFrame;
+
+    schedulePreparedWindow(
+      options.detectionTimeline.selectFrame(mediaTime),
+      mediaTime,
+      { force: true },
+    );
+  }
+
   function removeQueuedMaskFrameKey(key: string) {
     const index = queuedMaskFrameKeys.indexOf(key);
 
@@ -497,16 +607,20 @@ export function createPreparedRenderWindow(options: {
     );
     const retainedKeys = getKnownFrameRetentionKeys(bufferedFrames);
 
-    timeline.rememberFrames(bufferedFrames, retainedKeys);
     pruneObservedMaskFrames(retainedKeys);
     lastPreparedWindowFrames = timeline.getWindowFrames(
       bufferedFrames,
       anchorTime,
+      bufferState.bufferEndTime,
     );
-    lastPreparedTargetFrames = lastPreparedWindowFrames.slice(
-      0,
-      prefetchFrameCount,
-    );
+
+    const targetFrameCount = getPrefetchFrameCount();
+
+    lastPreparedTargetFrames = selectPresentedTargetFrames({
+      stride: getPresentedFrameStride(),
+      targetFrameCount,
+      windowFrames: lastPreparedWindowFrames,
+    });
 
     if (
       detectionFrame &&
@@ -515,18 +629,18 @@ export function createPreparedRenderWindow(options: {
       lastPreparedTargetFrames = [
         detectionFrame,
         ...lastPreparedTargetFrames,
-      ].slice(0, prefetchFrameCount);
+      ].slice(0, targetFrameCount);
     }
 
-    schedulePreparedTargetBatch();
+    schedulePreparedTargetBatch({ force: scheduleOptions.force });
   };
 
   function shouldTopUpPreparedWindowAtLowWatermark() {
     if (
       !activeMaskFrame ||
-      prefetchFrameCount === 0 ||
+      getPrefetchFrameCount() === 0 ||
       lastPreparedWindowFrames.length === 0 ||
-      lastPreparedTargetFrames.length < prefetchFrameCount
+      lastPreparedTargetFrames.length < getPrefetchFrameCount()
     ) {
       return false;
     }
@@ -535,7 +649,7 @@ export function createPreparedRenderWindow(options: {
       getPreparedAheadDiagnosticsFor(activeMaskFrame).frameCount;
     const availableAhead = getAvailableAheadFrameCount(activeMaskFrame);
     const effectiveThreshold = Math.min(
-      refillThresholdFrameCount,
+      getRefillThresholdFrameCount(),
       availableAhead,
     );
 
@@ -544,8 +658,16 @@ export function createPreparedRenderWindow(options: {
     );
   }
 
-  function schedulePreparedTargetBatch() {
+  function schedulePreparedTargetBatch(
+    batchOptions: { readonly force?: boolean } = {},
+  ) {
     if (isDestroyed || terminalPreparationError) {
+      return;
+    }
+
+    /* A wait held at the gate does not ask again until it is let through, so
+       the hold is what has to keep preparation running. */
+    if (!isPlayheadSettled && !batchOptions.force && getGateHold() === null) {
       return;
     }
 
@@ -573,8 +695,40 @@ export function createPreparedRenderWindow(options: {
   return {
     getFrame,
 
-    waitForReady(mediaTime, waitOptions) {
-      if (waitOptions.enabled === false) {
+    getPreparationProgress() {
+      return preparationProgress;
+    },
+
+    isArtifactPrepared(mediaTime) {
+      if (isDestroyed || !maskStyle) {
+        return true;
+      }
+
+      const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+
+      if (!detectionFrame) {
+        return true;
+      }
+
+      return (
+        getMaskStatus(getFrameKey(detectionFrame)) !==
+        PreparedRenderFrameMaskStatus.Pending
+      );
+    },
+
+    needsPlaybackGateWait(mediaTime, waitOptions) {
+      if (isDestroyed || waitOptions.enabled === false) {
+        return false;
+      }
+
+      return !isReadyForPresentation(
+        mediaTime,
+        getStopBelowSeconds(waitOptions),
+      );
+    },
+
+    waitForReady(mediaTime, waitOptions, signal) {
+      if (waitOptions.enabled === false || signal?.aborted) {
         return Promise.resolve();
       }
 
@@ -588,36 +742,66 @@ export function createPreparedRenderWindow(options: {
         return Promise.reject(terminalPreparationError);
       }
 
-      if (
-        isReadyForPresentation(mediaTime, getMinimumAheadSeconds(waitOptions))
-      ) {
+      if (isReadyForPresentation(mediaTime, getStopBelowSeconds(waitOptions))) {
         return Promise.resolve();
       }
 
       return new Promise((resolve, reject) => {
+        const activeWait = {
+          mediaTime,
+          resumeAtSeconds: getResumeAtSeconds(waitOptions),
+        };
+        const endWait = () => {
+          readinessWaiters.delete(checkReady);
+          activeReadinessWaits.delete(activeWait);
+          signal?.removeEventListener("abort", abandonWait);
+        };
+        const abandonWait = () => {
+          endWait();
+          resolve();
+        };
         const checkReady = () => {
           if (terminalPreparationError) {
-            readinessWaiters.delete(checkReady);
+            endWait();
             reject(terminalPreparationError);
             return;
           }
 
           if (
             !isDestroyed &&
-            !isReadyForPresentation(
-              mediaTime,
-              getRequiredAheadSeconds(waitOptions),
-            )
+            !isReadyForPresentation(mediaTime, activeWait.resumeAtSeconds)
           ) {
             return;
           }
 
-          readinessWaiters.delete(checkReady);
+          endWait();
           resolve();
         };
 
         readinessWaiters.add(checkReady);
+        activeReadinessWaits.add(activeWait);
+        signal?.addEventListener("abort", abandonWait);
+        emitDiagnostics();
       });
+    },
+
+    setPlaybackActive(active) {
+      if (isDestroyed || active === isPlaybackActive) {
+        return;
+      }
+
+      isPlaybackActive = active;
+      /* Whichever way this goes, the gesture that was moving the playhead is
+         over, and the window may lead it again. */
+      consecutivePlayheadJumpCount = 0;
+      isPlayheadSettled = true;
+      rescanPreparedWindow();
+
+      if (!active) {
+        dropQueuedMaskFramesBeyondTargets();
+      }
+
+      emitDiagnostics();
     },
 
     setTimelineContext(context) {
@@ -675,6 +859,8 @@ export function createPreparedRenderWindow(options: {
 
     const key = getFrameKey(detectionFrame);
 
+    observePresentedFrameStride(key);
+    observePlayheadStep(detectionFrame.mediaTime);
     setActiveMaskFrame({
       key,
       mediaTime: detectionFrame.mediaTime,
@@ -696,6 +882,7 @@ export function createPreparedRenderWindow(options: {
     const status = maskFramePreparer.getStatus();
     const preparedAhead = getPreparedAheadDiagnostics();
     const maxInFlightCount = getMaxInFlightMaskFrameCount();
+    const gateHold = getGateHold();
 
     options.renderPreparation?.onDiagnostics?.({
       artifacts: [
@@ -709,6 +896,7 @@ export function createPreparedRenderWindow(options: {
                 ),
               }
             : null,
+          gateHold,
           inFlightCount: inFlightMaskFrames.size,
           kind: options.artifactKind ?? RenderPreparationArtifactKind.MaskFrame,
           maxInFlightCount,
@@ -717,13 +905,13 @@ export function createPreparedRenderWindow(options: {
           pendingCount: pendingMaskFrames.size,
           preparedAheadFrameCount: preparedAhead.frameCount,
           preparedAheadSeconds: preparedAhead.seconds,
-          prefetchCount: prefetchFrameCount,
+          prefetchCount: getPrefetchFrameCount(),
           preparedCount: preparedMaskFrames.size,
-          refillThresholdCount: refillThresholdFrameCount,
+          refillThresholdCount: getRefillThresholdFrameCount(),
           scheduleBatchSize,
           window: {
             availableFrameCount: lastPreparedWindowFrames.length,
-            refillThresholdFrameCount,
+            refillThresholdFrameCount: getRefillThresholdFrameCount(),
             targetFrameCount: lastPreparedTargetFrames.length,
           },
         },
@@ -733,6 +921,7 @@ export function createPreparedRenderWindow(options: {
       workerStatus: status.workerStatus,
     });
     notifyReadinessWaiters();
+    options.onPreparedWindowChange?.();
   }
 
   function evictPreparedMaskFrames() {
@@ -763,19 +952,41 @@ export function createPreparedRenderWindow(options: {
     const targetKeys = new Set(lastPreparedTargetFrames.map(getFrameKey));
     const activeKey = activeMaskFrame?.key ?? null;
 
+    return (
+      findFarthestPreparedMaskFrame(
+        (key) => key !== activeKey && !targetKeys.has(key),
+      ) ?? findFarthestPreparedMaskFrame((key) => key !== activeKey)
+    );
+  }
+
+  /**
+   * The cache is a span around the playhead rather than a queue behind it. A
+   * cache emptied in cook order empties from the ground the playhead just
+   * crossed, which is the ground a reversing gesture reaches first.
+   */
+  function findFarthestPreparedMaskFrame(canEvict: (key: string) => boolean) {
+    const playheadMediaTime = activeMaskFrame?.mediaTime;
+    let farthestKey: string | undefined;
+    let farthestDistance = -1;
+
     for (const key of preparedMaskFrames.keys()) {
-      if (key !== activeKey && !targetKeys.has(key)) {
-        return key;
+      if (!canEvict(key)) {
+        continue;
+      }
+
+      const frameMediaTime = observedMaskFrames.get(key)?.mediaTime;
+      const distance =
+        playheadMediaTime === undefined || frameMediaTime === undefined
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(frameMediaTime - playheadMediaTime);
+
+      if (distance > farthestDistance) {
+        farthestDistance = distance;
+        farthestKey = key;
       }
     }
 
-    for (const key of preparedMaskFrames.keys()) {
-      if (key !== activeKey) {
-        return key;
-      }
-    }
-
-    return undefined;
+    return farthestKey;
   }
 
   function clearPreparedMaskFrames() {
@@ -794,7 +1005,6 @@ export function createPreparedRenderWindow(options: {
     queuedMaskFrameKeys.length = 0;
     emptyMaskFrameKeys.clear();
     observedMaskFrames.clear();
-    timeline.clear();
 
     if (preparedMaskFrames.size > 0) {
       const maskFrames = Array.from(preparedMaskFrames.values());
@@ -870,6 +1080,16 @@ export function createPreparedRenderWindow(options: {
     return getPreparedAheadDiagnosticsFor(activeMaskFrame);
   }
 
+  /**
+   * How far prepared work reaches in front of a frame, and how much of that
+   * reach is finished. The walk crosses a frame the scheduler already holds
+   * without counting it and stops at one nobody has asked for: a queued or
+   * in-flight frame is runway that arrives on its own, while a gap no job
+   * covers is runway that never fills. A source still appending detections
+   * drops a fresh uncooked frame into this span on every record it writes.
+   * Whether the frame about to be presented is itself ready is a separate
+   * question, asked separately.
+   */
   function getPreparedAheadDiagnosticsFor(frameRef: {
     readonly key: string;
     readonly mediaTime: number;
@@ -896,12 +1116,15 @@ export function createPreparedRenderWindow(options: {
     for (const frame of frames.slice(activeFrameIndex)) {
       const key = getFrameKey(frame);
 
-      if (!preparedMaskFrames.has(key) && !emptyMaskFrameKeys.has(key)) {
-        break;
+      if (preparedMaskFrames.has(key) || emptyMaskFrameKeys.has(key)) {
+        frameCount += 1;
+        latestPreparedTime = frame.mediaTime;
+        continue;
       }
 
-      frameCount += 1;
-      latestPreparedTime = frame.mediaTime;
+      if (!pendingMaskFrames.has(key)) {
+        break;
+      }
     }
 
     return {
@@ -926,6 +1149,39 @@ export function createPreparedRenderWindow(options: {
     }
 
     return lastPreparedWindowFrames.length - activeFrameIndex;
+  }
+
+  /**
+   * The furthest a run of prepared frames starting here can ever reach. The run
+   * is read out of a cache holding a fixed number of frames, and eviction takes
+   * the frame farthest from the playhead, so a lead demanded beyond this span
+   * is one no amount of preparation delivers. Unbounded while the playhead sits
+   * outside the scanned window, the only place the span can be read from.
+   */
+  function getCacheReachableAheadSeconds(frameRef: {
+    readonly key: string;
+    readonly mediaTime: number;
+  }) {
+    const activeFrameIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === frameRef.key,
+    );
+
+    if (activeFrameIndex < 0) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const lastReachableFrame =
+      lastPreparedWindowFrames[
+        Math.min(
+          lastPreparedWindowFrames.length,
+          activeFrameIndex + maxMaskFrameCacheSize,
+        ) - 1
+      ];
+
+    return timeline.getFrameDistance(
+      lastReachableFrame.mediaTime,
+      frameRef.mediaTime,
+    );
   }
 
   function getPreparedTargetAheadSeconds(frameRef: {
@@ -953,18 +1209,25 @@ export function createPreparedRenderWindow(options: {
     );
   }
 
-  function isReadyForPresentation(
+  /**
+   * The hold this gate would apply to the given frame, or null when it would
+   * let playback through. Only the gate can name its own hold: the requirement
+   * a wait has to clear is capped by the live target window, and the distance
+   * to enter a hold is not the distance to leave one, so a host holding the
+   * options still cannot work out which of the two stopped the picture.
+   */
+  function getPresentationHold(
     mediaTime: number,
     requiredAheadSeconds: number,
-  ) {
+  ): RenderPreparationGateHoldDiagnostics | null {
     if (isDestroyed || !maskStyle) {
-      return true;
+      return null;
     }
 
     const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
 
     if (!detectionFrame) {
-      return true;
+      return null;
     }
 
     const frameRef = {
@@ -972,25 +1235,56 @@ export function createPreparedRenderWindow(options: {
       mediaTime: detectionFrame.mediaTime,
     };
     const activeStatus = getMaskStatus(frameRef.key);
+    const requiredLeadSeconds = Math.min(
+      Math.max(requiredAheadSeconds, 0),
+      getPreparedTargetAheadSeconds(frameRef),
+      getCacheReachableAheadSeconds(frameRef),
+    );
 
     if (activeStatus === PreparedRenderFrameMaskStatus.Pending) {
-      return false;
+      return {
+        reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+        requiredAheadSeconds: requiredLeadSeconds,
+      };
     }
 
     if (requiredAheadSeconds <= 0) {
-      return true;
+      return null;
     }
 
-    const availableAheadSeconds = getPreparedTargetAheadSeconds(frameRef);
-    const requiredAvailableAheadSeconds = Math.min(
-      requiredAheadSeconds,
-      availableAheadSeconds,
-    );
+    if (
+      getPreparedAheadDiagnosticsFor(frameRef).seconds >= requiredLeadSeconds
+    ) {
+      return null;
+    }
 
-    return (
-      getPreparedAheadDiagnosticsFor(frameRef).seconds >=
-      requiredAvailableAheadSeconds
-    );
+    return {
+      reason: RenderPreparationGateHoldReason.LeadBelowRequirement,
+      requiredAheadSeconds: requiredLeadSeconds,
+    };
+  }
+
+  function isReadyForPresentation(
+    mediaTime: number,
+    requiredAheadSeconds: number,
+  ) {
+    return getPresentationHold(mediaTime, requiredAheadSeconds) === null;
+  }
+
+  /**
+   * Re-read on every emission rather than cached from the last check, because a
+   * hold ends without anything calling the gate again.
+   */
+  function getGateHold() {
+    for (const wait of activeReadinessWaits) {
+      const hold = getPresentationHold(wait.mediaTime, wait.resumeAtSeconds);
+
+      if (hold) {
+        return hold;
+      }
+    }
+
+    return null;
   }
 
   function notifyReadinessWaiters() {
@@ -999,20 +1293,18 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
-  function getRequiredAheadSeconds(
-    waitOptions: RenderPreparationPlaybackGateOptions,
+  function getResumeAtSeconds(
+    waitOptions: ResolvedRenderPreparationGateThresholds,
   ) {
-    return Math.max(waitOptions.requiredAheadSeconds ?? 0, 0);
+    return Math.max(waitOptions.resumeAtSeconds, 0);
   }
 
-  function getMinimumAheadSeconds(
-    waitOptions: RenderPreparationPlaybackGateOptions,
+  function getStopBelowSeconds(
+    waitOptions: ResolvedRenderPreparationGateThresholds,
   ) {
-    const requiredAheadSeconds = getRequiredAheadSeconds(waitOptions);
-
     return Math.min(
-      Math.max(waitOptions.minimumAheadSeconds ?? requiredAheadSeconds, 0),
-      requiredAheadSeconds,
+      Math.max(waitOptions.stopBelowSeconds, 0),
+      getResumeAtSeconds(waitOptions),
     );
   }
 
@@ -1021,6 +1313,113 @@ export function createPreparedRenderWindow(options: {
       onStatusChange: emitDiagnostics,
       renderPreparation: options.renderPreparation,
     });
+  }
+
+  /**
+   * How many timeline frames the playhead crossed to reach this one. Above 1x
+   * the playhead skips source frames the display never paints, and cooking
+   * those spends the throughput that the frames it does paint need.
+   */
+  function observePresentedFrameStride(nextKey: string) {
+    const previousKey = activeMaskFrame?.key;
+
+    if (!previousKey || previousKey === nextKey) {
+      return;
+    }
+
+    const previousIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === previousKey,
+    );
+    const nextIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === nextKey,
+    );
+
+    if (previousIndex < 0 || nextIndex < 0) {
+      return;
+    }
+
+    const stride = nextIndex - previousIndex;
+
+    if (stride <= 0 || stride > MAX_PRESENTED_FRAME_STRIDE) {
+      return;
+    }
+
+    presentedFrameStrideSamples.push(stride);
+
+    if (
+      presentedFrameStrideSamples.length > PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
+    ) {
+      presentedFrameStrideSamples.shift();
+    }
+  }
+
+  /**
+   * A playhead one playback step from where it was is a playhead the prefetch
+   * can lead, and one jump on its own is a seek that lands. A run of jumps is a
+   * drag, and the frames a prefetch picks for it are frames it has gone past.
+   */
+  function observePlayheadStep(mediaTime: number) {
+    const previousMediaTime = previousActiveFrameMediaTime;
+
+    previousActiveFrameMediaTime = mediaTime;
+
+    /* One presented frame is drawn several times over, and a redraw of the
+       frame already on screen says nothing about how the playhead is moving. */
+    if (previousMediaTime === null || mediaTime === previousMediaTime) {
+      return;
+    }
+
+    const advance = mediaTime - previousMediaTime;
+
+    if (advance > 0 && advance <= getSettledPlayheadAdvanceSeconds()) {
+      consecutivePlayheadJumpCount = 0;
+      isPlayheadSettled = true;
+      return;
+    }
+
+    consecutivePlayheadJumpCount += 1;
+    isPlayheadSettled =
+      consecutivePlayheadJumpCount < DRAGGED_PLAYHEAD_JUMP_COUNT;
+  }
+
+  function getSettledPlayheadAdvanceSeconds() {
+    const [firstFrame, secondFrame] = lastPreparedWindowFrames;
+
+    if (!firstFrame || !secondFrame) {
+      return preparedWindowScanIntervalSeconds;
+    }
+
+    return (
+      (secondFrame.mediaTime - firstFrame.mediaTime) *
+      MAX_PRESENTED_FRAME_STRIDE
+    );
+  }
+
+  /**
+   * A cadence only counts once it has repeated, which is what separates it from
+   * a seek, and the narrowest of those repeats is what the cooks follow, so
+   * jitter costs cooks rather than coverage. A paused playhead presents every
+   * frame it lands on, whatever it was doing before it stopped.
+   */
+  function getPresentedFrameStride() {
+    if (
+      !isPlaybackActive ||
+      presentedFrameStrideSamples.length < PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
+    ) {
+      return 1;
+    }
+
+    return Math.min(...presentedFrameStrideSamples);
+  }
+
+  function getPrefetchFrameCount() {
+    return isPlaybackActive ? prefetchFrameCount : pausedPrefetchFrameCount;
+  }
+
+  function getRefillThresholdFrameCount() {
+    return isPlaybackActive
+      ? refillThresholdFrameCount
+      : pausedRefillThresholdFrameCount;
   }
 
   function getMaxInFlightMaskFrameCount() {
@@ -1125,6 +1524,50 @@ function getPreparationError(error: unknown) {
   return error instanceof Error
     ? error
     : new Error("Unable to prepare mask frame.");
+}
+
+/**
+ * The playhead's own frame plus one schedule batch ahead. A batch is the most
+ * this window commits to in one pass, so a resting playhead holds a single pass
+ * of work, and a step forward still lands on a frame already cooked.
+ */
+function getPausedPreparedWindowFrameCount(options: {
+  readonly prefetchFrameCount: number;
+  readonly scheduleBatchSize: number;
+}) {
+  return Math.min(options.prefetchFrameCount, options.scheduleBatchSize + 1);
+}
+
+/**
+ * The same number of cooks, spread over the frames the display will paint. The
+ * walk starts on the playhead's own frame, so the frames it picks are the ones
+ * the playhead will land on rather than the ones between them.
+ */
+function selectPresentedTargetFrames(options: {
+  readonly stride: number;
+  readonly targetFrameCount: number;
+  readonly windowFrames: readonly DetectionFrame[];
+}) {
+  if (options.stride <= 1) {
+    return options.windowFrames.slice(0, options.targetFrameCount);
+  }
+
+  const targetFrames: DetectionFrame[] = [];
+
+  for (
+    let index = 0;
+    index < options.windowFrames.length &&
+    targetFrames.length < options.targetFrameCount;
+    index += options.stride
+  ) {
+    const frame = options.windowFrames[index];
+
+    if (frame) {
+      targetFrames.push(frame);
+    }
+  }
+
+  return targetFrames;
 }
 
 function getPreparedWindowRefillThresholdFrameCount(

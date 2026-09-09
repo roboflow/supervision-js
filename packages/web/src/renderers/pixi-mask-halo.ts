@@ -1,4 +1,24 @@
+import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
+import {
+  tintedMaskVertexGlsl,
+  tintedMaskVertexWgsl,
+} from "#renderers/mask-vertex";
+import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
+import type {
+  Detection,
+  MaskHaloDrawInstruction,
+  MaskHaloStyle,
+  MaskHaloStyleContext,
+  MaskStyle,
+} from "supervision-js-core";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -13,11 +33,6 @@ type PixiMaskHaloMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
 type ContainerConstructor = new () => PixiContainer;
 
-type MeshConstructor = new (options: {
-  geometry: PixiMeshGeometry;
-  shader: PixiShader;
-}) => PixiMaskHaloMesh;
-
 type ImageSourceConstructor = new (options: {
   autoGenerateMipmaps?: boolean;
   dynamic: boolean;
@@ -27,21 +42,6 @@ type ImageSourceConstructor = new (options: {
   width: number;
 }) => PixiImageSource;
 
-type MeshGeometryConstructor = new (options: {
-  indices: Uint32Array;
-  positions: Float32Array;
-  shrinkBuffersToFit: boolean;
-  topology: "triangle-list";
-  uvs: Float32Array;
-}) => PixiMeshGeometry;
-
-type ShaderFactory = {
-  from(options: {
-    gl: { fragment: string; vertex: string };
-    resources: Record<string, unknown>;
-  }): PixiShader;
-};
-
 type UniformGroupConstructor = new (
   uniforms: Record<
     string,
@@ -49,6 +49,51 @@ type UniformGroupConstructor = new (
     | { size?: number; type: "vec4<f32>"; value: Float32Array }
   >,
 ) => PixiUniformGroup;
+
+/**
+ * The halo a detection actually paints, or `undefined`. A style may answer an
+ * instruction that draws nothing, and both the coverage the halo prepares and
+ * the passes it renders have to read that the same way: the raster carries one
+ * detection id per pixel, so a detection admitted into the coverage but never
+ * painted still claims its pixels and buries the ids the glow is drawn from.
+ */
+export function resolvePaintedMaskHalo(
+  haloStyle: MaskHaloStyle,
+  detection: Detection,
+  context: MaskHaloStyleContext,
+): MaskHaloDrawInstruction | undefined {
+  if (!detection.mask) {
+    return undefined;
+  }
+
+  const halo = haloStyle.resolve(detection, context);
+
+  if (!halo || halo.alpha <= 0 || halo.spread <= 0) {
+    return undefined;
+  }
+
+  return halo;
+}
+
+/**
+ * The mask coverage a halo-only presentation prepares. Nothing here reaches the
+ * screen, so the fill colour and alpha are arbitrary.
+ */
+export function createMaskHaloPreparationStyle(
+  haloStyle: MaskHaloStyle,
+  artifactKey: string,
+): MaskStyle {
+  return {
+    artifactKey,
+    resolve: (detection, context) => {
+      const { mask } = detection;
+
+      return mask && resolvePaintedMaskHalo(haloStyle, detection, context)
+        ? { alpha: 0, color: 0x000000, mask }
+        : undefined;
+    },
+  };
+}
 
 export interface PixiBlurFilterLike {
   strength: number;
@@ -99,9 +144,9 @@ export function createPixiMaskHaloRenderer(options: {
   readonly Container: ContainerConstructor;
   readonly Rectangle: RectangleConstructor;
   readonly ImageSource: ImageSourceConstructor;
-  readonly Mesh: MeshConstructor;
-  readonly MeshGeometry: MeshGeometryConstructor;
-  readonly Shader: ShaderFactory;
+  readonly Mesh: InjectedMeshConstructor<PixiMaskHaloMesh>;
+  readonly MeshGeometry: InjectedMeshGeometryConstructor;
+  readonly Shader: InjectedShaderFactory;
   readonly UniformGroup: UniformGroupConstructor;
   readonly mediaHeight: number;
   readonly mediaWidth: number;
@@ -118,7 +163,7 @@ export function createPixiMaskHaloRenderer(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -146,7 +191,7 @@ export function createPixiMaskHaloRenderer(options: {
     destroy() {
       for (const pass of passes) {
         pass.mesh.destroy();
-        pass.shader.destroy(true);
+        destroyShaderKeepingProgram(pass.shader);
       }
 
       passes.length = 0;
@@ -231,12 +276,7 @@ export function createPixiMaskHaloRenderer(options: {
       pass.shader.resources.uTexture = source;
       pass.shader.resources.uSampler = source.style;
     } catch {
-      try {
-        pass.shader.destroy(true);
-      } catch {
-        // Pixi has already invalidated this shader's resource group.
-      }
-
+      destroyShaderKeepingProgram(pass.shader);
       pass.shader = createShader(pass.uniforms);
       pass.mesh.shader = pass.shader;
       pass.shader.resources.uTexture = source;
@@ -248,7 +288,17 @@ export function createPixiMaskHaloRenderer(options: {
     return options.Shader.from({
       gl: {
         fragment: maskHaloFragmentShader,
-        vertex: maskHaloVertexShader,
+        vertex: tintedMaskVertexGlsl,
+      },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: maskHaloFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: tintedMaskVertexWgsl,
+        },
       },
       resources: {
         haloUniforms: uniforms,
@@ -288,41 +338,6 @@ export function buildMaskHaloPalette(
   return palette;
 }
 
-function createPlaceholderCanvas() {
-  const canvas = document.createElement("canvas");
-
-  canvas.height = 1;
-  canvas.width = 1;
-
-  return canvas;
-}
-
-const maskHaloVertexShader = `#version 300 es
-precision highp float;
-
-in vec2 aPosition;
-in vec2 aUV;
-
-uniform mat3 uProjectionMatrix;
-uniform mat3 uWorldTransformMatrix;
-uniform vec4 uWorldColorAlpha;
-uniform mat3 uTransformMatrix;
-uniform vec4 uColor;
-
-out vec2 vUV;
-out vec4 vColor;
-
-void main(void) {
-  mat3 modelViewProjectionMatrix =
-    uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-
-  gl_Position =
-    vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-  vUV = aUV;
-  vColor = uWorldColorAlpha * uColor;
-}
-`;
-
 const maskHaloFragmentShader = `#version 300 es
 precision highp float;
 precision highp int;
@@ -341,5 +356,26 @@ void main(void) {
     int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
 
   finalColor = uHaloPalette[paletteIndex] * vColor;
+}
+`;
+
+const maskHaloFragmentWgsl = `
+struct HaloUniforms {
+  uHaloPalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
+}
+
+@group(2) @binding(0) var<uniform> haloUniforms: HaloUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+@fragment
+fn mainFragment(
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+) -> @location(0) vec4<f32> {
+  let maskId = floor(textureSampleLevel(uTexture, uSampler, vUV, 0.0).r * 255.0 + 0.5);
+  let paletteIndex = i32(clamp(maskId, 0.0, ${MAX_ID_MASK_PALETTE_ENTRIES - 1}.0));
+
+  return haloUniforms.uHaloPalette[paletteIndex] * vColor;
 }
 `;

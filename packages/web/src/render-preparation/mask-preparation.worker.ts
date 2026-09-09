@@ -1,7 +1,7 @@
 import {
   compositeMaskFrame,
-  createMaskIdFrame,
-  createPngIdMaskFrame,
+  createIdMaskPlane,
+  createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
@@ -32,28 +32,47 @@ workerScope.addEventListener("message", (event) => {
     return;
   }
 
-  void prepareMaskFrame(message);
+  prepareMaskFrame(message);
 });
 
-async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
+function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   try {
     const regionMaskCoverage = createRegionMaskCoverageFrame(
       message.job.instructions,
     );
-    const pngIdMaskFrame = await createPngIdMaskWorkerResponse(
-      message,
-      regionMaskCoverage,
+    const coverageTransfers =
+      getRegionMaskCoverageTransfers(regionMaskCoverage);
+    const idMaskFrame = createIdMaskRasterFrame(
+      message.job.instructions,
+      message.job.maxRasterWidth,
     );
 
-    if (pngIdMaskFrame) {
-      workerScope.postMessage(pngIdMaskFrame, [
-        pngIdMaskFrame.imageBitmap,
-        pngIdMaskFrame.png.buffer,
-        pngIdMaskFrame.fillPalette.buffer,
-        pngIdMaskFrame.strokePalette.buffer,
-        pngIdMaskFrame.strokeWidths.buffer,
-        ...getRegionMaskCoverageTransfers(regionMaskCoverage),
-      ]);
+    if (idMaskFrame) {
+      workerScope.postMessage(
+        {
+          artifactKind: PreparedMaskFrameKind.IdMask,
+          fillPalette: idMaskFrame.fillPalette,
+          hasStroke: idMaskFrame.hasStroke,
+          height: idMaskFrame.height,
+          key: message.job.key,
+          maxStrokeWidth: idMaskFrame.maxStrokeWidth,
+          raster: idMaskFrame.data,
+          regionMaskCoverage,
+          requestId: message.requestId,
+          sourceWidth: idMaskFrame.sourceWidth,
+          strokePalette: idMaskFrame.strokePalette,
+          strokeWidths: idMaskFrame.strokeWidths,
+          type: MaskPreparationWorkerMessageType.Complete,
+          width: idMaskFrame.width,
+        },
+        [
+          idMaskFrame.data.buffer,
+          idMaskFrame.fillPalette.buffer,
+          idMaskFrame.strokePalette.buffer,
+          idMaskFrame.strokeWidths.buffer,
+          ...coverageTransfers,
+        ],
+      );
       return;
     }
 
@@ -70,48 +89,43 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
 
     const preparedPixels =
       compositedFrame ?? createTransparentCoverageCarrier();
-
     const imageData = new ImageData(
       preparedPixels.data,
       preparedPixels.width,
       preparedPixels.height,
     );
     const imageBitmap = createImageBitmapFromImageData(imageData);
-    const idMaskData = createMaskIdFrame(message.job.instructions)?.data;
+    const idMaskPlane = createIdMaskPlane(
+      message.job.instructions,
+      message.job.maxRasterWidth,
+    );
+    const idMaskTransfers = idMaskPlane ? [idMaskPlane.data.buffer] : [];
 
     if (imageBitmap) {
       workerScope.postMessage(
         {
+          idMaskPlane,
           imageBitmap,
-          idMaskData,
           key: message.job.key,
           regionMaskCoverage,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,
         },
-        [
-          ...(idMaskData ? [idMaskData.buffer] : []),
-          ...getRegionMaskCoverageTransfers(regionMaskCoverage),
-          imageBitmap,
-        ],
+        [imageBitmap, ...idMaskTransfers, ...coverageTransfers],
       );
       return;
     }
 
     workerScope.postMessage(
       {
-        idMaskData,
+        idMaskPlane,
         imageData,
         key: message.job.key,
         regionMaskCoverage,
         requestId: message.requestId,
         type: MaskPreparationWorkerMessageType.Complete,
       },
-      [
-        ...(idMaskData ? [idMaskData.buffer] : []),
-        ...getRegionMaskCoverageTransfers(regionMaskCoverage),
-        imageData.data.buffer,
-      ],
+      [imageData.data.buffer, ...idMaskTransfers, ...coverageTransfers],
     );
   } catch (error) {
     workerScope.postMessage({
@@ -126,71 +140,15 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   }
 }
 
+/**
+ * A frame that carries only region coverage has nothing to composite, and the
+ * RGBA branch still has to produce an artifact for the coverage to ride on.
+ */
 function createTransparentCoverageCarrier() {
   return {
     data: new Uint8ClampedArray(new ArrayBuffer(4)),
     height: 1,
     width: 1,
-  };
-}
-
-async function createPngIdMaskWorkerResponse(
-  message: MaskPreparationWorkerRequest,
-  regionMaskCoverage: ReturnType<typeof createRegionMaskCoverageFrame>,
-): Promise<
-  | (MaskPreparationWorkerResponse & {
-      readonly fillPalette: Float32Array<ArrayBuffer>;
-      readonly imageBitmap: ImageBitmap;
-      readonly maxStrokeWidth: number;
-      readonly png: Uint8Array<ArrayBuffer>;
-      readonly strokePalette: Float32Array<ArrayBuffer>;
-      readonly strokeWidths: Float32Array<ArrayBuffer>;
-    })
-  | undefined
-> {
-  if (
-    typeof Blob === "undefined" ||
-    typeof createImageBitmap === "undefined" ||
-    typeof CompressionStream === "undefined"
-  ) {
-    return undefined;
-  }
-
-  let frame: Awaited<ReturnType<typeof createPngIdMaskFrame>>;
-
-  try {
-    frame = await createPngIdMaskFrame(message.job.instructions);
-  } catch {
-    return undefined;
-  }
-
-  if (!frame) {
-    return undefined;
-  }
-
-  let imageBitmap: ImageBitmap;
-
-  try {
-    imageBitmap = await createImageBitmap(
-      new Blob([frame.png], { type: "image/png" }),
-    );
-  } catch {
-    return undefined;
-  }
-
-  return {
-    artifactKind: PreparedMaskFrameKind.PngIdMask,
-    fillPalette: frame.fillPalette,
-    hasStroke: frame.hasStroke,
-    imageBitmap,
-    key: message.job.key,
-    maxStrokeWidth: frame.maxStrokeWidth,
-    png: frame.png,
-    requestId: message.requestId,
-    regionMaskCoverage,
-    strokePalette: frame.strokePalette,
-    strokeWidths: frame.strokeWidths,
-    type: MaskPreparationWorkerMessageType.Complete,
   };
 }
 

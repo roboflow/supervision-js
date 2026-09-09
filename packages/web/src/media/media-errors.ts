@@ -1,5 +1,45 @@
 import { MediaErrorKind } from "supervision-js-core";
 
+/**
+ * The vocabulary a media producer may name its own failure in. A producer that
+ * states its cause as one of these on `code` is classified by that name; any
+ * other code is classified from the message like an uncoded failure.
+ */
+export const MEDIA_PRODUCER_ERROR_CODES = [
+  "ABORTED",
+  "BACKEND_CRASHED",
+  "CONTAINER_UNREADABLE",
+  "DECODER_STALLED",
+  "DECODE_UNSUPPORTED",
+  "NO_VIDEO_TRACK",
+  "PRESENTATION_MISMATCH",
+  "RATE_UNSUPPORTED",
+  "SOURCE_UNREADABLE",
+  "VIDEO_TRACK_UNREADABLE",
+] as const;
+
+type MediaProducerErrorCode = (typeof MEDIA_PRODUCER_ERROR_CODES)[number];
+
+/**
+ * The kind each coded refusal already stands for. Reading the code beats
+ * re-deriving the kind from the message: the text of a container refusal says
+ * "demuxer", the text of a wedged worker says "timed out", and the patterns
+ * below would file both under the wrong kind. Written as a total record, so a
+ * code added to the vocabulary above fails the build until it has a kind.
+ */
+const PRODUCER_CODE_KINDS: Record<MediaProducerErrorCode, MediaErrorKind> = {
+  ABORTED: MediaErrorKind.Unknown,
+  BACKEND_CRASHED: MediaErrorKind.Decode,
+  CONTAINER_UNREADABLE: MediaErrorKind.Unreadable,
+  DECODER_STALLED: MediaErrorKind.Decode,
+  DECODE_UNSUPPORTED: MediaErrorKind.UnsupportedFormat,
+  NO_VIDEO_TRACK: MediaErrorKind.NoVideoTrack,
+  PRESENTATION_MISMATCH: MediaErrorKind.Unknown,
+  RATE_UNSUPPORTED: MediaErrorKind.Unknown,
+  SOURCE_UNREADABLE: MediaErrorKind.Unreadable,
+  VIDEO_TRACK_UNREADABLE: MediaErrorKind.UnsupportedFormat,
+};
+
 const UNSUPPORTED_FORMAT_PATTERN =
   /unsupported|not supported|no (?:matching )?(?:decoder|codec)|codec/i;
 const DECODE_PATTERN = /decod|demux|corrupt|malformed|bitstream/i;
@@ -48,10 +88,9 @@ export function toMediaSourceError(
   }
 
   const message = error instanceof Error ? error.message : fallbackMessage;
+  const kind = producerCodeKind(error) ?? classifyMediaErrorMessage(message);
 
-  return new MediaSourceError(classifyMediaErrorMessage(message), message, {
-    cause: error,
-  });
+  return new MediaSourceError(kind, message, { cause: error });
 }
 
 /**
@@ -62,6 +101,13 @@ export function toMediaSourceError(
  */
 export function getMediaErrorKind(error: unknown): MediaErrorKind {
   return toMediaSourceError(error).kind;
+}
+
+function producerCodeKind(error: unknown): MediaErrorKind | null {
+  const code = (error as { readonly code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" && code in PRODUCER_CODE_KINDS
+    ? PRODUCER_CODE_KINDS[code as MediaProducerErrorCode]
+    : null;
 }
 
 function classifyMediaErrorMessage(message: string): MediaErrorKind {

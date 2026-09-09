@@ -2,116 +2,133 @@ import type {
   ChangeEvent,
   CSSProperties,
   PointerEvent as ReactPointerEvent,
+  RefObject,
 } from "react";
-import { useEffect, useRef, useState } from "react";
 import {
-  MediaRendererPlaybackState,
-  type DetectionBufferState,
-} from "supervision";
-import { formatTimeRange } from "../format";
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { MediaRendererPlaybackState } from "supervision";
+import type {
+  FrameTimelineData,
+  SourceResidencyDiagnostics,
+} from "supervision/web-video-engine";
+import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
+import { DemoEvalHook } from "../eval-hooks";
+import {
+  readLiveReadouts,
+  useLiveReadoutWriter,
+  type LiveReadouts,
+} from "../hooks/live-readouts";
 import type { TimelineRange } from "../session/demo-session-types";
+import { DiagnosticLabel } from "./DiagnosticLabel";
+import {
+  formatSourceResidency,
+  readSourceResidencyRanges,
+  SOURCE_RESIDENCY_TOOLTIP,
+} from "./source-residency-lane";
+import {
+  readLivePreparedWindow,
+  readLivePresentedTime,
+} from "./live-readout-format";
+import { LiveReadoutText } from "./LiveReadoutText";
+import {
+  formatTimelineFrame,
+  quantizeScrubTime,
+  readTimelineFrames,
+  resolveScrubTime,
+  resolveTimelineFrame,
+} from "./timeline-frames";
+import { TimelineScrubInput } from "./TimelineScrubInput";
+
+const AXIS_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1] as const;
+const SHORT_MEDIA_SECONDS = 10;
+
+/** Lanes start below the axis label row and the scrub strip. */
+const LANE_ROW_OFFSET = 3;
 
 export function TimelineView({
-  activeDetectionFrameTime,
-  currentTime,
-  detectionBuffer,
   disabled,
   duration,
-  normalizedRanges = [],
+  frameTimeline = null,
+  onScrub,
   onSeek,
-  playbackState,
   processedRanges = [],
   processingRanges = [],
-  preparedAheadFrames,
-  preparedAheadSeconds,
+  sourceResidency = null,
 }: {
-  readonly activeDetectionFrameTime: number | null;
-  readonly currentTime: number;
-  readonly detectionBuffer: DetectionBufferState | null;
   readonly disabled: boolean;
   readonly duration: number | null;
-  readonly normalizedRanges?: readonly TimelineRange[];
-  readonly onSeek: (time: number) => void;
-  readonly playbackState: MediaRendererPlaybackState | null;
+  readonly frameTimeline?: FrameTimelineData | null;
+  readonly onScrub: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void> | void;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
-  readonly preparedAheadFrames: number | null;
-  readonly preparedAheadSeconds: number | null;
+  readonly sourceResidency?: SourceResidencyDiagnostics | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
-  const timelineCurrentTime = useSmoothTimelineCurrentTime({
-    currentTime,
+  const frames = useMemo(
+    () => readTimelineFrames(frameTimeline),
+    [frameTimeline],
+  );
+  const {
+    flushSeek,
+    onScrubChange,
+    onScrubEnd,
+    onScrubStart,
+    pendingSeekTime,
+    scrubTime,
+  } = useTimelineSeekGesture({
     disabled,
     duration: mediaDuration,
-    playbackState,
+    onScrub,
+    onSeek,
   });
-  const { flushSeek, onScrubChange, onScrubEnd, onScrubStart, scrubTime } =
-    useDebouncedTimelineSeek({
-      currentTime,
-      disabled,
-      duration: mediaDuration,
-      onSeek,
-    });
-  const displayedCurrentTime = scrubTime ?? timelineCurrentTime;
-  const visualDuration =
-    mediaDuration ??
-    Math.max(
-      displayedCurrentTime,
-      detectionBuffer?.bufferEndTime ?? 0,
-      detectionBuffer?.requestedEndTime ?? 0,
-      activeDetectionFrameTime ?? 0,
-      currentTime + (preparedAheadSeconds ?? 0),
-      getMaxRangeEnd(normalizedRanges),
-      getMaxRangeEnd(processedRanges),
-      getMaxRangeEnd(processingRanges),
-      1,
-    );
-  const requestedRange = createRangeStyle({
-    duration: visualDuration,
-    endTime: detectionBuffer?.requestedEndTime ?? null,
-    startTime: detectionBuffer?.requestedStartTime ?? null,
-  });
-  const bufferRange = createRangeStyle({
-    duration: visualDuration,
-    endTime: detectionBuffer?.bufferEndTime ?? null,
-    startTime: detectionBuffer?.bufferStartTime ?? null,
-  });
-  const preparedWindowRange = createRangeStyle({
-    duration: visualDuration,
-    endTime:
-      preparedAheadSeconds === null
-        ? null
-        : currentTime + Math.max(0, preparedAheadSeconds),
-    startTime: preparedAheadSeconds === null ? null : currentTime,
-  });
-  const processedRangeStyles = createSegmentStyles(
-    processedRanges,
-    visualDuration,
+  const rangeFloor = useMemo(
+    () => Math.max(1, getMaxRangeEnd(processedRanges, processingRanges)),
+    [processedRanges, processingRanges],
   );
-  const processingRangeStyles = createSegmentStyles(
-    processingRanges,
-    visualDuration,
+  const rangeFloorRef = useRef(rangeFloor);
+  const readVisualDuration = useCallback(
+    (readouts: LiveReadouts) =>
+      mediaDuration ?? readSpannedDuration(readouts, rangeFloorRef.current),
+    [mediaDuration],
   );
-  const normalizedRangeStyles = createSegmentStyles(
-    normalizedRanges,
-    visualDuration,
+
+  useEffect(() => {
+    rangeFloorRef.current = rangeFloor;
+  }, [rangeFloor]);
+
+  const trackWidthRef = useRef(0);
+  const { playheadRef, writePlayhead } = useTimelinePlayhead({
+    duration: mediaDuration,
+    pendingSeekTime,
+    readVisualDuration,
+    scrubTime,
+    trackWidthRef,
+  });
+  const processedRangeStyles = useMemo(
+    () => createSegmentStyles(processedRanges, mediaDuration),
+    [mediaDuration, processedRanges],
   );
-  const showRequestedRange =
-    requestedRange !== null &&
-    !sameRange(
-      detectionBuffer?.requestedStartTime ?? null,
-      detectionBuffer?.requestedEndTime ?? null,
-      detectionBuffer?.bufferStartTime ?? null,
-      detectionBuffer?.bufferEndTime ?? null,
-    );
-  const inputMax = mediaDuration ?? visualDuration;
-  const inputValue = clamp(displayedCurrentTime, 0, inputMax);
-  const playheadLeft = toPercent(displayedCurrentTime, visualDuration);
-  const playheadProgress = toPercent(inputValue, inputMax);
-  const activeFrameLeft =
-    activeDetectionFrameTime === null
-      ? null
-      : toPercent(activeDetectionFrameTime, visualDuration);
+  const processingRangeStyles = useMemo(
+    () => createSegmentStyles(processingRanges, mediaDuration),
+    [mediaDuration, processingRanges],
+  );
+  const residencyRangeStyles = useMemo(
+    () =>
+      createSegmentStyles(
+        readSourceResidencyRanges(sourceResidency, mediaDuration),
+        mediaDuration,
+      ),
+    [mediaDuration, sourceResidency],
+  );
+  const axisTicks = createAxisTicks(mediaDuration);
   const stripClassName = [
     "timeline-view__strip",
     !disabled && mediaDuration !== null
@@ -121,15 +138,249 @@ export function TimelineView({
     .filter(Boolean)
     .join(" ");
 
-  const handleSeek = (event: ChangeEvent<HTMLInputElement>) => {
-    onScrubChange(Number(event.currentTarget.value));
-  };
-  const handleInputPointerDown = () => {
-    onScrubStart(inputValue);
-  };
-  const handleInputPointerUp = () => {
-    onScrubEnd();
-  };
+  const hoverLabelRef = useRef<HTMLSpanElement>(null);
+  const hoverLineRef = useRef<HTMLSpanElement>(null);
+  const hoverHalfWidthRef = useRef(0);
+  const writtenHoverLabelRef = useRef<string | null>(null);
+  const hoverContextRef = useRef({ disabled, frames, mediaDuration });
+
+  useEffect(() => {
+    hoverContextRef.current = { disabled, frames, mediaDuration };
+  });
+
+  /**
+   * A hover preview answers per pointer move, so it writes the label and the
+   * guide straight to their elements: the panel's React state stays the scrub
+   * gesture's, and hovering repaints nothing else.
+   *
+   * Both are drawn at the frame the pointer is over, not at the pointer, so
+   * what the label names is what a click there lands on. With no table there is
+   * no frame to name and the pointer's own position is all the readout can
+   * honestly claim.
+   */
+  const handleHoverMove = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const {
+        disabled: isDisabled,
+        frames: hoverFrames,
+        mediaDuration: hoverDuration,
+      } = hoverContextRef.current;
+
+      if (isDisabled || hoverDuration === null) {
+        return;
+      }
+
+      const rect = event.currentTarget.getBoundingClientRect();
+      const offset = clamp(event.clientX - rect.left, 0, rect.width);
+      const frame = resolveTimelineFrame(
+        hoverFrames,
+        offset,
+        rect.width,
+        hoverDuration,
+      );
+      const guideOffset =
+        frame === null ? offset : (frame.timeS / hoverDuration) * rect.width;
+      const label = hoverLabelRef.current;
+
+      if (label !== null) {
+        const nextLabel =
+          frame === null
+            ? formatTime((offset / rect.width) * hoverDuration)
+            : formatTimelineFrame(frame);
+
+        if (nextLabel !== writtenHoverLabelRef.current) {
+          writtenHoverLabelRef.current = nextLabel;
+          label.textContent = nextLabel;
+        }
+
+        const halfWidth = hoverHalfWidthRef.current;
+
+        label.style.transform = `translateX(${clamp(
+          guideOffset,
+          halfWidth,
+          Math.max(halfWidth, rect.width - halfWidth),
+        )}px) translateX(-50%)`;
+        // A move shows the readout as well as writing it: a pointer resting on
+        // the strip while a source changes under it crosses no boundary, so no
+        // enter is coming to put back what the change took down.
+        label.classList.add("timeline-view__hover--visible");
+      }
+
+      if (hoverLineRef.current !== null) {
+        // Centred on the offset, like the label above it and like the playhead
+        // marker, whose own rule centres a 2px bar. Anchoring this one by its
+        // left edge left it sitting beside the playhead at the same time.
+        hoverLineRef.current.style.transform = `translateX(${guideOffset}px) translateX(-50%)`;
+        hoverLineRef.current.classList.add(
+          "timeline-view__hover-line--visible",
+        );
+      }
+    },
+    [],
+  );
+  const handleHoverEnter = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const { disabled: isDisabled, mediaDuration: hoverDuration } =
+        hoverContextRef.current;
+
+      if (isDisabled || hoverDuration === null) {
+        return;
+      }
+
+      const label = hoverLabelRef.current;
+
+      if (label !== null) {
+        hoverHalfWidthRef.current = label.offsetWidth / 2;
+      }
+
+      handleHoverMove(event);
+    },
+    [handleHoverMove],
+  );
+  const handleHoverLeave = useCallback(() => {
+    hoverLabelRef.current?.classList.remove("timeline-view__hover--visible");
+    hoverLineRef.current?.classList.remove(
+      "timeline-view__hover-line--visible",
+    );
+  }, []);
+
+  // A readout left standing while the pointer rests on the strip keeps naming a
+  // frame of the clip that closed, and the next clip has no such frame.
+  useEffect(() => {
+    const label = hoverLabelRef.current;
+
+    if (label !== null) {
+      label.textContent = "";
+    }
+
+    writtenHoverLabelRef.current = null;
+    handleHoverLeave();
+  }, [frames, handleHoverLeave]);
+
+  const gestureRef = useRef({
+    flushSeek,
+    frames,
+    onScrubChange,
+    onScrubEnd,
+    onScrubStart,
+  });
+
+  useEffect(() => {
+    gestureRef.current = {
+      flushSeek,
+      frames,
+      onScrubChange,
+      onScrubEnd,
+      onScrubStart,
+    };
+  });
+
+  const getPointerTime = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (mediaDuration === null) {
+        return 0;
+      }
+
+      const rect = event.currentTarget.getBoundingClientRect();
+
+      return resolveScrubTime(
+        frames,
+        event.clientX - rect.left,
+        rect.width,
+        mediaDuration,
+      );
+    },
+    [frames, mediaDuration],
+  );
+  const inputPointerActiveRef = useRef(false);
+  const inputPointerTimeRef = useRef<number | null>(null);
+  const releasedInputTimeRef = useRef<number | null>(null);
+  const handleSeek = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const nextTime = quantizeScrubTime(
+      gestureRef.current.frames,
+      Number(event.currentTarget.value),
+    );
+
+    if (inputPointerActiveRef.current) {
+      return;
+    }
+
+    const releasedTime = releasedInputTimeRef.current;
+    releasedInputTimeRef.current = null;
+
+    if (
+      releasedTime !== null &&
+      // The range rounds to 10 ms, so its native value may sit half a step
+      // from the coordinate-authoritative target already committed on release.
+      Math.abs(releasedTime - nextTime) <= 0.005
+    ) {
+      return;
+    }
+
+    gestureRef.current.onScrubChange(nextTime);
+  }, []);
+  const handleInputFlush = useCallback(() => {
+    gestureRef.current.flushSeek();
+  }, []);
+  const publishInputPointer = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      const nextTime = getPointerTime(event);
+
+      if (nextTime !== inputPointerTimeRef.current) {
+        inputPointerTimeRef.current = nextTime;
+        gestureRef.current.onScrubChange(nextTime);
+      }
+    },
+    [getPointerTime],
+  );
+  const handleInputPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      if (mediaDuration === null) {
+        return;
+      }
+
+      event.currentTarget.setPointerCapture(event.pointerId);
+      inputPointerActiveRef.current = true;
+      releasedInputTimeRef.current = null;
+      const nextTime = getPointerTime(event);
+
+      inputPointerTimeRef.current = nextTime;
+      // A click is one seek. Pointer movement is what turns it into a scrub.
+      gestureRef.current.onScrubStart(nextTime);
+    },
+    [getPointerTime, mediaDuration],
+  );
+  const handleInputPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      handleHoverMove(event);
+      if (inputPointerActiveRef.current && event.buttons === 1) {
+        publishInputPointer(event);
+      }
+    },
+    [handleHoverMove, publishInputPointer],
+  );
+  const handleInputPointerEnd = useCallback(() => {
+    if (!inputPointerActiveRef.current) {
+      return;
+    }
+
+    inputPointerActiveRef.current = false;
+    releasedInputTimeRef.current = inputPointerTimeRef.current;
+    inputPointerTimeRef.current = null;
+    gestureRef.current.onScrubEnd();
+  }, []);
+  const handleInputPointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLInputElement>) => {
+      if (!inputPointerActiveRef.current) {
+        return;
+      }
+
+      publishInputPointer(event);
+      handleInputPointerEnd();
+    },
+    [handleInputPointerEnd, publishInputPointer],
+  );
+  const publishedScrubTimeRef = useRef<number | null>(null);
   const handleStripPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || mediaDuration === null) {
       return;
@@ -138,363 +389,664 @@ export function TimelineView({
     event.currentTarget.setPointerCapture(event.pointerId);
     const nextTime = getPointerTime(event);
 
+    publishedScrubTimeRef.current = nextTime;
     onScrubStart(nextTime);
     onScrubChange(nextTime);
   };
   const handleStripPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    handleHoverMove(event);
+
     if (event.buttons !== 1) {
       return;
     }
 
-    onScrubChange(getPointerTime(event));
-  };
-  const handleStripPointerUp = () => {
-    onScrubEnd();
-  };
-  const getPointerTime = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (mediaDuration === null) {
-      return 0;
+    const nextTime = getPointerTime(event);
+
+    // A quantised drag publishes one value per frame, so a move answering with
+    // the value already published crossed no frame: there is nothing for the
+    // engine to decode and nothing for React to commit.
+    if (nextTime === publishedScrubTimeRef.current) {
+      return;
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const offset = event.clientX - rect.left;
-
-    return clamp(offset / rect.width, 0, 1) * mediaDuration;
+    publishedScrubTimeRef.current = nextTime;
+    onScrubChange(nextTime);
   };
+  const handleStripPointerEnd = () => {
+    publishedScrubTimeRef.current = null;
+    onScrubEnd();
+  };
+  const frameMarkRef = useRef<HTMLSpanElement>(null);
+  const bandRefs = useTimelineBands();
+  const scrubInputRef = useRef<HTMLInputElement>(null);
+
+  useLiveReadoutWriter((readouts) => {
+    writePlayhead(readouts, readVisualDuration(readouts));
+    writeScrubInputValue(
+      scrubInputRef.current,
+      readouts,
+      resolveTimelineTime(scrubTime, pendingSeekTime, null),
+    );
+  });
+
+  useLiveReadoutWriter((readouts) => {
+    const visualDuration = readVisualDuration(readouts);
+    const stepPercent = readPixelStepPercent(trackWidthRef.current);
+
+    writeMarker(
+      frameMarkRef.current,
+      readouts.activeDetectionFrameTime,
+      visualDuration,
+      stepPercent,
+    );
+    writeTimelineBands(bandRefs, readouts, visualDuration, stepPercent);
+  }, "geometry");
 
   return (
     <div className="timeline-view">
-      <div className="timeline-view__legend" aria-hidden="true">
-        <span className="timeline-view__chip timeline-view__chip--buffer">
-          <span className="timeline-view__chip-dot" />
-          Hot predictions{" "}
-          <strong>
-            {formatTimeRange(
-              detectionBuffer?.bufferStartTime ?? null,
-              detectionBuffer?.bufferEndTime ?? null,
-            )}
-          </strong>
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--ready">
-          <span className="timeline-view__chip-dot" />
-          Prepared window{" "}
-          <strong>
-            {preparedAheadSeconds === null
-              ? "-"
-              : `${preparedAheadSeconds.toFixed(2)}s · ${preparedAheadFrames ?? 0}f`}
-          </strong>
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--requested">
-          <span className="timeline-view__chip-dot" />
-          Requested{" "}
-          <strong>
-            {formatTimeRange(
-              detectionBuffer?.requestedStartTime ?? null,
-              detectionBuffer?.requestedEndTime ?? null,
-            )}
-          </strong>
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--processed">
-          <span className="timeline-view__chip-dot" />
-          Has detections
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--normalized">
-          <span className="timeline-view__chip-dot" />
-          Normalized
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--processing">
-          <span className="timeline-view__chip-dot" />
-          Running inference
-        </span>
+      <div className="timeline-view__cluster" aria-hidden="true" />
+      <div className="timeline-view__axis" aria-hidden="true">
+        {axisTicks.length === 0 ? (
+          <span className="timeline-view__axis-note">duration unavailable</span>
+        ) : (
+          axisTicks.map((tick) => (
+            <span
+              className={`timeline-view__tick timeline-view__tick--${tick.anchor}`}
+              key={tick.left}
+              style={{ "--timeline-left": tick.left } as TimelineMarkerStyle}
+            >
+              {tick.label}
+            </span>
+          ))
+        )}
       </div>
-
-      <div className="timeline-view__scrubber">
-        <div className="timeline-view__lanes" aria-hidden="true">
-          <div className="timeline-view__lane timeline-view__lane--normalization">
-            {normalizedRangeStyles.map(({ key, style }) => (
-              <span
-                className="timeline-view__segment timeline-view__segment--normalized"
-                key={key}
-                style={style}
-              />
-            ))}
-          </div>
-          <div className="timeline-view__lane timeline-view__lane--detections">
-            {processedRangeStyles.map(({ key, style }) => (
-              <span
-                className="timeline-view__segment timeline-view__segment--processed"
-                key={key}
-                style={style}
-              />
-            ))}
-            {processingRangeStyles.map(({ key, style }) => (
-              <span
-                className="timeline-view__segment timeline-view__segment--processing"
-                key={key}
-                style={style}
-              />
-            ))}
-          </div>
-          <div className="timeline-view__lane timeline-view__lane--ready">
-            {preparedWindowRange ? (
-              <span
-                className="timeline-view__segment timeline-view__segment--ready"
-                style={preparedWindowRange}
-              />
-            ) : null}
-          </div>
-        </div>
-        <div
-          aria-hidden="true"
-          className={stripClassName}
-          onPointerDown={handleStripPointer}
-          onPointerMove={handleStripPointerMove}
-          onPointerUp={handleStripPointerUp}
-        >
-          {showRequestedRange && requestedRange ? (
-            <span
-              className="timeline-view__range timeline-view__range--requested"
-              style={requestedRange}
-            />
-          ) : null}
-          {bufferRange ? (
-            <span
-              className="timeline-view__range timeline-view__range--buffer"
-              style={bufferRange}
-            />
-          ) : null}
-          {activeFrameLeft !== null ? (
-            <span
-              className="timeline-view__marker timeline-view__marker--active-frame"
-              style={
-                { "--timeline-left": activeFrameLeft } as TimelineMarkerStyle
-              }
-            />
-          ) : null}
+      <span
+        aria-hidden="true"
+        className="timeline-view__hover"
+        ref={hoverLabelRef}
+      />
+      <div
+        aria-hidden="true"
+        className={stripClassName}
+        onPointerDown={handleStripPointer}
+        onPointerEnter={handleHoverEnter}
+        onPointerLeave={handleHoverLeave}
+        onLostPointerCapture={handleStripPointerEnd}
+        onPointerCancel={handleStripPointerEnd}
+        onPointerMove={handleStripPointerMove}
+        onPointerUp={handleStripPointerEnd}
+      >
+        <span className="timeline-view__frame-mark" ref={frameMarkRef}>
+          <span className="timeline-view__marker timeline-view__marker--active-frame" />
+        </span>
+        <span className="timeline-view__hover-line" ref={hoverLineRef} />
+      </div>
+      <TimelineScrubInput
+        disabled={disabled || mediaDuration === null}
+        inputRef={scrubInputRef}
+        max={mediaDuration ?? rangeFloor}
+        onBlur={handleInputFlush}
+        onChange={handleSeek}
+        onKeyUp={handleInputFlush}
+        onLostPointerCapture={handleInputPointerEnd}
+        onPointerCancel={handleInputPointerEnd}
+        onPointerDown={handleInputPointerDown}
+        onPointerEnter={handleHoverEnter}
+        onPointerLeave={handleHoverLeave}
+        onPointerMove={handleInputPointerMove}
+        onPointerUp={handleInputPointerUp}
+      />
+      {LIVE_LANES.map((lane, index) => (
+        <Fragment key={lane.key}>
           <span
-            className="timeline-view__marker timeline-view__marker--playhead"
-            style={{ "--timeline-left": playheadLeft } as TimelineMarkerStyle}
-          />
+            className="timeline-view__lane-head"
+            style={LANE_ROW_STYLES[index]}
+          >
+            <DiagnosticLabel label={lane.label} tooltip={lane.tooltip} />
+            <LiveReadoutText
+              className="timeline-view__lane-value"
+              format={lane.format}
+            />
+          </span>
+          <div
+            aria-hidden="true"
+            className="timeline-view__lane"
+            style={LANE_ROW_STYLES[index]}
+          >
+            {lane.bands.map((band) => (
+              <span
+                className={`timeline-view__segment timeline-view__segment--${band.variant}`}
+                key={band.key}
+                ref={bandRefs[band.key]}
+              />
+            ))}
+          </div>
+        </Fragment>
+      ))}
+      <span className="timeline-view__lane-head" style={LANE_ROW_STYLES[3]}>
+        <DiagnosticLabel label="Detections" tooltip={PROCESSED_TOOLTIP} />
+        <span className="timeline-view__lane-value">
+          {formatRangeExtent(processedRanges, "none")}
+        </span>
+      </span>
+      <div
+        aria-hidden="true"
+        className="timeline-view__lane"
+        style={LANE_ROW_STYLES[3]}
+      >
+        {processedRangeStyles.map(({ key, style }) => (
           <span
-            className="timeline-view__knob"
-            style={{ "--timeline-left": playheadLeft } as TimelineMarkerStyle}
+            className="timeline-view__segment timeline-view__segment--processed"
+            key={key}
+            style={style}
           />
-        </div>
-        <input
-          aria-label="Timeline"
-          className="timeline-view__input"
-          disabled={disabled || mediaDuration === null}
-          max={inputMax}
-          min={0}
-          onChange={handleSeek}
-          onBlur={flushSeek}
-          onKeyUp={flushSeek}
-          onPointerDown={handleInputPointerDown}
-          onPointerUp={handleInputPointerUp}
-          step={0.01}
-          style={
-            { "--timeline-progress": playheadProgress } as TimelineInputStyle
-          }
-          type="range"
-          value={inputValue}
+        ))}
+      </div>
+      <span className="timeline-view__lane-head" style={LANE_ROW_STYLES[4]}>
+        <DiagnosticLabel label="Inference" tooltip={PROCESSING_TOOLTIP} />
+        <span className="timeline-view__lane-value">
+          {formatRangeExtent(processingRanges, "idle")}
+        </span>
+      </span>
+      <div
+        aria-hidden="true"
+        className="timeline-view__lane"
+        style={LANE_ROW_STYLES[4]}
+      >
+        {processingRangeStyles.map(({ key, style }) => (
+          <span
+            className="timeline-view__segment timeline-view__segment--processing"
+            key={key}
+            style={style}
+          />
+        ))}
+      </div>
+      <span className="timeline-view__lane-head" style={LANE_ROW_STYLES[5]}>
+        <DiagnosticLabel
+          label="Video held"
+          tooltip={SOURCE_RESIDENCY_TOOLTIP}
         />
+        <span className="timeline-view__lane-value">
+          {formatSourceResidency(sourceResidency)}
+        </span>
+      </span>
+      <div
+        aria-hidden="true"
+        className="timeline-view__lane"
+        style={LANE_ROW_STYLES[5]}
+      >
+        {residencyRangeStyles.map(({ key, style }) => (
+          <span
+            className="timeline-view__segment timeline-view__segment--resident"
+            key={key}
+            style={style}
+          />
+        ))}
       </div>
+      <span
+        aria-hidden="true"
+        className="timeline-view__playhead"
+        data-eval={DemoEvalHook.TimelinePlayhead}
+        ref={playheadRef}
+      >
+        <span className="timeline-view__marker timeline-view__marker--playhead" />
+        <span className="timeline-view__knob" />
+      </span>
     </div>
   );
 }
 
-interface SmoothTimelineCurrentTimeOptions {
-  readonly currentTime: number;
-  readonly disabled: boolean;
+const PROCESSED_TOOLTIP =
+  "The stretches that have predictions at all. A bundled clip ships with the whole clip predicted; an uploaded one fills in as the inference server answers.";
+const PROCESSING_TOOLTIP =
+  "The stretches queued at the inference server right now, still waiting on their predictions. Only an uploaded clip runs inference, so a bundled clip sits idle here.";
+
+type TimelineBandKey =
+  "buffer" | "prepared-cooked" | "prepared-target" | "requested";
+
+interface TimelineLiveLane {
+  readonly bands: readonly {
+    readonly key: TimelineBandKey;
+    readonly variant: string;
+  }[];
+  readonly format: (readouts: LiveReadouts) => string;
+  readonly key: string;
+  readonly label: string;
+  readonly tooltip: string;
+}
+
+/**
+ * The three lanes whose bands and values move with the picture. Their band
+ * elements are always mounted and always written imperatively, so a band
+ * appearing or vanishing costs the same frame as one that only moved.
+ */
+const LIVE_LANES: readonly TimelineLiveLane[] = [
+  {
+    bands: [{ key: "buffer", variant: "buffer" }],
+    format: formatHotBufferRange,
+    key: "buffer",
+    label: "Hot predictions",
+    tooltip:
+      "The stretch of the clip whose predictions are already in memory and can be drawn with no further fetch. It rolls along with the playhead, and on a looping clip it wraps past the end into the replay.",
+  },
+  {
+    bands: [{ key: "requested", variant: "requested" }],
+    format: formatRequestedRange,
+    key: "requested",
+    label: "Requested",
+    tooltip:
+      "The stretch the buffer last asked the prediction source for. It reads “same as hot” once everything asked for has arrived, so a band of its own means a fetch is still outstanding.",
+  },
+  {
+    bands: [
+      { key: "prepared-target", variant: "target" },
+      { key: "prepared-cooked", variant: "ready" },
+    ],
+    format: formatPreparedWindow,
+    key: "prepared",
+    label: "Prepared",
+    tooltip:
+      "Frames whose masks are already drawn into a texture and waiting, counted forward from the playhead to the first frame that is not. The hollow bar is how far the cook is aiming; it aims much further ahead while playing than while paused, which is why this shrinks the moment you pause.",
+  },
+];
+
+type TimelineBandRefs = Record<
+  TimelineBandKey,
+  RefObject<HTMLSpanElement | null>
+>;
+
+function useTimelineBands(): TimelineBandRefs {
+  const buffer = useRef<HTMLSpanElement>(null);
+  const requested = useRef<HTMLSpanElement>(null);
+  const cooked = useRef<HTMLSpanElement>(null);
+  const target = useRef<HTMLSpanElement>(null);
+
+  return useMemo(
+    () => ({
+      buffer,
+      "prepared-cooked": cooked,
+      "prepared-target": target,
+      requested,
+    }),
+    [],
+  );
+}
+
+function readHotBufferRange(readouts: LiveReadouts) {
+  return toSourceTimeRange(
+    readouts.detectionBuffer?.bufferStartTime ?? null,
+    readouts.detectionBuffer?.bufferEndTime ?? null,
+    readouts.duration,
+  );
+}
+
+function readRequestedRange(readouts: LiveReadouts) {
+  return toSourceTimeRange(
+    readouts.detectionBuffer?.requestedStartTime ?? null,
+    readouts.detectionBuffer?.requestedEndTime ?? null,
+    readouts.duration,
+  );
+}
+
+/**
+ * A requested stretch that matches the hot one says nothing a second band could
+ * add, and drawing it would put an identical bar under the first.
+ */
+function hasOwnRequestedBand(readouts: LiveReadouts) {
+  const hot = readHotBufferRange(readouts);
+  const requested = readRequestedRange(readouts);
+
+  return (
+    requested.startTime !== null &&
+    requested.endTime !== null &&
+    !(
+      hot.startTime === requested.startTime && hot.endTime === requested.endTime
+    )
+  );
+}
+
+function formatHotBufferRange(readouts: LiveReadouts) {
+  const { endTime, startTime } = readHotBufferRange(readouts);
+
+  return startTime === null || endTime === null
+    ? "none"
+    : formatTimeRange(startTime, endTime);
+}
+
+export function formatRequestedRange(readouts: LiveReadouts) {
+  const { endTime, startTime } = readRequestedRange(readouts);
+
+  if (startTime === null || endTime === null) {
+    return "none";
+  }
+
+  return hasOwnRequestedBand(readouts)
+    ? formatTimeRange(startTime, endTime)
+    : "same as hot";
+}
+
+export function formatPreparedWindow(readouts: LiveReadouts) {
+  const prepared = readLivePreparedWindow(readouts);
+
+  return prepared === null
+    ? "unavailable"
+    : `${prepared.cookedFrameCount}/${prepared.targetFrameCount}f · +${formatTime(prepared.cookedSeconds)}`;
+}
+
+function writeTimelineBands(
+  bands: TimelineBandRefs,
+  readouts: LiveReadouts,
+  visualDuration: number,
+  stepPercent: number,
+) {
+  const hot = readHotBufferRange(readouts);
+  const requested = readRequestedRange(readouts);
+  const prepared = readLivePreparedWindow(readouts);
+  const playheadTime = readouts.currentTime;
+
+  writeBand(
+    bands.buffer.current,
+    hot.startTime,
+    hot.endTime,
+    visualDuration,
+    stepPercent,
+  );
+  writeBand(
+    bands.requested.current,
+    hasOwnRequestedBand(readouts) ? requested.startTime : null,
+    requested.endTime,
+    visualDuration,
+    stepPercent,
+  );
+
+  /* The hollow target sits under the solid cooked run, so the two read as one
+   * bar filling rather than two lanes disagreeing. A cook that has finished
+   * everything it aimed for draws only the run: the outline would sit exactly
+   * under it, saying nothing. */
+  const showTarget =
+    prepared !== null && prepared.targetFrameCount > prepared.cookedFrameCount;
+
+  writeBand(
+    bands["prepared-target"].current,
+    showTarget && playheadTime !== null ? playheadTime : null,
+    showTarget && playheadTime !== null
+      ? playheadTime + prepared.targetSeconds
+      : null,
+    visualDuration,
+    stepPercent,
+  );
+  writeBand(
+    bands["prepared-cooked"].current,
+    prepared !== null ? playheadTime : null,
+    prepared !== null && playheadTime !== null
+      ? playheadTime + prepared.cookedSeconds
+      : null,
+    visualDuration,
+    stepPercent,
+  );
+}
+
+/**
+ * Where the timeline should say the viewer is.
+ *
+ * A drag speaks for itself, and a committed seek speaks until its picture
+ * arrives. The player's reported time is last because during a seek it still
+ * describes the frame on screen, which is where the viewer was, not where they
+ * are going.
+ */
+export function resolveTimelineTime(
+  scrubTime: number | null,
+  pendingSeekTime: number | null,
+  currentTime: number | null,
+) {
+  return scrubTime ?? pendingSeekTime ?? currentTime;
+}
+
+interface TimelinePlayheadOptions {
   readonly duration: number | null;
-  readonly playbackState: MediaRendererPlaybackState | null;
+  readonly pendingSeekTime: number | null;
+  readonly readVisualDuration: (readouts: LiveReadouts) => number;
+  readonly scrubTime: number | null;
+  readonly trackWidthRef: RefObject<number>;
 }
 
-interface TimelineClockAnchor {
-  readonly mediaTime: number;
-  readonly performanceTime: number;
+interface TimelinePlayheadClock {
+  readonly duration: number | null;
+  readonly scrubTime: number | null;
+  readonly pendingSeekTime: number | null;
 }
 
-const TIMELINE_DISCONTINUITY_THRESHOLD_SECONDS = 0.25;
-const TIMELINE_RENDER_EPSILON_SECONDS = 0.001;
+/** Playhead step when the track has no measured width yet. */
+const PLAYHEAD_MIN_STEP_PERCENT = 0.05;
 
-function useSmoothTimelineCurrentTime({
-  currentTime,
-  disabled,
+/**
+ * The playhead is positioned from the player's own reported time on the frame
+ * that reports it, and its position goes straight to the element as a
+ * composited transform, so React never hears about it.
+ */
+function useTimelinePlayhead({
   duration,
-  playbackState,
-}: SmoothTimelineCurrentTimeOptions) {
-  const isPlaying = playbackState === MediaRendererPlaybackState.Playing;
-  const [timelineCurrentTime, setTimelineCurrentTime] = useState(currentTime);
-  const timelineCurrentTimeRef = useRef(currentTime);
-  const anchorRef = useRef<TimelineClockAnchor>({
-    mediaTime: currentTime,
-    performanceTime: performance.now(),
+  pendingSeekTime,
+  readVisualDuration,
+  scrubTime,
+  trackWidthRef,
+}: TimelinePlayheadOptions) {
+  const playheadRef = useRef<HTMLSpanElement>(null);
+  const clockRef = useRef<TimelinePlayheadClock>({
+    duration,
+    pendingSeekTime,
+    scrubTime,
   });
-  const lastAuthoritativeTimeRef = useRef(currentTime);
+  const writtenPositionRef = useRef<string | null>(null);
 
-  const updateTimelineCurrentTime = (nextCurrentTime: number) => {
-    timelineCurrentTimeRef.current = nextCurrentTime;
-    setTimelineCurrentTime((previousCurrentTime) =>
-      Math.abs(previousCurrentTime - nextCurrentTime) <
-      TIMELINE_RENDER_EPSILON_SECONDS
-        ? previousCurrentTime
-        : nextCurrentTime,
-    );
-  };
+  const writePlayhead = (readouts: LiveReadouts, visualDuration: number) => {
+    const playhead = playheadRef.current;
 
-  useEffect(() => {
-    const now = performance.now();
-    const previousAuthoritativeTime = lastAuthoritativeTimeRef.current;
-    const currentVisualTime = timelineCurrentTimeRef.current;
-    const jumpedBackward =
-      currentTime < previousAuthoritativeTime - TIMELINE_RENDER_EPSILON_SECONDS;
-    const driftedFromAuthority =
-      Math.abs(currentTime - currentVisualTime) >
-      TIMELINE_DISCONTINUITY_THRESHOLD_SECONDS;
-
-    lastAuthoritativeTimeRef.current = currentTime;
-    anchorRef.current = {
-      mediaTime: currentTime,
-      performanceTime: now,
-    };
-
-    if (!isPlaying || disabled || jumpedBackward || driftedFromAuthority) {
-      updateTimelineCurrentTime(currentTime);
-    }
-  }, [currentTime, disabled, isPlaying]);
-
-  useEffect(() => {
-    if (!isPlaying || disabled) {
+    if (playhead === null) {
       return;
     }
 
-    let animationFrameHandle: number | undefined;
-    const tick = (now: number) => {
-      const anchor = anchorRef.current;
-      const elapsedSeconds = Math.max(0, (now - anchor.performanceTime) / 1000);
+    // Quantized to half a rendered pixel. A percentage carried to three
+    // decimals changes on every report, and each write invalidates style for
+    // the whole bar, which was the entire main-thread paint load during
+    // playback. Half a pixel is below what the eye can resolve on a playhead
+    // moving twenty pixels a second.
+    const stepPercent = readPixelStepPercent(trackWidthRef.current) / 2;
+    const clock = clockRef.current;
+    const time =
+      resolveTimelineTime(clock.scrubTime, clock.pendingSeekTime, null) ??
+      clampTimelineTime(readLivePresentedTime(readouts) ?? 0, clock.duration);
+    const position = quantizePercent(time, visualDuration, stepPercent);
 
-      updateTimelineCurrentTime(
-        clampTimelineTime(anchor.mediaTime + elapsedSeconds, duration),
-      );
-      animationFrameHandle = window.requestAnimationFrame(tick);
-    };
+    if (position === writtenPositionRef.current) {
+      return;
+    }
 
-    animationFrameHandle = window.requestAnimationFrame(tick);
+    writtenPositionRef.current = position;
+    playhead.style.transform = `translateX(${position})`;
+  };
 
-    return () => {
-      if (animationFrameHandle !== undefined) {
-        window.cancelAnimationFrame(animationFrameHandle);
-      }
-    };
-  }, [disabled, duration, isPlaying]);
+  useLayoutEffect(() => {
+    clockRef.current = { duration, pendingSeekTime, scrubTime };
+    // Read here, where layout has already run. The tick that writes the
+    // playhead must never measure, or it forces a layout per frame.
+    trackWidthRef.current = playheadRef.current?.offsetWidth ?? 0;
 
-  return timelineCurrentTime;
+    const readouts = readLiveReadouts();
+
+    writePlayhead(readouts, readVisualDuration(readouts));
+  });
+
+  return { playheadRef, writePlayhead };
 }
 
-interface DebouncedTimelineSeekOptions {
-  readonly currentTime: number;
+interface TimelineSeekGestureOptions {
   readonly disabled: boolean;
   readonly duration: number | null;
-  readonly onSeek: (time: number) => void;
+  readonly onScrub: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void> | void;
 }
 
-const TIMELINE_SEEK_DEBOUNCE_MS = 120;
-const TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS = 0.05;
+interface PendingTimelineSeek {
+  readonly runId: number;
+  readonly target: number;
+}
 
-function useDebouncedTimelineSeek({
-  currentTime,
+/**
+ * A completion belongs only to the seek that created it. An older request may
+ * finish after a newer one, and must not release the newer target's playhead
+ * latch.
+ */
+export function settlePendingTimelineSeek(
+  pending: PendingTimelineSeek | null,
+  completedRunId: number,
+): PendingTimelineSeek | null {
+  return pending?.runId === completedRunId ? null : pending;
+}
+
+/**
+ * Splits a timeline drag into the two things a player answers differently:
+ * every position the pointer passes through is a scrub, and the position it is
+ * released on is a seek. The knob follows the pointer until the player's own
+ * time catches up with where the drag ended.
+ */
+function useTimelineSeekGesture({
   disabled,
   duration,
+  onScrub,
   onSeek,
-}: DebouncedTimelineSeekOptions) {
+}: TimelineSeekGestureOptions) {
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const scrubTimeRef = useRef<number | null>(null);
-  const seekTimerRef = useRef<number | undefined>(undefined);
+  /**
+   * Where a committed seek is going, held until the picture arrives. The
+   * player's reported time still describes the frame on screen during the wait,
+   * so falling back to it would walk the playhead back to where the viewer
+   * started, which on a slow source is most of the wait.
+   */
+  const [pendingSeekTime, setPendingSeekTime] = useState<number | null>(null);
+  const pendingSeekRef = useRef<PendingTimelineSeek | null>(null);
+  const seekRunRef = useRef(0);
+  /**
+   * Pointer cancellation and lost capture may both follow the same drag. This
+   * latch makes every termination path idempotent, so exactly one commit ends
+   * the producer's interactive-seek hold.
+   */
+  const gestureActiveRef = useRef(false);
 
-  const clearTimer = () => {
-    if (seekTimerRef.current !== undefined) {
-      window.clearTimeout(seekTimerRef.current);
-      seekTimerRef.current = undefined;
+  const moveTo = (nextTime: number) => {
+    if (disabled || duration === null) {
+      return null;
     }
+
+    const clampedTime = clamp(nextTime, 0, duration);
+
+    scrubTimeRef.current = clampedTime;
+    setScrubTime(clampedTime);
+    return clampedTime;
   };
 
-  const commitSeek = () => {
-    const nextTime = scrubTimeRef.current;
-
-    clearTimer();
-
-    if (nextTime === null || disabled || duration === null) {
+  const releaseSeek = () => {
+    if (!gestureActiveRef.current || disabled || duration === null) {
       return;
     }
 
-    onSeek(clamp(nextTime, 0, duration));
+    gestureActiveRef.current = false;
+
+    const target = clamp(
+      scrubTimeRef.current ?? readLiveReadouts().currentTime ?? 0,
+      0,
+      duration,
+    );
+
+    scrubTimeRef.current = null;
+    setScrubTime(null);
+    const runId = seekRunRef.current + 1;
+    seekRunRef.current = runId;
+    pendingSeekRef.current = { runId, target };
+    setPendingSeekTime(target);
+    const settle = () => {
+      const next = settlePendingTimelineSeek(pendingSeekRef.current, runId);
+
+      if (next === pendingSeekRef.current) {
+        return;
+      }
+
+      pendingSeekRef.current = next;
+      setPendingSeekTime(next?.target ?? null);
+    };
+
+    void Promise.resolve(onSeek(target)).then(settle, settle);
   };
-
-  const scheduleSeek = () => {
-    clearTimer();
-
-    seekTimerRef.current = window.setTimeout(() => {
-      commitSeek();
-    }, TIMELINE_SEEK_DEBOUNCE_MS);
-  };
-
-  useEffect(() => {
-    if (scrubTime === null) {
-      return;
-    }
-
-    if (
-      Math.abs(currentTime - scrubTime) <= TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS
-    ) {
-      scrubTimeRef.current = null;
-      setScrubTime(null);
-    }
-  }, [currentTime, scrubTime]);
 
   useEffect(() => {
     if (!disabled && duration !== null) {
       return;
     }
 
-    clearTimer();
+    gestureActiveRef.current = false;
     scrubTimeRef.current = null;
     setScrubTime(null);
+    pendingSeekRef.current = null;
+    setPendingSeekTime(null);
   }, [disabled, duration]);
 
-  useEffect(
-    () => () => {
-      clearTimer();
-    },
-    [],
-  );
-
   return {
-    flushSeek: commitSeek,
+    flushSeek: releaseSeek,
     onScrubChange(nextTime: number) {
-      if (disabled || duration === null) {
-        return;
+      const clampedTime = moveTo(nextTime);
+
+      if (clampedTime !== null) {
+        // A keyboard step on the slider changes its value with no pointer down,
+        // and the scrub below still holds the player for a gesture. Marking it
+        // here is what lets the keyup release it; without this the player stays
+        // held for a drag nobody is making.
+        gestureActiveRef.current = true;
+        onScrub(clampedTime);
       }
-
-      const clampedTime = clamp(nextTime, 0, duration);
-
-      scrubTimeRef.current = clampedTime;
-      setScrubTime(clampedTime);
-      scheduleSeek();
     },
-    onScrubEnd: commitSeek,
+    onScrubEnd: releaseSeek,
+    pendingSeekTime,
     onScrubStart(nextTime: number) {
-      if (disabled || duration === null) {
-        return;
-      }
-
-      const clampedTime = clamp(nextTime, 0, duration);
-
-      scrubTimeRef.current = clampedTime;
-      setScrubTime(clampedTime);
+      gestureActiveRef.current = true;
+      moveTo(nextTime);
     },
     scrubTime,
   };
+}
+
+/**
+ * The input carries opacity 0: it is the interaction and accessibility surface,
+ * never the visible playhead, which is drawn separately. Tracking playback to
+ * the frame therefore bought nothing and repainted the whole bar, so while the
+ * picture is moving the value is carried at one-second resolution, which is all
+ * a keyboard step or a screen reader needs. Scrubbing and paused positions stay
+ * exact.
+ */
+function writeScrubInputValue(
+  input: HTMLInputElement | null,
+  readouts: LiveReadouts,
+  scrubTime: number | null,
+) {
+  if (input === null) {
+    return;
+  }
+
+  const time = scrubTime ?? readouts.currentTime;
+
+  if (time === null) {
+    return;
+  }
+
+  const isPlaying =
+    readouts.playbackState === MediaRendererPlaybackState.Playing;
+  const next = String(
+    isPlaying && scrubTime === null ? Math.floor(time) : time,
+  );
+
+  if (input.value !== next) {
+    input.value = next;
+  }
 }
 
 function clampTimelineTime(time: number, duration: number | null) {
@@ -514,8 +1066,8 @@ type TimelineMarkerStyle = CSSProperties & {
   readonly "--timeline-left": string;
 };
 
-type TimelineInputStyle = CSSProperties & {
-  readonly "--timeline-progress": string;
+type TimelineRowStyle = CSSProperties & {
+  readonly "--timeline-row": string;
 };
 
 interface StyledTimelineRange {
@@ -523,16 +1075,69 @@ interface StyledTimelineRange {
   readonly style: TimelineRangeStyle;
 }
 
+interface TimelineAxisTick {
+  readonly anchor: "end" | "middle" | "start";
+  readonly label: string;
+  readonly left: string;
+}
+
+const LANE_ROW_STYLES: readonly TimelineRowStyle[] = [0, 1, 2, 3, 4, 5].map(
+  (index) =>
+    ({ "--timeline-row": String(index + LANE_ROW_OFFSET) }) as TimelineRowStyle,
+);
+
+function createAxisTicks(duration: number | null): TimelineAxisTick[] {
+  if (duration === null) {
+    return [];
+  }
+
+  return AXIS_TICK_FRACTIONS.map((fraction) => ({
+    anchor:
+      fraction === 0
+        ? ("start" as const)
+        : fraction === 1
+          ? ("end" as const)
+          : ("middle" as const),
+    label: formatAxisTime(fraction * duration, duration),
+    left: `${fraction * 100}%`,
+  }));
+}
+
+function formatAxisTime(time: number, duration: number) {
+  return `${time.toFixed(duration < SHORT_MEDIA_SECONDS ? 1 : 0)}s`;
+}
+
+/** Says how much of the media a lane's segments reach across, so a lane whose
+ *  bands are too narrow to read still reports what it covers. */
+function formatRangeExtent(
+  ranges: readonly TimelineRange[],
+  emptyLabel: string,
+) {
+  if (ranges.length === 0) {
+    return emptyLabel;
+  }
+
+  let startTime = Number.POSITIVE_INFINITY;
+  let endTime = Number.NEGATIVE_INFINITY;
+
+  for (const range of ranges) {
+    startTime = Math.min(startTime, range.startTime);
+    endTime = Math.max(endTime, range.endTime);
+  }
+
+  return formatTimeRange(startTime, endTime);
+}
+
 function createSegmentStyles(
   ranges: readonly TimelineRange[],
-  duration: number,
+  duration: number | null,
 ): StyledTimelineRange[] {
+  if (duration === null) {
+    return [];
+  }
+
   return ranges.flatMap((range, index) => {
-    const style = createRangeStyle({
-      duration,
-      endTime: range.endTime,
-      startTime: range.startTime,
-    });
+    const style = createRangeStyle(range.startTime, range.endTime, duration);
 
     return style
       ? [
@@ -545,15 +1150,12 @@ function createSegmentStyles(
   });
 }
 
-function createRangeStyle({
-  duration,
-  endTime,
-  startTime,
-}: {
-  readonly duration: number;
-  readonly endTime: number | null;
-  readonly startTime: number | null;
-}): TimelineRangeStyle | null {
+function createRangeStyle(
+  startTime: number | null,
+  endTime: number | null,
+  duration: number,
+  stepPercent = REACT_RANGE_STEP_PERCENT,
+): TimelineRangeStyle | null {
   if (startTime === null || endTime === null || duration <= 0) {
     return null;
   }
@@ -562,29 +1164,127 @@ function createRangeStyle({
   const end = clamp(Math.max(start, endTime), 0, duration);
 
   return {
-    "--timeline-left": toPercent(start, duration),
-    "--timeline-width": toPercent(end - start, duration),
+    "--timeline-left": quantizePercent(start, duration, stepPercent),
+    "--timeline-width": quantizePercent(end - start, duration, stepPercent),
   } as TimelineRangeStyle;
 }
 
-function sameRange(
-  firstStart: number | null,
-  firstEnd: number | null,
-  secondStart: number | null,
-  secondEnd: number | null,
+/** A band with nothing to say is emptied rather than unmounted: taking it out
+ *  of the tree would move the writes onto React's schedule. */
+function writeBand(
+  band: HTMLSpanElement | null,
+  startTime: number | null,
+  endTime: number | null,
+  duration: number,
+  stepPercent: number,
 ) {
-  return firstStart === secondStart && firstEnd === secondEnd;
-}
+  if (band === null) {
+    return;
+  }
 
-function getMaxRangeEnd(ranges: readonly TimelineRange[]) {
-  return ranges.reduce(
-    (maxEndTime, range) => Math.max(maxEndTime, range.endTime),
-    0,
+  const style = createRangeStyle(startTime, endTime, duration, stepPercent);
+
+  writeCustomProperties(
+    band,
+    style === null ? "0%" : style["--timeline-left"],
+    style === null ? "0%" : style["--timeline-width"],
   );
 }
 
-function toPercent(time: number, duration: number) {
-  return `${clamp(time / duration, 0, 1) * 100}%`;
+/** A mark with no frame behind it is hidden rather than unmounted, so React
+ *  owns none of its churn. */
+function writeMarker(
+  marker: HTMLSpanElement | null,
+  time: number | null,
+  duration: number,
+  stepPercent: number,
+) {
+  if (marker === null) {
+    return;
+  }
+
+  const visibility = time === null ? "hidden" : "";
+
+  if (marker.style.visibility !== visibility) {
+    marker.style.visibility = visibility;
+  }
+
+  if (time === null) {
+    return;
+  }
+
+  const left = quantizePercent(time, duration, stepPercent);
+
+  if (marker.style.getPropertyValue("--timeline-left") !== left) {
+    marker.style.setProperty("--timeline-left", left);
+  }
+}
+
+function writeCustomProperties(
+  element: HTMLElement,
+  left: string,
+  width: string,
+) {
+  if (element.style.getPropertyValue("--timeline-left") !== left) {
+    element.style.setProperty("--timeline-left", left);
+  }
+
+  if (element.style.getPropertyValue("--timeline-width") !== width) {
+    element.style.setProperty("--timeline-width", width);
+  }
+}
+
+function getMaxRangeEnd(...rangeLists: readonly (readonly TimelineRange[])[]) {
+  let maxEndTime = 0;
+
+  for (const ranges of rangeLists) {
+    for (const range of ranges) {
+      maxEndTime = Math.max(maxEndTime, range.endTime);
+    }
+  }
+
+  return maxEndTime;
+}
+
+/**
+ * What the bar spans before the source reports a duration: everything the lanes
+ * are being asked to draw, so a band never runs off the end of a bar that has
+ * no end yet.
+ */
+function readSpannedDuration(readouts: LiveReadouts, rangeFloor: number) {
+  const hot = readHotBufferRange(readouts);
+  const requested = readRequestedRange(readouts);
+  const prepared = readLivePreparedWindow(readouts);
+  const currentTime = readouts.currentTime ?? 0;
+
+  return Math.max(
+    rangeFloor,
+    currentTime,
+    hot.endTime ?? 0,
+    requested.endTime ?? 0,
+    readouts.activeDetectionFrameTime ?? 0,
+    currentTime + (prepared?.targetSeconds ?? 0),
+  );
+}
+
+/** Position step for the bands React still draws, which move only when their
+ *  ranges do and so never need a measured track. */
+const REACT_RANGE_STEP_PERCENT = 0.05;
+
+function readPixelStepPercent(trackWidth: number) {
+  return trackWidth > 0 ? 100 / trackWidth : PLAYHEAD_MIN_STEP_PERCENT;
+}
+
+/**
+ * Positions are quantised to a rendered pixel. Two readings of the same edge
+ * differ in the last bits of a float often enough that an unrounded percentage
+ * rewrites a band, and repaints it, while nothing has moved; and an edge that
+ * has moved a third of a pixel has not moved anywhere a viewer can see.
+ */
+function quantizePercent(time: number, duration: number, stepPercent: number) {
+  const percent = clamp(time / duration, 0, 1) * 100;
+
+  return `${(Math.round(percent / stepPercent) * stepPercent).toFixed(3)}%`;
 }
 
 function clamp(value: number, min: number, max: number) {

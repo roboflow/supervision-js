@@ -6,11 +6,14 @@ import {
 } from "#types/media-renderer";
 import {
   RenderPreparationArtifactFrameStatus,
+  RenderPreparationGateHoldReason,
+  type RenderPreparationArtifactDiagnostics,
   type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMediaBranch,
   MediaSessionStatus,
   type MediaSessionActivity,
   type MediaSessionMediaState,
@@ -58,31 +61,79 @@ export function createMediaSessionStateSnapshot({
     );
   }
 
-  if (renderer?.playbackState === MediaRendererPlaybackState.Buffering) {
+  const stoppedForPlayback =
+    renderer?.playbackState === MediaRendererPlaybackState.Buffering;
+  const awaitingCoverage =
+    renderer?.detectionBuffer.status === DetectionBufferStatus.AwaitingCoverage;
+  const loadingDetections =
+    renderer?.detectionBuffer.status === DetectionBufferStatus.Loading;
+  const awaitingSourceRead = renderer?.source.awaitingRead === true;
+  const preparingActiveFrame = (renderPreparation?.artifacts ?? []).some(
+    (artifact) =>
+      artifact.activeFrame?.status ===
+        RenderPreparationArtifactFrameStatus.Pending ||
+      Boolean(artifact.gateHold),
+  );
+
+  if (awaitingSourceRead) {
     activities.push(
       createActivity({
         blockingPlayback: true,
-        kind: MediaSessionActivityKind.PlaybackBuffering,
-        label: "Buffering playback",
+        detail: "The video for this part has not arrived yet",
+        kind: MediaSessionActivityKind.MediaSourceReading,
+        label: "Loading the video",
         status: MediaSessionActivityStatus.Waiting,
       }),
     );
   }
 
-  if (renderer?.detectionBuffer.status === DetectionBufferStatus.Loading) {
-    const blockingPlayback =
-      renderer.playbackState === MediaRendererPlaybackState.Buffering;
-
+  // A picture stopped for its annotations is not stopped for its own bytes, and
+  // a host shown both reads the vaguer one first and tells the viewer the wrong
+  // thing. Only the reason nothing more specific claims is reported here.
+  if (
+    stoppedForPlayback &&
+    !awaitingSourceRead &&
+    !awaitingCoverage &&
+    !loadingDetections &&
+    !preparingActiveFrame
+  ) {
     activities.push(
       createActivity({
-        blockingPlayback,
-        kind: blockingPlayback
+        blockingPlayback: true,
+        detail: playbackBufferingDetail(media),
+        kind: MediaSessionActivityKind.PlaybackBuffering,
+        label: "Waiting for more video",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    );
+  }
+
+  if (awaitingCoverage) {
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        detail: "The model has not reached this frame yet",
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for the model",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    );
+  }
+
+  if (loadingDetections) {
+    activities.push(
+      createActivity({
+        blockingPlayback: stoppedForPlayback,
+        detail: stoppedForPlayback
+          ? "The detections for this part have not arrived yet"
+          : null,
+        kind: stoppedForPlayback
           ? MediaSessionActivityKind.DetectionsBuffering
           : MediaSessionActivityKind.DetectionsLoading,
-        label: blockingPlayback
-          ? "Waiting for detection buffer"
+        label: stoppedForPlayback
+          ? "Waiting for detections"
           : "Loading detections",
-        status: blockingPlayback
+        status: stoppedForPlayback
           ? MediaSessionActivityStatus.Waiting
           : MediaSessionActivityStatus.Running,
       }),
@@ -94,30 +145,75 @@ export function createMediaSessionStateSnapshot({
     const activeFrameIsPending =
       artifact.activeFrame?.status ===
       RenderPreparationArtifactFrameStatus.Pending;
+    const gateHold = artifact.gateHold ?? null;
+    const leadHold =
+      gateHold?.reason === RenderPreparationGateHoldReason.LeadBelowRequirement
+        ? gateHold
+        : null;
+    // The gate holds the frame about to be presented, which is not the frame on
+    // screen: a hold can name an unprepared frame ahead while the presented one
+    // is prepared and the queue behind it is empty. Reading only those two says
+    // nothing at all, and the picture stops with no activity to explain it.
+    const waitingForFrame =
+      activeFrameIsPending || (gateHold !== null && leadHold === null);
 
-    if (artifact.pendingCount <= 0 && !activeFrameIsPending) {
+    if (
+      artifact.pendingCount <= 0 &&
+      !activeFrameIsPending &&
+      gateHold === null
+    ) {
       continue;
     }
+
+    const holdingPlayback =
+      (activeFrameIsPending || gateHold !== null) && stoppedForPlayback;
+    const waiting = activeFrameIsPending || gateHold !== null;
 
     activities.push(
       createActivity({
         artifactKind: artifact.kind,
+        blockingPlayback: holdingPlayback,
         blockingPresentation: activeFrameIsPending,
-        detail: activeFrameIsPending
-          ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
-              3,
-            )}s is waiting for ${artifact.kind}`
-          : null,
+        detail: leadHold
+          ? `Starting again at ${leadHold.requiredAheadSeconds.toFixed(
+              1,
+            )}s of masks ready`
+          : holdingPlayback && waitingForFrame
+            ? "The masks for this frame are not drawn yet"
+            : activeFrameIsPending
+              ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
+                  3,
+                )}s is waiting for ${artifact.kind}`
+              : null,
         kind: MediaSessionActivityKind.RenderPreparing,
-        label: activeFrameIsPending
-          ? "Preparing active render artifact"
-          : "Preparing render artifacts",
+        label: leadHold
+          ? "Catching the masks up"
+          : waitingForFrame
+            ? holdingPlayback
+              ? "Waiting for the masks"
+              : "Preparing active render artifact"
+            : "Preparing render artifacts",
         pendingCount: artifact.pendingCount,
         preparedCount: artifact.preparedCount,
-        progress: totalCount > 0 ? artifact.preparedCount / totalCount : 0,
-        status: activeFrameIsPending
+        progress: leadHold
+          ? leadProgress(artifact)
+          : totalCount > 0
+            ? artifact.preparedCount / totalCount
+            : 0,
+        status: waiting
           ? MediaSessionActivityStatus.Waiting
           : MediaSessionActivityStatus.Running,
+      }),
+    );
+  }
+
+  if (renderer?.renderPreparationGateAbandoned === true) {
+    activities.push(
+      createActivity({
+        detail: "The video is playing without them",
+        kind: MediaSessionActivityKind.RenderPreparationAbandoned,
+        label: "Masks could not keep up",
+        status: MediaSessionActivityStatus.Waiting,
       }),
     );
   }
@@ -127,6 +223,7 @@ export function createMediaSessionStateSnapshot({
       createActivity({
         blockingPlayback: true,
         blockingPresentation: true,
+        errorKind: renderer.source.errorKind ?? null,
         errorMessage: renderer.source.errorMessage,
         kind: MediaSessionActivityKind.Error,
         label: "Renderer error",
@@ -161,6 +258,34 @@ export function createMediaSessionStateSnapshot({
     renderer,
     status: resolveSessionStatus(renderer, activities, errorMessage),
   };
+}
+
+/**
+ * Why the picture is short of video, in terms the session can stand behind.
+ *
+ * A transfer is certain on one branch only. A file opened from the device, and
+ * a source the host built and the session cannot see into, both stop while the
+ * bytes are read and decoded with nothing arriving over a network, so naming a
+ * download there describes an event that cannot happen.
+ */
+function playbackBufferingDetail(media: MediaSessionMediaState) {
+  return media.preparation?.branch === MediaSessionMediaBranch.Url
+    ? "This part of the video has not downloaded yet"
+    : "This part of the video is still being read";
+}
+
+/** How far a lead the gate is banking has come, against what it has to reach. */
+function leadProgress(artifact: RenderPreparationArtifactDiagnostics) {
+  const requiredAheadSeconds = artifact.gateHold?.requiredAheadSeconds ?? 0;
+
+  if (requiredAheadSeconds <= 0) {
+    return 0;
+  }
+
+  return Math.min(
+    (artifact.preparedAheadSeconds ?? 0) / requiredAheadSeconds,
+    1,
+  );
 }
 
 function createActivity(

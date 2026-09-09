@@ -5,11 +5,16 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
-import { DetectionMaskEncoding } from "supervision-js-core";
+import {
+  createMemoryColdDetectionFrameStore,
+  createWritableDetectionFrameSource,
+  DetectionMaskEncoding,
+} from "supervision-js-core";
 import {
   MediaSessionActivityKind,
   MediaSessionStatus,
 } from "#types/media-session";
+import type { MediaFrameNavigation } from "../index";
 
 import {
   createContainer,
@@ -38,6 +43,127 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
+  it("delegates the renderer's exact frame-navigation capability by identity", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const renderers = await import("#renderers/media-renderer");
+    const create = renderers.createMediaRenderer;
+    const frameNavigation: MediaFrameNavigation = {
+      moveToFrame: vi.fn(),
+      moveToTime: vi.fn(),
+      scrubToFrame: vi.fn(),
+      scrubToTime: vi.fn(),
+    };
+    const opening = vi
+      .spyOn(renderers, "createMediaRenderer")
+      .mockImplementationOnce(async (options) => {
+        const renderer = await create(options);
+        Object.defineProperty(renderer, "frameNavigation", {
+          configurable: true,
+          value: frameNavigation,
+        });
+        return renderer;
+      });
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    try {
+      expect(session.frameNavigation).toBe(frameNavigation);
+      expect(session.frameNavigation).toBe(session.renderer.frameNavigation);
+    } finally {
+      opening.mockRestore();
+      session.destroy();
+    }
+  });
+
+  it("delegates display sizing without replacing its renderer or detections", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const renderers = await import("#renderers/media-renderer");
+    const create = renderers.createMediaRenderer;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const resize = vi.fn(function (this: unknown) {
+      expect(this).toBe(session.renderer);
+      return pending;
+    });
+    const opening = vi
+      .spyOn(renderers, "createMediaRenderer")
+      .mockImplementationOnce(async (options) => {
+        const renderer = await create(options);
+        renderer.setDisplay = resize;
+        return renderer;
+      });
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      detections: { frames },
+      renderer: { autoPlay: false },
+    });
+    try {
+      const source = session.detectionSource;
+      const display = { boxWidth: 640, boxHeight: 360, devicePixelRatio: 2 };
+      let settled = false;
+      const setDisplay = session.setDisplay!;
+      const resizing = setDisplay(display).then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(resize).toHaveBeenCalledExactlyOnceWith(display);
+      finish();
+      await resizing;
+      expect(session.detectionSource).toBe(source);
+      expect(opening).toHaveBeenCalledOnce();
+    } finally {
+      opening.mockRestore();
+      session.destroy();
+    }
+  });
+
+  it("delegates an indexed source clock without manufacturing one for pull media", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const { openMediabunnyMediaSource } =
+      await import("#media/mediabunny-media-source");
+    const frameClock = {
+      frameCount: 2,
+      firstTimestamp: 0,
+      endTimestamp: 0.08,
+      duration: 0.08,
+      timeAt: (index: number) => index * 0.04,
+      durationAt: () => 0.04,
+      indexAtOrBefore: (time: number) => (time < 0.04 ? 0 : 1),
+    };
+    const open = vi.fn(async () => ({
+      ...(await openMediabunnyMediaSource("sample.mp4")),
+      frameClock,
+    }));
+    const indexed = await createMediaSession({
+      container: createContainer(),
+      media: { open },
+      renderer: { autoPlay: false },
+    });
+    expect(indexed.frameClock).toBe(frameClock);
+    expect(indexed.renderer.frameClock).toBe(frameClock);
+    indexed.destroy();
+    const pull = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+    expect(pull.frameClock).toBeNull();
+    expect(pull.renderer.frameClock).toBeNull();
+    expect(pull.frameNavigation).toBeNull();
+    expect(pull.renderer.frameNavigation).toBeNull();
+    pull.destroy();
+  });
+
   it("owns video navigation, playback rate, and current-frame refresh", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
@@ -48,6 +174,7 @@ describe("media session", () => {
       renderer: { autoPlay: false },
     });
 
+    expect(session.setDisplay).toBeUndefined();
     session.setPlaybackRate(1.5);
     expect(session.getState().renderer).toMatchObject({ playbackRate: 1.5 });
 
@@ -121,6 +248,124 @@ describe("media session", () => {
     expect(await session.detectionSource?.loadFrames(0, 1)).toEqual(frames);
 
     session.destroy();
+  });
+
+  it.each(["source", "sources"] as const)(
+    "writes through a caller-owned %s without clearing or destroying it",
+    async (input) => {
+      resetMocks();
+      const { createMediaSession } = await import("../index");
+      const source = createWritableDetectionFrameSource({
+        datasetId: "external-dataset",
+        store: createMemoryColdDetectionFrameStore(),
+      });
+      const clear = vi.spyOn(source, "clear");
+      const destroy = vi.spyOn(source, "destroy");
+      const session = await createMediaSession({
+        container: createContainer(),
+        detections: {
+          ...(input === "source"
+            ? { source }
+            : { sources: [{ id: "external-entry", source }] }),
+          playbackGate: { enabled: false },
+        },
+        media: "sample.mp4",
+        renderer: { autoPlay: false },
+      });
+      const writeOptions = {
+        sourceId: input === "source" ? "external-dataset" : "external-entry",
+      };
+      const refresh = vi
+        .spyOn(session.renderer, "refresh")
+        .mockResolvedValue(undefined);
+
+      await expect(
+        session.appendDetectionFrames(frames, writeOptions),
+      ).resolves.toMatchObject({
+        datasetId: "external-dataset",
+        frameCount: 1,
+      });
+      expect(await source.loadFrames(0, 1)).toEqual(frames);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+      await expect(
+        session.appendLiveDetectionFrame(
+          { detections: [{ id: "live" }], frameIndex: 1, mediaTime: 1 },
+          writeOptions,
+        ),
+      ).resolves.toMatchObject({ frameCount: 2 });
+      await expect(
+        session.finalizeDetectionCoverage(2, writeOptions),
+      ).resolves.toMatchObject({ endTime: 2, frameCount: 2 });
+      expect(session.getDetectionSummary(writeOptions)).toMatchObject({
+        datasetId: "external-dataset",
+        endTime: 2,
+      });
+
+      refresh.mockRestore();
+      session.destroy();
+
+      expect(clear).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+      await expect(source.loadFrames(1, 2)).resolves.toEqual([
+        expect.objectContaining({ detections: [{ id: "live" }], endTime: 2 }),
+      ]);
+      source.destroy?.();
+    },
+  );
+
+  it("preserves write routing and live-capability errors for external sources", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const legacy = {
+      ...createWritableDetectionFrameSource({
+        datasetId: "legacy-dataset",
+        store: createMemoryColdDetectionFrameStore(),
+      }),
+      appendLiveFrame: undefined,
+      finalizeCoverage: undefined,
+    };
+    const other = createWritableDetectionFrameSource({
+      datasetId: "other-dataset",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        autoRefresh: false,
+        playbackGate: { enabled: false },
+        sources: [
+          { id: "legacy", source: legacy },
+          { id: "other", source: other },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await expect(session.appendDetectionFrames(frames)).rejects.toThrow(
+      "sourceId is required when a media session owns multiple appendable detection sources.",
+    );
+    await expect(
+      session.appendDetectionFrames(frames, { sourceId: "missing" }),
+    ).rejects.toThrow("Unknown appendable detection source: missing.");
+    await expect(
+      session.appendDetectionFrames(frames, { sourceId: "legacy" }),
+    ).resolves.toMatchObject({ datasetId: "legacy-dataset" });
+    expect(other.getSummary()).toBeNull();
+    await expect(
+      session.appendLiveDetectionFrame(frames[0]!, { sourceId: "legacy" }),
+    ).rejects.toThrow(
+      "This detection source does not support live appends or coverage finalization.",
+    );
+    await expect(
+      session.finalizeDetectionCoverage(2, { sourceId: "legacy" }),
+    ).rejects.toThrow(
+      "This detection source does not support live appends or coverage finalization.",
+    );
+
+    session.destroy();
+    legacy.destroy?.();
+    other.destroy?.();
   });
 
   it("projects initial detection frames into media space", async () => {
@@ -1255,12 +1500,14 @@ describe("media session", () => {
 
     expect(onState).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        errorMessage: "No video track found in media source.",
+        errorMessage:
+          "The media source's tracks read and none of them carries video.",
         status: MediaSessionStatus.Error,
       }),
     );
     expect(failedSession.getState()).toMatchObject({
-      errorMessage: "No video track found in media source.",
+      errorMessage:
+        "The media source's tracks read and none of them carries video.",
       status: MediaSessionStatus.Error,
     });
 

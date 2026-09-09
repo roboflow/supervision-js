@@ -1,12 +1,21 @@
 import {
   createChunkedDetectionFrameSource,
+  createWebVideoEngineMediaRendererSource,
+  type DetectionCoordinateSpace,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
   type DetectionFrameSource,
   type DetectionFrame,
-  type MediaSessionMedia,
+  type MediaRendererSource,
 } from "supervision";
-import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
+import { SourceKind } from "supervision/web-video-engine";
+import { delayDetectionFetch } from "../diagnostics/slow-work";
+import type { DisplayBoxResolutionOptions } from "supervision/web-video-engine";
+import type {
+  DemoPresentationAvailability,
+  DemoPresentationLayerSetting,
+} from "../presentation/demo-presentation";
+import type { DemoEngineOptions } from "../session/session-options";
 
 const fixtureMetaModules = import.meta.glob(
   "../../fixtures/*/fixture.meta.json",
@@ -15,6 +24,13 @@ const fixtureMetaModules = import.meta.glob(
     import: "default",
   },
 ) as Record<string, DemoFixtureMeta>;
+const fixtureManifests = import.meta.glob(
+  ["../../fixtures/*/detections.manifest.json"],
+  {
+    eager: true,
+    import: "default",
+  },
+) as Record<string, DemoFixtureDetectionManifest>;
 const fixtureManifestUrls = import.meta.glob(
   "../../fixtures/*/detections.manifest.json",
   {
@@ -59,7 +75,12 @@ interface DemoFixtureMeta {
   readonly media: {
     readonly file: string;
     readonly loadingStatusLabel: string;
-    readonly normalizeInBrowser: boolean;
+    /**
+     * Forced-CFR 30fps transcode the fixture's detections were computed
+     * against. A v1 fixture indexes that timeline rather than the source's own
+     * frames, so playing `file` draws every detection against the wrong frame.
+     */
+    readonly proxyFile?: string;
     readonly readyStatusLabel: string;
   };
   readonly presentation?: DemoFixturePresentationDefaults;
@@ -84,14 +105,54 @@ export interface DemoFixtureDefinition {
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
-  readonly normalizeInBrowser: boolean;
   readonly presentationDefaults?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
   /** Whether the fixture appears in the general demo sample selector. */
   readonly showInDemo: boolean;
   readonly mediaReadyStatusLabel: string;
+  /** Declared detection-timeline transcode, or null when the fixture has none. */
+  readonly proxyVideoSrc: string | null;
   readonly videoSrc: string;
+}
+
+/** Layers that draw nothing unless the detections carry the matching geometry. */
+const geometryBackedLayers: readonly (readonly [
+  DemoPresentationLayerSetting,
+  keyof DemoFixtureGeometrySummary,
+])[] = [
+  ["boxesEnabled", "boxDetectionCount"],
+  ["keypointsEnabled", "keypointDetectionCount"],
+  ["masksEnabled", "maskDetectionCount"],
+  ["polygonsEnabled", "polygonDetectionCount"],
+  ["polylinesEnabled", "polylineDetectionCount"],
+];
+
+/**
+ * The layers a fixture is allowed to offer.
+ *
+ * A manifest that counts its own geometry settles what the detections hold, and
+ * a declared flag may only take a layer away from that, never hand one back: a
+ * fixture is regenerated far more often than its metadata is reread, so the
+ * count is the side that stays true.
+ */
+export function resolveDemoFixtureAvailability(
+  declared: DemoPresentationAvailability | undefined,
+  geometry: DemoFixtureGeometrySummary | undefined,
+): DemoPresentationAvailability | undefined {
+  if (!geometry) {
+    return declared;
+  }
+
+  const availability: DemoPresentationAvailability = { ...declared };
+
+  for (const [layer, countKey] of geometryBackedLayers) {
+    if (geometry[countKey] === 0) {
+      availability[layer] = false;
+    }
+  }
+
+  return availability;
 }
 
 /** Every committed fixture that can be loaded by a focused documentation view. */
@@ -132,6 +193,12 @@ export interface DemoFixtureDetectionManifest extends DetectionFrameChunkManifes
     readonly height: number;
     readonly frameRate: number;
     readonly duration: number;
+    /**
+     * Presentation timestamp of source frame index 0. Absent on fixtures
+     * extracted from a normalized proxy, whose grid always started at zero.
+     */
+    readonly firstTimestamp?: number;
+    readonly frameCount?: number;
   };
   readonly classNames?: readonly string[];
   readonly geometry?: DemoFixtureGeometrySummary;
@@ -191,13 +258,6 @@ export type DemoFixtureDetectionSourceTransform = (
   manifest: DemoFixtureDetectionManifest,
 ) => DetectionFrameSource;
 
-export interface DemoFixtureMediaSource {
-  readonly error: Error | null;
-  readonly media: MediaSessionMedia;
-  readonly normalizeInBrowser: boolean;
-  readonly statusLabel: string;
-}
-
 export async function loadDemoFixtureDetectionManifest(
   definition: DemoFixtureDefinition = defaultDemoFixture,
 ): Promise<DemoFixtureDetectionManifest> {
@@ -212,32 +272,30 @@ export async function loadDemoFixtureDetectionManifest(
   return (await response.json()) as DemoFixtureDetectionManifest;
 }
 
-export async function loadDemoFixtureMedia(
+/**
+ * Media a fixture session plays. A fixture whose detections were computed on a
+ * transcoded timeline has to play that transcode, because its frame indexes
+ * describe the transcode's grid and not the source's own frames.
+ */
+export function resolveDemoFixturePlaybackSrc(
+  definition: DemoFixtureDefinition,
+): string {
+  return definition.proxyVideoSrc ?? definition.videoSrc;
+}
+
+export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
-): Promise<DemoFixtureMediaSource> {
-  if (!definition.normalizeInBrowser) {
-    return {
-      error: null,
-      media: definition.videoSrc,
-      normalizeInBrowser: false,
-      statusLabel: definition.mediaReadyStatusLabel,
-    };
-  }
-
-  const response = await fetch(definition.videoSrc);
-
-  if (!response.ok) {
-    throw new Error(
-      `Unable to load sample source media: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  return {
-    error: null,
-    media: await response.blob(),
-    normalizeInBrowser: true,
-    statusLabel: definition.mediaReadyStatusLabel,
-  };
+  display?: DisplayBoxResolutionOptions,
+  engine?: DemoEngineOptions,
+): MediaRendererSource {
+  return createWebVideoEngineMediaRendererSource({
+    ...engine,
+    display,
+    source: {
+      kind: SourceKind.Url,
+      url: resolveDemoFixturePlaybackSrc(definition),
+    },
+  });
 }
 
 export function createDemoFixtureDetectionSource(
@@ -246,10 +304,15 @@ export function createDemoFixtureDetectionSource(
   frameTransform?: DemoFixtureFrameTransform,
   sourceTransform?: DemoFixtureDetectionSourceTransform,
 ): DemoFixtureDetectionSource {
-  const baseDetectionSource = createChunkedDetectionFrameSource({
+  const detectionSpace = resolveDemoFixtureDetectionSpace(manifest);
+  const chunkedDetectionSource = createChunkedDetectionFrameSource({
     baseUrl: definition.detectionsManifestSrc,
     fetchChunk: async (chunk) => {
-      const loaded = await fetchDemoFixtureDetectionChunk(chunk, definition);
+      const loaded = await fetchDemoFixtureDetectionChunk(
+        chunk,
+        definition,
+        detectionSpace,
+      );
 
       return frameTransform
         ? { frames: frameTransform(loaded.frames) }
@@ -257,6 +320,25 @@ export function createDemoFixtureDetectionSource(
     },
     manifest,
   });
+  const baseDetectionSource: DetectionFrameSource = {
+    ...chunkedDetectionSource,
+    async loadFrames(startTime, endTime, options) {
+      const frames = await chunkedDetectionSource.loadFrames(
+        startTime,
+        endTime,
+        options,
+      );
+
+      assertDemoFixtureDetectionSpace(
+        frames,
+        detectionSpace,
+        definition,
+        options?.coordinateSpace,
+      );
+
+      return frames;
+    },
+  };
   const detectionSource =
     sourceTransform?.(baseDetectionSource, manifest) ?? baseDetectionSource;
   let destroyed = false;
@@ -285,6 +367,7 @@ export function createDemoFixtureDetectionSource(
 const fetchDemoFixtureDetectionChunk = async (
   chunk: Parameters<DetectionFrameChunkFetch>[0],
   definition: DemoFixtureDefinition,
+  detectionSpace: DetectionCoordinateSpace | null,
 ) => {
   const chunkUrl =
     sampleDetectionChunkUrls[`${definition.basePath}/${chunk.src}`];
@@ -292,6 +375,8 @@ const fetchDemoFixtureDetectionChunk = async (
   if (!chunkUrl) {
     throw new Error(`Unknown fixture detection chunk: ${chunk.src}`);
   }
+
+  await delayDetectionFetch();
 
   const response = await fetch(chunkUrl);
 
@@ -301,10 +386,74 @@ const fetchDemoFixtureDetectionChunk = async (
     );
   }
 
-  return (await response.json()) as Awaited<
+  const chunkData = (await response.json()) as Awaited<
     ReturnType<DetectionFrameChunkFetch>
   >;
+
+  return detectionSpace
+    ? {
+        frames: chunkData.frames.map((frame) => ({
+          ...frame,
+          coordinateSpace: detectionSpace,
+        })),
+      }
+    : chunkData;
 };
+
+/**
+ * Pixel space the fixture's detections were computed in, as its manifest
+ * records it.
+ *
+ * A fixture's chunks hold rectangles, polygons, polylines, and keypoints in the
+ * pixels of the media the model saw. The demo may play a smaller delivery
+ * proxy of that media instead, so every frame states the space it came from and
+ * lets the renderer scale it onto the frame actually presented.
+ */
+function resolveDemoFixtureDetectionSpace(
+  manifest: DemoFixtureDetectionManifest,
+): DetectionCoordinateSpace | null {
+  const { height, width } = manifest.video;
+
+  return width > 0 && height > 0 ? { height, width } : null;
+}
+
+/**
+ * Refuses to serve detections the demo cannot place on the media it is playing.
+ *
+ * Nothing downstream can notice geometry drawn in the wrong pixel space: boxes
+ * and labels simply land somewhere plausible, or off the canvas entirely.
+ */
+function assertDemoFixtureDetectionSpace(
+  frames: readonly DetectionFrame[],
+  detectionSpace: DetectionCoordinateSpace | null,
+  definition: DemoFixtureDefinition,
+  presentedSpace: DetectionCoordinateSpace | undefined,
+): void {
+  if (!presentedSpace) {
+    return;
+  }
+
+  if (!detectionSpace) {
+    throw new Error(
+      `Fixture ${definition.sampleName} does not say what size its detections were computed at, so the demo cannot tell whether they fit the ${presentedSpace.width}x${presentedSpace.height} media it is playing. Give video.width and video.height real pixel sizes in demo/fixtures/${definition.sampleName}/detections.manifest.json.`,
+    );
+  }
+
+  if (
+    detectionSpace.width === presentedSpace.width &&
+    detectionSpace.height === presentedSpace.height
+  ) {
+    return;
+  }
+
+  if (frames.every((frame) => frame.coordinateSpace)) {
+    return;
+  }
+
+  throw new Error(
+    `Fixture ${definition.sampleName} plays ${presentedSpace.width}x${presentedSpace.height} media while its detections were computed at ${detectionSpace.width}x${detectionSpace.height}, and the loaded frames do not declare which of the two they use. Every frame needs coordinateSpace set to the size the detections were computed at, or every box, label, polygon, polyline, and keypoint is drawn in the wrong place.`,
+  );
+}
 
 function createDemoFixtures(): readonly DemoFixtureDefinition[] {
   const fixtures = Object.entries(fixtureMetaModules).flatMap(
@@ -322,12 +471,23 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
       const basePath = metaPath.replace(/\/fixture\.meta\.json$/, "");
       const manifestPath = `${basePath}/detections.manifest.json`;
       const mediaPath = normalizeFixturePath(basePath, meta.media.file);
+      const proxyPath = meta.media.proxyFile
+        ? normalizeFixturePath(basePath, meta.media.proxyFile)
+        : null;
       const detectionsManifestSrc = fixtureManifestUrls[manifestPath];
       const videoSrc = fixtureMediaUrls[mediaPath];
+      const proxyVideoSrc = proxyPath ? fixtureMediaUrls[proxyPath] : null;
 
       if (!detectionsManifestSrc || !videoSrc) {
         console.warn(
           `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${manifestPath} and ${mediaPath}.`,
+        );
+        return [];
+      }
+
+      if (proxyPath && !proxyVideoSrc) {
+        console.warn(
+          `Skipping demo fixture ${meta.sampleName} with a declared but missing proxy. Expected ${proxyPath}.`,
         );
         return [];
       }
@@ -341,9 +501,12 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           inferenceLabel: meta.inferenceLabel,
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
-          normalizeInBrowser: meta.media.normalizeInBrowser,
           presentationDefaults: meta.presentation,
-          presentationAvailability: meta.presentationAvailability,
+          presentationAvailability: resolveDemoFixtureAvailability(
+            meta.presentationAvailability,
+            fixtureManifests[manifestPath]?.geometry,
+          ),
+          proxyVideoSrc: proxyVideoSrc ?? null,
           sampleName: meta.sampleName,
           showInDemo: meta.showInDemo !== false,
           videoSrc,

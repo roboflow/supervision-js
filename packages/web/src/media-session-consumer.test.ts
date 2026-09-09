@@ -7,12 +7,48 @@ import type {
 import {
   createContainer,
   createMockSample,
+  flushAnimationFrame,
   mediaMock,
   pixiMock,
   resetMocks,
 } from "../../../test/media-renderer-harness";
 
 describe("media session consumer workflows", () => {
+  it("plays an ungated appendable session whose predictions have not arrived", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
+    const { createMediaSession, MediaRendererPlaybackState } =
+      await import("./index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "no-predictions-yet" },
+      },
+      media: "sample.mp4",
+      // A session with appendable detections waits for coverage by default, and
+      // this one is about what a host gets when it opts out.
+      playbackGate: false,
+      renderer: {
+        autoPlay: false,
+        loop: false,
+      },
+    });
+
+    await session.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(session.getState()).toMatchObject({ playbackBlocked: false });
+    expect(session.getState().renderer).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    session.destroy();
+  });
+
   it("creates a session, appends detections, seeks, updates styles, and destroys cleanly", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];
@@ -191,13 +227,6 @@ describe("media session consumer workflows", () => {
   it("forwards the mask halo renderer style from session presentation", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];
-    // Node lacks createImageBitmap; stubbing it lets the prepared pipeline
-    // take the PngIdMask path the halo depends on.
-    vi.stubGlobal(
-      "createImageBitmap",
-      vi.fn(async () => ({ close: vi.fn(), height: 2, width: 2 })),
-    );
-
     const { annotationRenderers, createMediaSession, DetectionMaskEncoding } =
       await import("./index");
     const haloResolve = vi.fn(() => ({
@@ -251,8 +280,6 @@ describe("media session consumer workflows", () => {
     });
 
     session.destroy();
-    // Restore the node default so later tests take the RGBA fallback again.
-    vi.stubGlobal("createImageBitmap", undefined);
   });
 
   it("forwards the box-corners renderer style from session presentation", async () => {

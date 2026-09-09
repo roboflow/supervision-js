@@ -8,6 +8,10 @@ code contributions.
 
 - Search existing issues and pull requests before opening a new one.
 - Keep browser renderer changes aligned with the session-first public API.
+- Video presentation is push-based and its atomic present is law for later
+  edits. Read
+  [video-engine-presentation.md](docs/internal/video-engine-presentation.md)
+  before changing video, the annotation window, or the render policy.
 - Do not expose PixiJS, Mediabunny, worker, or prepared-artifact internals as
   public API without a concrete consumer need.
 - Treat React Native as experimental and keep it independent of the browser
@@ -29,6 +33,11 @@ Use Node.js 20.19 or newer.
 npm install
 npm run dev
 ```
+
+`npm run dev` keeps the package build watchers running beside the demo server.
+A demo-only server does not, and the demo runs the built package, so read
+[the build note in agent-guidance](docs/internal/agent-guidance.md#the-demo-runs-the-built-package)
+before iterating on library source any other way.
 
 Useful checks:
 

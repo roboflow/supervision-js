@@ -17,6 +17,14 @@ export interface BasePolylineStyleOptions {
     Partial<BoxStrokeStyle> | null,
     PolylineStyleContext
   >;
+  /**
+   * Contrast stroke drawn under the path. An absent value draws no shadow; the
+   * canonical default polyline style supplies one.
+   */
+  readonly shadowStroke?: DetectionStyleValue<
+    Partial<BoxStrokeStyle> | null,
+    PolylineStyleContext
+  >;
   readonly shouldRender?: DetectionStylePredicate<PolylineStyleContext>;
 }
 
@@ -42,8 +50,23 @@ export class BasePolylineStyle implements PolylineStyle {
       return undefined;
     }
 
+    const shadowStroke = resolveStyleValue(
+      this.options.shadowStroke,
+      detection,
+      context,
+    );
+
     return {
       points: detection.polyline.points,
+      ...(shadowStroke === undefined || shadowStroke === null
+        ? {}
+        : {
+            shadowStroke: resolveStrokeStyle(shadowStroke, {
+              alpha: 0.65,
+              color: 0x000000,
+              width: 4,
+            }),
+          }),
       stroke: resolveStrokeStyle(stroke, {
         alpha: 1,
         color: 0x00ff66,

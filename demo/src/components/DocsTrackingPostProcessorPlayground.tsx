@@ -13,6 +13,7 @@ import {
 } from "../docs-tracking";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 
 const emptyDiagnostics: DetectionPostProcessingDiagnostics = {
   activeTrackCount: 0,
@@ -82,7 +83,7 @@ export function DocsTrackingPostProcessorPlayground() {
   );
   const demo = useDemoRenderer({
     fixtureDetectionSourceTransform: sourceTransform,
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_sam3",
     initialPresentationSettings: {
       boxesEnabled: true,
       focusEnabled: false,
@@ -94,8 +95,8 @@ export function DocsTrackingPostProcessorPlayground() {
     },
     presentationTransform,
   });
-  const totalFrames = demo.fixtureSummary?.frameCount ?? 270;
-  const totalChunks = Math.ceil((demo.fixtureSummary?.duration ?? 9) / 1);
+  const totalFrames = demo.fixtureSummary?.frameCount ?? 0;
+  const totalChunks = Math.ceil(demo.fixtureSummary?.duration ?? 0);
   const {
     algorithm,
     bufferRatioFirst,
@@ -268,6 +269,12 @@ export function DocsTrackingPostProcessorPlayground() {
     })();
   }, [controller, demo, isPlaying, showPresentation]);
 
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
+  );
+
   return (
     <main
       className="docs-layer-playground docs-tracking-playground"
@@ -276,9 +283,8 @@ export function DocsTrackingPostProcessorPlayground() {
       <section className="docs-layer-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
         <div aria-live="polite" className="docs-tracking-playground__badge">
           <span>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DetectionBufferStatus } from "supervision-js-core";
+import { DetectionBufferStatus, MediaErrorKind } from "supervision-js-core";
 import {
   MediaRendererFit,
   MediaRendererPlaybackState,
@@ -11,11 +11,13 @@ import {
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
+  RenderPreparationGateHoldReason,
   RenderPreparationWorkerStatus,
 } from "#types/render-preparation";
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMediaBranch,
   MediaSessionStatus,
 } from "#types/media-session";
 
@@ -115,6 +117,39 @@ describe("media session state", () => {
     ]);
   });
 
+  /**
+   * A local file already in memory, held while inference runs, reported both as
+   * a stopped picture and as a wait for the model. A host reading the vaguer of
+   * the two first tells the viewer the video is still downloading.
+   */
+  it("separates waiting for a detection producer from loading detections", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.AwaitingCoverage,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(state.playbackBlocked).toBe(true);
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: true,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for the model",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ]);
+  });
+
   it("marks playback buffering as playback-blocking", () => {
     const state = createMediaSessionStateSnapshot({
       errorMessage: null,
@@ -175,12 +210,6 @@ describe("media session state", () => {
     expect(state.playbackBlocked).toBe(true);
     expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
-      expect.objectContaining({
-        blockingPlayback: true,
-        blockingPresentation: false,
-        kind: MediaSessionActivityKind.PlaybackBuffering,
-        status: MediaSessionActivityStatus.Waiting,
-      }),
       expect.objectContaining({
         blockingPlayback: true,
         blockingPresentation: false,
@@ -290,6 +319,55 @@ describe("media session state", () => {
     ]);
   });
 
+  it("says the masks were given up on while the picture keeps moving", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+        renderPreparationGateAbandoned: true,
+      }),
+    });
+
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: false,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.RenderPreparationAbandoned,
+        label: "Masks could not keep up",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ]);
+    expect(state.playbackBlocked).toBe(false);
+    expect(state.status).toBe(MediaSessionStatus.Playing);
+  });
+
+  it("says nothing about the masks once preparation covers the playhead again", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+      }),
+    });
+
+    expect(state.activities).toEqual([]);
+  });
+
   it("reports renderer errors as blocking errors", () => {
     const state = createMediaSessionStateSnapshot({
       errorMessage: null,
@@ -321,6 +399,34 @@ describe("media session state", () => {
         errorMessage: "Decoder failed",
         kind: MediaSessionActivityKind.Error,
         status: MediaSessionActivityStatus.Error,
+      }),
+    ]);
+  });
+
+  it("carries the source's failure kind on the renderer error activity", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Error,
+        sourceErrorKind: MediaErrorKind.UnsupportedFormat,
+        sourceErrorMessage:
+          "openInput: browser cannot decode this video track's codec hevc",
+        sourceStatus: MediaSourceStatus.Error,
+      }),
+    });
+
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        errorKind: MediaErrorKind.UnsupportedFormat,
+        kind: MediaSessionActivityKind.Error,
       }),
     ]);
   });
@@ -382,11 +488,302 @@ describe("media session state", () => {
       status: MediaSessionStatus.Destroyed,
     });
   });
+  /**
+   * A local file already in memory, held at the start of playback while its
+   * masks rasterize. Reported as a stopped picture alone, it reads as a slow
+   * network on a file that is not being fetched at all.
+   */
+  it("names the masks when they are what stopped the picture", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "1.500",
+              mediaTime: 1.5,
+              status: RenderPreparationArtifactFrameStatus.Pending,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 3,
+            preparedCount: 9,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(
+      state.activities.map((entry) => ({
+        blockingPlayback: entry.blockingPlayback,
+        kind: entry.kind,
+        label: entry.label,
+      })),
+    ).toStrictEqual([
+      {
+        blockingPlayback: true,
+        kind: MediaSessionActivityKind.RenderPreparing,
+        label: "Waiting for the masks",
+      },
+    ]);
+  });
+
+  /**
+   * Shot 1: 84 of 84 frames prepared, the frame on screen among them, and the
+   * gate still holding to bank a lead. Nothing is pending and the active frame
+   * is ready, so every earlier signal reads clear and the wait was described as
+   * a download on a file sitting on the viewer's own disk.
+   */
+  it("names a lead being banked rather than blaming the transfer", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "0.167",
+              mediaTime: 0.1668,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            gateHold: {
+              reason: RenderPreparationGateHoldReason.LeadBelowRequirement,
+              requiredAheadSeconds: 1,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 0,
+            preparedAheadSeconds: 0.25,
+            preparedCount: 84,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(state.activities).toStrictEqual([
+      {
+        artifactKind: RenderPreparationArtifactKind.MaskFrame,
+        blockingPlayback: true,
+        blockingPresentation: false,
+        detail: "Starting again at 1.0s of masks ready",
+        kind: MediaSessionActivityKind.RenderPreparing,
+        label: "Catching the masks up",
+        pendingCount: 0,
+        preparedCount: 84,
+        progress: 0.25,
+        status: MediaSessionActivityStatus.Waiting,
+      },
+    ]);
+  });
+
+  it("blames a transfer only where the session opened one", () => {
+    const stoppedOn = (branch: MediaSessionMediaBranch | undefined) =>
+      createMediaSessionStateSnapshot({
+        errorMessage: null,
+        media: {
+          inputMetadata: null,
+          normalizedMedia: null,
+          objectUrl: null,
+          preparation: branch ? { branch, opened: "src" } : null,
+        },
+        normalization: null,
+        renderPreparation: null,
+        renderer: createRendererState({
+          detectionBufferStatus: DetectionBufferStatus.Ready,
+          playbackState: MediaRendererPlaybackState.Buffering,
+        }),
+      }).activities[0].detail;
+
+    expect({
+      blob: stoppedOn(MediaSessionMediaBranch.BlobObjectUrl),
+      normalized: stoppedOn(MediaSessionMediaBranch.NormalizedObjectUrl),
+      progressive: stoppedOn(MediaSessionMediaBranch.ProgressiveSource),
+      rendererSource: stoppedOn(MediaSessionMediaBranch.RendererSource),
+      unknown: stoppedOn(undefined),
+      url: stoppedOn(MediaSessionMediaBranch.Url),
+    }).toStrictEqual({
+      blob: "This part of the video is still being read",
+      normalized: "This part of the video is still being read",
+      progressive: "This part of the video is still being read",
+      rendererSource: "This part of the video is still being read",
+      unknown: "This part of the video is still being read",
+      url: "This part of the video has not downloaded yet",
+    });
+  });
+
+  /**
+   * Shot 2: the gate holds on the frame it is about to present while the frame
+   * on screen is prepared and the queue behind it has momentarily drained. The
+   * hold and the presented frame describe different frames, so every field the
+   * loop used to read said the artifact had nothing to report.
+   */
+  it("names a hold taken on the frame ahead of the one on screen", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "2.000",
+              mediaTime: 2,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            gateHold: {
+              reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+              requiredAheadSeconds: 1,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 0,
+            preparedCount: 42,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect({
+      labels: state.activities.map((activity) => activity.label),
+      playbackBlocked: state.playbackBlocked,
+    }).toStrictEqual({
+      labels: ["Waiting for the masks"],
+      playbackBlocked: true,
+    });
+  });
+
+  /**
+   * Measured after a scrub: two strictly sequential range reads of the clip,
+   * 534KB then 657KB at roughly 490KB/s, with the picture stopped for the two
+   * seconds they took. A seek does not pass through the transport, so nothing
+   * downstream of the read had anything to report.
+   */
+  it("names the source read the picture is stopped on", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+        sourceAwaitingRead: true,
+      }),
+    });
+
+    expect({
+      activities: state.activities.map((activity) => ({
+        detail: activity.detail,
+        kind: activity.kind,
+        label: activity.label,
+      })),
+      playbackBlocked: state.playbackBlocked,
+    }).toStrictEqual({
+      activities: [
+        {
+          detail: "The video for this part has not arrived yet",
+          kind: MediaSessionActivityKind.MediaSourceReading,
+          label: "Loading the video",
+        },
+      ],
+      playbackBlocked: true,
+    });
+  });
+
+  it("reports a stopped picture once, on the read rather than the transport", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+        sourceAwaitingRead: true,
+      }),
+    });
+
+    expect(state.activities.map((activity) => activity.kind)).toStrictEqual([
+      MediaSessionActivityKind.MediaSourceReading,
+    ]);
+  });
+
+  it("names detections still arriving apart from video still arriving", () => {
+    const stoppedFor = (detectionBufferStatus: DetectionBufferStatus) =>
+      createMediaSessionStateSnapshot({
+        errorMessage: null,
+        media: {
+          inputMetadata: null,
+          normalizedMedia: null,
+          objectUrl: null,
+        },
+        normalization: null,
+        renderPreparation: null,
+        renderer: createRendererState({
+          detectionBufferStatus,
+          playbackState: MediaRendererPlaybackState.Buffering,
+        }),
+      }).activities.map((activity) => activity.label);
+
+    expect({
+      detections: stoppedFor(DetectionBufferStatus.Loading),
+      media: stoppedFor(DetectionBufferStatus.Ready),
+      model: stoppedFor(DetectionBufferStatus.AwaitingCoverage),
+    }).toStrictEqual({
+      detections: ["Waiting for detections"],
+      media: ["Waiting for more video"],
+      model: ["Waiting for the model"],
+    });
+  });
 });
 
 function createRendererState(options: {
   readonly detectionBufferStatus: DetectionBufferStatus;
   readonly playbackState: MediaRendererPlaybackState;
+  readonly renderPreparationGateAbandoned?: boolean;
+  readonly sourceAwaitingRead?: boolean;
+  readonly sourceErrorKind?: MediaErrorKind | null;
   readonly sourceErrorMessage?: string | null;
   readonly sourceStatus?: MediaSourceStatus;
 }): MediaRendererState {
@@ -406,19 +803,24 @@ function createRendererState(options: {
       requestedStartTime: null,
       status: options.detectionBufferStatus,
     },
+    drawnMaskFrameTime: null,
     duration: null,
     fit: MediaRendererFit.Contain,
     lastFrameRenderTimings: null,
+    maskHeldStale: false,
     mediaHeight: 0,
     mediaWidth: 0,
     playbackState: options.playbackState,
     presentedFrames: 0,
+    renderPreparationGateAbandoned:
+      options.renderPreparationGateAbandoned ?? false,
     rendererBackend: "test",
     source: {
       audioTrackCount: null,
+      awaitingRead: options.sourceAwaitingRead ?? false,
       canRead: null,
       duration: null,
-      errorKind: null,
+      errorKind: options.sourceErrorKind ?? null,
       errorMessage: options.sourceErrorMessage ?? null,
       estimatedFrameCount: null,
       estimatedFrameRate: null,

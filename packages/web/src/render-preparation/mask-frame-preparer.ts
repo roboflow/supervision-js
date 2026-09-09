@@ -1,13 +1,14 @@
 import {
   compositeMaskFrame,
-  createMaskIdFrame,
-  createPngIdMaskFrame,
+  createIdMaskPlane,
+  createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
 import {
   PreparedMaskFrameKind,
   type PreparedMaskFrame,
+  type PreparedRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-artifact";
 import { getBrowserMaskPreparationWorkerCount } from "#render-preparation/mask-preparation-worker-count";
 import {
@@ -208,16 +209,16 @@ function createMainThreadMaskFramePreparer(
         throw new Error("Mask frame preparer has been destroyed.");
       }
 
-      const pngIdMaskFrame = await createPreparedPngIdMaskFrame(job);
-
-      if (pngIdMaskFrame) {
-        return pngIdMaskFrame;
-      }
-
-      const compositedFrame = compositeMaskFrame(job.instructions);
       const regionMaskCoverage = createRegionMaskCoverageFrame(
         job.instructions,
       );
+      const idMaskFrame = createPreparedIdMaskFrame(job, regionMaskCoverage);
+
+      if (idMaskFrame) {
+        return idMaskFrame;
+      }
+
+      const compositedFrame = compositeMaskFrame(job.instructions);
 
       if (!compositedFrame && !regionMaskCoverage) {
         return undefined;
@@ -225,7 +226,6 @@ function createMainThreadMaskFramePreparer(
 
       const preparedPixels =
         compositedFrame ?? createTransparentCoverageCarrier();
-
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
 
@@ -251,7 +251,7 @@ function createMainThreadMaskFramePreparer(
           canvas.height = 0;
         },
         height: preparedPixels.height,
-        idMaskData: createMaskIdFrame(job.instructions)?.data,
+        idMaskPlane: createIdMaskPlane(job.instructions, job.maxRasterWidth),
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
         regionMaskCoverage,
@@ -268,6 +268,10 @@ function createMainThreadMaskFramePreparer(
   return preparer;
 }
 
+/**
+ * A frame that carries only region coverage has nothing to composite, and the
+ * RGBA branch still has to produce an artifact for the coverage to ride on.
+ */
 function createTransparentCoverageCarrier() {
   return {
     data: new Uint8ClampedArray(new ArrayBuffer(4)),
@@ -276,49 +280,31 @@ function createTransparentCoverageCarrier() {
   };
 }
 
-async function createPreparedPngIdMaskFrame(
+function createPreparedIdMaskFrame(
   job: MaskFramePreparationJob,
-): Promise<PreparedMaskFrame | undefined> {
-  if (
-    typeof Blob === "undefined" ||
-    typeof createImageBitmap === "undefined" ||
-    typeof CompressionStream === "undefined"
-  ) {
+  regionMaskCoverage: PreparedRegionMaskCoverageFrame | undefined,
+): PreparedMaskFrame | undefined {
+  const frame = createIdMaskRasterFrame(job.instructions, job.maxRasterWidth);
+
+  if (!frame) {
     return undefined;
   }
 
-  try {
-    const regionMaskCoverage = createRegionMaskCoverageFrame(job.instructions);
-    const frame = await createPngIdMaskFrame(job.instructions);
-
-    if (!frame) {
-      return undefined;
-    }
-
-    const imageBitmap = await createImageBitmap(
-      new Blob([frame.png], { type: "image/png" }),
-    );
-
-    return {
-      close() {
-        imageBitmap.close();
-      },
-      fillPalette: frame.fillPalette,
-      hasStroke: frame.hasStroke,
-      height: imageBitmap.height,
-      key: job.key,
-      kind: PreparedMaskFrameKind.PngIdMask,
-      maxStrokeWidth: frame.maxStrokeWidth,
-      png: frame.png,
-      regionMaskCoverage,
-      source: imageBitmap,
-      strokePalette: frame.strokePalette,
-      strokeWidths: frame.strokeWidths,
-      width: imageBitmap.width,
-    };
-  } catch {
-    return undefined;
-  }
+  return {
+    close() {},
+    fillPalette: frame.fillPalette,
+    hasStroke: frame.hasStroke,
+    height: frame.height,
+    key: job.key,
+    kind: PreparedMaskFrameKind.IdMask,
+    maxStrokeWidth: frame.maxStrokeWidth,
+    raster: frame.data,
+    regionMaskCoverage,
+    sourceWidth: frame.sourceWidth,
+    strokePalette: frame.strokePalette,
+    strokeWidths: frame.strokeWidths,
+    width: frame.width,
+  };
 }
 
 function createWorkerMaskFramePreparer(
@@ -477,13 +463,15 @@ function createPreparedFrameFromWorkerResponse(
     { readonly type: MaskPreparationWorkerMessageType.Complete }
   >,
 ): PreparedMaskFrame {
-  if (message.artifactKind === PreparedMaskFrameKind.PngIdMask) {
+  if (message.artifactKind === PreparedMaskFrameKind.IdMask) {
     if (
-      !message.imageBitmap ||
+      !message.raster ||
       !message.fillPalette ||
-      !message.png ||
       !message.strokePalette ||
-      !message.strokeWidths
+      !message.strokeWidths ||
+      !message.width ||
+      !message.height ||
+      !message.sourceWidth
     ) {
       throw new Error(
         "Mask preparation worker returned an incomplete ID mask artifact.",
@@ -491,21 +479,19 @@ function createPreparedFrameFromWorkerResponse(
     }
 
     return {
-      close() {
-        message.imageBitmap?.close();
-      },
+      close() {},
       fillPalette: message.fillPalette,
       hasStroke: message.hasStroke ?? false,
-      height: message.imageBitmap.height,
+      height: message.height,
       key: message.key,
-      kind: PreparedMaskFrameKind.PngIdMask,
+      kind: PreparedMaskFrameKind.IdMask,
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
-      png: message.png,
+      raster: message.raster,
       regionMaskCoverage: message.regionMaskCoverage,
-      source: message.imageBitmap,
+      sourceWidth: message.sourceWidth,
       strokePalette: message.strokePalette,
       strokeWidths: message.strokeWidths,
-      width: message.imageBitmap.width,
+      width: message.width,
     };
   }
 
@@ -515,7 +501,7 @@ function createPreparedFrameFromWorkerResponse(
         message.imageBitmap?.close();
       },
       height: message.imageBitmap.height,
-      idMaskData: message.idMaskData,
+      idMaskPlane: message.idMaskPlane,
       key: message.key,
       kind: PreparedMaskFrameKind.RgbaImage,
       regionMaskCoverage: message.regionMaskCoverage,
@@ -545,7 +531,7 @@ function createPreparedFrameFromWorkerResponse(
       canvas.height = 0;
     },
     height: message.imageData.height,
-    idMaskData: message.idMaskData,
+    idMaskPlane: message.idMaskPlane,
     key: message.key,
     kind: PreparedMaskFrameKind.RgbaImage,
     regionMaskCoverage: message.regionMaskCoverage,

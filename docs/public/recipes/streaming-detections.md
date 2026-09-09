@@ -27,10 +27,6 @@ const session = await createMediaSession({
         mode: DetectionFrameRetentionMode.PersistAll,
       },
     },
-    playbackGate: {
-      enabled: true,
-      requiredAheadSeconds: 2,
-    },
   },
   normalize: { stream: true },
   renderer: {
@@ -41,6 +37,40 @@ const session = await createMediaSession({
 for await (const frames of streamInferenceFrames(file)) {
   await session.appendDetectionFrames(frames);
 }
+await session.finalizeDetectionCoverage();
+```
+
+Gates are on by default, but opening does not wait for predictions that will
+arrive later. The initial media frame can be bare. Subsequent playback waits
+for detection coverage and prepared annotations, subject to each gate's wait
+limit. Pass `playbackGate: false` to `createMediaSession` when you would rather the
+picture keep moving and the annotations land as they arrive: a frame the source
+does not cover yet then presents without annotations and draws them when the
+append covering it lands, so inference falling behind slows annotations rather
+than the video.
+That one switch answers for `detections.playbackGate` and
+`renderer.renderPreparation.playbackGate` together; set either one's `enabled`
+to answer for that gate alone. Detection `requiredAheadSeconds` is the coverage
+needed ahead of playback. Preparation `requiredAheadSeconds` caps the prepared
+lead a stop may accumulate; it is not a minimum needed to resume.
+
+### Which Sources The Gate Reaches
+
+After opening, both gates apply while playback runs. For the `media` inputs
+above, a URL, a `File`, or a `Blob`, the renderer pulls a decoded sample and
+holds it before drawing.
+
+A media source that presents its own frames owns the playhead, and the renderer
+follows it rather than pacing it. `createWebVideoEngineMediaRendererSource` and
+`openWebVideoEngineMediaSource` return that kind of source, and they are what
+most hosts render video through. The renderer stops that producer when detection
+coverage or prepared artifacts are missing and starts it again when the wait
+settles. Wait on coverage yourself when you would rather decide where playback
+stops:
+
+```ts
+await session.detectionSource?.waitForRange?.({ startTime: 0, endTime: 2 });
+await session.play();
 ```
 
 ## Appending Results
@@ -95,5 +125,8 @@ session.subscribe((state) => {
 });
 ```
 
-`playbackBlocked` means playback should wait. `presentationBlocked` means the
-visual frame may still be preparing even if playback can continue.
+`playbackBlocked` means playback should wait; media buffering and session errors
+raise it. Detection coverage raises it only through an enabled detection gate,
+so `playbackGate: false` keeps coverage from blocking playback at all.
+`presentationBlocked` means the visual frame is still preparing an artifact
+while playback continues.

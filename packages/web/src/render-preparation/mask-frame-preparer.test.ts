@@ -5,7 +5,10 @@ import {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
 } from "#types/render-preparation";
-import { DetectionMaskEncoding } from "supervision-js-core";
+import {
+  DetectionMaskEncoding,
+  MAX_ID_MASK_PALETTE_ENTRIES,
+} from "supervision-js-core";
 
 import { resetMocks } from "../../../../test/media-renderer-harness";
 import {
@@ -53,41 +56,58 @@ describe("mask frame preparer", () => {
     }
   });
 
-  it("uses PNG ID-mask artifacts on the main thread when browser support exists", async () => {
+  it("builds ID-mask rasters on the main thread", async () => {
     resetMocks();
 
-    const imageBitmap = {
-      close: vi.fn(),
+    const preparer = createMaskFramePreparer({
+      renderPreparation: {
+        mode: RenderPreparationMode.MainThread,
+      },
+    });
+
+    await expect(preparer.prepare(maskPreparationJob)).resolves.toMatchObject({
       height: 2,
+      key: "0:0",
+      kind: PreparedMaskFrameKind.IdMask,
       width: 2,
-    } as unknown as ImageBitmap;
-    const originalCreateImageBitmap = globalThis.createImageBitmap;
-    const createImageBitmap = vi.fn(async () => imageBitmap);
+    });
 
-    globalThis.createImageBitmap = createImageBitmap;
+    preparer.destroy();
+  });
 
-    try {
-      const preparer = createMaskFramePreparer({
-        renderPreparation: {
-          mode: RenderPreparationMode.MainThread,
-        },
-      });
+  it("falls back to a composited RGBA frame past the ID palette", async () => {
+    resetMocks();
 
-      await expect(preparer.prepare(maskPreparationJob)).resolves.toMatchObject(
-        {
-          height: 2,
-          key: "0:0",
-          kind: PreparedMaskFrameKind.PngIdMask,
-          source: imageBitmap,
-          width: 2,
-        },
-      );
-      expect(createImageBitmap).toHaveBeenCalledWith(expect.any(Blob));
+    const preparer = createMaskFramePreparer({
+      renderPreparation: {
+        mode: RenderPreparationMode.MainThread,
+      },
+    });
 
-      preparer.destroy();
-    } finally {
-      globalThis.createImageBitmap = originalCreateImageBitmap;
-    }
+    await expect(
+      preparer.prepare({
+        instructions: Array.from(
+          { length: MAX_ID_MASK_PALETTE_ENTRIES },
+          (_unused, detectionIndex) => ({
+            alpha: 0.5,
+            color: 0xff0000,
+            detectionIndex,
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          }),
+        ),
+        key: "0:0",
+      }),
+    ).resolves.toMatchObject({
+      key: "0:0",
+      kind: PreparedMaskFrameKind.RgbaImage,
+    });
+
+    preparer.destroy();
   });
 
   it("keeps exact-region coverage when palette preparation falls back to RGBA", async () => {
@@ -364,32 +384,29 @@ describe("mask frame preparer", () => {
     }
   });
 
-  it("hydrates PNG ID-mask worker artifacts without losing shader palettes", async () => {
+  it("hydrates ID-mask worker artifacts without losing shader palettes", async () => {
     vi.useFakeTimers();
     resetMocks();
 
     try {
-      const imageBitmap = {
-        close: vi.fn(),
-        height: 2,
-        width: 2,
-      } as unknown as ImageBitmap;
       const fillPalette = new Float32Array([0, 0, 0, 0, 1, 0, 0, 0.5]);
       const strokePalette = new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]);
       const strokeWidths = new Float32Array([0, 5]);
-      const png = new Uint8Array([1, 2, 3]);
+      const raster = new Uint8Array([1, 0, 0, 0]);
       const fakeWorker = createFakeMaskPreparationWorker((message) => ({
-        artifactKind: PreparedMaskFrameKind.PngIdMask,
+        artifactKind: PreparedMaskFrameKind.IdMask,
         fillPalette,
         hasStroke: true,
-        imageBitmap,
+        height: 2,
         key: message.job.key,
         maxStrokeWidth: 5,
-        png,
+        raster,
         requestId: message.requestId,
+        sourceWidth: 2,
         strokePalette,
         strokeWidths,
         type: MaskPreparationWorkerMessageType.Complete,
+        width: 2,
       }));
       const preparer = createMaskFramePreparer({
         renderPreparation: {
@@ -408,10 +425,10 @@ describe("mask frame preparer", () => {
         hasStroke: true,
         height: 2,
         key: "0:0",
-        kind: PreparedMaskFrameKind.PngIdMask,
+        kind: PreparedMaskFrameKind.IdMask,
         maxStrokeWidth: 5,
-        png,
-        source: imageBitmap,
+        raster,
+        sourceWidth: 2,
         strokePalette,
         strokeWidths,
         width: 2,

@@ -2,8 +2,12 @@ export type DemoRenderQuality = number | undefined;
 
 export const defaultDemoRenderQuality = 1.5;
 
+/**
+ * An unstated ceiling is capped at 2x by every grid the library sizes, so "no
+ * cap" is the viewer's own ratio said out loud.
+ */
 export function getDemoMaxDevicePixelRatio(quality: DemoRenderQuality) {
-  return quality;
+  return quality ?? globalThis.devicePixelRatio ?? 1;
 }
 
 export function getDemoRenderQualityDescription(quality: DemoRenderQuality) {

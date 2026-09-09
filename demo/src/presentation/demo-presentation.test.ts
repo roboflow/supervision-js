@@ -18,7 +18,17 @@ import {
   constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
+  demoPresentationDrawsAnnotations,
 } from "./demo-presentation";
+import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
+import {
+  createRegionPlaygroundRenderers,
+  initialRegionPlaygroundSettings,
+} from "../docs-region-annotation-renderer";
+import {
+  createRegionEffectsPlaygroundPresentation,
+  initialRegionEffectsPlaygroundSettings,
+} from "../docs-region-effects";
 
 const detection: Detection = {
   className: "horse",
@@ -36,6 +46,34 @@ const rectangleDetection: Detection = {
   className: "horse",
   confidence: 0.9,
   rect: { height: 40, width: 20, x: 10, y: 12 },
+};
+
+const maskOnlyDetection: Detection = {
+  className: "horse",
+  confidence: 0.9,
+  mask: {
+    counts: "04",
+    encoding: DetectionMaskEncoding.CompressedRle,
+    height: 2,
+    width: 2,
+  },
+};
+
+const polygonOnlyDetection: Detection = {
+  className: "court",
+  confidence: 0.9,
+  polygon: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 10 },
+    ],
+  },
+};
+
+const geometrylessDetection: Detection = {
+  className: "horse",
+  confidence: 0.9,
 };
 
 const vectorDetection: Detection = {
@@ -430,6 +468,99 @@ describe("demo presentation", () => {
     );
   });
 
+  it("keeps the label when no geometry layer is enabled", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      keypointsEnabled: false,
+      labelsEnabled: true,
+      masksEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(presentation.labelStyle?.resolve(detection, context)).toMatchObject({
+      rect: detection.rect,
+      text: "horse",
+    });
+    expect(
+      presentation.labelStyle?.resolve(geometrylessDetection, {
+        ...context,
+        frame: { detections: [geometrylessDetection], mediaTime: 0 },
+      }),
+    ).toBeUndefined();
+    expect(
+      presentation.interactionStyle?.resolve(geometrylessDetection, {
+        ...context,
+        frame: { detections: [geometrylessDetection], mediaTime: 0 },
+        point: { x: 12, y: 14 },
+        state: DetectionInteractionState.Hovered,
+        target: DetectionPickTarget.Box,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("anchors the label on carried geometry the enabled layer does not draw", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      keypointsEnabled: true,
+      labelsEnabled: true,
+      masksEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+    const frame = {
+      detections: [rectangleDetection, polygonOnlyDetection],
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.labelStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0,
+      }),
+    ).toMatchObject({ rect: rectangleDetection.rect, text: "horse" });
+    expect(
+      presentation.labelStyle?.resolve(polygonOnlyDetection, {
+        detectionIndex: 1,
+        frame,
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      rect: { height: 10, width: 20, x: 10, y: 5 },
+      text: "court",
+    });
+  });
+
+  it("keeps the hover highlight for a detection carrying only a mask", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      keypointsEnabled: false,
+      masksEnabled: true,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+
+    expect(
+      presentation.interactionStyle?.resolve(maskOnlyDetection, {
+        detectionIndex: 0,
+        frame: { detections: [maskOnlyDetection], mediaTime: 0 },
+        mediaTime: 0,
+        point: { x: 12, y: 14 },
+        state: DetectionInteractionState.Hovered,
+        target: DetectionPickTarget.Mask,
+      })?.maskStyle,
+    ).toBeTruthy();
+  });
+
   it("toggles each vector layer independently without touching the other styles", () => {
     const allEnabled = createDemoPresentation(defaultDemoPresentationSettings);
     const polygonsOnly = createDemoPresentation({
@@ -539,6 +670,95 @@ describe("demo presentation", () => {
       color: 0x000000,
       width: 3,
     });
+  });
+
+  it("filters a trajectory on the track's confidence and every other layer on the frame's", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 0.5,
+    });
+    const weakFrameOfStrongTrack: Detection = {
+      className: "basketball",
+      confidence: 0.11,
+      metadata: { trajectoryConfidence: 0.86 },
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+      rect: { height: 34, width: 34, x: 10, y: 12 },
+    };
+    const strongFrameOfWeakTrack: Detection = {
+      ...weakFrameOfStrongTrack,
+      confidence: 0.9,
+      metadata: { trajectoryConfidence: 0.17 },
+    };
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [weakFrameOfStrongTrack], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.polylineStyle?.resolve(weakFrameOfStrongTrack, context),
+    ).toBeDefined();
+    expect(
+      presentation.boxStyle?.resolve(weakFrameOfStrongTrack, context),
+    ).toBeUndefined();
+    expect(
+      presentation.polylineStyle?.resolve(strongFrameOfWeakTrack, context),
+    ).toBeUndefined();
+  });
+
+  it("draws a trajectory over a contrast stroke so it reads on any media", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const trajectory: Detection = {
+      className: "basketball",
+      confidence: 0.9,
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+    };
+
+    expect(
+      presentation.polylineStyle?.resolve(trajectory, {
+        detectionIndex: 0,
+        frame: { detections: [trajectory], mediaTime: 0 },
+        mediaTime: 0,
+      })?.shadowStroke,
+    ).toMatchObject({ alpha: 0.55, color: 0x000000 });
+  });
+
+  it("keeps the class color the majority of the drawn trajectory", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const trajectory = {
+      className: "basketball",
+      confidence: 0.9,
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+    };
+    const resolved = presentation.polylineStyle?.resolve(trajectory, {
+      detectionIndex: 0,
+      frame: { detections: [trajectory], mediaTime: 0 },
+      mediaTime: 0,
+    });
+    const strokeWidth = resolved?.stroke?.width ?? 0;
+    const shadowWidth = resolved?.shadowStroke?.width ?? 0;
+
+    expect(shadowWidth).toBeGreaterThan(strokeWidth);
+    expect(shadowWidth).toBeLessThan(strokeWidth * 2);
   });
 
   it("filters vector layers through the shared confidence threshold", () => {
@@ -800,5 +1020,75 @@ describe("demo presentation", () => {
       targetMode: FocusTargetMode.HoveredAndSelected,
       targets: [selectedPick, hoveredPick],
     });
+  });
+});
+
+describe("demo annotation demand", () => {
+  const withoutLayers = {
+    ...defaultDemoPresentationSettings,
+    boxesEnabled: false,
+    boxCornersEnabled: false,
+    ellipsesEnabled: false,
+    focusEnabled: false,
+    keypointsEnabled: false,
+    labelsEnabled: false,
+    maskHaloEnabled: false,
+    masksEnabled: false,
+    markersEnabled: false,
+    polygonsEnabled: false,
+    polylinesEnabled: false,
+  };
+
+  it("reports no demand only once every layer is switched off", () => {
+    expect(
+      demoPresentationDrawsAnnotations(
+        createDemoPresentation(defaultDemoPresentationSettings),
+      ),
+    ).toBe(true);
+    expect(
+      demoPresentationDrawsAnnotations(createDemoPresentation(withoutLayers)),
+    ).toBe(false);
+
+    for (const layer of [
+      "polylinesEnabled",
+      "maskHaloEnabled",
+      "focusEnabled",
+    ] as const) {
+      expect(
+        demoPresentationDrawsAnnotations(
+          createDemoPresentation({ ...withoutLayers, [layer]: true }),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("reports demand for renderers a docs playground composed itself", () => {
+    const base = createDemoPresentation({
+      ...withoutLayers,
+      ...docsRegionPlaygroundPresentationSettings,
+    });
+
+    expect(demoPresentationDrawsAnnotations(base)).toBe(false);
+    expect(
+      demoPresentationDrawsAnnotations(
+        createRegionEffectsPlaygroundPresentation(
+          initialRegionEffectsPlaygroundSettings,
+          base,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      demoPresentationDrawsAnnotations({
+        ...base,
+        renderers: createRegionPlaygroundRenderers(
+          initialRegionPlaygroundSettings,
+          {
+            fireGif: "fire.gif",
+            whiteTeamBadge: "white-team-badge.svg",
+            yellowTeamBadge: "yellow-team-badge.svg",
+          },
+        ),
+      }),
+    ).toBe(true);
   });
 });

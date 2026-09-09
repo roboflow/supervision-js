@@ -4,9 +4,8 @@
   "inferenceLabel": "SAM3",
   "media": {
     "file": "1min-horse-video.mov",
-    "loadingStatusLabel": "stream-normalizing 70s horse trail",
-    "normalizeInBrowser": true,
-    "readyStatusLabel": "70s horse trail source media | browser-normalized WebM 30fps"
+    "loadingStatusLabel": "opening 70s horse trail",
+    "readyStatusLabel": "70s horse trail | source MOV"
   },
   "presentation": {
     "boxesEnabled": false,
