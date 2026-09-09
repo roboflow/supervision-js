@@ -289,6 +289,16 @@ The pull machinery still exists and still runs. It serves:
   preparation;
 - `createMediaStreamRendererSource()` for browser `MediaStream` inputs.
 
+The MediaBunny-backed pull source does not guarantee single-decoder
+handover between sample reads. In MediaBunny 1.55.5, an iterator's `return()`
+requests termination but can resolve before its decoder closes. Awaiting that
+promise alone is not a teardown barrier. Strict ownership is deferred until a
+public cleanup-completion contract can support per-source read admission;
+pending `getSample()` cancellation remains a separate requirement. Verify
+configured decoder lifetimes through initialization, playback, seek, and step
+before claiming that guarantee. This limitation does not relax the indexed
+engine's single-playback-decoder ownership.
+
 A pull scene keeps Pixi's ticker, has no prepared annotation window, and reports
 no render count. None of it is precedent for the push path: new video work goes
 through the engine-backed source

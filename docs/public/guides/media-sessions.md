@@ -73,6 +73,10 @@ hands each selected frame and its media time to the renderer. The renderer
 composites matching annotations and acknowledges the frame once displayed.
 Passing a URL or a `Blob` directly keeps the renderer pulling samples instead.
 
+The default finite-media pull path can overlap decoders when playback, seeking,
+or stepping hands off between sample reads. The indexed web video engine owns a
+separate single-playback-decoder lifecycle.
+
 ## Reading The Resolved Defaults
 
 `resolveMediaSessionDefaults()` reports the detection-buffer and

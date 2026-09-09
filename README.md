@@ -67,7 +67,7 @@ The web video engine is currently part of the `0.2` preview. Install the
 npm install supervision@next
 ```
 
-The preview is published as `0.2.0-next.2` before it reaches `latest`.
+The preview is published as `0.2.0-next.3` before it reaches `latest`.
 Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 
