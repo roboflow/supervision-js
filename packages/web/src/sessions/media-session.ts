@@ -1,3 +1,4 @@
+import { DetectionTimelineOrigin } from "#types/media-renderer";
 import { createMediaRenderer } from "#renderers/media-renderer";
 import {
   DetectionFrameSelectionMode,
@@ -389,7 +390,17 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
-        const coverageEndTime = endTime ?? renderer.getState().duration;
+        const mediaState = renderer.getState();
+        const sourceOffset =
+          options.detections?.timelineOrigin ===
+          DetectionTimelineOrigin.MediaStart
+            ? 0
+            : (mediaState.source?.firstTimestamp ?? 0);
+        const coverageEndTime =
+          endTime ??
+          (mediaState.duration === null
+            ? null
+            : sourceOffset + mediaState.duration);
 
         if (coverageEndTime === null) {
           return null;

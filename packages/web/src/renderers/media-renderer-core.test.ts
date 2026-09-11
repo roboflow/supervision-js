@@ -103,6 +103,7 @@ describe("media renderer core", () => {
     );
 
     expect(scene.setTimelineContext).toHaveBeenCalledWith({
+      firstTimestamp: 0,
       duration: 0.12,
       loop: false,
     });
@@ -388,14 +389,14 @@ describe("media renderer core", () => {
     // composing source can project children before it flattens them.
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(
       1,
-      4.25,
-      5,
+      9.25,
+      9.75,
       mediaCoordinateSpaceLoadOptions,
     );
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(
       2,
-      0,
-      1.75,
+      4.75,
+      6.75,
       mediaCoordinateSpaceLoadOptions,
     );
 

@@ -1,3 +1,4 @@
+import { DetectionTimelineOrigin } from "#types/media-renderer";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -13,6 +14,7 @@ import {
 
 import {
   createContainer,
+  createMockSample,
   mediaMock,
   pixiMock,
   resetMocks,
@@ -555,6 +557,49 @@ describe("media session", () => {
 
     session.destroy();
   });
+
+  it.each([
+    [DetectionTimelineOrigin.MediaTimeline, 5.4],
+    [DetectionTimelineOrigin.MediaStart, 3.4],
+  ] as const)(
+    "finalizes %s detections in their own timebase",
+    async (timelineOrigin, expectedEnd) => {
+      resetMocks();
+      mediaMock.getFirstTimestamp.mockResolvedValue(2);
+      mediaMock.computeDuration.mockResolvedValue(5.4);
+      mediaMock.samples = [createMockSample(2), createMockSample(5.2, 0.2)];
+      const { createMediaSession } = await import("../index");
+      const session = await createMediaSession({
+        container: createContainer(),
+        detections: {
+          appendable: { datasetId: "offset-finalized" },
+          timelineOrigin,
+        },
+        media: "offset.mp4",
+        renderer: { autoPlay: false },
+      });
+      try {
+        await session.appendDetectionFrames([
+          {
+            detections: [{ id: "last" }],
+            frameIndex: 0,
+            mediaTime: expectedEnd - 0.2,
+            endTime: expectedEnd - 0.1,
+          },
+        ]);
+        const summary = await session.finalizeDetectionCoverage();
+        expect(summary?.endTime).toBeCloseTo(expectedEnd, 6);
+        const frames = await session.detectionSource!.loadFrames(0, 10);
+        expect(frames[0]?.endTime).toBeCloseTo(expectedEnd, 6);
+        const explicit = await session.finalizeDetectionCoverage(
+          expectedEnd + 1,
+        );
+        expect(explicit?.endTime).toBeCloseTo(expectedEnd + 1, 6);
+      } finally {
+        session.destroy();
+      }
+    },
+  );
 
   it("redraws when finalizing coverage changes the displayed instant", async () => {
     resetMocks();

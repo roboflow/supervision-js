@@ -1,6 +1,8 @@
 import type { DetectionFrame } from "supervision-js-core";
 
 export interface PreparedRenderTimelineContext {
+  /** Absolute first playable timestamp; duration remains a relative span. */
+  readonly firstTimestamp?: number;
   readonly duration: number | null;
   readonly loop: boolean;
 }
@@ -84,8 +86,9 @@ export function createPreparedWindowTimeline(options: {
     }
 
     const duration = timelineContext.duration;
-    const normalizedFrameTime = modulo(frameTime, duration);
-    const normalizedMediaTime = modulo(mediaTime, duration);
+    const firstTimestamp = timelineContext.firstTimestamp ?? 0;
+    const normalizedFrameTime = modulo(frameTime - firstTimestamp, duration);
+    const normalizedMediaTime = modulo(mediaTime - firstTimestamp, duration);
     const rawDistance = normalizedFrameTime - normalizedMediaTime;
 
     return rawDistance >= 0 ? rawDistance : rawDistance + duration;

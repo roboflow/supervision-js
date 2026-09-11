@@ -89,6 +89,8 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
 }
 
 export interface DetectionTimelineContext {
+  /** Absolute first playable timestamp; duration remains a relative span. */
+  readonly firstTimestamp?: number;
   readonly duration: number | null;
   readonly loop: boolean;
 }

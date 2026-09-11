@@ -544,10 +544,12 @@ export async function createMediaRendererCore(
     });
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({
+      firstTimestamp: metadata.firstTimestamp,
       duration: metadata.duration,
       loop: options.loop !== false,
     });
     mediaScene.setTimelineContext?.({
+      firstTimestamp: metadata.firstTimestamp,
       duration: metadata.duration,
       loop: options.loop !== false,
     });

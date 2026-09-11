@@ -1961,7 +1961,7 @@ describe("package entrypoint", () => {
 
   it("presents the first sample and first detection frame again at a loop boundary", async () => {
     resetMocks();
-    mediaMock.getDurationFromMetadata.mockResolvedValue(0.08);
+    mediaMock.computeDuration.mockResolvedValue(0.08);
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
 
     const renderer = await createRenderer(false, true, {

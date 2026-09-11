@@ -135,6 +135,8 @@ export interface MediaRendererScene {
 }
 
 export interface MediaRendererSceneTimelineContext {
+  /** Absolute first playable timestamp; duration remains a relative span. */
+  readonly firstTimestamp?: number;
   readonly duration: number | null;
   readonly loop: boolean;
 }

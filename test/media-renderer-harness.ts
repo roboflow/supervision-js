@@ -133,6 +133,8 @@ const mockState = vi.hoisted(() => {
   const mediaMock = {
     audioTracks: [{ type: "audio" }],
     canRead: vi.fn(async () => true),
+    computeDuration: vi.fn(async () => 1),
+    isLive: vi.fn(async () => false),
     computePacketStats: vi.fn(async () => ({ averagePacketRate: 25 })),
     dispose: vi.fn(),
     format: { mimeType: "video/mp4", name: "MP4" },
@@ -560,6 +562,7 @@ vi.mock("mediabunny", () => {
     QTFF: { name: "QuickTime" },
     UrlSource,
     VideoSampleSink,
+    ReadableStreamSource: class {},
     WEBM: { name: "WebM" },
   };
 });
@@ -627,6 +630,8 @@ export function resetMocks() {
   mediaMock.audioTracks = [{ type: "audio" }];
   mediaMock.canRead.mockClear();
   mediaMock.canRead.mockResolvedValue(true);
+  mediaMock.computeDuration.mockReset().mockResolvedValue(1);
+  mediaMock.isLive.mockReset().mockResolvedValue(false);
   mediaMock.computePacketStats.mockClear();
   mediaMock.computePacketStats.mockResolvedValue({ averagePacketRate: 25 });
   mediaMock.dispose.mockClear();
@@ -654,6 +659,8 @@ export function resetMocks() {
     );
   });
   mediaMock.primaryVideoTrack = {
+    computeDuration: mediaMock.computeDuration,
+    isLive: mediaMock.isLive,
     computePacketStats: mediaMock.computePacketStats,
     getDisplayHeight: mediaMock.getDisplayHeight,
     getDisplayWidth: mediaMock.getDisplayWidth,
