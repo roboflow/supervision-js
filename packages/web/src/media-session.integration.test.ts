@@ -457,7 +457,7 @@ describe("media session integration", () => {
     resetMocks();
 
     try {
-      mediaMock.getDurationFromMetadata.mockResolvedValue(6);
+      mediaMock.computeDuration.mockResolvedValue(6);
       mediaMock.samples = [
         createMockSample(0, 0),
         createMockSample(1, 0),

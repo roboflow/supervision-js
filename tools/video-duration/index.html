@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><title>Video duration regression</title
+  ><style>
+    body {
+      font: 16px system-ui;
+      margin: 30px;
+      background: #eef2f5;
+      color: #142637;
+    }
+    #video {
+      width: 480px;
+      height: 320px;
+      background: #142637;
+    }
+    button {
+      padding: 12px;
+      margin: 8px;
+    }
+    pre {
+      white-space: pre-wrap;
+    }
+  </style>
+  <h1>Finite video duration regression</h1>
+  <p>Synthetic video only. Real media session and browser decoder.</p>
+  <button id="run">Run all cases and seek to End</button>
+  <div id="video"></div>
+  <pre id="result">Ready</pre>
+  <script type="module" src="./main.ts"></script>
+</html>

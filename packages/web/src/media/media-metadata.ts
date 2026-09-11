@@ -1,6 +1,10 @@
+import {
+  videoPresentationDuration,
+  type VideoPresentationDurationTrack,
+} from "./video-presentation-duration";
 import type { MediaNormalizationInputMetadata } from "#types/media-normalization";
 
-export interface MediaMetadataVideoTrack {
+export interface MediaMetadataVideoTrack extends VideoPresentationDurationTrack {
   canDecode?(): Promise<boolean>;
   getCodec?(): Promise<string | null>;
   getDisplayHeight(): Promise<number>;
@@ -22,13 +26,15 @@ export async function collectInputMetadata(
   input: MediaMetadataInput,
   source: Blob,
 ): Promise<MediaNormalizationInputMetadata> {
-  const [format, detectedMimeType, duration, primaryVideoTrack] =
-    await Promise.all([
-      input.getFormat(),
-      input.getMimeType(),
-      input.getDurationFromMetadata(undefined, { skipLiveWait: true }),
-      input.getPrimaryVideoTrack(),
-    ]);
+  const [format, detectedMimeType, primaryVideoTrack] = await Promise.all([
+    input.getFormat(),
+    input.getMimeType(),
+    input.getPrimaryVideoTrack(),
+  ]);
+
+  const duration = primaryVideoTrack
+    ? await videoPresentationDuration(primaryVideoTrack)
+    : await input.getDurationFromMetadata(undefined, { skipLiveWait: true });
 
   const [primaryVideoWidth, primaryVideoHeight] = primaryVideoTrack
     ? await Promise.all([

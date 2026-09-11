@@ -48,6 +48,8 @@ const mockState = vi.hoisted(() => {
     readableStreamSourceConstructor: vi.fn(),
     primaryVideoTrack: {
       canDecode: vi.fn(async () => true),
+      computeDuration: vi.fn(async () => 1.25),
+      isLive: vi.fn(async () => false),
       computePacketStats: vi.fn(async () => ({ averagePacketRate: 24 })),
       getCodec: vi.fn(async () => "avc"),
       getDisplayHeight: vi.fn(async () => 720),
@@ -236,6 +238,12 @@ describe("normalizeMedia", () => {
     normalizationMock.readableStreamSourceConstructor.mockClear();
     normalizationMock.primaryVideoTrack.canDecode.mockClear();
     normalizationMock.primaryVideoTrack.canDecode.mockResolvedValue(true);
+    normalizationMock.primaryVideoTrack.computeDuration
+      .mockReset()
+      .mockResolvedValue(1.25);
+    normalizationMock.primaryVideoTrack.isLive
+      .mockReset()
+      .mockResolvedValue(false);
     normalizationMock.primaryVideoTrack.computePacketStats.mockClear();
     normalizationMock.primaryVideoTrack.computePacketStats.mockResolvedValue({
       averagePacketRate: 24,
@@ -434,7 +442,12 @@ describe("normalizeMedia", () => {
       new Blob(["source"], { type: "video/mp4" }),
     );
 
-    normalizationMock.inputGetDurationFromMetadata.mockResolvedValueOnce(null);
+    // Growing WebM inputs can report non-live before EOF. Opening must not scan
+    // to the end of a conversion that is still producing bytes.
+    normalizationMock.primaryVideoTrack.isLive.mockResolvedValue(false);
+    normalizationMock.primaryVideoTrack.computeDuration.mockImplementation(
+      () => new Promise(() => {}),
+    );
 
     const source = await normalized.rendererSource.open();
 

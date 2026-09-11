@@ -1,3 +1,4 @@
+import { videoPresentationDuration } from "./video-presentation-duration";
 import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
 import { normalizeMediaSourcePresentationTimeline } from "#media/presentation-timeline-media-source";
 import type { DecodedMediaSource } from "./media-source";
@@ -21,7 +22,8 @@ export async function openMediabunnyMediaSource(
   // Loading the decoder and constructing its input can fail on their own, for
   // example when the module chunk cannot be fetched. Classify those the same
   // way as a read failure so nothing leaves this source untyped.
-  const { VideoSampleSink, input } = await createMediabunnyInput(sourceInput);
+  const { VideoSampleSink, input, progressive } =
+    await createMediabunnyInput(sourceInput);
 
   try {
     const canRead = await input.canRead();
@@ -33,21 +35,14 @@ export async function openMediabunnyMediaSource(
       );
     }
 
-    const [
-      format,
-      mimeType,
-      metadataDuration,
-      tracks,
-      videoTracks,
-      audioTracks,
-    ] = await Promise.all([
-      input.getFormat(),
-      input.getMimeType(),
-      input.getDurationFromMetadata(undefined, { skipLiveWait: true }),
-      input.getTracks(),
-      input.getVideoTracks(),
-      input.getAudioTracks(),
-    ]);
+    const [format, mimeType, tracks, videoTracks, audioTracks] =
+      await Promise.all([
+        input.getFormat(),
+        input.getMimeType(),
+        input.getTracks(),
+        input.getVideoTracks(),
+        input.getAudioTracks(),
+      ]);
     const primaryVideoTrack = await input.getPrimaryVideoTrack();
 
     if (!primaryVideoTrack) {
@@ -73,9 +68,13 @@ export async function openMediabunnyMediaSource(
         packetStatsPromise,
       ]);
 
-    const duration = isUrlSourceInput(sourceInput)
-      ? metadataDuration
-      : (sourceInput.metadata?.duration ?? metadataDuration);
+    const duration = await videoPresentationDuration(
+      primaryVideoTrack,
+      isUrlSourceInput(sourceInput)
+        ? undefined
+        : sourceInput.metadata?.duration,
+      progressive,
+    );
     const estimatedFrameRate =
       packetStats !== null &&
       Number.isFinite(packetStats.averagePacketRate) &&
@@ -116,8 +115,16 @@ async function createMediabunnyInput(
   sourceInput: string | URL | Request | MediabunnyMediaSourceInput,
 ) {
   try {
-    const { Input, MATROSKA, MP4, QTFF, UrlSource, VideoSampleSink, WEBM } =
-      await import("mediabunny");
+    const {
+      Input,
+      MATROSKA,
+      MP4,
+      QTFF,
+      ReadableStreamSource,
+      UrlSource,
+      VideoSampleSink,
+      WEBM,
+    } = await import("mediabunny");
     const source = isUrlSourceInput(sourceInput)
       ? new UrlSource(sourceInput)
       : sourceInput.source;
@@ -128,6 +135,7 @@ async function createMediabunnyInput(
     return {
       VideoSampleSink,
       input: new Input({ formats, source }),
+      progressive: source instanceof ReadableStreamSource,
     };
   } catch (error) {
     throw toMediaSourceError(error, "Unable to open this media source.");
