@@ -565,18 +565,26 @@ export function createBufferedDetectionTimeline(
     }
 
     const duration = timelineContext.duration ?? 0;
+    const firstTimestamp = timelineContext.firstTimestamp ?? 0;
 
     if (endTime - startTime >= duration) {
       return {
-        endTime: duration,
-        sourceRanges: [{ endTime: duration, startTime: 0 }],
-        startTime: 0,
+        endTime: firstTimestamp + duration,
+        sourceRanges: [
+          { endTime: firstTimestamp + duration, startTime: firstTimestamp },
+        ],
+        startTime: firstTimestamp,
       };
     }
 
     return {
       endTime,
-      sourceRanges: getLoopingSourceRanges(startTime, endTime, duration),
+      sourceRanges: getLoopingSourceRanges(
+        startTime,
+        endTime,
+        duration,
+        firstTimestamp,
+      ),
       startTime,
     };
   }
@@ -629,11 +637,18 @@ export function createBufferedDetectionTimeline(
       return mediaTime;
     }
 
-    if (mediaTime >= 0 && mediaTime <= timelineContext.duration) {
+    const firstTimestamp = timelineContext.firstTimestamp ?? 0;
+    if (
+      mediaTime >= firstTimestamp &&
+      mediaTime <= firstTimestamp + timelineContext.duration
+    ) {
       return mediaTime;
     }
 
-    return modulo(mediaTime, timelineContext.duration);
+    return (
+      firstTimestamp +
+      modulo(mediaTime - firstTimestamp, timelineContext.duration)
+    );
   }
 }
 
@@ -691,11 +706,14 @@ function getLoopingSourceRanges(
   startTime: number,
   endTime: number,
   duration: number,
+  firstTimestamp: number,
 ): readonly DetectionFrameSourceVersionRange[] {
-  const normalizedStartTime = modulo(startTime, duration);
-  const normalizedEndTime = modulo(endTime, duration);
-  const startCycle = Math.floor(startTime / duration);
-  const endCycle = Math.floor(endTime / duration);
+  const normalizedStartTime =
+    firstTimestamp + modulo(startTime - firstTimestamp, duration);
+  const normalizedEndTime =
+    firstTimestamp + modulo(endTime - firstTimestamp, duration);
+  const startCycle = Math.floor((startTime - firstTimestamp) / duration);
+  const endCycle = Math.floor((endTime - firstTimestamp) / duration);
 
   if (startCycle === endCycle) {
     return [{ endTime: normalizedEndTime, startTime: normalizedStartTime }];
@@ -703,12 +721,15 @@ function getLoopingSourceRanges(
 
   const ranges: DetectionFrameSourceVersionRange[] = [];
 
-  if (normalizedStartTime < duration) {
-    ranges.push({ endTime: duration, startTime: normalizedStartTime });
+  if (normalizedStartTime < firstTimestamp + duration) {
+    ranges.push({
+      endTime: firstTimestamp + duration,
+      startTime: normalizedStartTime,
+    });
   }
 
-  if (normalizedEndTime > 0) {
-    ranges.push({ endTime: normalizedEndTime, startTime: 0 });
+  if (normalizedEndTime > firstTimestamp) {
+    ranges.push({ endTime: normalizedEndTime, startTime: firstTimestamp });
   }
 
   return ranges;

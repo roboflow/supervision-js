@@ -27,7 +27,26 @@ button.onclick = async () => {
         );
       }
       const url = URL.createObjectURL(new Blob([data], { type: "video/mp4" }));
+      const sourceStart = name === "offset-vfr" ? 2 : 0;
       const session = await createMediaSession({
+        detections: {
+          frames: [
+            {
+              mediaTime: sourceStart,
+              endTime: sourceStart + 0.2,
+              detections: [
+                { id: "early", rect: { x: 0, y: 0, width: 8, height: 8 } },
+              ],
+            },
+            {
+              mediaTime: sourceStart + 3.2,
+              endTime: sourceStart + 3.4,
+              detections: [
+                { id: "late", rect: { x: 8, y: 8, width: 8, height: 8 } },
+              ],
+            },
+          ],
+        },
         container: document.querySelector<HTMLDivElement>("#video")!,
         media: url,
         renderer: { autoPlay: false },
@@ -38,6 +57,8 @@ button.onclick = async () => {
         await session.seek(start + state.duration!);
         const frame = await session.captureFrame();
         const expectedLast = start + 3.2;
+        const activeDetectionTime =
+          session.getState().renderer?.activeDetectionFrameTime;
         const row = {
           name,
           header,
@@ -45,9 +66,12 @@ button.onclick = async () => {
           firstTimestamp: start,
           lastFrame: frame.mediaTime,
           expectedLast,
+          activeDetectionTime,
           passed:
             Math.abs(state.duration! - 3.4) < 0.00001 &&
-            Math.abs(frame.mediaTime - expectedLast) < 0.00001,
+            Math.abs(frame.mediaTime - expectedLast) < 0.00001 &&
+            activeDetectionTime != null &&
+            Math.abs(activeDetectionTime - expectedLast) < 0.00001,
         };
         rows.push(row);
         result.textContent = JSON.stringify(rows, null, 2);

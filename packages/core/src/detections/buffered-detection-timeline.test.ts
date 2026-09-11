@@ -833,3 +833,50 @@ function createDeferred<T>() {
 
   return { promise, reject, resolve };
 }
+
+it("loads and selects late absolute detections across an offset loop", async () => {
+  const frames: DetectionFrame[] = [2, 2.4, 5.2].map((mediaTime) => ({
+    mediaTime,
+    detections: [],
+  }));
+  const source = {
+    loadFrames: vi.fn(async (start: number, end: number) =>
+      frames.filter(
+        (frame) => frame.mediaTime >= start && frame.mediaTime <= end,
+      ),
+    ),
+  };
+  const timeline = createBufferedDetectionTimeline({
+    source,
+    bufferAheadSeconds: 0.5,
+    bufferBehindSeconds: 0.2,
+  });
+  timeline.setTimelineContext?.({
+    firstTimestamp: 2,
+    duration: 3.4,
+    loop: true,
+  });
+  await timeline.prepare(5.3);
+  expect(source.loadFrames).toHaveBeenCalledTimes(2);
+  expect(source.loadFrames.mock.calls[0]![0]).toBeCloseTo(5.1);
+  expect(source.loadFrames.mock.calls[0]![1]).toBeCloseTo(5.4);
+  expect(source.loadFrames.mock.calls[1]![0]).toBe(2);
+  expect(source.loadFrames.mock.calls[1]![1]).toBeCloseTo(2.4);
+  expect(timeline.selectFrame(5.3)?.mediaTime).toBe(5.2);
+  expect(timeline.selectFrame(5.5)?.mediaTime).toBe(2);
+});
+it("loads a complete offset loop without requesting timestamp zero", async () => {
+  const source = { loadFrames: vi.fn(async () => []) };
+  const timeline = createBufferedDetectionTimeline({
+    source,
+    bufferAheadSeconds: 4,
+    bufferBehindSeconds: 0,
+  });
+  timeline.setTimelineContext?.({
+    firstTimestamp: 2,
+    duration: 3.4,
+    loop: true,
+  });
+  await timeline.prepare(5.2);
+  expect(source.loadFrames).toHaveBeenCalledWith(2, 5.4);
+});
