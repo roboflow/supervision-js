@@ -24,11 +24,7 @@ Install the current browser release with `npm install supervision`. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 
-The web video engine subpaths are currently available from the `0.2` preview:
-
-```sh
-npm install supervision@next
-```
+The web video engine subpaths are included in `supervision` starting with `0.2.0`.
 
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
@@ -449,7 +445,7 @@ The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
 
 See [Migrating to 0.2](migrating-to-0.2.md) for source changes required by the
-preview, including interaction presentation options.
+release, including interaction presentation options.
 
 1. one media item maps to one session;
 2. detections are semantic input;

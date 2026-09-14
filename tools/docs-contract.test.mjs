@@ -304,6 +304,9 @@ test("every playback-gate surface states the default and reach the code ships", 
 });
 
 test("public installation guidance distinguishes stable and preview installs", async () => {
+  const { version } = JSON.parse(
+    await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
+  );
   const consumerDocs = [
     path.join(rootDir, "README.md"),
     path.join(publicDocsDir, "index.md"),
@@ -316,8 +319,13 @@ test("public installation guidance distinguishes stable and preview installs", a
 
     assert.match(source, /npm install supervision(?:\n|`|<)/);
 
-    if (source.includes("supervision/web-video-engine")) {
+    if (
+      version.includes("-next.") &&
+      source.includes("supervision/web-video-engine")
+    ) {
       assert.match(source, /npm install supervision@next(?:\n|`|<)/);
+    } else if (!version.includes("-")) {
+      assert.doesNotMatch(source, /npm install supervision@next(?:\n|`|<)/);
     }
   }
 });

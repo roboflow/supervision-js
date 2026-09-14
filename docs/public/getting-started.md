@@ -15,7 +15,7 @@ the static or streaming source recipe that matches your application.
 
 - [Application integration](./guides/application-integration.md) — install,
   mount, and own a session lifecycle.
-- [Migrating to 0.2](./guides/migrating-to-0.2.md) — update preview imports and
+- [Migrating to 0.2](./guides/migrating-to-0.2.md) — update imports and
   interaction highlight configuration.
 - [Static detections](./recipes/static-detections.md) — render a known sequence
   of frames.

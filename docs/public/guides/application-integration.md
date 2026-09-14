@@ -21,14 +21,10 @@ npm install supervision
 The published package includes the internal `supervision-js-core` dependency.
 Consumers must not install `supervision-js-core` separately.
 
-The web video engine that opens video files is in the `0.2` preview. Install the
-`next` tag before importing `supervision/web-video-engine`:
+The web video engine is included in `supervision` starting with `0.2.0`, at
+`supervision/web-video-engine`.
 
-```sh
-npm install supervision@next
-```
-
-There is no separate engine package to install, and the preview download
+There is no separate engine package to install, and the package download
 carries the engine whether or not an application opens a video.
 `supervision` reaches the engine through a dynamic import at the moment a video
 source opens, so an application that shows only still images or camera input

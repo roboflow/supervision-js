@@ -60,15 +60,8 @@ session.setPresentation({
 npm install supervision
 ```
 
-The web video engine is currently part of the `0.2` preview. Install the
-`next` tag before importing its subpath:
-
-```sh
-npm install supervision@next
-```
-
-The preview is published as `0.2.0-next.3` before it reaches `latest`.
-Its package includes the private core dependency. Consumers import
+The `0.2.0` release includes the web video engine and the private core
+dependency in the same package. Consumers import
 only the public browser entrypoints:
 
 ```ts
