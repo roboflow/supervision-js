@@ -10,7 +10,11 @@ import {
   type PolygonStyle,
 } from "supervision-js-core";
 import { resolveScreenLength } from "./pixi-path";
-import { createPixiMaskLayer, type PixiMaskLayer } from "./pixi-mask-layer";
+import {
+  createPixiMaskLayer,
+  type BufferImageSourceConstructor,
+  type PixiMaskLayer,
+} from "./pixi-mask-layer";
 
 type PixiMaskLayerOptions = Parameters<typeof createPixiMaskLayer>[0];
 
@@ -20,6 +24,11 @@ export interface PixiPolygonLayer {
     readonly width: number;
   }): ReturnType<PixiMaskLayer["createSprite"]>;
   drawFrame(mediaTime: number, viewportScale?: number): void;
+  prepareFrame(mediaTime: number, viewportScale?: number): void;
+  clearFrame: PixiMaskLayer["clearFrame"];
+  isArtifactPrepared: PixiMaskLayer["isArtifactPrepared"];
+  getPreparationProgress: PixiMaskLayer["getPreparationProgress"];
+  needsRenderPreparationWait: PixiMaskLayer["needsRenderPreparationWait"];
   getVectorFallbackStyle(): PolygonStyle;
   setPolygonStyle(polygonStyle: PolygonStyle | null | undefined): void;
   setTimelineContext: PixiMaskLayer["setTimelineContext"];
@@ -30,8 +39,10 @@ export interface PixiPolygonLayer {
 export function createPixiPolygonLayer(
   options: Omit<
     PixiMaskLayerOptions,
-    "artifactKind" | "maskStyle" | "resolveInstructions"
+    "BufferImageSource" | "artifactKind" | "maskStyle" | "resolveInstructions"
   > & {
+    /** Without it a frame that cooked to an id raster reaches no texture. */
+    readonly BufferImageSource: BufferImageSourceConstructor;
     readonly polygonStyle: PolygonStyle;
     readonly resolveContextState?: (
       detection: Detection,
@@ -83,19 +94,20 @@ export function createPixiPolygonLayer(
     },
 
     drawFrame(mediaTime, nextViewportScale = 1) {
-      const normalizedViewportScale = Math.max(
-        nextViewportScale,
-        Number.EPSILON,
-      );
-
-      if (normalizedViewportScale !== viewportScale) {
-        viewportScale = normalizedViewportScale;
-        styleVersion += 1;
-        rasterLayer.setMaskStyle(createArtifactStyle());
-      }
-
+      adoptViewportScale(nextViewportScale);
       rasterLayer.drawFrame(mediaTime);
     },
+
+    prepareFrame(mediaTime, nextViewportScale = 1) {
+      adoptViewportScale(nextViewportScale);
+      rasterLayer.prepareFrame(mediaTime);
+    },
+
+    clearFrame: rasterLayer.clearFrame,
+
+    isArtifactPrepared: rasterLayer.isArtifactPrepared,
+
+    getPreparationProgress: rasterLayer.getPreparationProgress,
 
     getVectorFallbackStyle() {
       return vectorFallbackStyle;
@@ -113,9 +125,22 @@ export function createPixiPolygonLayer(
       );
     },
 
+    needsRenderPreparationWait: rasterLayer.needsRenderPreparationWait,
     setTimelineContext: rasterLayer.setTimelineContext,
     waitForRenderPreparation: rasterLayer.waitForRenderPreparation,
   };
+
+  function adoptViewportScale(nextViewportScale: number) {
+    const normalizedViewportScale = Math.max(nextViewportScale, Number.EPSILON);
+
+    if (normalizedViewportScale === viewportScale) {
+      return;
+    }
+
+    viewportScale = normalizedViewportScale;
+    styleVersion += 1;
+    rasterLayer.setMaskStyle(createArtifactStyle());
+  }
 
   function createArtifactStyle(): MaskStyle {
     return {

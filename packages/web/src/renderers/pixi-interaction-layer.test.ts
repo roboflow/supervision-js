@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createPixiAnnotationOverlayLayer } from "#renderers/pixi-annotation-overlay-layer";
 import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
 import {
+  AnnotationGeometryKind,
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
   DetectionMaskEncoding,
@@ -487,6 +488,94 @@ describe("pixi interaction layer", () => {
     );
   });
 
+  it.each([
+    {
+      area: "empty space",
+      from: { x: 80, y: 60 },
+      to: { x: 90, y: 65 },
+      hoverCalls: 0,
+    },
+    {
+      area: "the same detection",
+      from: { x: 10, y: 20 },
+      to: { x: 15, y: 25 },
+      hoverCalls: 1,
+    },
+  ])(
+    "invalidates creation guides for each pointer move over $area without repeating hover callbacks",
+    ({ from, to, hoverCalls }) => {
+      const onStateChange = vi.fn();
+      const onHover = vi.fn();
+      const editingEngine = createAnnotationEditingEngine();
+      editingEngine.setCreationTool({
+        geometry: AnnotationGeometryKind.Box,
+        createDetection: () => ({ id: "created" }),
+      });
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline(frame),
+        editingEngine,
+        interaction: { mode: MediaInteractionMode.PausedOnly, onHover },
+        onStateChange,
+      });
+      const display = layer.createDisplay({
+        height: 80,
+        width: 120,
+      }) as FakeContainer;
+      layer.drawFrame(0.1);
+      onStateChange.mockClear();
+      onHover.mockClear();
+
+      display.emit("pointermove", createPointerEvent(display, from.x, from.y));
+      display.emit("pointermove", createPointerEvent(display, to.x, to.y));
+
+      expect(layer.getState().pointerPoint).toEqual(to);
+      expect(onHover).toHaveBeenCalledTimes(hoverCalls);
+      expect(onStateChange).toHaveBeenCalledTimes(2);
+      expect(
+        onStateChange.mock.calls.map(([state]) => state.pointerPoint),
+      ).toEqual([from, to]);
+    },
+  );
+
+  it("invalidates creation guides on pointer exit even when no detection was hovered", () => {
+    const onStateChange = vi.fn();
+    const onHover = vi.fn();
+    const editingEngine = createAnnotationEditingEngine();
+    editingEngine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: () => ({ id: "created" }),
+    });
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      editingEngine,
+      interaction: { mode: MediaInteractionMode.PausedOnly, onHover },
+      onStateChange,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 80, 60));
+    expect(layer.getState().pointerPoint).toEqual({ x: 80, y: 60 });
+    expect(layer.getState().hoveredPick).toBeNull();
+    onStateChange.mockClear();
+    onHover.mockClear();
+
+    display.emit("pointerout", createPointerEvent(display, 121, 60));
+
+    expect(layer.getState().pointerPoint).toBeNull();
+    expect(onHover).not.toHaveBeenCalled();
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+    expect(onStateChange.mock.calls[0]![0].pointerPoint).toBeNull();
+  });
+
   it("notifies the host when hover or selected interaction state changes", () => {
     const onStateChange = vi.fn();
     const layer = createPixiInteractionLayer({
@@ -851,6 +940,141 @@ describe("pixi interaction layer", () => {
     expect(onSelect).toHaveBeenLastCalledWith(null);
   });
 
+  it("holds the selection through a media time whose detections have not arrived", () => {
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+    const laterFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "ball",
+          id: "ball-1",
+          rect: { height: 10, width: 10, x: 80, y: 20 },
+        },
+        {
+          className: "player",
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 40, y: 45 },
+        },
+      ],
+      frameIndex: 5,
+      mediaTime: 0.3,
+    };
+    let activeFrame: DetectionFrame | undefined = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+    const selectCalls = onSelect.mock.calls.length;
+    const selectionChangeCalls = onSelectionChange.mock.calls.length;
+
+    activeFrame = undefined;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick?.detection.id).toBe("player-1");
+    expect(
+      layer.getState().selectedPicks.map(({ detection }) => detection.id),
+    ).toEqual(["player-1"]);
+    expect(onSelect.mock.calls.length).toBe(selectCalls);
+    expect(onSelectionChange.mock.calls.length).toBe(selectionChangeCalls);
+
+    activeFrame = laterFrame;
+    layer.drawFrame(0.3);
+
+    expect(layer.getState().selectedPick).toMatchObject({
+      detection: laterFrame.detections[1],
+      detectionIndex: 1,
+      frame: laterFrame,
+      mediaTime: 0.3,
+    });
+  });
+
+  it("clears a held selection on the first arriving frame without the detection", () => {
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+    let activeFrame: DetectionFrame | undefined = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    activeFrame = undefined;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick?.detection.id).toBe("player-1");
+
+    activeFrame = nextFrame;
+    layer.drawFrame(0.3);
+
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelectionChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("drops a held selection hidden while its detections had not arrived", () => {
+    const onSelectionChange = vi.fn();
+    const hiddenClasses = new Set<string>();
+    let activeFrame: DetectionFrame | undefined = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      canPickDetection: (detection) =>
+        !hiddenClasses.has(detection.className ?? ""),
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    hiddenClasses.add("player");
+    activeFrame = undefined;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick?.detection.id).toBe("player-1");
+
+    activeFrame = frame;
+    layer.drawFrame(0.1);
+
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelectionChange).toHaveBeenLastCalledWith([]);
+  });
+
   it("ignores stale mask picks and falls back to boxes on the active frame", () => {
     const onHover = vi.fn();
     const staleMaskPick = {
@@ -1161,24 +1385,31 @@ function createPointerEvent(
 }
 
 function createTimeline(
-  activeFrame: DetectionFrame | (() => DetectionFrame),
+  activeFrame: DetectionFrame | (() => DetectionFrame | undefined),
 ): BufferedDetectionTimeline {
   const getActiveFrame =
     typeof activeFrame === "function" ? activeFrame : () => activeFrame;
 
   return {
     destroy() {},
-    getBufferedFrames: () => [getActiveFrame()],
-    getState: () => ({
-      bufferEndTime: getActiveFrame().endTime ?? getActiveFrame().mediaTime,
-      bufferStartTime: getActiveFrame().mediaTime,
-      detectionCount: getActiveFrame().detections.length,
-      errorMessage: null,
-      frameCount: 1,
-      requestedEndTime: getActiveFrame().endTime ?? getActiveFrame().mediaTime,
-      requestedStartTime: getActiveFrame().mediaTime,
-      status: "ready",
-    }),
+    getBufferedFrames: () => {
+      const bufferedFrame = getActiveFrame();
+      return bufferedFrame ? [bufferedFrame] : [];
+    },
+    getState: () => {
+      const bufferedFrame = getActiveFrame();
+      return {
+        bufferEndTime: bufferedFrame?.endTime ?? bufferedFrame?.mediaTime ?? 0,
+        bufferStartTime: bufferedFrame?.mediaTime ?? 0,
+        detectionCount: bufferedFrame?.detections.length ?? 0,
+        errorMessage: null,
+        frameCount: bufferedFrame ? 1 : 0,
+        requestedEndTime:
+          bufferedFrame?.endTime ?? bufferedFrame?.mediaTime ?? 0,
+        requestedStartTime: bufferedFrame?.mediaTime ?? 0,
+        status: "ready",
+      };
+    },
     prepare: async () => undefined,
     prefetch() {},
     selectFrame: () => getActiveFrame(),

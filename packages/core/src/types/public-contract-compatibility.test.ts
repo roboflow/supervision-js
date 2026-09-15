@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+import { DetectionBufferStatus } from "#types/detection-timeline";
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 import type {
   ColdDetectionFrameStore,
@@ -9,8 +10,15 @@ import type {
   LiveWritableDetectionFrameSource,
   WritableDetectionFrameSource,
 } from "#types/detection-timeline";
-import { MediaSourceStatus } from "#types/media-rendering";
-import type { MediaSourceState } from "#types/media-rendering";
+import {
+  MediaRendererFit,
+  MediaRendererPlaybackState,
+  MediaSourceStatus,
+} from "#types/media-rendering";
+import type {
+  MediaRendererState,
+  MediaSourceState,
+} from "#types/media-rendering";
 import type { DetectionFrame } from "#types/detections";
 
 /**
@@ -77,6 +85,34 @@ const legacySourceState: MediaSourceState = {
   videoTrackCount: 1,
 };
 
+/** A renderer state written before the mask layer reported what it drew. */
+const legacyRendererState: MediaRendererState = {
+  activeDetectionCount: 0,
+  activeDetectionFrameIndex: null,
+  activeDetectionFrameTime: null,
+  currentTime: 0,
+  detectionBuffer: {
+    bufferEndTime: null,
+    bufferStartTime: null,
+    detectionCount: 0,
+    errorMessage: null,
+    frameCount: 0,
+    requestedEndTime: null,
+    requestedStartTime: null,
+    status: DetectionBufferStatus.Idle,
+  },
+  duration: 9,
+  fit: MediaRendererFit.Contain,
+  lastFrameRenderTimings: null,
+  mediaHeight: 720,
+  mediaWidth: 1280,
+  playbackRate: 1,
+  playbackState: MediaRendererPlaybackState.Ready,
+  presentedFrames: 0,
+  rendererBackend: null,
+  source: legacySourceState,
+};
+
 /** A cold store implemented before optional in-place pruning existed. */
 const legacyStore: ColdDetectionFrameStore = {
   async putFrames() {
@@ -99,6 +135,12 @@ describe("public contract compatibility", () => {
 
   it("keeps media source states written before typed errors assignable", () => {
     expect(legacySourceState.errorKind ?? null).toBeNull();
+  });
+
+  it("keeps renderer states written before the mask readouts assignable", () => {
+    expect(legacyRendererState.presentedFrames).toBe(0);
+    expect(legacyRendererState.drawnMaskFrameTime).toBeUndefined();
+    expect(legacyRendererState.maskHeldStale).toBeUndefined();
   });
 
   it("keeps cold stores written before in-place pruning assignable", () => {

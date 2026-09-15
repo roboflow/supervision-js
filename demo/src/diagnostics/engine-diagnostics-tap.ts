@@ -1,0 +1,190 @@
+import {
+  DIAGNOSTICS,
+  TRACE_RING_BOUNDS,
+  type DiagnosticsSnapshot,
+} from "supervision/web-video-engine";
+import type { MediaRendererSource } from "supervision";
+
+/**
+ * The slice of the engine handle the diagnostics surface needs, named
+ * structurally so the tap can refuse a media source that is not the engine.
+ */
+interface EngineDiagnosticsProducer {
+  armTrace(windowMs: number): void;
+  disarmTrace(): void;
+  exportTrace(): Promise<unknown>;
+  getLatestDiagnostics(): DiagnosticsSnapshot | null;
+  startDiagnostics(hz?: number): void;
+  stopDiagnostics(): void;
+  subscribeDiagnostics(listener: () => void): () => void;
+}
+
+export interface EngineDiagnosticsTap {
+  /** Allocates the worker's rolling trace rings; disarm keeps what they hold. */
+  armTrace(): void;
+  /** Whether a web video engine source is open, broadcast or no broadcast. */
+  attached(): boolean;
+  disarmTrace(): void;
+  /** The assembled capture, or null when nothing was armed. */
+  exportTrace(): Promise<unknown>;
+  /** Null until a web video engine source opens, and again after it closes. */
+  read(): DiagnosticsSnapshot | null;
+  /** One reading: holds the broadcast open until a push carries a snapshot,
+   *  hands that snapshot over and closes it again. The returned call abandons
+   *  a reading still waiting for its push. */
+  readOnce(onReading: (snapshot: DiagnosticsSnapshot) => void): () => void;
+  /** Turns the worker broadcast on, and off again through the returned stop.
+   *  Idempotent: repeated starts share one broadcast. */
+  start(): () => void;
+  subscribe(listener: () => void): () => void;
+  tap(source: MediaRendererSource): MediaRendererSource;
+}
+
+/**
+ * Captures the engine handle as a media source opens, so the demo can read the
+ * same DiagnosticsSnapshot the engine's own panel renders.
+ *
+ * The engine only assembles snapshots while something is subscribed, so the
+ * broadcast is reference counted against the surfaces that asked for it: a
+ * closed Debug tab leaves the worker paying nothing.
+ */
+export function createEngineDiagnosticsTap(): EngineDiagnosticsTap {
+  let producer: EngineDiagnosticsProducer | null = null;
+  let unsubscribeProducer: (() => void) | null = null;
+  let readers = 0;
+  const listeners = new Set<() => void>();
+
+  const notify = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+
+  const attach = () => {
+    if (!producer || unsubscribeProducer || readers === 0) {
+      return;
+    }
+
+    producer.startDiagnostics(DIAGNOSTICS.BROADCAST_HZ);
+    unsubscribeProducer = producer.subscribeDiagnostics(notify);
+  };
+
+  const detach = () => {
+    unsubscribeProducer?.();
+    unsubscribeProducer = null;
+    producer?.stopDiagnostics();
+  };
+
+  const startReading = () => {
+    readers += 1;
+    attach();
+    let stopped = false;
+
+    return () => {
+      if (stopped) {
+        return;
+      }
+
+      stopped = true;
+      readers -= 1;
+
+      if (readers === 0) {
+        detach();
+      }
+    };
+  };
+
+  return {
+    armTrace() {
+      producer?.armTrace(TRACE_RING_BOUNDS.snapshotWindowMs);
+    },
+
+    attached() {
+      return producer !== null;
+    },
+
+    disarmTrace() {
+      producer?.disarmTrace();
+    },
+
+    async exportTrace() {
+      return (await producer?.exportTrace()) ?? null;
+    },
+
+    read() {
+      return producer?.getLatestDiagnostics() ?? null;
+    },
+
+    readOnce(onReading) {
+      const stop = startReading();
+      const release = () => {
+        listeners.delete(waitForSnapshot);
+        stop();
+      };
+      // A source opening notifies too, and it carries no reading with it.
+      const waitForSnapshot = () => {
+        const snapshot = producer?.getLatestDiagnostics();
+
+        if (!snapshot) {
+          return;
+        }
+
+        release();
+        onReading(snapshot);
+      };
+
+      listeners.add(waitForSnapshot);
+
+      return release;
+    },
+
+    start: startReading,
+
+    subscribe(listener) {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
+    tap(source) {
+      return {
+        async open() {
+          const opened = await source.open();
+          detach();
+          producer = readEngineDiagnosticsProducer(opened);
+          attach();
+          notify();
+          return opened;
+        },
+      };
+    },
+  };
+}
+
+function readEngineDiagnosticsProducer(
+  opened: unknown,
+): EngineDiagnosticsProducer | null {
+  if (typeof opened !== "object" || opened === null) {
+    return null;
+  }
+
+  const { engine } = opened as { readonly engine?: unknown };
+
+  if (typeof engine !== "object" || engine === null) {
+    return null;
+  }
+
+  const candidate = engine as Partial<EngineDiagnosticsProducer>;
+
+  return typeof candidate.armTrace === "function" &&
+    typeof candidate.disarmTrace === "function" &&
+    typeof candidate.exportTrace === "function" &&
+    typeof candidate.getLatestDiagnostics === "function" &&
+    typeof candidate.startDiagnostics === "function" &&
+    typeof candidate.stopDiagnostics === "function" &&
+    typeof candidate.subscribeDiagnostics === "function"
+    ? (engine as EngineDiagnosticsProducer)
+    : null;
+}

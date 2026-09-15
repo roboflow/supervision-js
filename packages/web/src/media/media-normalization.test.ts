@@ -53,6 +53,7 @@ const mockState = vi.hoisted(() => {
       getDisplayHeight: vi.fn(async () => 720),
       getDisplayWidth: vi.fn(async () => 1280),
       getFirstTimestamp: vi.fn(async () => 0),
+      getTimeResolution: vi.fn(async () => 1_000_000),
       type: "video",
     },
     videoSampleSinkConstructor: vi.fn(),

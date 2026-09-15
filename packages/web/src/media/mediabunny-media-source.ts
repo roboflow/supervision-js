@@ -51,10 +51,19 @@ export async function openMediabunnyMediaSource(
     const primaryVideoTrack = await input.getPrimaryVideoTrack();
 
     if (!primaryVideoTrack) {
-      throw new MediaSourceError(
-        MediaErrorKind.NoVideoTrack,
-        "No video track found in media source.",
-      );
+      // A file whose streams are all in formats mediabunny does not carry
+      // reaches here with an empty track list: its video is unreachable, not
+      // absent. Only a listed set of tracks with no video in it says anything
+      // about the file.
+      throw tracks.length === 0
+        ? new MediaSourceError(
+            MediaErrorKind.UnsupportedFormat,
+            "The container opened and mediabunny parsed no track out of it.",
+          )
+        : new MediaSourceError(
+            MediaErrorKind.NoVideoTrack,
+            "The media source's tracks read and none of them carries video.",
+          );
     }
 
     const packetStatsPromise =
@@ -65,13 +74,19 @@ export async function openMediabunnyMediaSource(
             })
             .catch(() => null)
         : Promise.resolve(null);
-    const [displayWidth, displayHeight, firstTimestamp, packetStats] =
-      await Promise.all([
-        primaryVideoTrack.getDisplayWidth(),
-        primaryVideoTrack.getDisplayHeight(),
-        primaryVideoTrack.getFirstTimestamp(),
-        packetStatsPromise,
-      ]);
+    const [
+      displayWidth,
+      displayHeight,
+      firstTimestamp,
+      timeResolution,
+      packetStats,
+    ] = await Promise.all([
+      primaryVideoTrack.getDisplayWidth(),
+      primaryVideoTrack.getDisplayHeight(),
+      primaryVideoTrack.getFirstTimestamp(),
+      primaryVideoTrack.getTimeResolution(),
+      packetStatsPromise,
+    ]);
 
     const duration = isUrlSourceInput(sourceInput)
       ? metadataDuration
@@ -101,6 +116,7 @@ export async function openMediabunnyMediaSource(
         mimeType,
         primaryVideoHeight: displayHeight,
         primaryVideoWidth: displayWidth,
+        timeResolution,
         trackCount: tracks.length,
         videoTrackCount: videoTracks.length,
       },

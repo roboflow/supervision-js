@@ -2,6 +2,7 @@ import {
   normalizeMedia,
   normalizeMediaProgressively,
 } from "#media/media-normalization";
+import { MediaSessionMediaBranch } from "#types/media-session";
 import type {
   MediaSessionMedia,
   MediaSessionMediaState,
@@ -38,7 +39,13 @@ export async function prepareSessionMedia(
         // URL sources are owned by the caller.
       },
       rendererSourceOption: { src: media },
-      state: createEmptyMediaState(),
+      state: {
+        ...createEmptyMediaState(),
+        preparation: {
+          branch: MediaSessionMediaBranch.Url,
+          opened: "src",
+        },
+      },
     };
   }
 
@@ -48,7 +55,13 @@ export async function prepareSessionMedia(
         // Renderer sources are owned by the caller.
       },
       rendererSourceOption: { source: media },
-      state: createEmptyMediaState(),
+      state: {
+        ...createEmptyMediaState(),
+        preparation: {
+          branch: MediaSessionMediaBranch.RendererSource,
+          opened: "source",
+        },
+      },
     };
   }
 
@@ -64,6 +77,10 @@ export async function prepareSessionMedia(
         inputMetadata: null,
         normalizedMedia: null,
         objectUrl,
+        preparation: {
+          branch: MediaSessionMediaBranch.BlobObjectUrl,
+          opened: "src",
+        },
       },
     };
   }
@@ -96,6 +113,10 @@ export async function prepareSessionMedia(
         inputMetadata: normalizedMedia.inputMetadata,
         normalizedMedia,
         objectUrl: null,
+        preparation: {
+          branch: MediaSessionMediaBranch.ProgressiveSource,
+          opened: "source",
+        },
       },
     };
   }
@@ -119,6 +140,10 @@ export async function prepareSessionMedia(
       inputMetadata: normalizedMedia.inputMetadata,
       normalizedMedia,
       objectUrl,
+      preparation: {
+        branch: MediaSessionMediaBranch.NormalizedObjectUrl,
+        opened: "src",
+      },
     },
   };
 }
@@ -128,6 +153,7 @@ export function createEmptyMediaState(): MediaSessionMediaState {
     inputMetadata: null,
     normalizedMedia: null,
     objectUrl: null,
+    preparation: null,
   };
 }
 

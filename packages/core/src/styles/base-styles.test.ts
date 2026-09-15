@@ -292,20 +292,19 @@ describe("base presentation styles", () => {
     });
   });
 
-  it("resolves hover and selected interaction highlights without touching base layers", () => {
+  it("resolves hover and selected picks into their configured presentations", () => {
     const style = new BaseInteractionStyle({
-      fill: (_detection, context) =>
-        context.state === DetectionInteractionState.Selected
-          ? { alpha: 0.2, color: 0xfde047 }
-          : null,
-      stroke: (detection, context) => ({
-        alpha: context.state === DetectionInteractionState.Selected ? 1 : 0.85,
-        cap: "square",
-        color: detection.className === "person" ? 0x22c55e : 0x38bdf8,
-        join: "round",
-        miterLimit: 5,
-        width: context.state === DetectionInteractionState.Selected ? 5 : 3,
-      }),
+      hovered: {
+        boxStyle: new BaseBoxStyle({
+          stroke: { alpha: 0.85, color: 0x38bdf8, width: 3 },
+        }),
+      },
+      selected: {
+        boxStyle: new BaseBoxStyle({
+          fill: { alpha: 0.2, color: 0xfde047 },
+          stroke: { alpha: 1, color: 0x22c55e, width: 5 },
+        }),
+      },
     });
     const detection = {
       className: "person",
@@ -335,18 +334,10 @@ describe("base presentation styles", () => {
         frame,
         mediaTime: 0.25,
       }),
-    ).toEqual({
-      fill: undefined,
+    ).toMatchObject({
       rect: detection.rect,
       shape: BoxShape.Rect,
-      stroke: {
-        alpha: 0.85,
-        cap: "square",
-        color: 0x22c55e,
-        join: "round",
-        miterLimit: 5,
-        width: 3,
-      },
+      stroke: { alpha: 0.85, color: 0x38bdf8, width: 3 },
     });
     expect(
       selectedPresentation?.boxStyle?.resolve(detection, {
@@ -356,11 +347,34 @@ describe("base presentation styles", () => {
       }),
     ).toMatchObject({
       fill: { alpha: 0.2, color: 0xfde047 },
-      stroke: {
-        alpha: 1,
-        color: 0x22c55e,
-        width: 5,
-      },
+      stroke: { alpha: 1, color: 0x22c55e, width: 5 },
+    });
+  });
+
+  it("falls back to a highlight rectangle when a state has no presentation", () => {
+    const style = new BaseInteractionStyle();
+    const detection = { rect: { height: 40, width: 20, x: 10, y: 12 } };
+
+    const presentation = style.resolve(detection, {
+      detectionIndex: 0,
+      frame,
+      mediaTime: 0.25,
+      point: { x: 12, y: 14 },
+      state: DetectionInteractionState.Selected,
+      target: DetectionPickTarget.Box,
+    });
+
+    expect(
+      presentation?.boxStyle?.resolve(detection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0.25,
+      }),
+    ).toEqual({
+      fill: { alpha: 0.18, color: 0xfde047 },
+      rect: detection.rect,
+      shape: BoxShape.Rect,
+      stroke: { alpha: 1, color: 0xfde047, width: 4 },
     });
   });
 

@@ -2,9 +2,12 @@
 /**
  * Builds the combined geometry showcase fixture from offline model inputs:
  *
- * 1. the committed SAM3 segmentation timeline
+ * 1. the SAM3 segmentation timeline
  *    (`demo/fixtures/basketball_sam3/detections.json`), whose masks are
- *    converted into bounded simplified polygons on the same detections; and
+ *    converted into bounded simplified polygons on the same detections. That
+ *    file is git-ignored, so run `npm run fixture:sam3:restore` first; the
+ *    chunks beside it are this script's own output and already carry the merged
+ *    geometry, so they cannot stand in for it; and
  * 2. a raw pose JSONL produced once by `run-pose.py`, normalized here into
  *    center-based rects, zero-based COCO skeleton edges, and an explicit
  *    visibility policy; and optionally
@@ -52,6 +55,13 @@ const POSE_Z_INDEX_BASE = 100;
 const POSE_TARGET_CLASS_NAMES = ["white team player", "yellow team player"];
 const BASKETBALL_TRACE_ALGORITHM = "basketball-motion-track-v1";
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
+/**
+ * A trace candidate covering this much of the frame is the scene, not a ball.
+ * The prompt occasionally returns a whole-frame mask at low confidence, and the
+ * association has no reason to prefer the real ball over it once it latches, so
+ * the trace follows a static blob for the rest of the clip.
+ */
+const BASKETBALL_TRACE_MAX_FRAME_COVERAGE = 0.5;
 const BASKETBALL_TRACE_MAX_ASSOCIATION_GAP_SECONDS = 0.1;
 const BASKETBALL_TRACE_MAX_POINTS = 60;
 const BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS = 12;
@@ -59,7 +69,9 @@ const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
 const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-temporal-mask-v4";
-const HEAD_MAX_GAP_FRAMES = 7;
+const HEAD_REGION_ALGORITHM = "sam3-head-temporal-mask-v5";
+const GAP_FILL_ALGORITHM = "head-rect-center-interpolation-v1";
+const HEAD_MAX_GAP_FRAMES = 4;
 const HEAD_MASK_NORMALIZATION_SIZE = 64;
 const HEAD_MASK_SMOOTHING_RADIUS = 2;
 const HEAD_SOURCE_ID = "sam3-head";
@@ -88,22 +100,11 @@ const headSam3Fixture = headSam3Raw ? JSON.parse(headSam3Raw) : undefined;
 const headFrames = new Map(
   (headSam3Fixture?.frames ?? []).map((frame) => [frame.frameIndex, frame]),
 );
-const { poseMeta, poseFrames } = parseRawPose(poseRaw);
+const { poseMeta, poseFrames } = readPose(poseRaw, poseInputPath, sam3Fixture);
 const polygonOptions = {
   maxPoints: options.maxPolygonPoints,
   tolerance: options.polygonTolerance,
 };
-
-let droppedPoseFrameCount = 0;
-const knownFrameIndexes = new Set(
-  sam3Fixture.frames.map((frame) => frame.frameIndex),
-);
-
-for (const frameIndex of poseFrames.keys()) {
-  if (!knownFrameIndexes.has(frameIndex)) {
-    droppedPoseFrameCount += 1;
-  }
-}
 
 const poseAssociation = {
   matchedPoseCount: 0,
@@ -156,7 +157,7 @@ const stabilizedHeads = headSam3Fixture
       })),
       {
         associationAlgorithm: HEAD_ASSOCIATION_ALGORITHM,
-        fillGap: translateHeadMaskToPlayer,
+        fillGap: interpolateHeadBetweenObservations,
         maxGapFrames: HEAD_MAX_GAP_FRAMES,
         sourceId: HEAD_SOURCE_ID,
         targetClassNames: POSE_TARGET_CLASS_NAMES,
@@ -183,15 +184,17 @@ const fixture = {
   geometry,
   inference: sam3Fixture.inference,
   provenance: {
-    generationCommand: "npm run fixture:geometry:create",
+    generationCommand: describeInvocation(),
     ...(headSam3Fixture
       ? {
           headRegions: {
-            algorithm: HEAD_ASSOCIATION_ALGORITHM,
+            algorithm: HEAD_REGION_ALGORITHM,
             associationPolicy: `C-BIoU assigns stable team-player tracks before global one-to-one head matching; exact repeated masks retain their prior owner, implausible relative position/scale jumps are rejected, confidence >= 0.7 starts a head track, confidence >= 0.5 continues it, and internal gaps of at most ${HEAD_MAX_GAP_FRAMES} frames are filled`,
             cropPolicy:
               "6px mask-bounds padding with bidirectional exponential smoothing and a seven-frame local size envelope; every crop remains a superset of its stabilized mask bounds",
-            derivedFrom: `direct SAM3 \`head\` masks associated with offline C-BIoU team-player tracks; masks are normalized to ${HEAD_MASK_NORMALIZATION_SIZE}x${HEAD_MASK_NORMALIZATION_SIZE}, stabilized by a ${HEAD_MASK_SMOOTHING_RADIUS * 2 + 1}-frame weighted temporal majority and one-cell morphological close, then projected into the current frame's SAM3 bounds so media pixels remain spatially aligned; short gaps translate the nearest observation with tracked player motion`,
+            derivedFrom: `direct SAM3 \`head\` masks associated with offline C-BIoU team-player tracks; masks are normalized to ${HEAD_MASK_NORMALIZATION_SIZE}x${HEAD_MASK_NORMALIZATION_SIZE}, stabilized by a ${HEAD_MASK_SMOOTHING_RADIUS * 2 + 1}-frame weighted temporal majority and one-cell morphological close, then projected into the current frame's SAM3 bounds so media pixels remain spatially aligned; a gap frame carries the nearer bracketing observation's mask, rigidly translated onto the position interpolated between both bracketing observations`,
+            gapFillAlgorithm: GAP_FILL_ALGORITHM,
+            gapFillPolicy: `a gap frame's head center is the linear interpolation of both bracketing observations' mask centers; a gap frame whose player track has no frozen detection stays empty`,
             continuedLowConfidenceHeadCount:
               stabilizedHeads.summary.continuedLowConfidenceHeadCount,
             gapFilledHeadCount: stabilizedHeads.summary.gapFilledHeadCount,
@@ -234,6 +237,8 @@ const fixture = {
     },
     polyline: {
       algorithm: BASKETBALL_TRACE_ALGORITHM,
+      confidencePolicy:
+        "metadata.trajectoryConfidence is the median SAM3 confidence of the observations composing the drawn window; the detection's own confidence stays its single frame's raw score",
       derivedFrom:
         "motion-gated nearest-neighbor association across SAM3 basketball detections on the shared frame grid",
       interpolation: "none",
@@ -285,12 +290,6 @@ await writeFile(outputPath, `${JSON.stringify(fixture)}\n`);
 console.log(
   `Wrote combined timeline (${frames.length} frames, ${JSON.stringify(geometry)}) to ${outputPath}`,
 );
-
-if (droppedPoseFrameCount > 0) {
-  console.warn(
-    `Dropped pose output for ${droppedPoseFrameCount} frame indexes without a SAM3 frame record.`,
-  );
-}
 
 await runChunker(outputPath, fixtureDir, options.datasetId);
 
@@ -370,12 +369,53 @@ function trackHeadPlayerDetections(frames) {
   return result;
 }
 
-function translateHeadMaskToPlayer({ sourceHead, sourcePlayer, targetPlayer }) {
+/**
+ * The player box is limb-driven: its top follows whichever body part is
+ * highest, usually a raised arm. Moving a head by that box's delta tracks the
+ * arm, not the head, and the error compounds with distance from the
+ * observation it was moved from, so both bracketing observations anchor the
+ * placement.
+ */
+function interpolateHeadBetweenObservations({
+  interpolationAmount,
+  nextHead,
+  previousHead,
+}) {
+  if (!previousHead.rect || !nextHead.rect) return undefined;
+  const ordered =
+    interpolationAmount <= 0.5
+      ? [previousHead, nextHead]
+      : [nextHead, previousHead];
+
+  for (const sourceHead of ordered) {
+    const filled = translateHeadMaskToInterpolatedCenter({
+      interpolationAmount,
+      nextHead,
+      previousHead,
+      sourceHead,
+    });
+
+    if (filled) return filled;
+  }
+
+  return undefined;
+}
+
+function translateHeadMaskToInterpolatedCenter({
+  interpolationAmount,
+  nextHead,
+  previousHead,
+  sourceHead,
+}) {
   if (!sourceHead.mask || !sourceHead.rect) return undefined;
-  const sourceTop = sourcePlayer.rect.y - sourcePlayer.rect.height / 2;
-  const targetTop = targetPlayer.rect.y - targetPlayer.rect.height / 2;
-  const offsetX = Math.round(targetPlayer.rect.x - sourcePlayer.rect.x);
-  const offsetY = Math.round(targetTop - sourceTop);
+  const offsetX = Math.round(
+    lerp(previousHead.rect.x, nextHead.rect.x, interpolationAmount) -
+      sourceHead.rect.x,
+  );
+  const offsetY = Math.round(
+    lerp(previousHead.rect.y, nextHead.rect.y, interpolationAmount) -
+      sourceHead.rect.y,
+  );
   const decoded = decodeCompressedRleMask(sourceHead.mask);
   const translated = new Uint8Array(decoded.data.length);
   let left = decoded.width;
@@ -407,6 +447,7 @@ function translateHeadMaskToPlayer({ sourceHead, sourcePlayer, targetPlayer }) {
     mask: encodeBinaryMask(translated, decoded.width, decoded.height),
     metadata: {
       ...sourceHead.metadata,
+      gapFill: GAP_FILL_ALGORITHM,
       gapFillOffset: { x: offsetX, y: offsetY },
       gapFillSourceDetectionId: sourceHead.id,
     },
@@ -659,6 +700,24 @@ function clampInteger(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+function lerp(from, to, amount) {
+  return from + (to - from) * amount;
+}
+
+function coversWholeFrame(detection) {
+  const frameArea =
+    (detection.mask?.width ?? 0) * (detection.mask?.height ?? 0);
+
+  if (frameArea <= 0) {
+    return false;
+  }
+
+  return (
+    (detection.rect.width * detection.rect.height) / frameArea >=
+    BASKETBALL_TRACE_MAX_FRAME_COVERAGE
+  );
+}
+
 function attachBasketballCenterTrace(
   detections,
   mediaTime,
@@ -666,7 +725,9 @@ function attachBasketballCenterTrace(
   previousObservation,
 ) {
   const basketballCandidates = detections.filter(
-    (detection) => detection.className === BASKETBALL_TRACE_CLASS_NAME,
+    (detection) =>
+      detection.className === BASKETBALL_TRACE_CLASS_NAME &&
+      !coversWholeFrame(detection),
   );
 
   const observationIsStale =
@@ -696,6 +757,7 @@ function attachBasketballCenterTrace(
   }
 
   const observation = {
+    confidence: basketball.confidence,
     mediaTime,
     x: basketball.rect.x,
     y: basketball.rect.y,
@@ -725,12 +787,36 @@ function attachBasketballCenterTrace(
             metadata: {
               ...detection.metadata,
               trajectoryTrackId: BASKETBALL_TRACE_TRACK_ID,
+              ...(polyline
+                ? {
+                    trajectoryConfidence: medianConfidence(trace),
+                  }
+                : {}),
             },
           }
         : detection,
     ),
     previousObservation: observation,
   };
+}
+
+/**
+ * How much of the drawn path the model stood behind.
+ *
+ * A drawn window spans up to a second of observations, so its own detection's
+ * score answers a question about a single frame and not about the path. The
+ * median holds against the one-frame dropouts that punctuate this clip and
+ * still falls when a whole segment is weak.
+ */
+function medianConfidence(trace) {
+  const sorted = trace
+    .map(({ confidence }) => confidence)
+    .sort((a, b) => a - b);
+  const middle = sorted.length / 2;
+
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[Math.floor(middle)];
 }
 
 function normalizePoseFrame(rawDetections, frame) {
@@ -745,6 +831,43 @@ function normalizePoseFrame(rawDetections, frame) {
 
     return detection ? [detection] : [];
   });
+}
+
+/**
+ * Pose read against the detection grid it claims to describe.
+ *
+ * Keypoints join the timeline by frame index alone, and an index resolves on
+ * any grid. A pose run against a different frame rate therefore lands every
+ * skeleton on a frame it was not measured from, which reads as annotations
+ * quietly drifting rather than as a failure.
+ */
+function readPose(raw, inputPath, sam3Fixture) {
+  const { poseMeta, poseFrames } = parseRawPose(raw);
+  const detectionFrameCount = sam3Fixture.frames.length;
+  const knownFrameIndexes = new Set(
+    sam3Fixture.frames.map((frame) => frame.frameIndex),
+  );
+  const unknownFrameIndexes = [...poseFrames.keys()].filter(
+    (frameIndex) => !knownFrameIndexes.has(frameIndex),
+  );
+
+  if (
+    poseMeta.frameCount !== detectionFrameCount ||
+    unknownFrameIndexes.length > 0
+  ) {
+    throw new Error(
+      `${inputPath} was run over ${poseMeta.frameCount} frames and the ` +
+        `detections cover ${detectionFrameCount}` +
+        (unknownFrameIndexes.length > 0
+          ? `, with ${unknownFrameIndexes.length} pose frame indexes absent ` +
+            `from the detection grid`
+          : "") +
+        `. Rerun run-pose.py over frames extracted from the video these ` +
+        `detections were inferred against.`,
+    );
+  }
+
+  return { poseFrames, poseMeta };
 }
 
 function parseRawPose(raw) {
@@ -797,15 +920,31 @@ function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
 }
 
+/**
+ * The flags decide which fixture is built and which inputs it reads, so a
+ * manifest that records the bare script records a rebuild of something else.
+ */
+function describeInvocation() {
+  const args = process.argv
+    .slice(2)
+    .map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg));
+
+  return [
+    "npm run fixture:geometry:create",
+    ...(args.length ? ["--"] : []),
+    ...args,
+  ].join(" ");
+}
+
 function parseArgs(args) {
   const parsed = {
-    datasetId: "basketball_geometry_v1",
-    fixtureDir: "demo/fixtures/basketball_geometry",
+    datasetId: "basketball_sam3_v1",
+    fixtureDir: "demo/fixtures/basketball_sam3",
     headSam3Input: undefined,
     help: false,
     maxPolygonPoints: DEFAULT_MAX_POLYGON_POINTS,
-    output: "tools/geometry-fixture/output/detections.json",
-    poseInput: "demo/fixtures/basketball_geometry/raw-pose.jsonl",
+    output: "tools/geometry-fixture/output/merged-detections.json",
+    poseInput: "demo/fixtures/basketball_sam3/raw-pose.jsonl",
     polygonTolerance: DEFAULT_POLYGON_TOLERANCE,
     sam3Input: "demo/fixtures/basketball_sam3/detections.json",
     visibleConfidence: DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
@@ -875,12 +1014,12 @@ function printHelp() {
 npm run fixture:geometry:create -- [options]
 
 Options:
-  --dataset-id <id>                default: basketball_geometry_v1
-  --fixture-dir <path>             default: demo/fixtures/basketball_geometry
+  --dataset-id <id>                default: basketball_sam3_v1
+  --fixture-dir <path>             default: demo/fixtures/basketball_sam3
   --head-sam3-input <path>         append direct SAM3 head masks associated to players
   --max-polygon-points <count>     default: ${DEFAULT_MAX_POLYGON_POINTS}
-  --output <path>                  default: tools/geometry-fixture/output/detections.json
-  --pose-input <path>              default: demo/fixtures/basketball_geometry/raw-pose.jsonl
+  --output <path>                  default: tools/geometry-fixture/output/merged-detections.json
+  --pose-input <path>              default: demo/fixtures/basketball_sam3/raw-pose.jsonl
   --polygon-tolerance <pixels>     default: ${DEFAULT_POLYGON_TOLERANCE}
   --sam3-input <path>              default: demo/fixtures/basketball_sam3/detections.json
   --visible-confidence <value>     default: ${DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE}`);

@@ -1,3 +1,4 @@
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
@@ -37,6 +38,8 @@ import type {
   MediaSourceState,
 } from "#types/media-renderer";
 import type { RenderPreparationDiagnostics } from "#types/render-preparation";
+import type { MediaFrameClock } from "#types/media-frame-clock";
+import type { MediaFrameNavigation } from "#types/media-frame-navigation";
 
 export {
   MediaSessionActivityKind,
@@ -61,7 +64,8 @@ export type MediaSessionMedia =
 export interface MediaSessionNormalizationOptions extends MediaNormalizationOptions {
   /**
    * When true, media normalization may expose progressive output before the
-   * entire input has finished normalizing.
+   * entire input has finished normalizing. Defaults to false, which opens the
+   * session only once the complete normalized blob exists.
    */
   readonly stream?: boolean;
 }
@@ -137,9 +141,10 @@ export interface MediaSessionDetectionSourceOptions {
    */
   readonly sync?: MediaSessionDetectionSyncOptions;
   /**
-   * When false, playback gates skip this source's readiness checks.
+   * When false, `waitForRange` on `MediaSession.detectionSource` resolves
+   * without waiting for this source. Defaults to true.
    */
-  readonly requiredForPlayback?: boolean;
+  readonly requiredForCoverage?: boolean;
 }
 
 export interface MediaSessionDetectionOptions {
@@ -182,8 +187,19 @@ export interface MediaSessionDetectionOptions {
   readonly buffer?: DetectionBufferOptions;
 
   /**
-   * Optional playback gate that treats detection coverage as part of media
-   * readiness.
+   * Hold playback until detections cover the frame about to be presented.
+   *
+   * Off by default: the session presents a frame the detection window does not
+   * cover without annotations and draws them once coverage lands. Enabled, the
+   * session treats detection coverage as part of media readiness and reports
+   * buffering while it waits. Merges over `buffer.playbackGate`.
+   *
+   * The wait lasts for the length of playback on both kinds of media source. A
+   * source the renderer pulls samples from is held between decoding and drawing
+   * a frame. A source that presents its own frames drives the playhead itself,
+   * which is what `createWebVideoEngineMediaRendererSource` returns and therefore
+   * what most video sessions run on. There the renderer stops the producer at a
+   * frame its detections do not cover and starts it again when they arrive.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 
@@ -208,6 +224,10 @@ export interface MediaSessionRendererOptions {
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
   readonly playbackRate?: number;
+  /**
+   * @deprecated Nothing reads this. The renderer is video-only and audio
+   * playback is deferred, so setting it changes nothing either way.
+   */
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
@@ -256,6 +276,30 @@ export interface MediaSessionOptions {
    */
   readonly detections?: MediaSessionDetectionOptions;
   /**
+   * Buffered playback: hold the picture until the frame it is about to show has
+   * both its detections and its prepared annotation artifacts. Opening still
+   * presents an initial media frame so the session can accept future appends;
+   * these gates hold subsequent playback, not session creation.
+   *
+   * On by default. `false` starts playback at once and draws annotations as
+   * they land, which suits a host that cares about cadence more than overlays.
+   * The switch answers for `detections.playbackGate` and
+   * `renderer.renderPreparation.playbackGate` together, each keeping its own
+   * lookahead; set either one's `enabled` to answer for that gate alone.
+   *
+   * The detection gate only applies to a session with appendable detections,
+   * since a source that is complete before playback starts has nothing to wait
+   * for. `true` turns it on for any session.
+   *
+   * Both kinds of source are held frame by frame for as long as playback runs.
+   * A source the renderer pulls decoded samples from waits between decoding and
+   * drawing. A source that presents its own frames, which is what
+   * `createWebVideoEngineMediaRendererSource` returns, is stopped when detection
+   * coverage or prepared artifacts are missing and started again when the wait
+   * settles.
+   */
+  readonly playbackGate?: boolean;
+  /**
    * Aggregate loading, playback, buffering, processing, and error state.
    */
   readonly onState?: (state: MediaSessionState) => void;
@@ -270,12 +314,47 @@ export interface MediaSessionOptions {
 }
 
 /**
+ * Which of the session's media branches ran.
+ *
+ * The five differ in whether the clip is converted first and in who ends up
+ * reading it, and from outside they were indistinguishable: two of them leave
+ * every other field on {@link MediaSessionMediaState} null.
+ */
+export enum MediaSessionMediaBranch {
+  /** A URL, `URL` or `Request` went to the renderer untouched. */
+  Url = "url",
+  /** A source the caller had already built went to the renderer untouched. */
+  RendererSource = "rendererSource",
+  /** A file the session was not asked to convert, played from an object URL. */
+  BlobObjectUrl = "blobObjectUrl",
+  /** A file converted in full first, played from the conversion's object URL. */
+  NormalizedObjectUrl = "normalizedObjectUrl",
+  /** A file converted while it plays, read through the conversion's source. */
+  ProgressiveSource = "progressiveSource",
+}
+
+/**
+ * What the session did with the media it was handed, recorded as it did it.
+ *
+ * The renderer opens a `src` and a `source` through different readers, so which
+ * of the two a branch set decides which one opens the clip. Nothing else
+ * reports it.
+ */
+export interface MediaSessionMediaPreparation {
+  readonly branch: MediaSessionMediaBranch;
+  /** Which of the renderer's two media options this branch filled in. */
+  readonly opened: "src" | "source";
+}
+
+/**
  * Prepared media state visible to host applications.
  */
 export interface MediaSessionMediaState {
   readonly inputMetadata: MediaNormalizationInputMetadata | null;
   readonly normalizedMedia: NormalizedMedia | ProgressiveNormalizedMedia | null;
   readonly objectUrl: string | null;
+  /** Null until the session has prepared its media. */
+  readonly preparation?: MediaSessionMediaPreparation | null;
 }
 
 export interface MediaSessionNormalizationState {
@@ -305,6 +384,12 @@ export interface MediaSessionDetectionWriteOptions {
  * Public controller for one renderer-owned media item.
  */
 export interface MediaSession {
+  /** Exact frame timing when the media source provides an index; null otherwise. */
+  readonly frameClock?: MediaFrameClock | null;
+  /** Indexed moves and observable scrub landings for push-based indexed sources. */
+  readonly frameNavigation?: MediaFrameNavigation | null;
+  /** Resize an engine-backed display-box source and await its presented output. */
+  setDisplay?(display: MediaRendererDisplay): Promise<void>;
   /**
    * Detection source used by the renderer. Present when the session was created
    * with static frames, a source, or an appendable source.
@@ -314,7 +399,8 @@ export interface MediaSession {
   readonly media: MediaSessionMediaState;
   readonly renderer: MediaRenderer;
   /**
-   * Append semantic detection frames to a session-owned appendable source.
+   * Append semantic detection frames to the selected writable source, supplied
+   * by the caller or created through `detections.appendable`.
    */
   appendDetectionFrames(
     frames: readonly DetectionFrame[],
@@ -323,9 +409,9 @@ export interface MediaSession {
   /**
    * Optionally append the newest live detection frame.
    *
-   * Optional so controllers written against the previous shape stay
-   * assignable. `createMediaSession` always provides it; see
-   * {@link LiveMediaSession}.
+   * Live ingestion is an added capability, so a controller that does not do it
+   * still satisfies this interface. `createMediaSession` always provides it;
+   * see {@link LiveMediaSession}.
    */
   appendLiveDetectionFrame?(
     frame: DetectionFrame,
@@ -334,7 +420,7 @@ export interface MediaSession {
   /**
    * Optionally close the appendable source's final coverage.
    *
-   * Optional for the same backward-compatibility reason as
+   * Optional for the same reason as
    * {@link MediaSession.appendLiveDetectionFrame}.
    */
   finalizeDetectionCoverage?(
@@ -380,14 +466,13 @@ export interface MediaSession {
 /**
  * Media session that also exposes live detection ingestion.
  *
- * `createMediaSession` returns this shape. Controllers that only satisfy the
- * historical {@link MediaSession} contract stay assignable to it, so live
- * ingestion is an added capability rather than a required one.
+ * `createMediaSession` returns this shape. The members it requires are
+ * optional on {@link MediaSession}, so live ingestion is an added capability
+ * rather than a required one.
  */
 export interface LiveMediaSession extends MediaSession {
   /**
-   * Append the newest live detection frame to a session-owned appendable
-   * source.
+   * Append the newest live detection frame to the selected writable source.
    *
    * The frame stays active until the next live frame supersedes it, which is
    * closed at the new frame's `mediaTime`. Use this for streams whose producer
@@ -401,9 +486,10 @@ export interface LiveMediaSession extends MediaSession {
    * Close the appendable source's final coverage at the end of media.
    *
    * `endTime` defaults to the renderer's reported media duration. Calling it
-   * again is a no-op. Use it when a producer has finished so coverage-gated
-   * playback does not stall on a terminal sliver the container declares beyond
-   * the last decoded sample.
+   * again is a no-op. Use it when a producer has finished, so the source stops
+   * answering for the terminal sliver a container can declare beyond the last
+   * decoded sample. What the sliver would otherwise strand is a `waitForRange`
+   * caller, and an enabled detection playback gate along with it.
    */
   finalizeDetectionCoverage(
     endTime?: number,

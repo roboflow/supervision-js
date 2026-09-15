@@ -30,3 +30,29 @@ export function formatTimeRange(
 
   return `${formatTime(startTime)}-${formatTime(endTime)}`;
 }
+
+/**
+ * A looping detection buffer reports its ranges on an unbounded comparable
+ * axis (media time plus whole laps), so a range read after a lap or two lands
+ * far past the clip's duration. Fold both endpoints back into [0, duration)
+ * before showing them next to a playhead that wraps.
+ */
+export function toSourceTimeRange(
+  startTime: number | null,
+  endTime: number | null,
+  duration: number | null,
+): { readonly endTime: number | null; readonly startTime: number | null } {
+  if (
+    startTime === null ||
+    endTime === null ||
+    duration === null ||
+    duration <= 0 ||
+    (startTime >= 0 && endTime <= duration)
+  ) {
+    return { endTime, startTime };
+  }
+
+  const wrap = (value: number) => ((value % duration) + duration) % duration;
+
+  return { endTime: wrap(endTime), startTime: wrap(startTime) };
+}

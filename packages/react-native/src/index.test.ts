@@ -579,8 +579,9 @@ describe("React Native live ID-mask artifacts", () => {
   });
 
   it("clamps detections to the palette limit", () => {
-    const detections = Array.from({ length: 70 }, () =>
-      createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+    const detections = Array.from(
+      { length: MAX_ID_MASK_PALETTE_ENTRIES + 1 },
+      () => createFullCoverageLiveDetection({ color: 0x38bdf8 }),
     );
 
     const artifact = createReactNativeLiveIdMaskArtifact({
@@ -1010,7 +1011,7 @@ describe("React Native ID-mask artifacts", () => {
     expect([...uniforms.uMediaRect]).toEqual([37.5, 0, 25, 50]);
     expect(uniforms.uBorderEnabled).toBe(0);
     expect(Array.isArray(uniforms.uFillPalette)).toBe(true);
-    expect(uniforms.uFillPalette).toHaveLength(256);
+    expect(uniforms.uFillPalette).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES * 4);
     expect(uniforms.uFillPalette.slice(4, 8)).toEqual([1, 0, 0, 1]);
   });
 

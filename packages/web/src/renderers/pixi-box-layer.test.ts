@@ -40,6 +40,7 @@ describe("pixi box layer", () => {
 
     expect(layer.drawFrame(0.1)).toEqual({
       activeDetectionCount: 1,
+      activeDetectionFrame: frame,
       activeDetectionFrameIndex: 3,
       activeDetectionIndexes: [0],
       activeDetectionFrameTime: 0.1,
@@ -112,6 +113,7 @@ describe("pixi box layer", () => {
 
     expect(layer.drawFrame(0.1)).toEqual({
       activeDetectionCount: 0,
+      activeDetectionFrame: frame,
       activeDetectionFrameIndex: 3,
       activeDetectionIndexes: [],
       activeDetectionFrameTime: 0.1,

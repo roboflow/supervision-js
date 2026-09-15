@@ -13,8 +13,8 @@ the selected annotation frame for the current decoded media sample changes,
 redraw the rectangle layer; when it does not change, keep the existing graphics.
 
 Do not route the hot path through React state or DOM overlays. Keep media and
-annotations in one Pixi-owned scene, with Mediabunny decoded sample timestamps
-as the source of truth for synchronized annotation state.
+annotations in one Pixi-owned scene, with the timestamp of the media frame being
+presented as the source of truth for synchronized annotation state.
 
 ## Local Evidence
 
@@ -117,7 +117,10 @@ moving boxes into React or DOM overlays.
 
 ## Hard Constraints
 
-- Mediabunny owns media reading, decode, and decoded sample timestamps.
+- The media source owns reading, decode, and frame timestamps. Video runs on the
+  push path described in
+  [`video-engine-presentation.md`](video-engine-presentation.md); Mediabunny
+  owns the same job on the remaining pull path.
 - Pixi owns one composed scene for media, synchronized overlays, and future
   rectangle annotations. Benchmark layers live in `/benchmark/initial`, not the
   package renderer.

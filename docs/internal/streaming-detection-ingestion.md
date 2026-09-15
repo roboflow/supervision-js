@@ -19,8 +19,8 @@ The library owns:
 - `DetectionFrameSource` as the renderer-readable contract.
 - cold detection storage for frames that should not all live in hot memory.
 - writable detection ingestion for append/upsert workflows.
-- optional prediction-coverage gating so playback can wait for annotation data
-  the same way media playback waits for decoded media.
+- prediction-coverage reporting, as `getAvailableRanges()` and the optional
+  `waitForRange()` waiter, for callers that want to know what is covered.
 - hot buffer refresh when a source version changes.
 
 The demo owns:
@@ -110,8 +110,9 @@ frontier. Anchoring it on the summary end time would push the retention floor
 ## Finalizing Coverage
 
 A container can declare a duration slightly beyond its last decoded sample --
-9.0 seconds for 89 frames at 10fps, for example. Coverage-gated playback then
-waits forever for that terminal sliver at the loop boundary.
+9.0 seconds for 89 frames at 10fps, for example. The frames then stop short of
+the end of media, and a caller reading availability sees a terminal sliver the
+source will never cover.
 A source tracks its latest frame so it can finalize without scanning storage.
 That tracking follows identity, not just ordering: a write that replaces or
 revises the tracked frame's stored record replaces what is tracked, or
@@ -125,19 +126,26 @@ reporting coverage that does not exist. Reported availability is clipped with
 it. The operation is idempotent, so a producer can call it whenever it
 finishes.
 
-## Prediction-Gated Playback
+## Prediction Coverage
 
-Some sessions should treat missing predictions as missing media. In those cases,
-the writable source tracks appended time ranges and exposes range waiters. The
-renderer can opt into a playback gate with a required lookahead window. When
-playback reaches media time that does not yet have prediction coverage ahead,
-the renderer reports `buffering`, waits for the writable source to cover that
-range, then resumes from the same media timestamp instead of letting video and
-annotations drift apart.
+Missing predictions are not treated as missing media by default. A frame the
+ingested ranges do not cover presents without annotations rather than holding
+the picture, and `detections.playbackGate` is off unless a host enables it.
 
-This gate belongs in the media session/renderer path, not in React. The demo may
-show processed and processing ranges, but it should not run its own pause/play
-loop to enforce synchronization.
+Enabling it makes prediction coverage part of media readiness on a media source
+the renderer pulls decoded samples from, such as a URL, a `File` or a `Blob`:
+the renderer awaits `DetectionFrameSource.waitForRange()` for the configured
+lookahead before each frame is presented, and reports buffering while it waits.
+A source that presents its own frames owns the playhead, so the gate is accepted
+and ignored there, which is every session the web video engine backs. That is a
+deliberate trade of promptness for completeness, so it belongs to the app rather
+than to the ingestion path.
+
+The writable source tracks appended time ranges and exposes that waiter either
+way, so an app can also hold playback itself by awaiting `waitForRange()` on
+`MediaSession.detectionSource` and pausing. A demo that only wants to show
+progress should read `getAvailableRanges()` and render it rather than running a
+pause/play loop.
 
 ## Image Handling
 

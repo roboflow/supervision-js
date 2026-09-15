@@ -1,3 +1,13 @@
+import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
+import { untintedMaskVertexWgsl } from "#renderers/mask-vertex";
+import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
 import type { PreparedRegionMaskCoverageEntry } from "#render-preparation/mask-frame-artifact";
 import type {
   AlphaMask as PixiAlphaMask,
@@ -23,26 +33,6 @@ type ImageSourceConstructor = new (options: {
   scaleMode?: "linear" | "nearest";
   width: number;
 }) => PixiImageSource;
-
-type MeshConstructor = new (options: {
-  geometry: PixiMeshGeometry;
-  shader: PixiShader;
-}) => RegionCoverageMaskMesh;
-
-type MeshGeometryConstructor = new (options: {
-  indices: Uint32Array;
-  positions: Float32Array;
-  shrinkBuffersToFit: boolean;
-  topology: "triangle-list";
-  uvs: Float32Array;
-}) => PixiMeshGeometry;
-
-type ShaderFactory = {
-  from(options: {
-    gl: { fragment: string; vertex: string };
-    resources: Record<string, unknown>;
-  }): PixiShader;
-};
 
 type UniformGroupConstructor = new (
   uniforms: Record<
@@ -86,9 +76,9 @@ export interface PixiRegionCoverageMask {
 export function createPixiRegionCoverageMask(options: {
   readonly AlphaMask: AlphaMaskConstructor;
   readonly ImageSource: ImageSourceConstructor;
-  readonly Mesh: MeshConstructor;
-  readonly MeshGeometry: MeshGeometryConstructor;
-  readonly Shader: ShaderFactory;
+  readonly Mesh: InjectedMeshConstructor<RegionCoverageMaskMesh>;
+  readonly MeshGeometry: InjectedMeshGeometryConstructor;
+  readonly Shader: InjectedShaderFactory;
   readonly UniformGroup: UniformGroupConstructor;
 }): PixiRegionCoverageMask {
   const uniforms = new options.UniformGroup({
@@ -105,7 +95,7 @@ export function createPixiRegionCoverageMask(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -124,7 +114,7 @@ export function createPixiRegionCoverageMask(options: {
     destroy() {
       effect.destroy();
       display.destroy();
-      shader.destroy(true);
+      destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -161,11 +151,7 @@ export function createPixiRegionCoverageMask(options: {
       shader.resources.uTexture = source;
       shader.resources.uSampler = source.style;
     } catch {
-      try {
-        shader.destroy(true);
-      } catch {
-        // Pixi may already have invalidated this shader resource group.
-      }
+      destroyShaderKeepingProgram(shader);
       shader = createShader();
       display.shader = shader;
       shader.resources.uTexture = source;
@@ -179,6 +165,16 @@ export function createPixiRegionCoverageMask(options: {
         fragment: regionCoverageMaskFragmentShader,
         vertex: regionCoverageMaskVertexShader,
       },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: regionCoverageMaskFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: untintedMaskVertexWgsl,
+        },
+      },
       resources: {
         regionMaskUniforms: uniforms,
         uSampler: placeholderSource.style,
@@ -186,17 +182,6 @@ export function createPixiRegionCoverageMask(options: {
       },
     });
   }
-}
-
-function createPlaceholderCanvas() {
-  if (typeof document === "undefined") {
-    return { height: 1, width: 1 } as HTMLCanvasElement;
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.height = 1;
-  canvas.width = 1;
-  return canvas;
 }
 
 const regionCoverageMaskVertexShader = `#version 300 es
@@ -242,5 +227,33 @@ void main(void) {
   }
   float alpha = texture(uTexture, vMaskUV).r;
   finalColor = vec4(alpha);
+}
+`;
+
+// Resolving the crop per fragment keeps the uniform block out of the vertex
+// stage's bind group.
+const regionCoverageMaskFragmentWgsl = `
+struct RegionMaskUniforms {
+  uCrop: vec4<f32>,
+  uMaskRegion: vec4<f32>,
+}
+
+@group(2) @binding(0) var<uniform> regionMaskUniforms: RegionMaskUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+@fragment
+fn mainFragment(@location(0) vUV: vec2<f32>) -> @location(0) vec4<f32> {
+  let mediaPoint =
+    regionMaskUniforms.uCrop.xy + vUV * regionMaskUniforms.uCrop.zw;
+  let maskUV =
+    (mediaPoint - regionMaskUniforms.uMaskRegion.xy) /
+    regionMaskUniforms.uMaskRegion.zw;
+
+  if (any(maskUV < vec2<f32>(0.0)) || any(maskUV > vec2<f32>(1.0))) {
+    return vec4<f32>(0.0);
+  }
+
+  return vec4<f32>(textureSampleLevel(uTexture, uSampler, maskUV, 0.0).r);
 }
 `;

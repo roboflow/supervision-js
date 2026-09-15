@@ -112,6 +112,7 @@ export async function createMediaSession(
     const sessionDefaults = resolveMediaSessionDefaults({
       detections: options.detections,
       mode: options.mode,
+      playbackGate: options.playbackGate,
       renderer: options.renderer,
     });
 
@@ -325,6 +326,9 @@ export async function createMediaSession(
     };
 
     return {
+      frameClock: renderer.frameClock ?? null,
+      frameNavigation: renderer.frameNavigation ?? null,
+      setDisplay: renderer.setDisplay?.bind(renderer),
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,
       renderer,

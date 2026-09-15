@@ -254,12 +254,23 @@ export function createPixiInteractionLayer(options: {
       }
       return;
     }
-    setHoveredPick(pickFromPointerEvent(event));
+    const hoverChanged = setHoveredPick(pickFromPointerEvent(event));
+    if (!hoverChanged && editingEngine?.hasCreationTool()) {
+      notifyStateChange();
+    }
   }
 
   function handlePointerOut() {
+    const hadPointer = pointerPoint !== null;
     pointerPoint = null;
-    setHoveredPick(null);
+    const hoverChanged = setHoveredPick(null);
+    if (
+      !hoverChanged &&
+      hadPointer &&
+      options.editingEngine?.hasCreationTool()
+    ) {
+      notifyStateChange();
+    }
   }
 
   function handlePointerTap(event: PixiInteractionPointerEvent) {
@@ -501,7 +512,9 @@ export function createPixiInteractionLayer(options: {
   }
 
   function followSelectedPicks(frame: DetectionFrame | undefined) {
-    if (selectedPicks.length === 0) {
+    // An absent frame means detection data for this time has not arrived, not
+    // that the selection left the video, and a dropped selection never returns.
+    if (!frame || selectedPicks.length === 0) {
       return;
     }
 
@@ -545,7 +558,7 @@ export function createPixiInteractionLayer(options: {
           ? hoverCursor(nextPick)
           : resolveIdleCursor();
       }
-      return;
+      return false;
     }
 
     hoveredPick = nextPick;
@@ -555,6 +568,7 @@ export function createPixiInteractionLayer(options: {
     }
     options.interaction.onHover?.(nextPick);
     notifyStateChange();
+    return true;
   }
 
   function setSelectedPick(nextPick: DetectionPickResult | null) {

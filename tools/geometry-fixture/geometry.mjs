@@ -313,9 +313,13 @@ export function associateHeadDetectionsToPlayers(
  * Stabilizes independently inferred head masks against persistent player ids.
  *
  * High-confidence observations start tracks; lower-confidence observations may
- * only continue them. Short internal gaps can be synthesized by an offline
- * caller, and crop rectangles are padded/smoothed while remaining guaranteed
- * to contain the exact current mask bounds.
+ * only continue them. Crop rectangles are padded/smoothed while remaining
+ * guaranteed to contain the exact current mask bounds.
+ *
+ * An offline caller may synthesize short internal gaps through `fillGap`, which
+ * receives both bracketing observations and the interpolation amount between
+ * them. A gap frame whose player track has no detection is left empty; a head
+ * placed against a guessed player box lands on whatever else is under it.
  */
 export function stabilizeHeadDetectionFrames(frames, options = {}) {
   const startConfidence =
@@ -451,45 +455,26 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
         const frame = frameByIndex.get(frameIndex);
         const previousObservation = observations.get(previousFrameIndex);
         const nextObservation = observations.get(nextFrameIndex);
+        const targetPlayer = frame?.playerDetections.find(
+          (player) => String(player.id) === playerId,
+        );
+
+        if (!frame || !targetPlayer || !previousObservation || !nextObservation)
+          continue;
         const interpolationAmount =
           (frameIndex - previousFrameIndex) /
           (nextFrameIndex - previousFrameIndex);
-        const targetPlayer =
-          frame?.playerDetections.find(
-            (player) => String(player.id) === playerId,
-          ) ??
-          interpolatePlayerDetection(
-            previousObservation?.player,
-            nextObservation?.player,
-            interpolationAmount,
-          );
-        const sourceFrameIndexes = [previousFrameIndex, nextFrameIndex].sort(
-          (left, right) =>
-            Math.abs(frameIndex - left) - Math.abs(frameIndex - right),
-        );
-        let filledHead;
-        let sourceObservation;
+        const sourceObservation =
+          interpolationAmount <= 0.5 ? previousObservation : nextObservation;
+        const filledHead = options.fillGap({
+          frame,
+          interpolationAmount,
+          nextHead: nextObservation.head,
+          previousHead: previousObservation.head,
+          targetPlayer,
+        });
 
-        if (!frame || !targetPlayer) continue;
-
-        for (const sourceFrameIndex of sourceFrameIndexes) {
-          const candidate = observations.get(sourceFrameIndex);
-
-          if (!candidate) continue;
-          const candidateHead = options.fillGap({
-            frame,
-            sourceHead: candidate.head,
-            sourcePlayer: candidate.player,
-            targetPlayer,
-          });
-
-          if (!candidateHead?.mask || !candidateHead.rect) continue;
-          filledHead = candidateHead;
-          sourceObservation = candidate;
-          break;
-        }
-
-        if (!filledHead || !sourceObservation) continue;
+        if (!filledHead?.mask || !filledHead.rect) continue;
         observations.set(frameIndex, {
           head: filledHead,
           normalizedTopCenterDistance:
@@ -962,21 +947,6 @@ function maskSignature(detection) {
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
-}
-
-function interpolatePlayerDetection(previous, next, amount) {
-  if (!previous?.rect || !next?.rect) return undefined;
-
-  return {
-    ...previous,
-    className: next.className ?? previous.className,
-    rect: {
-      height: lerp(previous.rect.height, next.rect.height, amount),
-      width: lerp(previous.rect.width, next.rect.width, amount),
-      x: lerp(previous.rect.x, next.rect.x, amount),
-      y: lerp(previous.rect.y, next.rect.y, amount),
-    },
-  };
 }
 
 /**

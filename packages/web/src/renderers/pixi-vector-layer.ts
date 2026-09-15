@@ -292,7 +292,15 @@ export function createPixiVectorLayer(options: {
         );
     }
 
-    if (polyline)
+    if (polyline) {
+      if (polyline.shadowStroke)
+        drawPixiPath(
+          graphics,
+          polyline.points,
+          false,
+          polyline.shadowStroke,
+          viewportScale,
+        );
       drawPixiPath(
         graphics,
         polyline.points,
@@ -300,6 +308,7 @@ export function createPixiVectorLayer(options: {
         polyline.stroke,
         viewportScale,
       );
+    }
 
     if (keypoints)
       drawPixiKeypointInstruction(graphics, keypoints, viewportScale);

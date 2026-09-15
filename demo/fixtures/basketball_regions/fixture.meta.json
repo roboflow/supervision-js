@@ -4,16 +4,16 @@
   "inferenceLabel": "SAM3 player and head masks",
   "media": {
     "file": "../basketball_sample/basketball_sample.mp4",
-    "loadingStatusLabel": "stream-normalizing 9s basketball sample",
-    "normalizeInBrowser": true,
-    "readyStatusLabel": "9s basketball sample source MP4 | browser-normalized WebM 30fps"
+    "loadingStatusLabel": "opening basketball region effects",
+    "proxyFile": "../basketball_sample/proxy-30fps.webm",
+    "readyStatusLabel": "9s basketball sample | 30fps proxy WebM"
   },
   "presentation": {
     "boxesEnabled": false,
     "focusEnabled": false,
     "keypointsEnabled": false,
     "labelsEnabled": false,
-    "masksEnabled": false,
+    "masksEnabled": true,
     "polygonsEnabled": false,
     "polylinesEnabled": false
   },

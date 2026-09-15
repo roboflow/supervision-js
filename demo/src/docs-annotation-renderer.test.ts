@@ -33,7 +33,7 @@ describe("docs annotation renderers", () => {
                     ? ["maskHaloEnabled"]
                     : renderer === "percentage-bar"
                       ? ["percentageBarsEnabled"]
-                      : renderer === "regions"
+                      : renderer === "regions" || renderer === "region-effects"
                         ? []
                         : [`${renderer}Enabled`];
 

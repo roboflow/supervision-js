@@ -174,6 +174,7 @@ const polygonStyle = new BasePolygonStyle({
 });
 
 const polylineStyle = new BasePolylineStyle({
+  shadowStroke: { alpha: 0.55, color: 0x000000, width: 6 },
   stroke: { alpha: 1, color: 0x38bdf8, width: 4 },
 });
 
@@ -197,6 +198,11 @@ session.setPresentation({
 `BaseKeypointStyle` draws `NotLabeled` points as absent, `Occluded` points as
 crosses, and `Visible` points as circles. Pass `definitions` when class-specific
 skeleton vertices and edges need their own colors.
+
+A contrast stroke drawn under the line keeps a thin class-colored path readable
+where the media beneath it happens to share that color. `BasePolylineStyle`
+takes it as `shadowStroke`, `BaseKeypointStyle` as `edgeShadowStroke`, and the
+default presentation supplies one for both. Pass `null` to remove it.
 
 ## Consistent Class Colors
 
@@ -293,7 +299,7 @@ session.setPresentation({
 ```
 
 Focus styles dim the rest of the media around the selected or hovered
-detections. The renderer may use the prepared PNG ID-mask artifact for
+detections. The renderer may use the prepared ID-mask artifact for
 shape-accurate mask cutouts and falls back to detection rectangles when no mask
 artifact is available:
 

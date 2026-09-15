@@ -13,6 +13,34 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^#web-video-engine$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/index.ts",
+        ),
+      },
+      {
+        find: /^#web-video-engine\/analysis$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/analysis.ts",
+        ),
+      },
+      {
+        find: /^supervision\/web-video-engine$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/web/src/web-video-engine/index.ts",
+        ),
+      },
+      {
+        find: /^supervision\/web-video-engine\/analysis$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/analysis.ts",
+        ),
+      },
+      {
         find: "supervision/editing",
         replacement: path.resolve(rootDir, "packages/web/src/editing.ts"),
       },
@@ -99,7 +127,9 @@ export default defineConfig({
     include: [
       "packages/**/*.test.ts",
       "demo/src/**/*.test.ts",
+      "demo/src/**/*.test.tsx",
       "examples/react-native/src/**/*.test.ts",
+      "tools/**/*.test.ts",
     ],
   },
 });

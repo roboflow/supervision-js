@@ -1,5 +1,13 @@
 import type { MediaRendererSource } from "#types/media-renderer";
 
+/**
+ * The rate {@link normalizeMedia} writes when the caller states none. It lands
+ * a variable-rate input on a constant grid that detection frame indices can
+ * address, and it is the reason a conversion's output is a different frame
+ * sequence from its input unless the input already runs at exactly this rate.
+ */
+export const DEFAULT_NORMALIZATION_FRAME_RATE = 30;
+
 export enum MediaNormalizationContainer {
   WebM = "webm",
   Mp4 = "mp4",
@@ -36,22 +44,48 @@ export enum MediaProbeIssueCode {
 }
 
 export interface MediaNormalizationVideoOptions {
+  /**
+   * Output frame rate in hertz. Defaults to 30, which lands a variable-rate
+   * input on a constant grid that detection frame indices can address.
+   */
   readonly frameRate?: number;
+  /** Output width in pixels. Unset keeps the source's display width. */
   readonly width?: number;
+  /** Output height in pixels. Unset keeps the source's display height. */
   readonly height?: number;
+  /** How the frame is fitted when both `width` and `height` are set. */
   readonly fit?: MediaNormalizationFit;
+  /**
+   * Output video codec. Defaults to AVC for `Mp4` and VP9 for `WebM`.
+   */
   readonly codec?: MediaNormalizationVideoCodec;
+  /** Output bitrate in bits per second. Unset lets the encoder choose. */
   readonly bitrate?: number;
+  /**
+   * Seconds between key frames. Defaults to 1, which costs bytes and buys the
+   * short seeks scrubbing and frame stepping depend on.
+   */
   readonly keyFrameInterval?: number;
+  /**
+   * Always re-encode. Defaults to true, so the output profile is the requested
+   * one whatever the input already was; false copies a compatible video stream
+   * through untouched.
+   */
   readonly forceTranscode?: boolean;
 }
 
 export interface MediaNormalizationAudioOptions {
+  /** Drop every audio track. Defaults to true. */
   readonly discard?: boolean;
+  /** Output audio codec. Unset keeps the container's own default. */
   readonly codec?: MediaNormalizationAudioCodec;
+  /** Output bitrate in bits per second. Unset lets the encoder choose. */
   readonly bitrate?: number;
+  /** Output sample rate in hertz. Unset keeps the source's. */
   readonly sampleRate?: number;
+  /** Output channel count. Unset keeps the source's. */
   readonly numberOfChannels?: number;
+  /** Always re-encode audio. Unset leaves that choice to the encoder. */
   readonly forceTranscode?: boolean;
 }
 
@@ -61,6 +95,7 @@ export interface MediaNormalizationProgress {
 }
 
 export interface MediaNormalizationOptions {
+  /** Output container. Defaults to `WebM`. */
   readonly container?: MediaNormalizationContainer;
   readonly video?: MediaNormalizationVideoOptions;
   readonly audio?: MediaNormalizationAudioOptions;

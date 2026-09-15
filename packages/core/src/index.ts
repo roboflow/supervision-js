@@ -124,6 +124,7 @@ export {
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
   RegionRendererCoverageKind,
+  RegionRendererMediaEffectKind,
   RegionRendererRegionKind,
   RegionRendererSizeSpace,
   RegionRendererSourceKind,
@@ -133,6 +134,9 @@ export {
   type RegionRendererBoundsRegion,
   type RegionRendererCompose,
   type RegionRendererMaskCoverage,
+  type RegionRendererBlurEffect,
+  type RegionRendererMediaEffect,
+  type RegionRendererPixelateEffect,
   type RegionRendererPolygonCoverage,
   type RegionRendererKeypointAnchorRegion,
   type RegionRendererMediaSource,
@@ -154,6 +158,10 @@ export {
   type MarkerStyleContext,
 } from "#types/marker-style";
 export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
+export {
+  resolveAnnotationRendererStyleFields,
+  type AnnotationRendererStyleField,
+} from "#styles/annotation-renderer-registry";
 export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
@@ -199,6 +207,7 @@ export {
   encodeBinaryMask,
   encodeBinaryMaskWithBounds,
   encodeDetectionMaskPayload,
+  extractDetectionMaskRectRuns,
   extractMaskContour,
   extractMaskRectRuns,
   isDeflatedBase64DetectionMaskPayload,
@@ -237,6 +246,9 @@ export {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
   createIdMaskFrame,
+  resolveIdMaskPaletteId,
+  resolveIdMaskStrokeTexels,
+  writeIdMaskPaletteEntry,
   type IdMaskFrame,
   type IdMaskInstruction,
 } from "#utils/id-mask-frame";
@@ -361,6 +373,7 @@ export {
   MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  PlaybackGateReach,
   MediaSourceStatus,
 } from "#types/media-rendering";
 export type {

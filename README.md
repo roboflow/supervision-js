@@ -60,14 +60,20 @@ session.setPresentation({
 npm install supervision
 ```
 
-The next browser release is `0.1.7`, prepared for npm's default `latest` tag.
-Its package includes the private core dependency. Consumers import
+The package includes the web video engine and the private core
+dependency in the same package. Consumers import
 only the public browser entrypoints:
 
 ```ts
 import { createMediaSession } from "supervision";
 import { createMaskBrushEditor } from "supervision/editing";
+import { createWebVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
+
+The web video engine is one of those entrypoints, so opening a video file takes
+nothing further to install and every install carries the engine. `supervision`
+loads it through a dynamic import at the moment a video source opens, so an
+application that only annotates still images emits none of its code.
 
 ## Documentation And Demo
 
@@ -99,6 +105,10 @@ Useful commands:
 Start with [Application Integration](docs/public/guides/application-integration.md),
 [Media Sessions](docs/public/guides/media-sessions.md), and the
 [Public API guide](docs/public/guides/public-api.md).
+
+For what the browser path does not do, read
+[Browser Support](docs/public/guides/browser-support.md): HEVC in Firefox, the
+cost of presenting a frame without WebGPU, audio, and the frame-count ceiling.
 
 ## Current API Status
 

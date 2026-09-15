@@ -84,7 +84,7 @@ The public data model should remain small and evidence-based:
 - `WritableDetectionFrameSource`: the write contract for streaming detections
   into a session.
 
-Prepared render artifacts are not public annotation data. PNG ID masks, RGBA
+Prepared render artifacts are not public annotation data. ID masks, RGBA
 fallbacks, Pixi textures, palettes, and worker payloads are renderer-owned
 runtime representations.
 
@@ -116,7 +116,7 @@ The package should preserve this pipeline:
    A small time window of parsed detection frames around playback.
 3. **Prepared render window**
    Runtime-friendly artifacts derived from the hot window. For masks this is
-   usually one prepared frame-level artifact, such as a PNG ID mask.
+   usually one prepared frame-level artifact, such as an ID mask.
 4. **Active render frame**
    The renderer presents media and overlays selected from the same media timing
    reference.
@@ -158,13 +158,23 @@ scene adapters, workers, and prepared-artifact implementation details belong to
 
 ## Media Boundary
 
-Mediabunny is the first media engine. It should remain the default adapter for
-reading, decoding, and normalizing media, but the session contract should not be
-shaped around Mediabunny types.
+Mediabunny remains the default adapter for reading, decoding, and normalizing
+media: the `src` path, a `Blob`, normalization output, and browser `MediaStream`
+inputs all open through it. A host that passes
+`createWebVideoEngineMediaRendererSource()` gets an engine-backed source instead,
+which hands each selected frame to the host. The renderer atomically composites
+matching layers and acknowledges the displayed frame, with no pull loop or
+second clock. That source takes a URL or a `Blob`, because it reads the video
+twice, once for the frames it presents and once for the thumbnails and
+single-frame grabs its sample sink answers, so it needs a source that opens
+twice. A host holding a one-shot stream drives `WebVideoEngine` directly. The
+session contract is shaped around neither engine's types.
+[`video-engine-presentation.md`](video-engine-presentation.md) is the contract
+for the push path and describes what the pull path still covers.
 
 The session should expose normalized media status, playback state, canonical
-frame timing, seek/step/rate controls, and current-frame refresh, not Mediabunny
-internals. Navigation is latest-request-wins, and refresh reuses the retained
+frame timing, seek/step/rate controls, and current-frame refresh, not the media
+adapter's internals. Navigation is latest-request-wins, and refresh reuses the retained
 media presentation instead of decoding or uploading the frame again.
 
 Browser media, renderer, worker, and storage adapters belong in
@@ -199,9 +209,11 @@ Media failures cross the boundary as a `MediaErrorKind` on
 `MediaSourceState.errorKind` and as a `MediaSourceError` that preserves its
 cause. The kind enum is a semantic contract and lives in core; classifying
 vendor failures into it is the browser adapter's job, and every public media
-source wraps what it throws at its own `open()` boundary. Applications branch on
-the kind and own their localized copy; they should never have to match decoder,
-demuxer, or container message text.
+source wraps what it throws at its own `open()` boundary. A source also raises a
+kind when it refuses an input it cannot serve, before it opens anything, and
+that error carries no cause because nothing failed underneath it. Applications
+branch on the kind and own their localized copy; they should never have to match
+decoder, demuxer, or container message text.
 
 Additions to these public shapes stay structurally compatible. New members of an
 already-published interface are optional, and a capability that must be
@@ -256,7 +268,7 @@ The public contract should eventually support:
 - Keep React out of the core library.
 - Keep visual composition renderer-owned.
 - Keep RLE as semantic cold storage.
-- Keep PNG ID masks and other prepared artifacts internal unless a future use
+- Keep ID masks and other prepared artifacts internal unless a future use
   case proves that they need to be public.
 - Prefer one strong session API over many low-level public constructors.
 - Add public extension points only after a second real pressure point appears.

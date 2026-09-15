@@ -228,7 +228,6 @@ the current `720x1280` artifact.
 **Files:**
 
 - Modify: `examples/react-native/App.tsx`
-- Modify: `examples/react-native/src/debug-logging.ts` if needed.
 
 - [ ] Keep segmentation, native prep, shared-value assignment, and
       `frameRenderer.renderFrame(frame)` in the same strict-sync callback.

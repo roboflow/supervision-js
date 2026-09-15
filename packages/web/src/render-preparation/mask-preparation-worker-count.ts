@@ -1,10 +1,10 @@
 const FALLBACK_HARDWARE_CONCURRENCY = 4;
 
 /**
- * Automatic mask preparation intentionally uses a small pool. RLE decode and
- * PNG ID-mask creation are CPU-heavy enough to benefit from parallelism, but
- * worker count also increases memory pressure and can compete with media
- * decode. Explicit caller requests are allowed higher, but still bounded.
+ * Automatic mask preparation intentionally uses a small pool. Worker count
+ * increases memory pressure and competes with media decode, and every prepared
+ * frame crosses back to the main thread as a full-resolution raster. Explicit
+ * caller requests are allowed higher, but still bounded.
  */
 export const AUTO_MASK_PREPARATION_WORKER_LIMIT = 4;
 export const REQUESTED_MASK_PREPARATION_WORKER_LIMIT = 8;
