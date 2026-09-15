@@ -24,7 +24,7 @@ Install the current browser release with `npm install supervision`. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 
-The web video engine subpaths are included in `supervision` starting with `0.2.0`.
+The web video engine subpaths are included in `supervision` starting with the 0.2 release series.
 
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,

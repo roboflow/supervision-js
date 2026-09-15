@@ -60,7 +60,7 @@ session.setPresentation({
 npm install supervision
 ```
 
-The `0.2.0` release includes the web video engine and the private core
+The package includes the web video engine and the private core
 dependency in the same package. Consumers import
 only the public browser entrypoints:
 
