@@ -232,9 +232,11 @@ export interface MediaRenderer extends MediaRendererStateController {
     >,
   ): void;
   setViewportLocked(locked: boolean): void;
+  /** Convert container-relative CSS pixels to natural media pixels. */
   screenToMedia(
     point: import("supervision-js-core").Point,
   ): import("supervision-js-core").Point;
+  /** Convert natural media pixels to container-relative CSS pixels. */
   mediaToScreen(
     point: import("supervision-js-core").Point,
   ): import("supervision-js-core").Point;
