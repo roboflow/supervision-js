@@ -327,6 +327,7 @@ export async function createPixiMediaScene(
   let drawnReadiness: string | null = null;
   let isPresenting = false;
   let isDestroyed = false;
+  let brushPreviewRenderQueued = false;
   let displayFrameHandle: number | null = null;
   let deferredPresentedFrame: PresentedVideoFrame | null = null;
   /**
@@ -455,7 +456,7 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         preview: options.maskBrush,
-        onInvalidate: renderNow,
+        onInvalidate: scheduleBrushPreviewRender,
       })
     : undefined;
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
@@ -2399,6 +2400,15 @@ export async function createPixiMediaScene(
 
   function renderNow() {
     if (frameChannel) renderScene();
+  }
+
+  function scheduleBrushPreviewRender() {
+    if (!frameChannel || isDestroyed || brushPreviewRenderQueued) return;
+    brushPreviewRenderQueued = true;
+    queueMicrotask(() => {
+      brushPreviewRenderQueued = false;
+      if (!isDestroyed) renderNow();
+    });
   }
 
   function renderOnChange() {
