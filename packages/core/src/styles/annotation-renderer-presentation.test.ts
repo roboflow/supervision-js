@@ -121,6 +121,7 @@ describe("annotation renderer presentation", () => {
       mask: annotationRenderers.mask,
       maskHalo: annotationRenderers.maskHalo,
       marker: annotationRenderers.marker,
+      percentageBar: annotationRenderers.percentageBar,
       polygon: annotationRenderers.polygon,
       polyline: annotationRenderers.polyline,
     } as const;

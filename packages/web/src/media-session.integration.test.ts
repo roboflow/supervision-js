@@ -16,6 +16,7 @@ describe("media session integration", () => {
     const polygonResolve = vi.fn(() => undefined);
     const polylineResolve = vi.fn(() => undefined);
     const keypointResolve = vi.fn(() => undefined);
+    const percentageBarResolve = vi.fn(() => undefined);
     const session = await createMediaSession({
       container: createContainer(),
       detections: {
@@ -41,6 +42,7 @@ describe("media session integration", () => {
                   edges: [],
                   points: [{ x: 5, y: 5 }],
                 },
+                rect: { height: 10, width: 10, x: 0, y: 0 },
               },
             ],
             mediaTime: 0,
@@ -50,6 +52,7 @@ describe("media session integration", () => {
       media: "sample.mp4",
       presentation: {
         keypointStyle: { resolve: keypointResolve },
+        percentageBarStyle: { resolve: percentageBarResolve },
         polygonStyle: { resolve: polygonResolve },
         polylineStyle: { resolve: polylineResolve },
         visibility: { annotationsHidden: true },
@@ -57,7 +60,12 @@ describe("media session integration", () => {
       renderer: { autoPlay: false },
     });
 
-    for (const resolve of [polygonResolve, polylineResolve, keypointResolve]) {
+    for (const resolve of [
+      polygonResolve,
+      polylineResolve,
+      keypointResolve,
+      percentageBarResolve,
+    ]) {
       expect(resolve).toHaveBeenCalledWith(
         expect.objectContaining({ id: "vector-1" }),
         expect.objectContaining({ hidden: true }),

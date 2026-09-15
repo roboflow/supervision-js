@@ -107,7 +107,7 @@ interface PathShapeInstructionBase {
 export interface ClosedPathShapeInstruction extends PathShapeInstructionBase {
   readonly closed: true;
   readonly fill?: FillStyle;
-  readonly stroke: StrokeStyle;
+  readonly stroke?: StrokeStyle;
 }
 
 export interface OpenPathShapeInstruction extends PathShapeInstructionBase {

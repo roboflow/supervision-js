@@ -5,6 +5,10 @@ import type {
   EllipseShapeInstruction,
   EllipseStyle,
   MarkerStyle,
+  PercentageBarDrawInstruction,
+  PercentageBarStyle,
+  Point,
+  Rect,
   ShapeDrawInstruction,
   ShapeStyle,
 } from "supervision-js-core";
@@ -23,12 +27,14 @@ export function resolveAnnotationShapeStyle(styles: {
   readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly ellipseStyle?: EllipseStyle | null;
   readonly markerStyle?: MarkerStyle | null;
+  readonly percentageBarStyle?: PercentageBarStyle | null;
 }): ShapeStyle | null {
   const boxCornerStyle = styles.boxCornerStyle ?? null;
   const ellipseStyle = styles.ellipseStyle ?? null;
   const markerStyle = styles.markerStyle ?? null;
+  const percentageBarStyle = styles.percentageBarStyle ?? null;
 
-  if (!boxCornerStyle && !ellipseStyle && !markerStyle) {
+  if (!boxCornerStyle && !ellipseStyle && !markerStyle && !percentageBarStyle) {
     return null;
   }
 
@@ -55,10 +61,59 @@ export function resolveAnnotationShapeStyle(styles: {
       if (ellipse) {
         instructions.push(lowerEllipseInstruction(ellipse));
       }
+      const percentageBar = percentageBarStyle?.resolve(detection, context);
+
+      if (percentageBar) {
+        lowerPercentageBarInstructions(percentageBar, instructions);
+      }
 
       return instructions.length > 0 ? instructions : undefined;
     },
   };
+}
+
+function lowerPercentageBarInstructions(
+  bar: PercentageBarDrawInstruction,
+  target: ShapeDrawInstruction[],
+) {
+  if (bar.background) {
+    target.push({
+      closed: true,
+      fill: bar.background,
+      kind: ShapeInstructionKind.Path,
+      segments: [rectToPolygonPoints(bar.backgroundRect)],
+    });
+  }
+
+  if (bar.fill && bar.valueRect.width > 0) {
+    target.push({
+      closed: true,
+      fill: bar.fill,
+      kind: ShapeInstructionKind.Path,
+      segments: [rectToPolygonPoints(bar.valueRect)],
+    });
+  }
+
+  if (bar.border) {
+    target.push({
+      closed: true,
+      kind: ShapeInstructionKind.Path,
+      segments: [rectToPolygonPoints(bar.backgroundRect)],
+      stroke: bar.border,
+    });
+  }
+}
+
+function rectToPolygonPoints(rect: Rect): Point[] {
+  const halfWidth = rect.width / 2;
+  const halfHeight = rect.height / 2;
+
+  return [
+    { x: rect.x - halfWidth, y: rect.y - halfHeight },
+    { x: rect.x + halfWidth, y: rect.y - halfHeight },
+    { x: rect.x + halfWidth, y: rect.y + halfHeight },
+    { x: rect.x - halfWidth, y: rect.y + halfHeight },
+  ];
 }
 
 function lowerEllipseInstruction(

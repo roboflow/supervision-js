@@ -75,6 +75,7 @@ const mockState = vi.hoisted(() => {
       fill: ReturnType<typeof vi.fn>;
       lineTo: ReturnType<typeof vi.fn>;
       moveTo: ReturnType<typeof vi.fn>;
+      poly: ReturnType<typeof vi.fn>;
       quadraticCurveTo: ReturnType<typeof vi.fn>;
       rect: ReturnType<typeof vi.fn>;
       roundRect: ReturnType<typeof vi.fn>;
@@ -295,6 +296,7 @@ vi.mock("pixi.js", () => {
     fill = vi.fn(() => this);
     lineTo = vi.fn(() => this);
     moveTo = vi.fn(() => this);
+    poly = vi.fn(() => this);
     quadraticCurveTo = vi.fn(() => this);
     rect = vi.fn(() => this);
     roundRect = vi.fn(() => this);

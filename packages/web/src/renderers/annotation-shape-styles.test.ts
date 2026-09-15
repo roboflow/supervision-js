@@ -147,4 +147,104 @@ describe("annotation shape styles", () => {
       },
     ]);
   });
+
+  it("lowers percentage bar geometry into background and value closed paths", () => {
+    const style = resolveAnnotationShapeStyle({
+      percentageBarStyle: {
+        resolve: () => ({
+          background: { alpha: 0.75, color: 0x0f172a },
+          backgroundRect: { height: 10, width: 50, x: 25, y: 5 },
+          fill: { alpha: 1, color: 0x00ff66 },
+          value: 0.6,
+          valueRect: { height: 10, width: 30, x: 15, y: 5 },
+        }),
+      },
+    });
+
+    expect(style?.resolve(detection, context)).toEqual([
+      {
+        closed: true,
+        fill: { alpha: 0.75, color: 0x0f172a },
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 50, y: 0 },
+            { x: 50, y: 10 },
+            { x: 0, y: 10 },
+          ],
+        ],
+      },
+      {
+        closed: true,
+        fill: { alpha: 1, color: 0x00ff66 },
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 30, y: 0 },
+            { x: 30, y: 10 },
+            { x: 0, y: 10 },
+          ],
+        ],
+      },
+    ]);
+  });
+
+  it("emits percentage bar border stroke after value fill so fill does not paint over border", () => {
+    const style = resolveAnnotationShapeStyle({
+      percentageBarStyle: {
+        resolve: () => ({
+          background: { alpha: 0.5, color: 0x111111 },
+          backgroundRect: { height: 8, width: 40, x: 20, y: 4 },
+          border: { alpha: 1, color: 0xffffff, width: 1 },
+          fill: { alpha: 1, color: 0x22c55e },
+          value: 0.5,
+          valueRect: { height: 8, width: 20, x: 10, y: 4 },
+        }),
+      },
+    });
+
+    expect(style?.resolve(detection, context)).toEqual([
+      {
+        closed: true,
+        fill: { alpha: 0.5, color: 0x111111 },
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 40, y: 0 },
+            { x: 40, y: 8 },
+            { x: 0, y: 8 },
+          ],
+        ],
+      },
+      {
+        closed: true,
+        fill: { alpha: 1, color: 0x22c55e },
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 20, y: 0 },
+            { x: 20, y: 8 },
+            { x: 0, y: 8 },
+          ],
+        ],
+      },
+      {
+        closed: true,
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 40, y: 0 },
+            { x: 40, y: 8 },
+            { x: 0, y: 8 },
+          ],
+        ],
+        stroke: { alpha: 1, color: 0xffffff, width: 1 },
+      },
+    ]);
+  });
 });

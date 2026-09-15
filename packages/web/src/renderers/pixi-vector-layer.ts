@@ -412,13 +412,15 @@ function drawShapeInstruction(
       graphics.fill(instruction.fill);
     }
 
-    drawPixiPath(
-      graphics,
-      segment,
-      instruction.closed,
-      instruction.stroke,
-      viewportScale,
-    );
+    if (instruction.stroke) {
+      drawPixiPath(
+        graphics,
+        segment,
+        instruction.closed,
+        instruction.stroke,
+        viewportScale,
+      );
+    }
   }
 }
 

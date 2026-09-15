@@ -1112,6 +1112,7 @@ function createSceneOptions(
     maskBrush: undefined,
     maskStyle: null,
     maxDevicePixelRatio: 1,
+    percentageBarStyle: undefined,
     polygonStyle: undefined,
     polylineStyle: null,
     previewOverlay: undefined,

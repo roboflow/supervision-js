@@ -379,6 +379,67 @@ describe("media session consumer workflows", () => {
     session.destroy();
   });
 
+  it("forwards the percentage-bar renderer style from session presentation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, createMediaSession, MediaSessionStatus } =
+      await import("./index");
+    const resolve = vi.fn(() => ({
+      background: { alpha: 0.8, color: 0x000000 },
+      backgroundRect: { height: 6, width: 20, x: 20, y: 8 },
+      fill: { alpha: 1, color: 0x00ff00 },
+      value: 0.75,
+      valueRect: { height: 6, width: 15, x: 17.5, y: 8 },
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [annotationRenderers.percentageBar({ style: { resolve } })],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(resolve).toHaveBeenCalled();
+    });
+
+    // The bar lowers into closed polygon paths, so a passing resolver is not
+    // enough: the vector layer must actually draw both the track and the value
+    // fill through Graphics#poly without the render pipeline erroring out.
+    const drawnPolys = pixiMock.graphicsInstances.flatMap((graphics) =>
+      graphics.poly.mock.calls.map(([points, closed]) => ({ closed, points })),
+    );
+
+    expect(drawnPolys).toContainEqual({
+      closed: true,
+      points: [10, 5, 30, 5, 30, 11, 10, 11],
+    });
+    expect(drawnPolys).toContainEqual({
+      closed: true,
+      points: [10, 5, 25, 5, 25, 11, 10, 11],
+    });
+
+    const state = session.getState();
+
+    expect(state.status).not.toBe(MediaSessionStatus.Error);
+    expect(state.errorMessage).toBeNull();
+    session.destroy();
+  });
+
   it("delivers detection picks through session interaction callbacks", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

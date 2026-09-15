@@ -82,6 +82,8 @@ Start here for normal application code:
 - `BasePolylineStyle`
 - `BaseKeypointStyle`
 - `BaseLabelStyle`
+- `BasePercentageBarStyle`
+- `PercentageBarPlacement`
 - `BaseInteractionStyle`
 - `BaseFocusStyle`
 - `annotationRenderers`
@@ -126,8 +128,8 @@ session.setPresentation({
 ```
 
 The current built-ins are `box`, `box-corners`, `ellipse`, `marker`, `mask`,
-`maskHalo`, `polygon`, `polyline`, `keypoints`, `label`, and the
-multi-instance `region` renderer for asset overlays and current-frame media
+`maskHalo`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
+the multi-instance `region` renderer for asset overlays and current-frame media
 crops;
 `annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list

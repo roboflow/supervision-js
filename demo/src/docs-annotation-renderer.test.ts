@@ -31,9 +31,11 @@ describe("docs annotation renderers", () => {
                   ? ["ellipsesEnabled"]
                   : renderer === "mask-halo"
                     ? ["maskHaloEnabled"]
-                    : renderer === "regions" || renderer === "region-effects"
-                      ? []
-                      : [`${renderer}Enabled`];
+                    : renderer === "percentage-bar"
+                      ? ["percentageBarsEnabled"]
+                      : renderer === "regions" || renderer === "region-effects"
+                        ? []
+                        : [`${renderer}Enabled`];
 
       expect(enabled).toEqual(expectedEnabled);
     }
@@ -104,6 +106,40 @@ describe("docs annotation renderers", () => {
       "y: detection.rect.y + detection.rect.height / 2 - radiusY,",
     );
     expect(ellipseSnippet).toContain("alpha: 1,");
+    const percentageBarSnippet = createDocsAnnotationRendererSnippet(
+      "percentage-bar",
+      {
+        ...defaultDemoPresentationSettings,
+        percentageBarFillAlpha: 0.9,
+        percentageBarHeight: 12,
+      },
+    );
+    expect(percentageBarSnippet).toContain(
+      "annotationRenderers.percentageBar({",
+    );
+    expect(percentageBarSnippet).toContain("height: 12");
+    expect(percentageBarSnippet).toContain("alpha: 0.9");
+  });
+
+  it("keeps the percentage-bar snippet aligned with the playground preview", () => {
+    const snippet = createDocsAnnotationRendererSnippet("percentage-bar", {
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 0.4,
+      percentageBarFillAlpha: 0.6,
+      percentageBarHeight: 10,
+    });
+
+    // The preview tints each bar with its detection's class color, so the
+    // snippet must resolve the same color instead of pinning a fixed one.
+    expect(snippet).toContain(
+      "resolveDetectionClassColorStyle(detection.className).fill",
+    );
+
+    // The preview also hides detections below the confidence threshold.
+    expect(snippet).toContain("shouldRender:");
+    expect(snippet).toContain("(detection.confidence ?? 1) >= 0.4");
+    expect(snippet).toContain("height: 10");
+    expect(snippet).toContain("alpha: 0.6");
   });
 
   it("exposes marker shape and bounding-box position controls", () => {
