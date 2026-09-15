@@ -582,9 +582,14 @@ export function createDocsAnnotationRendererSnippet(
   renderers: [
     annotationRenderers.percentageBar({
       style: new BasePercentageBarStyle({
-        fill: { alpha: ${formatNumber(settings.percentageBarFillAlpha)} },
+        fill: (detection) => ({
+          alpha: ${formatNumber(settings.percentageBarFillAlpha)},
+          color: resolveDetectionClassColorStyle(detection.className).fill,
+        }),
         height: ${formatNumber(settings.percentageBarHeight)},
         placement: PercentageBarPlacement.${percentageBarPlacementMemberNames[settings.percentageBarPlacement]},
+        shouldRender: (detection) =>
+          (detection.confidence ?? 1) >= ${formatNumber(settings.confidenceThreshold)},
       }),
     }),
   ],
