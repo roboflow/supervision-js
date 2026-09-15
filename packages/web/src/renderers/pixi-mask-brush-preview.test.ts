@@ -10,6 +10,7 @@ describe("Pixi mask brush preview", () => {
     const sourceUpdate = vi.fn();
     const textureUpdate = vi.fn();
     const cursorClear = vi.fn();
+    const onInvalidate = vi.fn();
     const editor = {
       canvas: { height: 40, width: 60 },
       getCursor: () => ({ mode: "add", point: { x: 4, y: 5 }, radius: 3 }),
@@ -57,17 +58,24 @@ describe("Pixi mask brush preview", () => {
       Sprite: Sprite as never,
       Texture: Texture as never,
       preview: { editor },
+      onInvalidate,
     });
 
     expect(cursorClear).toHaveBeenCalledTimes(1);
+    expect(onInvalidate).not.toHaveBeenCalled();
     cursorListener!();
     expect(cursorClear).toHaveBeenCalledTimes(2);
     expect(sourceUpdate).not.toHaveBeenCalled();
+    expect(onInvalidate).toHaveBeenCalledTimes(1);
 
     textureListener!();
     expect(sourceUpdate).toHaveBeenCalledTimes(1);
     expect(textureUpdate).not.toHaveBeenCalled();
     expect(cursorClear).toHaveBeenCalledTimes(2);
+    expect(onInvalidate).toHaveBeenCalledTimes(2);
+
+    preview.setViewportScale(2);
+    expect(onInvalidate).toHaveBeenCalledTimes(2);
 
     preview.destroy();
     expect(textureListener).toBeNull();

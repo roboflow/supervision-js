@@ -17,6 +17,7 @@ export interface PixiMaskBrushPreview {
 
 export function createPixiMaskBrushPreview(options: {
   readonly preview: MaskBrushPreviewOptions;
+  readonly onInvalidate: () => void;
   readonly CanvasSource: new (options: {
     dynamic: boolean;
     height: number;
@@ -52,9 +53,13 @@ export function createPixiMaskBrushPreview(options: {
 
   const updateTexture = () => {
     source.update();
+    options.onInvalidate();
   };
   const unsubscribeTexture = editor.subscribeTextureUpdates(updateTexture);
-  const unsubscribeCursor = editor.subscribeCursorUpdates(drawCursor);
+  const unsubscribeCursor = editor.subscribeCursorUpdates(() => {
+    drawCursor();
+    options.onInvalidate();
+  });
   drawCursor();
 
   return {

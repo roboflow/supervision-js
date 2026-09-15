@@ -455,6 +455,7 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         preview: options.maskBrush,
+        onInvalidate: renderNow,
       })
     : undefined;
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();

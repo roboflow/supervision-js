@@ -16,6 +16,7 @@ import type {
 } from "./media-renderer-scene";
 import type { MediaRendererPresentation } from "#types/media-renderer";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
+import type { MaskBrushEditor } from "#editing/mask-brush-editor";
 import { MediaRendererFit } from "#types/media-renderer";
 
 const pixiMock = vi.hoisted(() => ({
@@ -110,6 +111,7 @@ vi.mock("pixi.js", () => {
   }
 
   class Graphics extends Container {
+    circle = vi.fn(() => this);
     clear = vi.fn(() => this);
     fill = vi.fn(() => this);
     rect = vi.fn(() => this);
@@ -194,6 +196,7 @@ vi.mock("pixi.js", () => {
   }
 
   class Texture {
+    destroy = vi.fn();
     readonly dynamic: boolean;
     readonly frame?: { height: number; width: number; x: number; y: number };
     readonly orig: { height: number; width: number };
@@ -228,6 +231,7 @@ vi.mock("pixi.js", () => {
   }
 
   class CanvasSource {
+    destroy = vi.fn();
     readonly height: number;
     readonly width: number;
     update = vi.fn();
@@ -332,7 +336,7 @@ const documentMock = {
   addEventListener: vi.fn(),
   createElement: (tagName: string) =>
     tagName === "div"
-      ? { appendChild: vi.fn(), style: {} }
+      ? { appendChild: vi.fn(), remove: vi.fn(), style: {} }
       : {
           getContext: () => stagingContext,
           height: 0,
@@ -388,6 +392,46 @@ afterEach(() => {
 });
 
 describe("push-presented Pixi scene", () => {
+  it("repaints brush changes on a paused frame without requesting another video frame", async () => {
+    let cursorListener: (() => void) | null = null;
+    let textureListener: (() => void) | null = null;
+    const editor = {
+      canvas: { width: 320, height: 240 },
+      getCursor: () => ({ mode: "add", point: { x: 50, y: 60 }, radius: 10 }),
+      subscribeCursorUpdates(listener: () => void) {
+        cursorListener = listener;
+        return () => {
+          cursorListener = null;
+        };
+      },
+      subscribeTextureUpdates(listener: () => void) {
+        textureListener = listener;
+        return () => {
+          textureListener = null;
+        };
+      },
+    } as unknown as MaskBrushEditor;
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maskBrush: { editor },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    const frame = presentedFrame(1000);
+    channel.present(frame);
+    expect(scene.getRenderCount?.()).toBe(1);
+    cursorListener!();
+    expect(scene.getRenderCount?.()).toBe(2);
+    textureListener!();
+    expect(scene.getRenderCount?.()).toBe(3);
+    expect(frame.frame.close).toHaveBeenCalledTimes(1);
+    expect(pixiMock.tickerAdd).not.toHaveBeenCalled();
+    scene.destroy();
+    expect(cursorListener).toBeNull();
+    expect(textureListener).toBeNull();
+  });
+
   it("renders once per presented frame and nothing else", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
