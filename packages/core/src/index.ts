@@ -93,6 +93,8 @@ export { BaseMaskStyle } from "#styles/mask-style";
 export type { BaseMaskStyleOptions } from "#styles/mask-style";
 export { BaseMarkerStyle } from "#styles/marker-style";
 export type { BaseMarkerStyleOptions } from "#types/marker-style";
+export { BaseOrientedBoxStyle } from "#styles/oriented-box-style";
+export type { BaseOrientedBoxStyleOptions } from "#styles/oriented-box-style";
 export { BasePercentageBarStyle } from "#styles/percentage-bar-style";
 export type { BasePercentageBarStyleOptions } from "#types/percentage-bar-style";
 export { BasePolygonStyle } from "#styles/polygon-style";
@@ -119,6 +121,7 @@ export {
   type MaskAnnotationRenderer,
   type MaskHaloAnnotationRenderer,
   type MarkerAnnotationRenderer,
+  type OrientedBoxAnnotationRenderer,
   type PercentageBarAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
@@ -353,6 +356,7 @@ export {
   type DetectionMask,
   type KeypointEdge,
   type KeypointGeometry,
+  type OrientedBoxGeometry,
   type Point,
   type PolygonGeometry,
   type PolylineGeometry,
@@ -447,6 +451,11 @@ export type {
   MaskHaloStyleContext,
 } from "#types/mask-halo-style";
 export { MaskRenderMode } from "#types/mask-style";
+export type {
+  OrientedBoxDrawInstruction,
+  OrientedBoxStyle,
+  OrientedBoxStyleContext,
+} from "#types/oriented-box-style";
 export type {
   PolygonDrawInstruction,
   PolygonStyle,

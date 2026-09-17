@@ -1,10 +1,13 @@
 import { ShapeInstructionKind } from "supervision-js-core";
 import type {
   BoxCornerStyle,
+  ClosedPathShapeInstruction,
   EllipseDrawInstruction,
   EllipseShapeInstruction,
   EllipseStyle,
   MarkerStyle,
+  OrientedBoxDrawInstruction,
+  OrientedBoxStyle,
   PercentageBarDrawInstruction,
   PercentageBarStyle,
   Point,
@@ -27,14 +30,22 @@ export function resolveAnnotationShapeStyle(styles: {
   readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly ellipseStyle?: EllipseStyle | null;
   readonly markerStyle?: MarkerStyle | null;
+  readonly orientedBoxStyle?: OrientedBoxStyle | null;
   readonly percentageBarStyle?: PercentageBarStyle | null;
 }): ShapeStyle | null {
   const boxCornerStyle = styles.boxCornerStyle ?? null;
   const ellipseStyle = styles.ellipseStyle ?? null;
   const markerStyle = styles.markerStyle ?? null;
+  const orientedBoxStyle = styles.orientedBoxStyle ?? null;
   const percentageBarStyle = styles.percentageBarStyle ?? null;
 
-  if (!boxCornerStyle && !ellipseStyle && !markerStyle && !percentageBarStyle) {
+  if (
+    !boxCornerStyle &&
+    !ellipseStyle &&
+    !markerStyle &&
+    !orientedBoxStyle &&
+    !percentageBarStyle
+  ) {
     return null;
   }
 
@@ -60,6 +71,11 @@ export function resolveAnnotationShapeStyle(styles: {
 
       if (ellipse) {
         instructions.push(lowerEllipseInstruction(ellipse));
+      }
+      const orientedBox = orientedBoxStyle?.resolve(detection, context);
+
+      if (orientedBox) {
+        instructions.push(lowerOrientedBoxInstruction(orientedBox));
       }
       const percentageBar = percentageBarStyle?.resolve(detection, context);
 
@@ -120,4 +136,16 @@ function lowerEllipseInstruction(
   instruction: EllipseDrawInstruction,
 ): EllipseShapeInstruction {
   return { ...instruction, kind: ShapeInstructionKind.Ellipse };
+}
+
+function lowerOrientedBoxInstruction(
+  instruction: OrientedBoxDrawInstruction,
+): ClosedPathShapeInstruction {
+  return {
+    closed: true,
+    fill: instruction.fill,
+    kind: ShapeInstructionKind.Path,
+    segments: [instruction.points],
+    stroke: instruction.stroke,
+  };
 }

@@ -121,6 +121,7 @@ describe("annotation renderer presentation", () => {
       mask: annotationRenderers.mask,
       maskHalo: annotationRenderers.maskHalo,
       marker: annotationRenderers.marker,
+      orientedBox: annotationRenderers.orientedBox,
       percentageBar: annotationRenderers.percentageBar,
       polygon: annotationRenderers.polygon,
       polyline: annotationRenderers.polyline,

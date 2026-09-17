@@ -122,6 +122,18 @@ describe("detection picker", () => {
           id: "mask",
           mask: encodeBinaryMask(Uint8Array.from([1, 0, 0, 0]), 2, 2),
         },
+        {
+          id: "oriented-box",
+          // A quadrilateral rotated 45 degrees around (90, 10).
+          orientedBox: {
+            points: [
+              { x: 90, y: 0 },
+              { x: 100, y: 10 },
+              { x: 90, y: 20 },
+              { x: 80, y: 10 },
+            ],
+          },
+        },
       ],
       mediaTime: 0,
     };
@@ -132,6 +144,14 @@ describe("detection picker", () => {
     expect(pickDetectionAtPoint(mixedFrame, { x: 32, y: 10 })?.target).toBe(
       DetectionPickTarget.Polyline,
     );
+    expect(pickDetectionAtPoint(mixedFrame, { x: 90, y: 10 })).toMatchObject({
+      detection: expect.objectContaining({ id: "oriented-box" }),
+      target: DetectionPickTarget.OrientedBox,
+    });
+    // Inside the quadrilateral's axis-aligned bounds but outside its rotated
+    // edges, proving the hit test follows the actual quadrilateral rather than
+    // its bounding box.
+    expect(pickDetectionAtPoint(mixedFrame, { x: 82, y: 2 })).toBeNull();
     expect(pickDetectionAtPoint(mixedFrame, { x: 50, y: 5 })).toMatchObject({
       geometryIndex: 0,
       target: DetectionPickTarget.Keypoint,

@@ -5,15 +5,91 @@ import {
   AnnotationGeometryKind,
   applyAnnotationHandleDrag,
   createAnnotationEditingEngine,
+  createEditableAnnotationFrameSession,
   deleteAnnotationVertex,
   DetectionMaskEncoding,
   DetectionPickTarget,
   getAnnotationHandles,
   KeypointVisibility,
   pickAnnotationHandle,
+  pickDetectionAtPoint,
+  type Detection,
+  type DetectionFrame,
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it.each([false, true])(
+    "drags oriented boxes through picking, preview, and commit (other geometry: %s)",
+    (withOtherGeometry) => {
+      const frame: DetectionFrame = {
+        mediaTime: 0,
+        detections: [
+          {
+            id: "obb",
+            orientedBox: {
+              points: [
+                { x: 10, y: 30 },
+                { x: 20, y: 20 },
+                { x: 30, y: 30 },
+                { x: 20, y: 40 },
+              ],
+            },
+            ...(withOtherGeometry
+              ? {
+                  rect: { x: 20, y: 30, width: 40, height: 40 },
+                  polygon: {
+                    points: [
+                      { x: 0, y: 0 },
+                      { x: 50, y: 0 },
+                      { x: 25, y: 60 },
+                    ],
+                  },
+                }
+              : {}),
+          },
+        ],
+      };
+      const session = createEditableAnnotationFrameSession(frame);
+      const previous = session.getSnapshot();
+      const onCommit = vi.fn((detection: Detection) =>
+        session.update("obb", detection),
+      );
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const pick = pickDetectionAtPoint(previous, { x: 20, y: 30 });
+      expect(pick?.target).toBe(DetectionPickTarget.OrientedBox);
+
+      engine.pointerDown({ point: { x: 20, y: 30 }, timestamp: 0 }, pick);
+      engine.pointerMove({ point: { x: 30, y: 25 }, timestamp: 16 });
+      const movedPoints = [
+        { x: 20, y: 25 },
+        { x: 30, y: 15 },
+        { x: 40, y: 25 },
+        { x: 30, y: 35 },
+      ];
+      expect(engine.getState().preview?.orientedBox?.points).toEqual(
+        movedPoints,
+      );
+      expect(session.getSnapshot()).toBe(previous);
+      engine.pointerUp({ point: { x: 30, y: 25 }, timestamp: 32 });
+
+      const committed = session.getSnapshot().detections[0]!;
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(committed.orientedBox?.points).toEqual(movedPoints);
+      expect(previous).toEqual(frame);
+      expect(
+        pickDetectionAtPoint(session.getSnapshot(), { x: 30, y: 25 })?.target,
+      ).toBe(DetectionPickTarget.OrientedBox);
+      if (withOtherGeometry) {
+        expect(committed.rect).toEqual({ x: 30, y: 25, width: 40, height: 40 });
+        expect(committed.polygon?.points).toEqual([
+          { x: 10, y: -5 },
+          { x: 60, y: -5 },
+          { x: 35, y: 55 },
+        ]);
+      }
+    },
+  );
+
   it("creates center-based boxes and applies the click-cancel threshold", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });

@@ -6,6 +6,7 @@ export enum DetectionPickTarget {
   Keypoint = "keypoint",
   Label = "label",
   Mask = "mask",
+  OrientedBox = "orientedBox",
   Polygon = "polygon",
   Polyline = "polyline",
 }

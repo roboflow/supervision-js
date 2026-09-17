@@ -18,8 +18,9 @@ runtime artifacts.
    Keeps a bounded range of detection frames near the current playback time.
 3. **Prepared render window**
    Converts hot detections into renderer-friendly artifacts. Masks and polygons
-   rasterize into frame-level ID-mask artifacts by default; boxes, polylines,
-   and keypoints have nothing to prepare and draw from the detection data.
+   rasterize into frame-level ID-mask artifacts by default; boxes, oriented
+   boxes, polylines, and keypoints have nothing to prepare and draw from the
+   detection data.
 4. **Active render frame**
    Presents the one media frame and matching annotation artifacts selected from
    the current playback reference.
@@ -29,8 +30,8 @@ runtime artifacts.
 The render-preparation gate is on by default. The detection-coverage gate is on
 by default for appendable detections and opt-in for other detection inputs. The
 two gates are not annotations against masks. A mask is one geometry a detection
-can carry, beside boxes, polygons, polylines, and keypoints, so both gates are
-about detections. They differ in which stage above they wait on.
+can carry, beside boxes, oriented boxes, polygons, polylines, and keypoints, so
+both gates are about detections. They differ in which stage above they wait on.
 
 - The detection-coverage gate, `detections.playbackGate`, waits for **arrival**:
   whether this frame's detections have reached the source at all, or are still
@@ -57,8 +58,13 @@ Detection frames are app/model data:
 - `mediaTime` is seconds on the renderer media timeline;
 - `endTime` is exclusive when present;
 - `frameIndex` is optional and only used by frame-grid synchronization;
-- rectangles, polygons, polylines, and keypoints are media-pixel geometry;
+- rectangles, oriented boxes, polygons, polylines, and keypoints are media-pixel
+  geometry;
 - rectangle `x` and `y` identify its center, not its top-left corner;
+- `orientedBox.points` contains exactly four finite media-pixel vertices;
+  producers supply a convex quadrilateral in clockwise order from its local
+  top-left corner before rotation;
+- `orientedBox` and `rect` are independent and may coexist on one detection;
 - polygon paths need at least three points and polylines need at least two;
 - keypoint visibility uses COCO-compatible `NotLabeled`, `Occluded`, and
   `Visible` values;
@@ -97,8 +103,9 @@ const source = createCompositeDetectionFrameSource({
 
 ## Which Pixels Geometry Is In
 
-A box, a label anchor, a polygon, a polyline, and a keypoint are absolute media
-pixels. The numbers reach the scene whose unit is one media pixel. Present the
+A box, an oriented-box vertex, a label anchor, a polygon, a polyline, and a
+keypoint are absolute media pixels. The numbers reach the scene whose unit is
+one media pixel. Present the
 same detections against a raster of a different size and every one of them is
 drawn at the wrong fraction of the picture, far enough off that objects near an
 edge take their labels off the canvas entirely.
@@ -172,8 +179,8 @@ contract stays the same: detections remain semantic data, and styles resolve how
 that data should be presented.
 
 Continue to [Annotation Renderers](../annotation-renderers.md) for focused box,
-mask, label, polygon, polyline, and keypoint examples backed by the frozen
-basketball fixture.
+oriented-box, mask, label, polygon, polyline, and keypoint examples backed by the
+frozen basketball fixture.
 
 ## Geometry Shapes
 
@@ -186,6 +193,14 @@ const detection: Detection = {
   id: "pose-1",
   className: "person",
   rect: { x: 320, y: 240, width: 180, height: 360 },
+  orientedBox: {
+    points: [
+      { x: 260, y: 50 },
+      { x: 430, y: 90 },
+      { x: 380, y: 430 },
+      { x: 210, y: 390 },
+    ],
+  },
   polygon: {
     points: [
       { x: 230, y: 60 },
@@ -213,5 +228,8 @@ const detection: Detection = {
 };
 ```
 
-The corresponding `boxStyle`, `polygonStyle`, and `keypointStyle` independently
-decide which layers render. Geometry remains reusable app/model data.
+The corresponding `boxStyle`, `orientedBoxStyle`, `polygonStyle`, and
+`keypointStyle` independently decide which layers render. Geometry remains
+reusable app/model data. Use `annotationRenderers.orientedBox()` to enable the
+OBB renderer. See [Oriented Box](../annotation-renderers/oriented-box.md) for
+styling, validation, and editing behavior.

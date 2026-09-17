@@ -31,11 +31,14 @@ describe("docs annotation renderers", () => {
                   ? ["ellipsesEnabled"]
                   : renderer === "mask-halo"
                     ? ["maskHaloEnabled"]
-                    : renderer === "percentage-bar"
-                      ? ["percentageBarsEnabled"]
-                      : renderer === "regions" || renderer === "region-effects"
-                        ? []
-                        : [`${renderer}Enabled`];
+                    : renderer === "oriented-box"
+                      ? ["orientedBoxEnabled"]
+                      : renderer === "percentage-bar"
+                        ? ["percentageBarsEnabled"]
+                        : renderer === "regions" ||
+                            renderer === "region-effects"
+                          ? []
+                          : [`${renderer}Enabled`];
 
       expect(enabled).toEqual(expectedEnabled);
     }
@@ -97,6 +100,19 @@ describe("docs annotation renderers", () => {
         defaultDemoPresentationSettings,
       ),
     ).toContain("annotationRenderers.mask({");
+    expect(
+      createDocsAnnotationRendererSnippet("oriented-box", {
+        ...defaultDemoPresentationSettings,
+        orientedBoxFillAlpha: 0.31,
+        orientedBoxStrokeWidth: 5,
+      }),
+    ).toContain("fill: { alpha: 0.31 }");
+    expect(
+      createDocsAnnotationRendererSnippet("oriented-box", {
+        ...defaultDemoPresentationSettings,
+        orientedBoxStrokeWidth: 5,
+      }),
+    ).toContain("annotationRenderers.orientedBox({");
     const ellipseSnippet = createDocsAnnotationRendererSnippet(
       "ellipse",
       defaultDemoPresentationSettings,

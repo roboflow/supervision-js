@@ -110,6 +110,16 @@ export function pickDetectionAtPoint(
       );
     }
 
+    if (
+      detection.orientedBox &&
+      pointInPolygon(point, detection.orientedBox.points)
+    ) {
+      pushCandidate(
+        DetectionPickTarget.OrientedBox,
+        Math.max(1, polygonArea(detection.orientedBox.points)),
+      );
+    }
+
     if (detection.polyline) {
       const segmentIndex = findHitSegment(
         point,

@@ -49,6 +49,11 @@ import type {
   MarkerStyleContext,
 } from "#types/marker-style";
 import type {
+  OrientedBoxDrawInstruction,
+  OrientedBoxStyle,
+  OrientedBoxStyleContext,
+} from "#types/oriented-box-style";
+import type {
   PercentageBarDrawInstruction,
   PercentageBarStyle,
   PercentageBarStyleContext,
@@ -78,6 +83,7 @@ export interface PresentationStyleSet {
   readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
   readonly markerStyle?: MarkerStyle | null;
+  readonly orientedBoxStyle?: OrientedBoxStyle | null;
   readonly percentageBarStyle?: PercentageBarStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
@@ -170,6 +176,12 @@ export function createSourceAwarePresentation(
           sourcePresentations,
         )
       : globalPresentation.markerStyle,
+    orientedBoxStyle: shouldApplySourceStyle("orientedBoxStyle")
+      ? new SourceAwareOrientedBoxStyle(
+          globalPresentation.orientedBoxStyle ?? null,
+          sourcePresentations,
+        )
+      : globalPresentation.orientedBoxStyle,
     percentageBarStyle: shouldApplySourceStyle("percentageBarStyle")
       ? new SourceAwarePercentageBarStyle(
           normalizeGlobalPercentageBarStyle(
@@ -373,6 +385,28 @@ class SourceAwareMarkerStyle implements MarkerStyle {
     );
 
     return style?.resolve(detection, context);
+  }
+}
+
+class SourceAwareOrientedBoxStyle implements OrientedBoxStyle {
+  constructor(
+    private readonly globalStyle: OrientedBoxStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: OrientedBoxStyleContext,
+  ): OrientedBoxDrawInstruction | undefined {
+    return resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "orientedBoxStyle",
+    )?.resolve(detection, context);
   }
 }
 

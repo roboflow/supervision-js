@@ -6,6 +6,7 @@ import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseMarkerStyle } from "#styles/marker-style";
 import { BasePercentageBarStyle } from "#styles/percentage-bar-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
+import { BaseOrientedBoxStyle } from "#styles/oriented-box-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
 import { BoxShape } from "#types/box-style";
@@ -253,6 +254,28 @@ export function createDefaultMaskHaloStyle(
       };
     },
   };
+}
+
+/**
+ * Canonical opt-in oriented-box presentation, styled the same as the default
+ * polygon fill/stroke so the two closed shapes read consistently together.
+ */
+export function createDefaultOrientedBoxStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseOrientedBoxStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseOrientedBoxStyle({
+    fill: (detection) => ({
+      alpha: DEFAULT_FILL_ALPHA,
+      color: getClassColor(detection),
+    }),
+    stroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
 }
 
 export function createDefaultPolygonStyle(

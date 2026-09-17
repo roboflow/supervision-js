@@ -2,6 +2,7 @@ import {
   DetectionMaskEncoding,
   type DetectionFrame,
   type DetectionMask,
+  type OrientedBoxGeometry,
 } from "#types/detections";
 import {
   DetectionFrameSelectionMode,
@@ -69,6 +70,13 @@ export function copyDetectionFrame(frame: DetectionFrame): DetectionFrame {
       mask: detection.mask ? { ...detection.mask } : undefined,
       metadata: detection.metadata
         ? copyDetectionMetadata(detection.metadata)
+        : undefined,
+      orientedBox: detection.orientedBox
+        ? {
+            points: detection.orientedBox.points.map((point) => ({
+              ...point,
+            })) as unknown as OrientedBoxGeometry["points"],
+          }
         : undefined,
       polygon: detection.polygon
         ? {
@@ -292,6 +300,20 @@ export function validateDetectionFrames(
         () => `${detectionPath()}.polyline`,
         2,
       );
+
+      if (detection.orientedBox !== undefined) {
+        const points = detection.orientedBox?.points;
+        const path = () => `${detectionPath()}.orientedBox.points`;
+
+        if (!Array.isArray(points) || points.length !== 4) {
+          throw new Error(`${path()} must contain exactly 4 points.`);
+        }
+
+        for (let index = 0; index < points.length; index += 1) {
+          validateNumber(points[index]?.x, () => `${path()}[${index}].x`);
+          validateNumber(points[index]?.y, () => `${path()}[${index}].y`);
+        }
+      }
 
       if (detection.keypoints) {
         validatePoints(

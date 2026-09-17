@@ -47,6 +47,7 @@ export function getDetectionRect(detection: Detection): Rect | undefined {
   return (
     detection.rect ??
     getPointsRect(detection.polygon?.points ?? []) ??
+    getPointsRect(detection.orientedBox?.points ?? []) ??
     getPointsRect(detection.polyline?.points ?? []) ??
     getPointsRect(detection.keypoints?.points ?? [])
   );

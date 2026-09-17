@@ -76,6 +76,19 @@ const geometrylessDetection: Detection = {
   confidence: 0.9,
 };
 
+const orientedBoxOnlyDetection: Detection = {
+  className: "court",
+  confidence: 0.9,
+  orientedBox: {
+    points: [
+      { x: 4, y: 0 },
+      { x: 24, y: 4 },
+      { x: 20, y: 24 },
+      { x: 0, y: 20 },
+    ],
+  },
+};
+
 const vectorDetection: Detection = {
   className: "person",
   confidence: 0.9,
@@ -334,6 +347,45 @@ describe("demo presentation", () => {
         width: defaultDemoPresentationSettings.maskStrokeWidth,
       },
     });
+  });
+
+  it("draws the oriented-box renderer only for detections carrying explicit quadrilateral geometry, and only when enabled", () => {
+    const disabledPresentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+
+    expect(disabledPresentation.orientedBoxStyle).toBeNull();
+    expect(
+      disabledPresentation.renderers?.map((renderer) => renderer.kind),
+    ).not.toContain("orientedBox");
+
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      orientedBoxEnabled: true,
+      orientedBoxFillAlpha: 0.4,
+      orientedBoxStrokeWidth: 5,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [orientedBoxOnlyDetection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(presentation.renderers?.map((renderer) => renderer.kind)).toContain(
+      "orientedBox",
+    );
+    expect(
+      presentation.orientedBoxStyle?.resolve(orientedBoxOnlyDetection, context),
+    ).toMatchObject({
+      fill: { alpha: 0.4 },
+      points: orientedBoxOnlyDetection.orientedBox?.points,
+      stroke: { width: 5 },
+    });
+    // A detection without `orientedBox` never falls back to `rect`: this
+    // renderer only draws explicit quadrilateral geometry.
+    expect(
+      presentation.orientedBoxStyle?.resolve(rectangleDetection, context),
+    ).toBeUndefined();
   });
 
   it("keeps mask-only interaction picking free of box highlights", () => {
@@ -1035,6 +1087,7 @@ describe("demo annotation demand", () => {
     maskHaloEnabled: false,
     masksEnabled: false,
     markersEnabled: false,
+    orientedBoxEnabled: false,
     polygonsEnabled: false,
     polylinesEnabled: false,
   };

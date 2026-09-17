@@ -6,6 +6,7 @@ import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseMarkerStyle } from "#styles/marker-style";
 import { createDefaultMaskHaloStyle } from "#styles/default-annotation-presentation";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
+import { BaseOrientedBoxStyle } from "#styles/oriented-box-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
 import {
@@ -287,6 +288,44 @@ describe("createSourceAwarePresentation", () => {
     expect(
       presentation.boxCornerStyle?.resolve(createDetection("draft"), context)
         ?.stroke.color,
+    ).toBe(0xabcdef);
+  });
+
+  it("applies source overrides to oriented-box renderer styles", () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ] as const;
+    const presentation = createSourceAwarePresentation(
+      {
+        orientedBoxStyle: new BaseOrientedBoxStyle({
+          stroke: { color: 0x123456 },
+        }),
+      },
+      [
+        {
+          id: "draft",
+          presentation: {
+            orientedBoxStyle: new BaseOrientedBoxStyle({
+              stroke: { color: 0xabcdef },
+            }),
+          },
+        },
+      ],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+    const baseDetection = { orientedBox: { points }, sourceId: "base" };
+    const draftDetection = { orientedBox: { points }, sourceId: "draft" };
+
+    expect(
+      presentation.orientedBoxStyle?.resolve(baseDetection, context)?.stroke
+        ?.color,
+    ).toBe(0x123456);
+    expect(
+      presentation.orientedBoxStyle?.resolve(draftDetection, context)?.stroke
+        ?.color,
     ).toBe(0xabcdef);
   });
 

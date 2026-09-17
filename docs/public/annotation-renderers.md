@@ -9,6 +9,7 @@ children:
   - ./annotation-renderers/markers.md
   - ./annotation-renderers/percentage-bar.md
   - ./annotation-renderers/labels.md
+  - ./annotation-renderers/oriented-box.md
   - ./annotation-renderers/polygons.md
   - ./annotation-renderers/polylines.md
   - ./annotation-renderers/keypoints-and-skeletons.md
@@ -48,6 +49,7 @@ fixture's committed semantic data rather than inventing geometry at runtime.
 - [Markers](./annotation-renderers/markers.md)
 - [Percentage Bar](./annotation-renderers/percentage-bar.md)
 - [Labels](./annotation-renderers/labels.md)
+- [Oriented Box](./annotation-renderers/oriented-box.md)
 - [Polygons](./annotation-renderers/polygons.md)
 - [Polylines](./annotation-renderers/polylines.md)
 - [Keypoints and skeletons](./annotation-renderers/keypoints-and-skeletons.md)

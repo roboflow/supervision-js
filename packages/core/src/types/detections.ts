@@ -42,6 +42,20 @@ export interface PolygonGeometry {
   readonly points: readonly Point[];
 }
 
+/**
+ * Explicit oriented quadrilateral in media-pixel coordinates.
+ *
+ * Unlike `Rect`, which stays axis-aligned, these four vertices may describe a
+ * rotated rectangle or another convex quadrilateral. Order is clockwise in
+ * media space, starting from the box's local top-left corner (its top-left
+ * before any rotation was applied). A producer that only has a mask and wants
+ * an oriented box must compute this quadrilateral itself; nothing in
+ * `supervision-js` derives one from mask or polygon geometry.
+ */
+export interface OrientedBoxGeometry {
+  readonly points: readonly [Point, Point, Point, Point];
+}
+
 export interface PolylineGeometry {
   readonly points: readonly Point[];
 }
@@ -171,6 +185,8 @@ export interface Detection {
   readonly rect?: Rect;
   /** Optional closed polygon in media-pixel coordinates. */
   readonly polygon?: PolygonGeometry;
+  /** Optional explicit oriented quadrilateral in media-pixel coordinates. */
+  readonly orientedBox?: OrientedBoxGeometry;
   /** Optional open path in media-pixel coordinates. */
   readonly polyline?: PolylineGeometry;
   /** Optional keypoints and skeleton edges in media-pixel coordinates. */

@@ -5,6 +5,7 @@ import {
 import {
   type Detection,
   KeypointVisibility,
+  type OrientedBoxGeometry,
   type Point,
   type Rect,
 } from "#types/detections";
@@ -180,6 +181,15 @@ export function offsetDetection(
       : {}),
     ...(detection.polygon
       ? { polygon: { points: detection.polygon.points.map(offsetPoint) } }
+      : {}),
+    ...(detection.orientedBox
+      ? {
+          orientedBox: {
+            points: detection.orientedBox.points.map(
+              offsetPoint,
+            ) as unknown as OrientedBoxGeometry["points"],
+          },
+        }
       : {}),
     ...(detection.polyline
       ? { polyline: { points: detection.polyline.points.map(offsetPoint) } }

@@ -54,6 +54,7 @@ export {
   type KeypointEdge,
   type KeypointGeometry,
   type LiveWritableDetectionFrameSource,
+  type OrientedBoxGeometry,
   type Point,
   type PolygonGeometry,
   type PolylineGeometry,

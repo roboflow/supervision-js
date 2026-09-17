@@ -73,11 +73,13 @@ Start here for normal application code:
 - `Rect`
 - `DetectionMask`
 - `PolygonGeometry`
+- `OrientedBoxGeometry`
 - `PolylineGeometry`
 - `KeypointGeometry`
 - `BaseBoxStyle`
 - `BoxShape`
 - `BaseMaskStyle`
+- `BaseOrientedBoxStyle`
 - `BasePolygonStyle`
 - `BasePolylineStyle`
 - `BaseKeypointStyle`
@@ -128,7 +130,7 @@ session.setPresentation({
 ```
 
 The current built-ins are `box`, `box-corners`, `ellipse`, `marker`, `mask`,
-`maskHalo`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
+`maskHalo`, `orientedBox`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
 the multi-instance `region` renderer for asset overlays and current-frame media
 crops;
 `annotationRendererKinds` enumerates that vocabulary and
@@ -227,8 +229,8 @@ not the first thing most users should reach for:
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;
 - interaction and picking options;
-- polygons, polylines, keypoints, shared class-color helpers, and visibility
-  controls;
+- polygons, oriented boxes, polylines, keypoints, shared class-color helpers,
+  and visibility controls;
 - render-preparation diagnostics and worker options.
 - ordered detection post-processing, bounded out-of-order buffering, tracking
   diagnostics, in-place derived detection updates, optional raw-copy
@@ -255,8 +257,8 @@ A producer that streams results into a session has four supported contracts:
 
 - `session.appendDetectionFrames()` writes a batch. Frames that declare
   `coordinateSpace` are normalized into media space before storage; rectangles,
-  polygons, polylines, and keypoints scale, while masks keep their own intrinsic
-  dimensions and are never scaled twice.
+  polygons, oriented boxes, polylines, and keypoints scale, while masks keep
+  their own intrinsic dimensions and are never scaled twice.
 - `session.appendLiveDetectionFrame()` writes the newest result for a live
   stream. It stays active until the next live frame supersedes it, at which
   point the previous frame is closed at the new frame's `mediaTime`. At most two
@@ -353,7 +355,13 @@ The generated API reference has a separate Editing module for this entrypoint.
 
 `Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
 and `height` are its extent. `TopLeftRect` is only for explicit canvas/layout
-boundaries. There is no legacy top-left rectangle mode.
+boundaries. There is no legacy top-left rectangle mode. `Rect` also stays
+axis-aligned: it never gains a rotation field. A rotated or otherwise
+non-axis-aligned box is a separate `OrientedBoxGeometry` on
+`Detection.orientedBox`, four explicit media-pixel vertices ordered clockwise
+from the box's own top-left corner. Nothing in `supervision-js` derives an
+oriented box from a mask or a plain `rect`; a producer that only has one of
+those computes the quadrilateral itself.
 
 Advanced APIs should remain renderer-neutral. They may expose timing,
 diagnostics, and data-flow contracts, but they should not expose Pixi containers,

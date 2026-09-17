@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BaseKeypointStyle,
+  BaseOrientedBoxStyle,
   BasePolygonStyle,
   BasePolylineStyle,
   KeypointMarkerShape,
@@ -49,6 +50,30 @@ describe("vector presentation styles", () => {
       },
     });
   });
+
+  it("resolves an explicit oriented-box quadrilateral like a closed polygon", () => {
+    const points = [
+      { x: 0, y: 0 },
+      { x: 10, y: 2 },
+      { x: 8, y: 10 },
+      { x: -2, y: 8 },
+    ] as const;
+
+    expect(
+      new BaseOrientedBoxStyle({
+        stroke: { cap: "round", join: "bevel", miterLimit: 7 },
+      }).resolve({ orientedBox: { points } }, context),
+    ).toMatchObject({
+      points,
+      fill: { alpha: 0.16 },
+      stroke: { cap: "round", join: "bevel", miterLimit: 7, width: 2 },
+    });
+  });
+
+  // Degenerate-input handling (fewer than four points, zero-enclosed-area,
+  // hidden/shouldRender) is covered by `oriented-box-style.test.ts`; this
+  // file focuses on the shared stroke/points resolution this style has in
+  // common with the other closed-path vector styles above.
 
   it("uses schema colors, shadows, and occluded cross markers", () => {
     const instruction = new BaseKeypointStyle({

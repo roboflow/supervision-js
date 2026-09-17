@@ -1,16 +1,148 @@
 import { describe, expect, it } from "vitest";
 
+import { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
 import { DetectionFrameSelectionMode } from "#types/detection-timeline";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 import {
+  copyDetectionFrame,
   copySortedDetectionFrames,
   decodeCompressedRleMask,
   encodeCompressedRleCounts,
   filterDetectionFramesForRange,
   selectDetectionFrame,
+  validateDetectionFrames,
 } from "#utils/detection-frames";
 
 describe("detection frame utilities", () => {
+  it("deep-copies oriented boxes without sharing geometry, arrays, or points", () => {
+    const source: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          orientedBox: {
+            points: [
+              { x: 0, y: 2 },
+              { x: 2, y: 0 },
+              { x: 4, y: 2 },
+              { x: 2, y: 4 },
+            ],
+          },
+        },
+      ],
+    };
+    const original = source.detections[0]!.orientedBox!;
+    const copied = copyDetectionFrame(source).detections[0]!.orientedBox!;
+
+    expect(copied).toEqual(original);
+    expect(copied).not.toBe(original);
+    expect(copied.points).not.toBe(original.points);
+    copied.points.forEach((point, index) => {
+      expect(point).not.toBe(original.points[index]);
+    });
+  });
+
+  it("accepts finite oriented boxes and detections without them", async () => {
+    const frames: DetectionFrame[] = [
+      {
+        mediaTime: 0,
+        detections: [
+          {},
+          {
+            orientedBox: {
+              points: [
+                { x: -2.5, y: 0 },
+                { x: 0, y: -2.5 },
+                { x: 2.5, y: 0 },
+                { x: 0, y: 2.5 },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+    const source = createArrayDetectionFrameSource(frames);
+
+    expect(() => validateDetectionFrames(frames)).not.toThrow();
+    expect(await source.loadFrames(0, 1)).toEqual(frames);
+  });
+
+  it.each([
+    [
+      "three points",
+      {
+        points: [
+          { x: 0, y: 0 },
+          { x: 2, y: 0 },
+          { x: 0, y: 2 },
+        ],
+      },
+    ],
+    [
+      "five points",
+      { points: Array.from({ length: 5 }, () => ({ x: 0, y: 0 })) },
+    ],
+    ["missing points", {}],
+    ["null geometry", null],
+    ["null points", { points: null }],
+    ["array-like points", { points: { length: 4 } }],
+    [
+      "null vertex",
+      { points: [null, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }] },
+    ],
+    [
+      "missing coordinate",
+      { points: [{ x: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }] },
+    ],
+    [
+      "string coordinate",
+      {
+        points: [
+          { x: "0", y: 0 },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+      },
+    ],
+    [
+      "NaN",
+      {
+        points: [
+          { x: NaN, y: 0 },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+      },
+    ],
+    [
+      "infinity",
+      {
+        points: [
+          { x: 0, y: Infinity },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+      },
+    ],
+  ])(
+    "rejects oriented boxes with %s at frame admission",
+    (_name, orientedBox) => {
+      // Untyped producers and JSON can bypass the four-point TypeScript tuple.
+      const frames = [
+        { mediaTime: 0, detections: [{ orientedBox }] },
+      ] as unknown as DetectionFrame[];
+
+      expect(() => validateDetectionFrames(frames)).toThrow(
+        "frames[0].detections[0].orientedBox",
+      );
+      expect(() => createArrayDetectionFrameSource(frames)).toThrow(
+        "frames[0].detections[0].orientedBox",
+      );
+    },
+  );
+
   it("carries metadata a plain copy would flatten", () => {
     const recordedAt = new Date("2026-08-26T12:00:00.000Z");
     const source = [

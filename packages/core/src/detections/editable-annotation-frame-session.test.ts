@@ -4,8 +4,104 @@ import {
   AnnotationFrameMutationKind,
   createEditableAnnotationFrameSession,
 } from "#detections/editable-annotation-frame-session";
+import type { DetectionFrame, OrientedBoxGeometry } from "#types/detections";
 
 describe("editable annotation frame session", () => {
+  const createOrientedFrame = (): DetectionFrame => ({
+    mediaTime: 0,
+    detections: [
+      {
+        id: "obb",
+        orientedBox: {
+          points: [
+            { x: 0, y: 2 },
+            { x: 2, y: 0 },
+            { x: 4, y: 2 },
+            { x: 2, y: 4 },
+          ],
+        },
+      },
+    ],
+  });
+
+  it("freezes oriented-box snapshots without freezing caller-owned geometry", () => {
+    const frame = createOrientedFrame();
+    const original = frame.detections[0]!.orientedBox!;
+    const session = createEditableAnnotationFrameSession(frame);
+    const snapshot = session.getSnapshot().detections[0]!.orientedBox!;
+
+    for (const value of [original, original.points, ...original.points]) {
+      expect(Object.isFrozen(value)).toBe(false);
+    }
+    for (const value of [snapshot, snapshot.points, ...snapshot.points]) {
+      expect(Object.isFrozen(value)).toBe(true);
+    }
+    Object.assign(original.points[0], { x: 99 });
+    expect(snapshot.points[0]).toEqual({ x: 0, y: 2 });
+  });
+
+  it("allows oriented-box point edits in transact without changing previous snapshots", () => {
+    const frame = createOrientedFrame();
+    const session = createEditableAnnotationFrameSession(frame);
+    const previous = session.getSnapshot();
+    const current = session.transact(
+      (detections) => {
+        detections[0]!.orientedBox!.points[0].x = 1;
+        detections[0]!.orientedBox!.points[1] = { x: 3, y: 0 };
+      },
+      ["obb"],
+    );
+
+    expect(previous.detections[0]!.orientedBox).toEqual(
+      frame.detections[0]!.orientedBox,
+    );
+    expect(current.detections[0]!.orientedBox!.points.slice(0, 2)).toEqual([
+      { x: 1, y: 2 },
+      { x: 3, y: 0 },
+    ]);
+    expect(Object.isFrozen(current.detections[0]!.orientedBox!.points[0])).toBe(
+      true,
+    );
+    session.replace(previous);
+    expect(session.getSnapshot()).toEqual(previous);
+    session.replace(current);
+    expect(session.getSnapshot()).toEqual(current);
+  });
+
+  it("rejects malformed oriented-box edits without committing or notifying", () => {
+    const session = createEditableAnnotationFrameSession(createOrientedFrame());
+    const previous = session.getSnapshot();
+    const listener = vi.fn();
+    session.subscribe(listener);
+    const malformed = {
+      points: [
+        { x: 0, y: 0 },
+        { x: 2, y: 0 },
+        { x: 0, y: 2 },
+      ],
+    } as unknown as OrientedBoxGeometry;
+
+    expect(() => session.update("obb", { orientedBox: malformed })).toThrow(
+      "orientedBox",
+    );
+    expect(() =>
+      session.add({ id: "invalid", orientedBox: malformed }),
+    ).toThrow("orientedBox");
+    expect(() =>
+      session.replace({
+        mediaTime: 0,
+        detections: [{ id: "invalid", orientedBox: malformed }],
+      }),
+    ).toThrow("orientedBox");
+    expect(() =>
+      session.transact((detections) => {
+        detections[0]!.orientedBox!.points[0].y = Infinity;
+      }),
+    ).toThrow("orientedBox");
+    expect(session.getSnapshot()).toBe(previous);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   const initialFrame = {
     detections: [
       {

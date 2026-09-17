@@ -121,7 +121,7 @@ This inventory is based on the 32 public annotators in Python Supervision
 | `RichLabelAnnotator`            | Covered in essence        | Normal browser text and label recipe                       |
 | `VertexAnnotator`               | Covered                   | Existing keypoint markers                                  |
 | `EdgeAnnotator`                 | Covered                   | Existing skeleton edges                                    |
-| `OrientedBoxAnnotator`          | Partial                   | Oriented quadrilateral lowered to polygon/path geometry    |
+| `OrientedBoxAnnotator`          | Covered                   | Explicit `orientedBox` geometry and oriented-box renderer  |
 | `BoxCornerAnnotator`            | Covered                   | Existing box-corners renderer                              |
 | `CircleAnnotator`               | Covered in essence        | Circle marker or closed ellipse style                      |
 | `EllipseAnnotator`              | Covered                   | Existing ellipse renderer                                  |
@@ -397,16 +397,16 @@ coverage and has no runtime keypoint dependency.
 
 ### Gaps Before New Facades
 
-| Gap                                               | Status                                           | Earliest prerequisite                                                                                                                   |
-| ------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Open-path fixture for the existing polyline layer | Completed with `basketball_sam3`                 | Maintain frozen trace derivation, source identity, and visual regression evidence                                                       |
-| Marker and ellipse primitives                     | Completed with focused renderers and playgrounds | Add named facades only when they improve discovery without creating a parallel backend path                                             |
-| Asset and media region composition                | Completed with `basketball_regions`              | Maintain asset lifetime, exact coverage, viewport redraw, and stable fixture identity                                                   |
-| Region replacement composition                    | Deferred by product decision                     | A true replacement needs background reconstruction or a caller-provided prepared source; an overlay remains the honest current contract |
-| Oriented quadrilateral renderer                   | No first-class public annotation renderer        | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture                                                     |
-| Prepared mask/media effects                       | Completed with `region.source.effect`            | Maintain exact-coverage, resource-lifetime, and fixture regression evidence                                                             |
-| Temporal overlays                                 | No timeline-derived public annotation renderer   | Temporal-window primitive plus frozen stable identities and canonical media-time behavior                                               |
-| Analytical guides and HUD                         | No public analytics annotation renderer          | Shared guide/HUD primitives plus `vehicles_zone_v1` with frozen zone state and events                                                   |
+| Gap                                               | Status                                             | Earliest prerequisite                                                                                                                   |
+| ------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Open-path fixture for the existing polyline layer | Completed with `basketball_sam3`                   | Maintain frozen trace derivation, source identity, and visual regression evidence                                                       |
+| Marker and ellipse primitives                     | Completed with focused renderers and playgrounds   | Add named facades only when they improve discovery without creating a parallel backend path                                             |
+| Asset and media region composition                | Completed with `basketball_regions`                | Maintain asset lifetime, exact coverage, viewport redraw, and stable fixture identity                                                   |
+| Region replacement composition                    | Deferred by product decision                       | A true replacement needs background reconstruction or a caller-provided prepared source; an overlay remains the honest current contract |
+| Oriented quadrilateral renderer                   | Completed with `annotationRenderers.orientedBox()` | Maintain explicit OBB geometry, shared closed-path drawing, and the documented synthetic basketball fixture rotation                    |
+| Prepared mask/media effects                       | Completed with `region.source.effect`              | Maintain exact-coverage, resource-lifetime, and fixture regression evidence                                                             |
+| Temporal overlays                                 | No timeline-derived public annotation renderer     | Temporal-window primitive plus frozen stable identities and canonical media-time behavior                                               |
+| Analytical guides and HUD                         | No public analytics annotation renderer            | Shared guide/HUD primitives plus `vehicles_zone_v1` with frozen zone state and events                                                   |
 
 No annotator facade may be added ahead of the matching row's primitive and
 fixture evidence. Each facade remains one pull request after those prerequisites
@@ -637,10 +637,12 @@ prepared source proves the semantics and fixture.
 
 ### Phase 3: Remaining Geometry And Compound Facades
 
-6. **Oriented box.** Add one oriented-quadrilateral renderer/facade using an
-   explicit quadrilateral or a named, versioned mask-derived minimum-area
-   rectangle. Reuse polygon/path drawing internally and use a frozen fixture;
-   do not silently reinterpret the center-based `Rect` contract.
+6. **Oriented box, completed.** `annotationRenderers.orientedBox()` draws
+   explicit `Detection.orientedBox` vertices through the shared closed-path
+   primitive. The frozen basketball fixture uses a documented synthetic
+   22-degree rotation of each eligible basketball rectangle. `Rect` remains
+   independent and axis-aligned. Mask-derived minimum-area boxes remain
+   producer-owned; OBB rotation and vertex editing are not implemented.
 7. **Vertex label.** Resolve labels from visible keypoints and lower them to the
    shared text/label machinery without fabricating detections.
 8. **Pose covariance foundation, no facade.** Add the pure, versioned covariance
@@ -749,8 +751,9 @@ Review every roadmap PR against these questions:
    repository, rather than remaining linked references?
 2. Should the first release expose only factory-built recipes or also a
    low-level custom recipe extension?
-3. Does simultaneous segmentation-polygon and oriented-box data justify an
-   `orientedBox` field, or should adapters continue lowering it to polygons?
+3. Resolved: `Detection.orientedBox` is separate from `polygon` and `rect`, so
+   simultaneous geometries can be styled independently without overwriting
+   segmentation data.
 4. Which recipes should the experimental React Native backend support first?
 5. Which source capability should prove a finite, complete range for
    full-timeline heat maps?

@@ -513,6 +513,40 @@ test("clean consumer resolves package entrypoints and the standalone worker", ()
   assert.equal(output.trim(), "function ready function true true");
 });
 
+test("clean consumer resolves and exercises the oriented-box annotation renderer API", () => {
+  // Feature-specific packaging proof for BaseOrientedBoxStyle /
+  // annotationRenderers.orientedBox: the existing entrypoint-resolution test
+  // above only imports pre-existing APIs, so it does not, by itself, prove
+  // this newer API is actually packaged and resolvable from outside the
+  // repository. This constructs and runs it from the installed tarball, not
+  // from source.
+  const output = run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      [
+        'import { BaseOrientedBoxStyle, annotationRenderers } from "supervision";',
+        "const style = new BaseOrientedBoxStyle();",
+        "const points = [{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:10}];",
+        "const detection = { orientedBox: { points } };",
+        "const context = { detectionIndex: 0, frame: { detections: [detection], mediaTime: 0 }, mediaTime: 0 };",
+        "const instruction = style.resolve(detection, context);",
+        "const renderer = annotationRenderers.orientedBox({ style });",
+        "console.log(",
+        "  typeof BaseOrientedBoxStyle,",
+        "  typeof annotationRenderers.orientedBox,",
+        "  instruction?.points?.length,",
+        "  renderer.kind,",
+        ");",
+      ].join("\n"),
+    ],
+    consumerDir,
+  );
+
+  assert.equal(output.trim(), "function function 4 orientedBox");
+});
+
 test("clean consumer resolves the three video engine subpaths", () => {
   const output = run(
     process.execPath,

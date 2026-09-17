@@ -10,6 +10,7 @@ import {
   type EllipseStyle,
   type MarkerStyle,
   type MaskHaloStyle,
+  type OrientedBoxStyle,
   type PercentageBarStyle,
   type PolygonStyle,
   type RegionAnnotationRenderer,
@@ -279,6 +280,8 @@ export async function createPixiMediaScene(
     options.boxCornerStyle ?? null;
   let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
   let currentMarkerStyle: MarkerStyle | null = options.markerStyle ?? null;
+  let currentOrientedBoxStyle: OrientedBoxStyle | null =
+    options.orientedBoxStyle ?? null;
   let currentPercentageBarStyle: PercentageBarStyle | null =
     options.percentageBarStyle ?? null;
   let currentRegionRenderers: readonly RegionAnnotationRenderer[] =
@@ -1399,6 +1402,7 @@ export async function createPixiMediaScene(
         presentation.boxCornerStyle !== undefined ||
         presentation.ellipseStyle !== undefined ||
         presentation.markerStyle !== undefined ||
+        presentation.orientedBoxStyle !== undefined ||
         presentation.percentageBarStyle !== undefined
       ) {
         if (presentation.boxCornerStyle !== undefined) {
@@ -1409,6 +1413,9 @@ export async function createPixiMediaScene(
         }
         if (presentation.markerStyle !== undefined) {
           currentMarkerStyle = presentation.markerStyle;
+        }
+        if (presentation.orientedBoxStyle !== undefined) {
+          currentOrientedBoxStyle = presentation.orientedBoxStyle;
         }
         if (presentation.percentageBarStyle !== undefined) {
           currentPercentageBarStyle = presentation.percentageBarStyle;
@@ -1970,15 +1977,16 @@ export async function createPixiMediaScene(
   }
 
   /**
-   * The vector layer takes one shape style, and the ellipse, marker and
-   * box-corner renderer kinds all lower to shape instructions, so they are
-   * composed onto whatever style the caller passed.
+   * The vector layer takes one shape style, and the ellipse, marker,
+   * box-corner, and oriented-box renderer kinds all lower to shape
+   * instructions, so they are composed onto whatever style the caller passed.
    */
   function resolveVectorShapeStyle(): ShapeStyle | null {
     const kindShapeStyle = resolveAnnotationShapeStyle({
       boxCornerStyle: currentBoxCornerStyle,
       ellipseStyle: currentEllipseStyle,
       markerStyle: currentMarkerStyle,
+      orientedBoxStyle: currentOrientedBoxStyle,
       percentageBarStyle: currentPercentageBarStyle,
     });
     const baseShapeStyle = options.shapeStyle ?? null;

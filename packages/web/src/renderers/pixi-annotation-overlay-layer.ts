@@ -127,8 +127,8 @@ function drawEditingPreview(
     detection,
     styleContext,
   )!;
-  // A skeleton's rect is part of its geometry, so it previews alongside the
-  // keypoints; polygon, polyline and mask rects are derived bounds and are not.
+  // Rects coexist with keypoints and OBBs as independent editable geometry.
+  // Polygon, polyline and mask rects are derived bounds instead.
   if (
     detection.rect &&
     !detection.mask &&
@@ -180,6 +180,22 @@ function drawEditingPreview(
     drawPixiPath(
       graphics,
       detection.polygon.points,
+      true,
+      stroke,
+      viewportScale,
+    );
+  }
+  // Keep the OBB's own vertices visible alongside any independent rect.
+  if (detection.orientedBox) {
+    graphics
+      .poly(
+        detection.orientedBox.points.flatMap(({ x, y }) => [x, y]),
+        true,
+      )
+      .fill(polygonFill);
+    drawPixiPath(
+      graphics,
+      detection.orientedBox.points,
       true,
       stroke,
       viewportScale,

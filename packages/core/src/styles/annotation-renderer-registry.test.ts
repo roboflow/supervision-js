@@ -36,6 +36,7 @@ const expectedStyleFields = {
   mask: "maskStyle",
   maskHalo: "maskHaloStyle",
   marker: "markerStyle",
+  orientedBox: "orientedBoxStyle",
   percentageBar: "percentageBarStyle",
   polygon: "polygonStyle",
   polyline: "polylineStyle",
@@ -62,6 +63,7 @@ const styleFieldPairingIsExact: {
   mask: true,
   maskHalo: true,
   marker: true,
+  orientedBox: true,
   percentageBar: true,
   polygon: true,
   polyline: true,
@@ -82,6 +84,9 @@ const expectedCanonicalStyles = {
   // capability is opt-in, so it never appears in the default presentation.
   maskHalo: null,
   marker: null,
+  // The oriented-box canonical style is opt-in, like box-corners and ellipse,
+  // and therefore does not appear in the default presentation.
+  orientedBox: null,
   percentageBar: null,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
@@ -163,6 +168,10 @@ describe("annotation renderer registry", () => {
     expect(annotationRenderers.marker()).toEqual({
       id: "marker",
       kind: "marker",
+    });
+    expect(annotationRenderers.orientedBox()).toEqual({
+      id: "orientedBox",
+      kind: "orientedBox",
     });
     expect(annotationRenderers.polygon()).toEqual({
       id: "polygon",

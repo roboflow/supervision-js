@@ -25,6 +25,7 @@ import type { InteractionStyle } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskHaloStyle, MaskStyle } from "supervision-js-core";
 import type { MarkerStyle } from "supervision-js-core";
+import type { OrientedBoxStyle } from "supervision-js-core";
 import type { PercentageBarStyle } from "supervision-js-core";
 import type {
   RegionAnnotationRenderer,
@@ -62,6 +63,7 @@ export interface MediaRendererSceneOptions {
   readonly maskHaloStyle: MaskHaloStyle | null | undefined;
   readonly maskStyle: MaskStyle | null | undefined;
   readonly markerStyle: MarkerStyle | null | undefined;
+  readonly orientedBoxStyle: OrientedBoxStyle | null | undefined;
   readonly percentageBarStyle: PercentageBarStyle | null | undefined;
   readonly polygonStyle: PolygonStyle | null | undefined;
   readonly polylineStyle: PolylineStyle | null | undefined;
