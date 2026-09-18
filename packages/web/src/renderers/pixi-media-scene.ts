@@ -2769,7 +2769,7 @@ export function createMediaCompositor(
  * not carry a track display matrix to a canvas or GPU upload, so a pushed
  * frame has to be transformed before it joins the already-oriented cache path.
  */
-export function drawPresentedVideoFrame(
+function drawPresentedVideoFrame(
   context: Pick<
     CanvasRenderingContext2D,
     "drawImage" | "restore" | "rotate" | "save" | "scale" | "translate"
