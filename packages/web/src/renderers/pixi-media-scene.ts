@@ -193,7 +193,7 @@ type TextureUploadSource = {
 };
 
 type MediaCompositor = {
-  upload(frame: VideoFrame): void;
+  upload(frame: VideoFrame, rotation?: PresentedVideoFrame["rotation"]): void;
   destroy(): void;
 };
 
@@ -893,8 +893,17 @@ export async function createPixiMediaScene(
     app.ticker.add(tickFocusLayer);
   }
 
-  const uploadFrameToStagingCanvas = (frame: VideoFrame) => {
-    stagingContext.drawImage(frame, 0, 0, mediaWidth, mediaHeight);
+  const uploadFrameToStagingCanvas = (
+    frame: VideoFrame,
+    rotation: PresentedVideoFrame["rotation"] = 0,
+  ) => {
+    drawPresentedVideoFrame(
+      stagingContext,
+      frame,
+      rotation,
+      mediaWidth,
+      mediaHeight,
+    );
     stagingTextureSource?.update();
     stagingTexture?.update();
   };
@@ -945,14 +954,14 @@ export async function createPixiMediaScene(
       ? measureFramePresentLayers(presentLayers, measureDrawStep)
       : presentLayers,
     render: renderPresent,
-    uploadFrame: (frame) => {
+    uploadFrame: (presented) => {
       if (!collectFrameTimings) {
-        mediaCompositor?.upload(frame);
+        mediaCompositor?.upload(presented.frame, presented.rotation ?? 0);
         presentedSampleTimestamp = currentMediaTime;
         return;
       }
       presentMediaUploadMs += measure(() => {
-        mediaCompositor?.upload(frame);
+        mediaCompositor?.upload(presented.frame, presented.rotation ?? 0);
         presentedSampleTimestamp = currentMediaTime;
       });
     },
@@ -2684,15 +2693,15 @@ export function createMediaCompositor(
   const { device } = options;
   let gpuTexture = createFrameTexture(device, options.width, options.height);
   const textureSource = options.attach(gpuTexture);
+  let rotationCanvas: OffscreenCanvas | undefined;
 
   return {
     destroy() {
       gpuTexture.destroy();
     },
 
-    upload(frame) {
-      const width = frame.displayWidth;
-      const height = frame.displayHeight;
+    upload(frame, rotation = 0) {
+      const [width, height] = presentedFrameSize(frame, rotation);
 
       if (width !== gpuTexture.width || height !== gpuTexture.height) {
         const replacement = createFrameTexture(device, width, height);
@@ -2727,12 +2736,70 @@ export function createMediaCompositor(
       }
 
       device.queue.copyExternalImageToTexture(
-        { source: frame },
+        { source: uploadSource(frame, rotation) },
         { texture: gpuTexture },
         { height, width },
       );
     },
   };
+
+  function uploadSource(
+    frame: VideoFrame,
+    rotation: NonNullable<PresentedVideoFrame["rotation"]>,
+  ): VideoFrame | OffscreenCanvas {
+    if (rotation === 0) return frame;
+
+    const [width, height] = presentedFrameSize(frame, rotation);
+    if (!rotationCanvas) rotationCanvas = new OffscreenCanvas(width, height);
+    rotationCanvas.width = width;
+    rotationCanvas.height = height;
+    const context = rotationCanvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Unable to create a rotation canvas context.");
+    }
+
+    drawPresentedVideoFrame(context, frame, rotation, width, height);
+    return rotationCanvas;
+  }
+}
+
+/**
+ * Draws raw decoded pixels in their display orientation. A `VideoFrame` does
+ * not carry a track display matrix to a canvas or GPU upload, so a pushed
+ * frame has to be transformed before it joins the already-oriented cache path.
+ */
+export function drawPresentedVideoFrame(
+  context: Pick<
+    CanvasRenderingContext2D,
+    "drawImage" | "restore" | "rotate" | "save" | "scale" | "translate"
+  >,
+  frame: VideoFrame,
+  rotation: NonNullable<PresentedVideoFrame["rotation"]>,
+  width: number,
+  height: number,
+): void {
+  if (rotation === 0) {
+    context.drawImage(frame, 0, 0, width, height);
+    return;
+  }
+
+  context.save();
+  context.translate(width / 2, height / 2);
+  context.rotate((rotation * Math.PI) / 180);
+  const aspectRatioChange = rotation % 180 === 0 ? 1 : width / height;
+  context.scale(1 / aspectRatioChange, aspectRatioChange);
+  context.drawImage(frame, -width / 2, -height / 2, width, height);
+  context.restore();
+}
+
+function presentedFrameSize(
+  frame: VideoFrame,
+  rotation: NonNullable<PresentedVideoFrame["rotation"]>,
+): [number, number] {
+  return rotation % 180 === 0
+    ? [frame.displayWidth, frame.displayHeight]
+    : [frame.displayHeight, frame.displayWidth];
 }
 
 /**

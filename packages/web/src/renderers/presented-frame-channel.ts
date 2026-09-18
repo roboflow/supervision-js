@@ -30,6 +30,12 @@ export interface PresentedVideoFrame {
    */
   readonly mediaTimeS: number;
   readonly frame: VideoFrame;
+  /**
+   * Clockwise display-matrix turn still owed by the decoded pixels. Canvas
+   * frames that a producer already oriented report 0. Omitted remains upright
+   * for producers written before this field existed.
+   */
+  readonly rotation?: 0 | 90 | 180 | 270;
   /** Present when the producer distinguishes frame delivery from display. */
   readonly acknowledgePresentation?: () => void;
 }

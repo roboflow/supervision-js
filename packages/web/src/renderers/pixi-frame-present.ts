@@ -52,7 +52,8 @@ export interface FramePresentTargets {
   /** Adopts the presented time as the scene's media time, before anything draws. */
   readonly adoptMediaTime: (mediaTime: number) => void;
   readonly fitMediaScene: () => void;
-  readonly uploadFrame: (frame: VideoFrame) => void;
+  /** Receives the pixels and their remaining display transform as one delivery. */
+  readonly uploadFrame: (presented: PresentedVideoFrame) => void;
   readonly layers: FramePresentLayers;
   readonly render: () => void;
   readonly completePresentation: (
@@ -83,7 +84,7 @@ export function presentVideoFrame(
   try {
     at(targets.adoptMediaTime, mediaTime, presented);
     targets.fitMediaScene();
-    targets.uploadFrame(presented.frame);
+    targets.uploadFrame(presented);
 
     const { boxState, regionState } = drawFramePresentLayers(
       layers,

@@ -55,6 +55,7 @@ interface PresentRecording {
   readonly order: string[];
   readonly timestamps: Map<string, number[]>;
   readonly targets: FramePresentTargets;
+  readonly uploaded: PresentedVideoFrame[];
 }
 
 describe("atomic present", () => {
@@ -82,6 +83,18 @@ describe("atomic present", () => {
       "render",
       "completePresentation",
     ]);
+  });
+
+  it("keeps a decoded frame's display turn with its pixels", () => {
+    const recording = recordPresents();
+    const presented = {
+      ...presentedFrame(1),
+      rotation: 270 as const,
+    };
+
+    presentVideoFrame(presented, recording.targets);
+
+    expect(recording.uploaded).toStrictEqual([presented]);
   });
 
   it("redraws outside a present in the order a present draws in", () => {
@@ -205,6 +218,7 @@ function presentedFrame(mediaTimeS: number, frameIndex = 0) {
 function recordPresents(): PresentRecording {
   const order: string[] = [];
   const timestamps = new Map<string, number[]>();
+  const uploaded: PresentedVideoFrame[] = [];
   const step = (name: string) => (mediaTime: number) => {
     order.push(name);
     timestamps.set(name, [...(timestamps.get(name) ?? []), mediaTime]);
@@ -236,8 +250,12 @@ function recordPresents(): PresentRecording {
         drawVector: step("drawVector"),
       },
       render: () => order.push("render"),
-      uploadFrame: () => order.push("uploadFrame"),
+      uploadFrame: (presented) => {
+        order.push("uploadFrame");
+        uploaded.push(presented);
+      },
     },
     timestamps,
+    uploaded,
   };
 }
