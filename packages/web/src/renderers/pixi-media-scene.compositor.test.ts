@@ -13,7 +13,10 @@ interface FakeTexture {
 }
 
 interface FakeDevice {
-  readonly copies: { texture: FakeTexture }[];
+  readonly copies: {
+    readonly source: unknown;
+    readonly texture: FakeTexture;
+  }[];
   readonly created: FakeTexture[];
   readonly device: GPUDevice;
 }
@@ -45,7 +48,7 @@ describe("media compositor", () => {
     compositor.upload(frame(320, 240));
 
     expect(gpu.created).toHaveLength(1);
-    expect(gpu.copies).toStrictEqual([{ texture: gpu.created[0] }]);
+    expect(copiedTextures(gpu)).toStrictEqual([gpu.created[0]]);
   });
 
   it("takes a decode of another size on a texture sized by the frame", () => {
@@ -67,7 +70,7 @@ describe("media compositor", () => {
     expect(source.updateGPUTexture.mock.calls).toStrictEqual([[replacement]]);
     expect(retired.destroy).toHaveBeenCalledTimes(1);
     expect(onTextureReplaced).toHaveBeenCalledTimes(1);
-    expect(gpu.copies).toStrictEqual([{ texture: replacement }]);
+    expect(copiedTextures(gpu)).toStrictEqual([replacement]);
   });
 
   it("reports the replacement's size to the source before announcing the swap", () => {
@@ -120,7 +123,7 @@ describe("media compositor", () => {
     compositor.upload(frame(320, 240));
     compositor.destroy();
 
-    expect(gpu.copies).toStrictEqual([{ texture: live }]);
+    expect(copiedTextures(gpu)).toStrictEqual([live]);
     expect(
       gpu.created.map((texture) => texture.destroy.mock.calls.length),
     ).toStrictEqual([1, 1]);
@@ -143,11 +146,51 @@ describe("media compositor", () => {
       gpu.created.map((texture) => texture.destroy.mock.calls.length),
     ).toStrictEqual([1, 1]);
   });
+
+  it.each([
+    [90, [1080, 1920]],
+    [180, [1920, 1080]],
+    [270, [1080, 1920]],
+  ] as const)(
+    "orients a %i-degree decoded frame before its GPU upload",
+    (rotation, expectedSize) => {
+      RotationCanvas.created.length = 0;
+      const gpu = createFakeDevice();
+      const source = createTextureSource();
+      const compositor = createMediaCompositor({
+        attach: () => source,
+        device: gpu.device,
+        height: 1080,
+        onTextureReplaced: vi.fn(),
+        width: 1920,
+      });
+      const frameToRotate = frame(1920, 1080);
+      vi.stubGlobal("OffscreenCanvas", RotationCanvas);
+
+      compositor.upload(frameToRotate, rotation);
+
+      expect(gpu.copies[0]?.source).toBe(RotationCanvas.created[0]);
+      expect(RotationCanvas.created[0]?.drawImage).toHaveBeenCalledWith(
+        frameToRotate,
+        -expectedSize[0] / 2,
+        -expectedSize[1] / 2,
+        expectedSize[0],
+        expectedSize[1],
+      );
+      expect(RotationCanvas.created[0]?.rotate).toHaveBeenCalledWith(
+        (rotation * Math.PI) / 180,
+      );
+      expect(gpu.created.at(-1)).toMatchObject({
+        height: expectedSize[1],
+        width: expectedSize[0],
+      });
+    },
+  );
 });
 
 function createFakeDevice({ acceptsVideoFrames = true } = {}): FakeDevice {
   const created: FakeTexture[] = [];
-  const copies: { texture: FakeTexture }[] = [];
+  const copies: { source: unknown; texture: FakeTexture }[] = [];
 
   const device = {
     createTexture(descriptor: {
@@ -178,7 +221,7 @@ function createFakeDevice({ acceptsVideoFrames = true } = {}): FakeDevice {
           );
         }
 
-        copies.push({ texture: destination.texture });
+        copies.push({ source: source.source, texture: destination.texture });
       },
     },
   };
@@ -195,6 +238,10 @@ function createTextureSource() {
 
 function frame(displayWidth: number, displayHeight: number): VideoFrame {
   return { displayHeight, displayWidth } as unknown as VideoFrame;
+}
+
+function copiedTextures(gpu: FakeDevice): FakeTexture[] {
+  return gpu.copies.map((copy) => copy.texture);
 }
 
 describe("media compositor texture lifetime", () => {
@@ -312,5 +359,26 @@ class FakeVideoFrame {
 
   close() {
     this.closed = true;
+  }
+}
+
+class RotationCanvas {
+  static readonly created: RotationCanvas[] = [];
+  readonly drawImage = vi.fn();
+  readonly restore = vi.fn();
+  readonly rotate = vi.fn();
+  readonly save = vi.fn();
+  readonly scale = vi.fn();
+  readonly translate = vi.fn();
+
+  constructor(
+    readonly width: number,
+    readonly height: number,
+  ) {
+    RotationCanvas.created.push(this);
+  }
+
+  getContext() {
+    return this;
   }
 }
