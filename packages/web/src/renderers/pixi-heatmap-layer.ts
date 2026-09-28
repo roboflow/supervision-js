@@ -30,16 +30,21 @@ export function createPixiHeatmapLayer(options: {
   let lastFrame: DetectionFrame | undefined;
   let dirty = true;
   let warnedInvalidHeatmap = false;
-  const sprites: PixiSprite[] = [];
+  const positionedSprites: {
+    readonly sprite: PixiSprite;
+    readonly detectionId: string | number | undefined;
+    readonly x: number;
+    readonly y: number;
+  }[] = [];
 
   const clear = () => {
-    for (const sprite of sprites) {
+    for (const { sprite } of positionedSprites) {
       const texture = sprite.texture;
       sprite.removeFromParent();
       sprite.destroy();
       texture.destroy(true);
     }
-    sprites.length = 0;
+    positionedSprites.length = 0;
   };
 
   return {
@@ -51,6 +56,16 @@ export function createPixiHeatmapLayer(options: {
     invalidate() {
       dirty = true;
     },
+    translateDetection(id: string | number, dx: number, dy: number) {
+      let translated = false;
+      for (const entry of positionedSprites) {
+        if (entry.detectionId !== id) continue;
+        entry.sprite.x = entry.x + dx;
+        entry.sprite.y = entry.y + dy;
+        translated = true;
+      }
+      return translated;
+    },
     drawFrame(mediaTime: number) {
       const frame = options.detectionTimeline.selectFrame(mediaTime);
       if (!dirty && frame === lastFrame) return;
@@ -61,7 +76,15 @@ export function createPixiHeatmapLayer(options: {
         return;
       }
 
-      for (const detection of frame.detections) {
+      const orderedDetections = frame.detections
+        .map((detection, index) => ({ detection, index }))
+        .sort(
+          (left, right) =>
+            (left.detection.zIndex ?? left.index) -
+              (right.detection.zIndex ?? right.index) ||
+            left.index - right.index,
+        );
+      for (const { detection } of orderedDetections) {
         const map = detection.heatmap;
         if (!map || !options.isVisible(detection)) continue;
         for (const renderer of renderers) {
@@ -98,7 +121,12 @@ export function createPixiHeatmapLayer(options: {
           sprite.width = map.bounds.width;
           sprite.height = map.bounds.height;
           container.addChild(sprite);
-          sprites.push(sprite);
+          positionedSprites.push({
+            sprite,
+            detectionId: detection.id,
+            x: sprite.x,
+            y: sprite.y,
+          });
         }
       }
       lastFrame = frame;

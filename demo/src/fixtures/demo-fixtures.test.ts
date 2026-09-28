@@ -178,8 +178,10 @@ describe("geometry showcase fixture", () => {
       polygonsEnabled: false,
       polylinesEnabled: true,
     });
-    // Nothing is closed: the detections carry every kind the demo can draw.
-    expect(fixture?.presentationAvailability).toEqual({});
+    // This older fixture has no heatmap count, so its heatmap toggle is closed.
+    expect(fixture?.presentationAvailability).toEqual({
+      heatmapsEnabled: false,
+    });
   });
 
   it("curates presentation defaults for every sample the picker offers", () => {
@@ -502,7 +504,7 @@ describe("fixture layer availability", () => {
   it("closes a toggle the detections count none of", () => {
     expect(
       resolveDemoFixtureAvailability(undefined, maskDerivedGeometry),
-    ).toEqual({ keypointsEnabled: false });
+    ).toEqual({ heatmapsEnabled: false, keypointsEnabled: false });
   });
 
   it("keeps a layer a fixture curates away even when the detections carry it", () => {
@@ -511,7 +513,11 @@ describe("fixture layer availability", () => {
         { polygonsEnabled: false },
         maskDerivedGeometry,
       ),
-    ).toEqual({ keypointsEnabled: false, polygonsEnabled: false });
+    ).toEqual({
+      heatmapsEnabled: false,
+      keypointsEnabled: false,
+      polygonsEnabled: false,
+    });
   });
 
   it("leaves a manifest that counts nothing to its own declaration", () => {

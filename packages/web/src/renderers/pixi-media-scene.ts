@@ -670,6 +670,7 @@ export async function createPixiMediaScene(
       fastTranslatedDetectionId = id;
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
+      heatmapLayer?.translateDetection(id, dx, dy);
       renderNow();
     });
   const redrawDetectionLayers = (id: string | number) => {
@@ -709,6 +710,7 @@ export async function createPixiMediaScene(
       fastTranslatedDetectionId = null;
       regionLayer.translateDetection(id, 0, 0);
       labelLayer?.translateDetection(id, 0, 0);
+      heatmapLayer?.translateDetection(id, 0, 0);
       regionLayer.drawFrame(currentMediaTime, viewportScale);
       labelLayer?.drawFrame(currentMediaTime, viewportScale);
       renderNow();

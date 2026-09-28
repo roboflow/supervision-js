@@ -149,7 +149,10 @@ export function resolveDemoFixtureAvailability(
   const availability: DemoPresentationAvailability = { ...declared };
 
   for (const [layer, countKey] of geometryBackedLayers) {
-    if (geometry[countKey] === 0) {
+    if (
+      geometry[countKey] === 0 ||
+      (layer === "heatmapsEnabled" && geometry[countKey] === undefined)
+    ) {
       availability[layer] = false;
     }
   }

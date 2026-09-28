@@ -18,6 +18,45 @@ import {
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it("moves a heatmap with its pickable rectangle", () => {
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          id: "anomaly",
+          rect: { x: 20, y: 30, width: 10, height: 10 },
+          heatmap: {
+            bounds: { x: 22, y: 31, width: 6, height: 4 },
+            width: 1,
+            height: 1,
+            values: [0.8],
+          },
+        },
+      ],
+    };
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const pick = pickDetectionAtPoint(frame, { x: 20, y: 30 });
+
+    engine.pointerDown({ point: { x: 20, y: 30 }, timestamp: 0 }, pick);
+    engine.pointerMove({ point: { x: 30, y: 25 }, timestamp: 16 });
+    expect(engine.getState().preview?.heatmap?.bounds).toEqual({
+      x: 32,
+      y: 26,
+      width: 6,
+      height: 4,
+    });
+    engine.pointerUp({ point: { x: 30, y: 25 }, timestamp: 32 });
+
+    expect(onCommit.mock.calls[0]?.[0].heatmap.bounds).toEqual({
+      x: 32,
+      y: 26,
+      width: 6,
+      height: 4,
+    });
+    expect(frame.detections[0]?.heatmap?.bounds.x).toBe(22);
+  });
+
   it.each([false, true])(
     "drags oriented boxes through picking, preview, and commit (other geometry: %s)",
     (withOtherGeometry) => {
