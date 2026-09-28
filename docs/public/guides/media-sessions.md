@@ -626,6 +626,23 @@ session.setRenderQuality({
 The session keeps playback time, prepared detections, interaction state, and
 media buffers alive while the renderer resizes to the new resolution.
 
+### Media Larger Than The GPU Texture Limit
+
+GPUs refuse a texture with a side over their limit: 16,384 pixels on most
+desktops, 4,096 to 8,192 on some mobile and integrated GPUs. Media with a side
+over the limit is uploaded downscaled to fit, so a 20,000 x 3,000 image still
+shows. Only the picture loses detail: detections, picking, edits and
+`captureFrame()` stay in media pixels. `renderer.maxTextureSize` lowers the
+limit, for example to check a layout on a smaller GPU:
+
+```ts
+const session = await createMediaSession({
+  container,
+  media,
+  renderer: { maxTextureSize: 4096 },
+});
+```
+
 ## Multiple Detection Sources
 
 Use `detections.sources` when an app needs to render more than one semantic

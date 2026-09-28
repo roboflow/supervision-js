@@ -79,6 +79,14 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    * pixels, which can be useful for long videos or browsers under load.
    */
   readonly maxDevicePixelRatio?: number;
+  /**
+   * Lowers the largest media texture side below the GPU's own limit.
+   *
+   * Media with a side over the limit is staged downscaled so the GPU accepts
+   * it; the picture loses detail, but geometry, picking and edits stay in
+   * media pixels. The GPU limit applies without this option.
+   */
+  readonly maxTextureSize?: number;
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;

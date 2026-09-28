@@ -25,7 +25,7 @@ describe("captureCanvasMediaFrame", () => {
 
     expect(snapshot.width).toBe(640);
     expect(snapshot.height).toBe(360);
-    expect(drawImage).toHaveBeenCalledWith(source, 0, 0);
+    expect(drawImage).toHaveBeenCalledWith(source, 0, 0, 640, 360);
 
     source.width = 1;
     source.height = 1;
@@ -37,6 +37,29 @@ describe("captureCanvasMediaFrame", () => {
       type: "image/jpeg",
       width: 640,
     });
+  });
+
+  it("draws a downscaled source back up to the requested media size", async () => {
+    const drawImage = vi.fn();
+    const source = { height: 614, width: 4096 } as HTMLCanvasElement;
+    const snapshot = {
+      getContext: () => ({ drawImage }),
+      height: 0,
+      toBlob: (callback: (blob: Blob | null) => void) =>
+        callback(new Blob(["frame"], { type: "image/jpeg" })),
+      width: 0,
+    } as unknown as HTMLCanvasElement;
+
+    const capture = await captureCanvasMediaFrame({
+      capture: undefined,
+      createCanvas: () => snapshot,
+      mediaTime: 0,
+      size: { height: 1200, width: 8000 },
+      source,
+    });
+
+    expect(drawImage).toHaveBeenCalledWith(source, 0, 0, 8000, 1200);
+    expect(capture).toMatchObject({ height: 1200, width: 8000 });
   });
 
   it("rejects invalid encoder quality before copying the media canvas", async () => {

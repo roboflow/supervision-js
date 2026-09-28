@@ -41,6 +41,11 @@ import type {
 } from "#types/media-renderer";
 import { captureCanvasMediaFrame } from "./media-frame-capture";
 import {
+  fitTextureSize,
+  resolveMaxTextureSize,
+  type TextureLimitRenderer,
+} from "./pixi-texture-size";
+import {
   drawFramePresentLayers,
   measureFramePresentLayers,
   presentVideoFrame,
@@ -302,6 +307,9 @@ export async function createPixiMediaScene(
   let hasPresentedSample = false;
   let mediaHeight = 0;
   let mediaWidth = 0;
+  /** Staging surface size: the media size, or smaller when over the GPU limit. */
+  let stagingWidth = 0;
+  let stagingHeight = 0;
   let visibilityVersion = 0;
   let maskHaloVersion = 0;
   let haloPreparationStyleCache: {
@@ -901,8 +909,8 @@ export async function createPixiMediaScene(
       stagingContext,
       frame,
       rotation,
-      mediaWidth,
-      mediaHeight,
+      stagingWidth,
+      stagingHeight,
     );
     stagingTextureSource?.update();
     stagingTexture?.update();
@@ -1044,14 +1052,24 @@ export async function createPixiMediaScene(
     initializeMedia({ width, height }) {
       mediaWidth = width;
       mediaHeight = height;
-      stagingCanvas.width = mediaWidth;
-      stagingCanvas.height = mediaHeight;
+      const stagingSize = fitTextureSize(
+        width,
+        height,
+        resolveMaxTextureSize(
+          app.renderer as TextureLimitRenderer,
+          options.maxTextureSize,
+        ),
+      );
+      stagingWidth = stagingSize.width;
+      stagingHeight = stagingSize.height;
+      stagingCanvas.width = stagingWidth;
+      stagingCanvas.height = stagingHeight;
 
       const canvasSource: PixiCanvasSource = new CanvasSource({
         dynamic: true,
-        height: mediaHeight,
+        height: stagingHeight,
         resource: stagingCanvas,
-        width: mediaWidth,
+        width: stagingWidth,
       });
       const texture: PixiTexture = new Texture({
         dynamic: true,
@@ -1142,7 +1160,7 @@ export async function createPixiMediaScene(
         presentedFrameSerial += 1;
 
         if (!collectFrameTimings) {
-          sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
+          sample.draw(stagingContext, 0, 0, stagingWidth, stagingHeight);
           presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
@@ -1166,7 +1184,7 @@ export async function createPixiMediaScene(
         const totalStart = now();
         frameDrawTimings = createFrameDrawTimings();
         const mediaUploadMs = measure(() => {
-          sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
+          sample.draw(stagingContext, 0, 0, stagingWidth, stagingHeight);
           presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
@@ -1207,6 +1225,7 @@ export async function createPixiMediaScene(
         capture: captureOptions,
         createCanvas: () => document.createElement("canvas"),
         mediaTime: presentedSampleTimestamp,
+        size: { height: mediaHeight, width: mediaWidth },
         source: readPresentedSurface(),
       });
     },

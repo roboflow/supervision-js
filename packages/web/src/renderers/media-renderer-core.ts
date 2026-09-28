@@ -1139,6 +1139,7 @@ export async function createMediaRendererCore(
       markerStyle: currentPresentation.markerStyle,
       percentageBarStyle: currentPresentation.percentageBarStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
+      maxTextureSize: options.maxTextureSize,
       orientedBoxStyle: currentPresentation.orientedBoxStyle,
       onPresentationUpdate(presentedSample) {
         if (!runtimeState.isDestroyed()) {

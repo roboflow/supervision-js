@@ -54,6 +54,7 @@ export interface MediaRendererSceneOptions {
   readonly backgroundColor: MediaRendererPresentation["backgroundColor"];
   readonly fit: MediaRendererFit;
   readonly maxDevicePixelRatio: number | undefined;
+  readonly maxTextureSize?: number;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
   readonly boxCornerStyle: BoxCornerStyle | null | undefined;
