@@ -103,7 +103,7 @@ export interface HeatmapAnnotationRenderer extends BaseAnnotationRenderer {
   readonly opacity?: number;
   /** Upper score mapped to the final colour stop; defaults to 1. */
   readonly maximumScore?: number;
-  /** Interpolated from the threshold to `maximumScore`. */
+  /** Positions from 0 to 1 map scores from 0 to `maximumScore`. */
   readonly colorStops?: readonly HeatmapColorStop[];
 }
 
@@ -446,7 +446,11 @@ export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
   boxCorners: (options) => createAnnotationRenderer("box-corners", options),
   ellipse: (options) => createAnnotationRenderer("ellipse", options),
-  heatmap: (options) => ({ id: "heatmap", ...options, kind: "heatmap" }),
+  heatmap: (options) => ({
+    ...options,
+    id: options?.id ?? "heatmap",
+    kind: "heatmap",
+  }),
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),

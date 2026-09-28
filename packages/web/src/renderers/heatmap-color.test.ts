@@ -59,6 +59,21 @@ describe("colorizeHeatmap", () => {
     expect([...lowerPeak.slice(0, 4)]).toEqual([...higherPeak.slice(0, 4)]);
   });
 
+  it("uses an absolute colour scale even when model thresholds differ", () => {
+    const common = {
+      bounds: { x: 0.5, y: 0.5, width: 1, height: 1 },
+      width: 1,
+      height: 1,
+      values: [0.8],
+    };
+    const renderer = annotationRenderers.heatmap();
+    const lowCutoff = colorizeHeatmap({ ...common, threshold: 0.1 }, renderer);
+    const highCutoff = colorizeHeatmap({ ...common, threshold: 0.5 }, renderer);
+
+    expect([...lowCutoff.slice(0, 3)]).toEqual([...highCutoff.slice(0, 3)]);
+    expect(lowCutoff[3]).not.toBe(highCutoff[3]);
+  });
+
   it("rejects a mismatched raster instead of displaying stale geometry", () => {
     expect(() =>
       colorizeHeatmap(
@@ -73,6 +88,20 @@ describe("colorizeHeatmap", () => {
     ).toThrow(RangeError);
   });
 
+  it("rejects invalid bounds before the layer creates a canvas", () => {
+    expect(() =>
+      colorizeHeatmap(
+        {
+          bounds: { x: 0, y: 0, width: Number.NaN, height: 1 },
+          width: 1,
+          height: 1,
+          values: [0.8],
+        },
+        annotationRenderers.heatmap(),
+      ),
+    ).toThrow(RangeError);
+  });
+
   it("rejects an oversized raster before allocating its RGBA buffer", () => {
     expect(() =>
       colorizeHeatmap(
@@ -81,6 +110,20 @@ describe("colorizeHeatmap", () => {
           width: 16_000,
           height: 16_000,
           values: [0.1],
+        },
+        annotationRenderers.heatmap(),
+      ),
+    ).toThrow(RangeError);
+  });
+
+  it("rejects an overlong raster side even below the pixel limit", () => {
+    expect(() =>
+      colorizeHeatmap(
+        {
+          bounds: { x: 0, y: 0, width: 8_193, height: 1 },
+          width: 8_193,
+          height: 1,
+          values: new Float32Array(8_193),
         },
         annotationRenderers.heatmap(),
       ),

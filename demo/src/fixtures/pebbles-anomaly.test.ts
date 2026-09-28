@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Detection } from "supervision";
+import type { Detection, DetectionFrame } from "supervision";
 import manifest from "../../fixtures/pebbles_anomaly/detections.manifest.json";
 import early from "../../fixtures/pebbles_anomaly/detections/000000.json";
 import bolt from "../../fixtures/pebbles_anomaly/detections/000003.json";
@@ -8,10 +8,7 @@ import raw from "../../fixtures/pebbles_anomaly/raw-patrick-detections.json";
 const chunks = import.meta.glob(
   "../../fixtures/pebbles_anomaly/detections/*.json",
   { eager: true, import: "default" },
-) as Record<
-  string,
-  { frames: Array<{ frameIndex: number; detections: Detection[] }> }
->;
+) as Record<string, { frames: Array<DetectionFrame & { frameIndex: number }> }>;
 
 describe("Patrick pebbles fixture", () => {
   it("preserves source coordinates and the playable frame grid", () => {
@@ -53,6 +50,8 @@ describe("Patrick pebbles fixture", () => {
     for (const [index, frame] of frames.entries()) {
       const original = raw.frames[index]!;
       expect(frame.frameIndex).toBe(original.frame);
+      expect(frame.mediaTime).toBeCloseTo(index / manifest.frameRate, 6);
+      expect(frame.endTime).toBeCloseTo((index + 1) / manifest.frameRate, 6);
       expect(frame.detections).toHaveLength(original.anomalies.length);
       for (const [offset, detection] of frame.detections.entries()) {
         const anomaly = original.anomalies[offset]!;

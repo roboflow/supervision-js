@@ -11,18 +11,27 @@ const DEFAULT_STOPS: readonly HeatmapColorStop[] = [
   { position: 1, color: 0xdc1e1e },
 ];
 const MAX_HEATMAP_PIXELS = 16_777_216;
+const MAX_HEATMAP_SIDE = 8_192;
 
 /** Turns semantic scores into an RGBA raster; no palette enters cold data. */
 export function colorizeHeatmap(
   map: DetectionHeatmap,
   renderer: HeatmapAnnotationRenderer,
 ): Uint8ClampedArray {
-  const { width, height, values } = map;
+  const { bounds, width, height, values } = map;
   if (
+    !Number.isFinite(bounds?.x) ||
+    !Number.isFinite(bounds?.y) ||
+    !Number.isFinite(bounds?.width) ||
+    !Number.isFinite(bounds?.height) ||
+    bounds.width <= 0 ||
+    bounds.height <= 0 ||
     !Number.isInteger(width) ||
     !Number.isInteger(height) ||
     width <= 0 ||
     height <= 0 ||
+    width > MAX_HEATMAP_SIDE ||
+    height > MAX_HEATMAP_SIDE ||
     width * height > MAX_HEATMAP_PIXELS ||
     !(
       Array.isArray(values) ||
@@ -32,7 +41,7 @@ export function colorizeHeatmap(
     values.length !== width * height
   ) {
     throw new RangeError(
-      "Heatmap dimensions must match its row-major values and fit the raster limit.",
+      "Heatmap bounds and dimensions must be valid, match row-major values, and fit the raster limit.",
     );
   }
 
@@ -73,14 +82,16 @@ export function colorizeHeatmap(
   for (let index = 0; index < values.length; index += 1) {
     const score = values[index] * scale;
     if (!Number.isFinite(score) || score <= threshold) continue;
-    const intensity = clamp01((score - threshold) / (maximumScore - threshold));
-    const color = interpolateColor(stops, intensity);
+    const color = interpolateColor(stops, clamp01(score / maximumScore));
+    const alphaIntensity = clamp01(
+      (score - threshold) / (maximumScore - threshold),
+    );
     const offset = index * 4;
     rgba[offset] = color >> 16;
     rgba[offset + 1] = (color >> 8) & 0xff;
     rgba[offset + 2] = color & 0xff;
     rgba[offset + 3] = Math.round(
-      255 * opacity * (minimumAlpha + (1 - minimumAlpha) * intensity),
+      255 * opacity * (minimumAlpha + (1 - minimumAlpha) * alphaIntensity),
     );
   }
   return rgba;
