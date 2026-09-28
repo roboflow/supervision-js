@@ -1,0 +1,124 @@
+{
+  "schema": "supervision-js.detection-frame-chunk-manifest",
+  "version": 1,
+  "datasetId": "pebbles_anomaly_patrick_v1",
+  "classNames": [
+    "bolt",
+    "stick"
+  ],
+  "chunkDurationSeconds": 1,
+  "chunks": [
+    {
+      "chunkIndex": 0,
+      "startTime": 0,
+      "endTime": 1,
+      "frameCount": 30,
+      "src": "detections/000000.json"
+    },
+    {
+      "chunkIndex": 1,
+      "startTime": 1,
+      "endTime": 2,
+      "frameCount": 30,
+      "src": "detections/000001.json"
+    },
+    {
+      "chunkIndex": 2,
+      "startTime": 2,
+      "endTime": 3,
+      "frameCount": 30,
+      "src": "detections/000002.json"
+    },
+    {
+      "chunkIndex": 3,
+      "startTime": 3,
+      "endTime": 4,
+      "frameCount": 30,
+      "src": "detections/000003.json"
+    },
+    {
+      "chunkIndex": 4,
+      "startTime": 4,
+      "endTime": 5,
+      "frameCount": 30,
+      "src": "detections/000004.json"
+    },
+    {
+      "chunkIndex": 5,
+      "startTime": 5,
+      "endTime": 6,
+      "frameCount": 30,
+      "src": "detections/000005.json"
+    },
+    {
+      "chunkIndex": 6,
+      "startTime": 6,
+      "endTime": 7,
+      "frameCount": 30,
+      "src": "detections/000006.json"
+    },
+    {
+      "chunkIndex": 7,
+      "startTime": 7,
+      "endTime": 8,
+      "frameCount": 30,
+      "src": "detections/000007.json"
+    },
+    {
+      "chunkIndex": 8,
+      "startTime": 8,
+      "endTime": 9,
+      "frameCount": 30,
+      "src": "detections/000008.json"
+    },
+    {
+      "chunkIndex": 9,
+      "startTime": 9,
+      "endTime": 10,
+      "frameCount": 30,
+      "src": "detections/000009.json"
+    },
+    {
+      "chunkIndex": 10,
+      "startTime": 10,
+      "endTime": 10.677333333333333,
+      "frameCount": 20,
+      "src": "detections/000010.json"
+    }
+  ],
+  "duration": 10.677333333333333,
+  "frameCount": 320,
+  "frameRate": 29.97002997002997,
+  "detectionCount": 254,
+  "geometry": {
+    "boxDetectionCount": 254,
+    "keypointDetectionCount": 0,
+    "maskDetectionCount": 0,
+    "polygonDetectionCount": 0,
+    "polylineDetectionCount": 0,
+    "heatmapDetectionCount": 157
+  },
+  "inference": {
+    "frameRate": 29.97002997002997,
+    "modelId": "odysseus-vceuf/anomaly-in-pebbles-01-1-foundad-t1",
+    "sourceFile": "raw-patrick-detections.json",
+    "missingFrameIndexes": []
+  },
+  "provenance": {
+    "rawSha256": "1592eab68ae5891c190cafb993e44704cedd4ebf8cb1da59243f52521c531fe4",
+    "mediaSha256": "6f724426e9ed1d41a4b7f66c484ce230d4f291a80c269d4385bdc49f8c9b8d05",
+    "sourceFrameCount": 341,
+    "includedFrameCount": 320,
+    "policy": "Only confirmed tracker anomalies are detections. Hit frames carry score crops from matching hot spots; coast frames carry boxes but no synthetic heat.",
+    "raster": "16-bit stitched scalar PNG / 65535, cropped to matched hot spots + 24 px, 2x2 max pooled. Zero outside requested tiles is missing evidence, not a model score."
+  },
+  "video": {
+    "file": "pebbles-1800.mp4",
+    "width": 3600,
+    "height": 1570,
+    "frameRate": 29.97002997002997,
+    "duration": 10.677333333333333,
+    "frameCount": 320,
+    "firstTimestamp": 0
+  }
+}

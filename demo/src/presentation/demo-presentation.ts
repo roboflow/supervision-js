@@ -63,6 +63,9 @@ export interface DemoPresentationSettings {
   readonly boxCornersEnabled: boolean;
   readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
+  readonly heatmapsEnabled: boolean;
+  readonly heatmapThresholdScale: number;
+  readonly heatmapOpacity: number;
   readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
@@ -132,6 +135,7 @@ export type DemoPresentationLayerSetting =
   | "boxCornersEnabled"
   | "ellipsesEnabled"
   | "focusEnabled"
+  | "heatmapsEnabled"
   | "keypointsEnabled"
   | "labelsEnabled"
   | "masksEnabled"
@@ -150,6 +154,7 @@ const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "boxCornersEnabled",
   "ellipsesEnabled",
   "focusEnabled",
+  "heatmapsEnabled",
   "keypointsEnabled",
   "labelsEnabled",
   "masksEnabled",
@@ -227,6 +232,9 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   focusDimAlpha: 0.4,
   focusDimColor: 0x000000,
   focusEnabled: true,
+  heatmapsEnabled: false,
+  heatmapThresholdScale: 0.75,
+  heatmapOpacity: 1,
   focusTargetMode: FocusTargetMode.Ambient,
   hiddenClasses: [],
   interactionHoverFillAlpha: 0.08,
@@ -341,6 +349,15 @@ export function createDemoPresentation(
         : []),
       ...(ellipseStyle
         ? [annotationRenderers.ellipse({ style: ellipseStyle })]
+        : []),
+      ...(settings.heatmapsEnabled
+        ? [
+            annotationRenderers.heatmap({
+              thresholdScale: settings.heatmapThresholdScale,
+              opacity: settings.heatmapOpacity,
+              minimumAlpha: 0.35,
+            }),
+          ]
         : []),
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
       ...(maskHaloStyle

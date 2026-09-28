@@ -29,6 +29,7 @@ const geometryCountKeys = {
   boxesEnabled: "boxDetectionCount",
   keypointsEnabled: "keypointDetectionCount",
   masksEnabled: "maskDetectionCount",
+  heatmapsEnabled: "heatmapDetectionCount",
   polygonsEnabled: "polygonDetectionCount",
   polylinesEnabled: "polylineDetectionCount",
 } as const satisfies Record<string, keyof DemoFixtureGeometrySummary>;
@@ -138,6 +139,10 @@ describe("geometry showcase fixture", () => {
       {
         displayName: "Basketball Region Effects",
         sampleName: "basketball_regions",
+      },
+      {
+        displayName: "Pebbles anomaly (Patrick)",
+        sampleName: "pebbles_anomaly",
       },
     ]);
   });

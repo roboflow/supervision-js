@@ -23,6 +23,7 @@ export const annotationRendererKinds = [
   "box",
   "box-corners",
   "ellipse",
+  "heatmap",
   "keypoints",
   "label",
   "mask",
@@ -49,6 +50,7 @@ export type AnnotationRenderer =
   | BoxAnnotationRenderer
   | BoxCornerAnnotationRenderer
   | EllipseAnnotationRenderer
+  | HeatmapAnnotationRenderer
   | KeypointAnnotationRenderer
   | LabelAnnotationRenderer
   | MaskAnnotationRenderer
@@ -88,6 +90,24 @@ export interface BoxCornerAnnotationRenderer extends BaseAnnotationRenderer {
 export interface EllipseAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "ellipse";
   readonly style?: EllipseStyle | null;
+}
+
+/** Colours scalar heatmap samples without changing the underlying scores. */
+export interface HeatmapAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "heatmap";
+  /** Multiplies each heatmap's model threshold; defaults to 1. */
+  readonly thresholdScale?: number;
+  /** Minimum alpha for visible samples, from 0 to 1; defaults to 0. */
+  readonly minimumAlpha?: number;
+  /** Overall alpha multiplier, from 0 to 1; defaults to 1. */
+  readonly opacity?: number;
+  /** Interpolated from the threshold to the highest score in each raster. */
+  readonly colorStops?: readonly HeatmapColorStop[];
+}
+
+export interface HeatmapColorStop {
+  readonly position: number;
+  readonly color: number;
 }
 
 export interface KeypointAnnotationRenderer extends BaseAnnotationRenderer {
@@ -371,6 +391,9 @@ export type AnnotationRendererFactory = {
   readonly ellipse: (
     options?: AnnotationRendererStyleOptions<"ellipse">,
   ) => EllipseAnnotationRenderer;
+  readonly heatmap: (
+    options?: Omit<HeatmapAnnotationRenderer, "kind" | "id">,
+  ) => HeatmapAnnotationRenderer;
   readonly keypoints: (
     options?: AnnotationRendererStyleOptions<"keypoints">,
   ) => KeypointAnnotationRenderer;
@@ -404,7 +427,7 @@ export type AnnotationRendererFactory = {
 };
 
 type AnnotationRendererStyleOptions<
-  TKind extends Exclude<AnnotationRendererKind, "region">,
+  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap">,
 > = Pick<AnnotationRendererOfKind<TKind>, "style">;
 
 /**
@@ -419,6 +442,7 @@ export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
   boxCorners: (options) => createAnnotationRenderer("box-corners", options),
   ellipse: (options) => createAnnotationRenderer("ellipse", options),
+  heatmap: (options) => ({ id: "heatmap", kind: "heatmap", ...options }),
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),
@@ -433,7 +457,7 @@ export const annotationRenderers: AnnotationRendererFactory = {
 };
 
 function createAnnotationRenderer<
-  TKind extends Exclude<AnnotationRendererKind, "region">,
+  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap">,
 >(
   kind: TKind,
   options: AnnotationRendererStyleOptions<TKind> | undefined,

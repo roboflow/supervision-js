@@ -109,6 +109,36 @@ describe("detection coordinate-space projection", () => {
     expect(projected.detections[0]?.mask).toEqual(mask);
   });
 
+  it("projects heatmap placement without resampling its scalar pixels", () => {
+    const values = new Uint16Array([0, 100, 200, 300]);
+    const frame: DetectionFrame = {
+      coordinateSpace: { width: 3600, height: 1570 },
+      mediaTime: 1,
+      detections: [
+        {
+          heatmap: {
+            bounds: { x: 1800, y: 785, width: 200, height: 100 },
+            width: 2,
+            height: 2,
+            values,
+            valueScale: 1 / 65535,
+          },
+        },
+      ],
+    };
+    const projected = projectDetectionFrame(frame, {
+      width: 1800,
+      height: 785,
+    });
+    expect(projected.detections[0]?.heatmap?.bounds).toEqual({
+      x: 900,
+      y: 392.5,
+      width: 100,
+      height: 50,
+    });
+    expect(projected.detections[0]?.heatmap?.values).toBe(values);
+  });
+
   it("returns frames without coordinate metadata unchanged", () => {
     const frame: DetectionFrame = {
       detections: [{ id: "a", rect: { height: 10, width: 10, x: 5, y: 5 } }],

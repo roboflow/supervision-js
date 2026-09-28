@@ -164,6 +164,7 @@ describe("package entrypoint", () => {
       box: expect.any(Function),
       boxCorners: expect.any(Function),
       ellipse: expect.any(Function),
+      heatmap: expect.any(Function),
       keypoints: expect.any(Function),
       label: expect.any(Function),
       marker: expect.any(Function),

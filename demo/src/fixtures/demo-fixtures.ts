@@ -91,6 +91,7 @@ export interface DemoFixturePresentationDefaults {
   readonly boxesEnabled?: boolean;
   readonly confidenceThreshold?: number;
   readonly focusEnabled?: boolean;
+  readonly heatmapsEnabled?: boolean;
   readonly keypointsEnabled?: boolean;
   readonly labelsEnabled?: boolean;
   readonly masksEnabled?: boolean;
@@ -124,6 +125,7 @@ const geometryBackedLayers: readonly (readonly [
   ["boxesEnabled", "boxDetectionCount"],
   ["keypointsEnabled", "keypointDetectionCount"],
   ["masksEnabled", "maskDetectionCount"],
+  ["heatmapsEnabled", "heatmapDetectionCount"],
   ["polygonsEnabled", "polygonDetectionCount"],
   ["polylinesEnabled", "polylineDetectionCount"],
 ];
@@ -182,6 +184,7 @@ export interface DemoFixtureGeometrySummary {
   readonly boxDetectionCount: number;
   readonly keypointDetectionCount: number;
   readonly maskDetectionCount: number;
+  readonly heatmapDetectionCount?: number;
   readonly polygonDetectionCount: number;
   readonly polylineDetectionCount: number;
 }

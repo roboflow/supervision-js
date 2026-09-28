@@ -158,6 +158,12 @@ function GlobalRenderControls({
             onChange={(checked) => onChange("masksEnabled", checked)}
           />
           <ToggleControl
+            checked={settings.heatmapsEnabled}
+            disabled={availability?.heatmapsEnabled === false}
+            label="Heatmap"
+            onChange={(checked) => onChange("heatmapsEnabled", checked)}
+          />
+          <ToggleControl
             checked={settings.polygonsEnabled}
             disabled={availability?.polygonsEnabled === false}
             evalHook={DemoEvalHook.PolygonsToggle}

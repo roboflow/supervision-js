@@ -29,6 +29,7 @@ import type { OrientedBoxStyle } from "supervision-js-core";
 import type { PercentageBarStyle } from "supervision-js-core";
 import type {
   RegionAnnotationRenderer,
+  HeatmapAnnotationRenderer,
   PolygonStyle,
   PolylineStyle,
   ShapeStyle,
@@ -74,6 +75,7 @@ export interface MediaRendererSceneOptions {
   readonly shapeStyle?: ShapeStyle | null;
   readonly keypointStyle: KeypointStyle | null | undefined;
   readonly regionRenderers: readonly RegionAnnotationRenderer[];
+  readonly heatmapRenderers?: readonly HeatmapAnnotationRenderer[];
   readonly interaction: MediaInteractionOptions | undefined;
   readonly interactionStyle: InteractionStyle | null | undefined;
   readonly canInteract: () => boolean;

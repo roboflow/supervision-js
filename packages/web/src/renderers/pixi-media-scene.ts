@@ -7,6 +7,7 @@ import {
   type BoxCornerStyle,
   type Detection,
   type DetectionFrame,
+  type HeatmapAnnotationRenderer,
   type EllipseStyle,
   type MarkerStyle,
   type MaskHaloStyle,
@@ -62,6 +63,7 @@ import {
   resolvePaintedMaskHalo,
 } from "./pixi-mask-halo";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
+import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
@@ -165,6 +167,7 @@ const FRAME_DRAW_TIMING_BUCKETS: Partial<
 > = {
   drawBox: "boxMs",
   drawFocus: "focusMs",
+  drawHeatmap: "maskMs",
   drawInteraction: "interactionMs",
   drawInteractionPresentation: "interactionMs",
   drawLabel: "labelMs",
@@ -286,6 +289,8 @@ export async function createPixiMediaScene(
     options.percentageBarStyle ?? null;
   let currentRegionRenderers: readonly RegionAnnotationRenderer[] =
     options.regionRenderers;
+  let currentHeatmapRenderers: readonly HeatmapAnnotationRenderer[] =
+    options.heatmapRenderers ?? [];
   let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
     currentRegionRenderers,
   );
@@ -374,6 +379,18 @@ export async function createPixiMediaScene(
     Graphics: options.editingEngine ? Graphics : undefined,
     resolveContextState,
   });
+  let heatmapLayer: ReturnType<typeof createPixiHeatmapLayer> | undefined;
+  const ensureHeatmapLayer = () =>
+    (heatmapLayer ??= createPixiHeatmapLayer({
+      CanvasSource,
+      Container,
+      Sprite,
+      Texture,
+      detectionTimeline: annotationDetectionTimeline,
+      isVisible: (detection) =>
+        !resolveAnnotationStyleState(detection, currentVisibility).hidden,
+      renderers: currentHeatmapRenderers,
+    }));
   let polygonLayer =
     options.polygonStyle !== undefined &&
     currentPolygonStyle &&
@@ -535,6 +552,7 @@ export async function createPixiMediaScene(
   let polygonDisplay: PixiContainer | undefined;
   let timelineContext: MediaRendererSceneTimelineContext | undefined;
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
+  const heatmapSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Heatmap);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
   const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
   const vectorSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Vector);
@@ -548,6 +566,7 @@ export async function createPixiMediaScene(
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
     mediaSlot,
+    heatmapSlot,
     maskSlot,
     boxSlot,
     vectorSlot,
@@ -909,6 +928,7 @@ export async function createPixiMediaScene(
   };
 
   const presentLayers: FramePresentLayers = {
+    drawHeatmap: (mediaTime) => heatmapLayer?.drawFrame(mediaTime),
     advanceFocus: advanceFocusAnimation,
     drawAnnotationOverlay: (mediaTime) =>
       drawAnnotationOverlay(mediaTime, mediaTime * MILLISECONDS_PER_SECOND),
@@ -1074,6 +1094,9 @@ export async function createPixiMediaScene(
       mediaSprite.height = mediaHeight;
       if (!retainedBoxes) boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
+      if (currentHeatmapRenderers.length > 0) {
+        heatmapSlot.setDisplay(ensureHeatmapLayer().createContainer());
+      }
       boxSlot.setDisplay(retainedBoxes ?? boxes);
       vectorDisplay = new Container();
       attachPolygonLayerDisplay();
@@ -1374,6 +1397,7 @@ export async function createPixiMediaScene(
           presentation.visibility,
         );
         currentVisibility = presentation.visibility;
+        heatmapLayer?.invalidate();
         boxLayer.invalidate();
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
@@ -1437,6 +1461,19 @@ export async function createPixiMediaScene(
           (renderer): renderer is RegionAnnotationRenderer =>
             renderer.kind === "region",
         ) ?? [];
+      currentHeatmapRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is HeatmapAnnotationRenderer =>
+            renderer.kind === "heatmap",
+        ) ?? [];
+      if (currentHeatmapRenderers.length > 0) {
+        const layer = ensureHeatmapLayer();
+        layer.setRenderers(currentHeatmapRenderers);
+        heatmapSlot.setDisplay(layer.createContainer());
+        syncSceneChildren();
+      } else {
+        heatmapLayer?.setRenderers([]);
+      }
       const nextRegionMaskCoverageKey = resolveRegionMaskCoverageKey(
         currentRegionRenderers,
       );
@@ -1574,6 +1611,7 @@ export async function createPixiMediaScene(
       labelLayer?.destroy();
       vectorLayer.destroy();
       regionLayer.destroy();
+      heatmapLayer?.destroy();
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();

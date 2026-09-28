@@ -79,6 +79,14 @@ function projectDetection(
     ...(detection.rect
       ? { rect: scaleRect(detection.rect, scaleX, scaleY) }
       : {}),
+    ...(detection.heatmap
+      ? {
+          heatmap: {
+            ...detection.heatmap,
+            bounds: scaleRect(detection.heatmap.bounds, scaleX, scaleY),
+          },
+        }
+      : {}),
     ...(detection.polygon
       ? { polygon: scalePolygon(detection.polygon, scaleX, scaleY) }
       : {}),
