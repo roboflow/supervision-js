@@ -14,6 +14,66 @@ import {
 } from "#utils/detection-frames";
 
 describe("detection frame utilities", () => {
+  it("copies heatmap bounds and score buffers independently", () => {
+    const values = new Float32Array([0.1, 0.9]);
+    const source: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          heatmap: {
+            bounds: { x: 1, y: 2, width: 2, height: 1 },
+            width: 2,
+            height: 1,
+            values,
+          },
+        },
+      ],
+    };
+    const copied = copyDetectionFrame(source).detections[0]!.heatmap!;
+
+    expect(copied.bounds).not.toBe(source.detections[0]!.heatmap!.bounds);
+    expect(copied.values).toBeInstanceOf(Float32Array);
+    expect(copied.values).not.toBe(values);
+    values[1] = 0;
+    expect(copied.values[1]).toBeCloseTo(0.9);
+  });
+
+  it("rejects malformed heatmaps when frames are admitted", () => {
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          heatmap: {
+            bounds: { x: 1, y: 1, width: 2, height: 2 },
+            width: 2,
+            height: 2,
+            values: [0.5],
+          },
+        },
+      ],
+    };
+
+    expect(() => createArrayDetectionFrameSource([frame])).toThrow(
+      "frames[0].detections[0].heatmap.values",
+    );
+    expect(() =>
+      validateDetectionFrames([
+        {
+          ...frame,
+          detections: [
+            {
+              heatmap: {
+                ...frame.detections[0]!.heatmap!,
+                values: [0.5, 0.5, 0.5, 0.5],
+                bounds: { x: 1, y: 1, width: -2, height: 2 },
+              },
+            },
+          ],
+        },
+      ]),
+    ).toThrow("frames[0].detections[0].heatmap.bounds.width");
+  });
+
   it("deep-copies oriented boxes without sharing geometry, arrays, or points", () => {
     const source: DetectionFrame = {
       mediaTime: 0,

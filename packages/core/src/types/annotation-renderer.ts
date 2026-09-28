@@ -101,7 +101,9 @@ export interface HeatmapAnnotationRenderer extends BaseAnnotationRenderer {
   readonly minimumAlpha?: number;
   /** Overall alpha multiplier, from 0 to 1; defaults to 1. */
   readonly opacity?: number;
-  /** Interpolated from the threshold to the highest score in each raster. */
+  /** Upper score mapped to the final colour stop; defaults to 1. */
+  readonly maximumScore?: number;
+  /** Interpolated from the threshold to `maximumScore`. */
   readonly colorStops?: readonly HeatmapColorStop[];
 }
 
@@ -392,7 +394,9 @@ export type AnnotationRendererFactory = {
     options?: AnnotationRendererStyleOptions<"ellipse">,
   ) => EllipseAnnotationRenderer;
   readonly heatmap: (
-    options?: Omit<HeatmapAnnotationRenderer, "kind" | "id">,
+    options?: Omit<HeatmapAnnotationRenderer, "kind" | "id"> & {
+      readonly id?: string;
+    },
   ) => HeatmapAnnotationRenderer;
   readonly keypoints: (
     options?: AnnotationRendererStyleOptions<"keypoints">,
@@ -442,7 +446,7 @@ export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
   boxCorners: (options) => createAnnotationRenderer("box-corners", options),
   ellipse: (options) => createAnnotationRenderer("ellipse", options),
-  heatmap: (options) => ({ id: "heatmap", kind: "heatmap", ...options }),
+  heatmap: (options) => ({ id: "heatmap", ...options, kind: "heatmap" }),
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),

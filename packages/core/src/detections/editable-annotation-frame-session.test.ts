@@ -7,6 +7,32 @@ import {
 import type { DetectionFrame, OrientedBoxGeometry } from "#types/detections";
 
 describe("editable annotation frame session", () => {
+  it("accepts typed heatmaps as immutable snapshots without freezing caller values", () => {
+    const values = new Float32Array([0.2, 0.8]);
+    const session = createEditableAnnotationFrameSession({
+      mediaTime: 0,
+      detections: [
+        {
+          id: "heat",
+          heatmap: {
+            bounds: { x: 1, y: 0.5, width: 2, height: 1 },
+            width: 2,
+            height: 1,
+            values,
+          },
+        },
+      ],
+    });
+    const snapshot = session.getSnapshot().detections[0]!.heatmap!;
+
+    expect(snapshot.values[0]).toBeCloseTo(0.2);
+    expect(snapshot.values[1]).toBeCloseTo(0.8);
+    expect(Object.isFrozen(snapshot.values)).toBe(true);
+    expect(Object.isFrozen(values)).toBe(false);
+    values[1] = 0;
+    expect(snapshot.values[1]).toBeCloseTo(0.8);
+  });
+
   const createOrientedFrame = (): DetectionFrame => ({
     mediaTime: 0,
     detections: [

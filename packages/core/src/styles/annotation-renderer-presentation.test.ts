@@ -166,6 +166,23 @@ describe("annotation renderer presentation", () => {
     expect(presentation.boxStyle).toBeNull();
   });
 
+  it("keeps multiple uniquely identified heatmap renderers", () => {
+    const first = annotationRenderers.heatmap({
+      id: "heat-low",
+      thresholdScale: 0.5,
+    });
+    const second = annotationRenderers.heatmap({
+      id: "heat-high",
+      thresholdScale: 1,
+    });
+
+    const presentation = resolveAnnotationRendererPresentation({
+      renderers: [first, second],
+    });
+
+    expect(presentation.renderers).toEqual([first, second]);
+  });
+
   it("keeps source-specific style overrides after renderer normalization", () => {
     const globalBoxStyle = new BaseBoxStyle({
       stroke: { color: 0x8b5cf6, width: 2 },

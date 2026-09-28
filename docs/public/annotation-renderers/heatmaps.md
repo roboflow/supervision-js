@@ -33,8 +33,8 @@ const heatmap = {
     width: imageWidth,
     height: imageHeight,
   },
-  width: imageWidth,
-  height: imageHeight,
+  width: anomaly_map[0].length,
+  height: anomaly_map.length,
   values: anomaly_map.flat(),
   threshold: anomaly_threshold,
 };
@@ -45,7 +45,11 @@ session.setPresentation({
 });
 ```
 
-`thresholdScale`, `minimumAlpha`, `opacity`, and `colorStops` are presentation
-choices. The default cutoff is the score's own `threshold`; lower it only when
+`thresholdScale`, `minimumAlpha`, `opacity`, `maximumScore`, and `colorStops` are
+presentation choices. The default cutoff is the score's own `threshold` and
+colours use the same fixed 0-to-1 score scale across frames. Set
+`maximumScore` if the model uses a different range; lower the cutoff only when
 you want to show weaker evidence. In the pebbles demo, the cutoff is 75% of the
-model threshold and only tracker-confirmed detections are displayed.
+model threshold and only tracker-confirmed detections are displayed. A lower
+resolution `anomaly_map` can cover full-image `bounds` without making a
+full-resolution texture.

@@ -29,6 +29,7 @@ export function createPixiHeatmapLayer(options: {
   let renderers = options.renderers;
   let lastFrame: DetectionFrame | undefined;
   let dirty = true;
+  let warnedInvalidHeatmap = false;
   const sprites: PixiSprite[] = [];
 
   const clear = () => {
@@ -53,22 +54,36 @@ export function createPixiHeatmapLayer(options: {
     drawFrame(mediaTime: number) {
       const frame = options.detectionTimeline.selectFrame(mediaTime);
       if (!dirty && frame === lastFrame) return;
-      lastFrame = frame;
-      dirty = false;
       clear();
-      if (!frame || renderers.length === 0) return;
+      if (!frame || renderers.length === 0) {
+        lastFrame = frame;
+        dirty = false;
+        return;
+      }
 
       for (const detection of frame.detections) {
         const map = detection.heatmap;
         if (!map || !options.isVisible(detection)) continue;
         for (const renderer of renderers) {
+          let rgba: Uint8ClampedArray;
+          try {
+            // Reject malformed or oversized rasters before canvas allocation.
+            rgba = colorizeHeatmap(map, renderer);
+          } catch (error) {
+            if (!(error instanceof RangeError)) throw error;
+            if (!warnedInvalidHeatmap) {
+              console.warn("Skipping an invalid detection heatmap.", error);
+              warnedInvalidHeatmap = true;
+            }
+            continue;
+          }
           const canvas = document.createElement("canvas");
           canvas.width = map.width;
           canvas.height = map.height;
           const context = canvas.getContext("2d");
           if (!context) continue;
           const pixels = context.createImageData(map.width, map.height);
-          pixels.data.set(colorizeHeatmap(map, renderer));
+          pixels.data.set(rgba);
           context.putImageData(pixels, 0, 0);
           const texture = new options.Texture({
             source: new options.CanvasSource({
@@ -86,6 +101,8 @@ export function createPixiHeatmapLayer(options: {
           sprites.push(sprite);
         }
       }
+      lastFrame = frame;
+      dirty = false;
     },
     destroy() {
       clear();

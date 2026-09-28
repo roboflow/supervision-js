@@ -9,7 +9,7 @@ describe("colorizeHeatmap", () => {
         bounds: { x: 1, y: 0.5, width: 2, height: 1 },
         width: 2,
         height: 1,
-        values: [0.1, 0.2],
+        values: [0.1, 1],
         threshold: 0.1,
       },
       annotationRenderers.heatmap(),
@@ -35,7 +35,28 @@ describe("colorizeHeatmap", () => {
     );
     expect(rgba[3]).toBe(0);
     expect(rgba[7]).toBeGreaterThan(0);
-    expect([...rgba.slice(8, 12)]).toEqual([220, 30, 30, 255]);
+    expect([...rgba.slice(8, 11)]).toEqual([255, 214, 0]);
+    expect(rgba[11]).toBeLessThan(255);
+  });
+
+  it("keeps one score the same colour across rasters with different peaks", () => {
+    const common = {
+      bounds: { x: 1, y: 0.5, width: 2, height: 1 },
+      width: 2,
+      height: 1,
+      threshold: 0.1,
+    };
+    const renderer = annotationRenderers.heatmap();
+    const lowerPeak = colorizeHeatmap(
+      { ...common, values: [0.2, 0.3] },
+      renderer,
+    );
+    const higherPeak = colorizeHeatmap(
+      { ...common, values: [0.2, 0.9] },
+      renderer,
+    );
+
+    expect([...lowerPeak.slice(0, 4)]).toEqual([...higherPeak.slice(0, 4)]);
   });
 
   it("rejects a mismatched raster instead of displaying stale geometry", () => {
@@ -45,6 +66,20 @@ describe("colorizeHeatmap", () => {
           bounds: { x: 0, y: 0, width: 2, height: 1 },
           width: 2,
           height: 1,
+          values: [0.1],
+        },
+        annotationRenderers.heatmap(),
+      ),
+    ).toThrow(RangeError);
+  });
+
+  it("rejects an oversized raster before allocating its RGBA buffer", () => {
+    expect(() =>
+      colorizeHeatmap(
+        {
+          bounds: { x: 0, y: 0, width: 16_000, height: 16_000 },
+          width: 16_000,
+          height: 16_000,
           values: [0.1],
         },
         annotationRenderers.heatmap(),

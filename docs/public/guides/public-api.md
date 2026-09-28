@@ -129,7 +129,7 @@ session.setPresentation({
 });
 ```
 
-The current built-ins are `box`, `box-corners`, `ellipse`, `marker`, `mask`,
+The current built-ins are `box`, `box-corners`, `ellipse`, `heatmap`, `marker`, `mask`,
 `maskHalo`, `orientedBox`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
 the multi-instance `region` renderer for asset overlays and current-frame media
 crops;

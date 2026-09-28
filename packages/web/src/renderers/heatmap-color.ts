@@ -10,6 +10,7 @@ const DEFAULT_STOPS: readonly HeatmapColorStop[] = [
   { position: 0.7, color: 0xff7a00 },
   { position: 1, color: 0xdc1e1e },
 ];
+const MAX_HEATMAP_PIXELS = 16_777_216;
 
 /** Turns semantic scores into an RGBA raster; no palette enters cold data. */
 export function colorizeHeatmap(
@@ -22,13 +23,22 @@ export function colorizeHeatmap(
     !Number.isInteger(height) ||
     width <= 0 ||
     height <= 0 ||
+    width * height > MAX_HEATMAP_PIXELS ||
+    !(
+      Array.isArray(values) ||
+      values instanceof Float32Array ||
+      values instanceof Uint16Array
+    ) ||
     values.length !== width * height
   ) {
-    throw new RangeError("Heatmap dimensions must match its row-major values.");
+    throw new RangeError(
+      "Heatmap dimensions must match its row-major values and fit the raster limit.",
+    );
   }
 
   const scale = map.valueScale ?? 1;
   const threshold = (map.threshold ?? 0) * (renderer.thresholdScale ?? 1);
+  const maximumScore = renderer.maximumScore ?? 1;
   const opacity = clamp01(renderer.opacity ?? 1);
   const minimumAlpha = clamp01(renderer.minimumAlpha ?? 0);
   const stops = renderer.colorStops ?? DEFAULT_STOPS;
@@ -36,32 +46,34 @@ export function colorizeHeatmap(
     !Number.isFinite(scale) ||
     scale <= 0 ||
     !Number.isFinite(threshold) ||
+    !Number.isFinite(maximumScore) ||
+    maximumScore <= 0 ||
     !Number.isFinite(renderer.thresholdScale ?? 1) ||
     (renderer.thresholdScale ?? 1) < 0 ||
+    !Number.isFinite(renderer.opacity ?? 1) ||
+    !Number.isFinite(renderer.minimumAlpha ?? 0) ||
     stops.length === 0 ||
     stops.some(
       (stop, index) =>
         !Number.isFinite(stop.position) ||
         stop.position < 0 ||
         stop.position > 1 ||
+        !Number.isInteger(stop.color) ||
+        stop.color < 0 ||
+        stop.color > 0xffffff ||
         (index > 0 && stop.position < stops[index - 1].position),
     )
   ) {
     throw new RangeError("Invalid heatmap scale, threshold, or color stops.");
   }
 
-  let peak = threshold;
-  for (const stored of values) {
-    if (Number.isFinite(stored)) peak = Math.max(peak, stored * scale);
-  }
-
   const rgba = new Uint8ClampedArray(values.length * 4);
-  if (peak <= threshold || opacity === 0) return rgba;
+  if (maximumScore <= threshold || opacity === 0) return rgba;
 
   for (let index = 0; index < values.length; index += 1) {
     const score = values[index] * scale;
     if (!Number.isFinite(score) || score <= threshold) continue;
-    const intensity = clamp01((score - threshold) / (peak - threshold));
+    const intensity = clamp01((score - threshold) / (maximumScore - threshold));
     const color = interpolateColor(stops, intensity);
     const offset = index * 4;
     rgba[offset] = color >> 16;
