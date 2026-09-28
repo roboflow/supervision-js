@@ -439,6 +439,7 @@ export async function createPixiMediaScene(
     // stagingTexture wraps empty.
     getMediaTexture: () =>
       hasPresentedSample ? mediaSprite?.texture : undefined,
+    getMediaSize: () => ({ height: mediaHeight, width: mediaWidth }),
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
       const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
