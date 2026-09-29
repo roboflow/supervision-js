@@ -1,7 +1,5 @@
-import type {
-  DetectionHeatmap,
-  HeatmapAnnotationRenderer,
-} from "supervision-js-core";
+import type { HeatmapAnnotationRenderer } from "supervision-js-core";
+import type { HeatmapRaster } from "#renderers/heatmap-color";
 
 export enum HeatmapPreparationWorkerMessageType {
   Prepare = "heatmap-prepare",
@@ -10,7 +8,7 @@ export enum HeatmapPreparationWorkerMessageType {
 }
 
 export interface HeatmapPreparationWorkerRequest {
-  readonly map: DetectionHeatmap;
+  readonly map: HeatmapRaster;
   readonly renderer: HeatmapAnnotationRenderer;
   readonly requestId: number;
   readonly type: HeatmapPreparationWorkerMessageType.Prepare;

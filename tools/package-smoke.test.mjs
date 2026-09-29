@@ -332,6 +332,16 @@ test("built editing entrypoint exposes advanced host-owned editing APIs", async 
   assert.equal(typeof editing.createMaskBrushEditor, "function");
 });
 
+test("built heatmap path retains Pixi prepare registration", () => {
+  const entrypoint = readFileSync(
+    new URL("../packages/web/dist/index.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(entrypoint, /extensions\.add\(PrepareSystem\)/);
+  assert.match(entrypoint, /renderer\.prepare\.upload\(texture\)/);
+});
+
 test("public browser declarations do not leak Pixi implementation types", () => {
   for (const declaration of [
     "../packages/web/dist/index.d.ts",

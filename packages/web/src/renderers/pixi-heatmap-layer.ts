@@ -31,6 +31,14 @@ interface CachedHeatmap {
   readonly bytes: number;
 }
 
+interface HeatmapJob {
+  readonly key: string;
+  readonly map: DetectionHeatmap;
+  readonly renderer: HeatmapAnnotationRenderer;
+  readonly generation: number;
+  cancelled?: boolean;
+}
+
 export function createPixiHeatmapLayer(options: {
   readonly CanvasSource: new (options: {
     resource: HTMLCanvasElement;
@@ -53,6 +61,7 @@ export function createPixiHeatmapLayer(options: {
   readonly onPreparedWindowChange?: () => void;
   readonly prepareTexture?: (texture: PixiTexture) => Promise<void>;
   readonly preparer?: HeatmapFramePreparer;
+  readonly preparerFactory?: () => HeatmapFramePreparer;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly renderers: readonly HeatmapAnnotationRenderer[];
 }) {
@@ -66,21 +75,15 @@ export function createPixiHeatmapLayer(options: {
   let nextIdentity = 0;
   let cachedBytes = 0;
   let destroyed = false;
-  let activeJob:
-    | {
-        key: string;
-        map: DetectionHeatmap;
-        renderer: HeatmapAnnotationRenderer;
-        generation: number;
-      }
-    | undefined;
+  let activeJob: HeatmapJob | undefined;
   let preparer = options.preparer;
   const identities = new WeakMap<object, number>();
   const cache = new Map<string, CachedHeatmap>();
-  const pending = new Map<string, NonNullable<typeof activeJob>>();
+  const pending = new Map<string, HeatmapJob>();
   const failed = new Set<string>();
   const activeKeys = new Set<string>();
   const wantedKeys = new Set<string>();
+  const currentKeys = new Set<string>();
   const positionedSprites: {
     readonly sprite: PixiSprite;
     readonly detectionId: string | number | undefined;
@@ -101,6 +104,12 @@ export function createPixiHeatmapLayer(options: {
   };
 
   const clearCache = () => {
+    if (activeJob && (!options.preparer || options.preparerFactory)) {
+      activeJob.cancelled = true;
+      preparer?.destroy();
+      preparer = undefined;
+      activeJob = undefined;
+    }
     clear();
     for (const entry of cache.values()) {
       entry.texture.destroy(true);
@@ -110,6 +119,7 @@ export function createPixiHeatmapLayer(options: {
     pending.clear();
     failed.clear();
     wantedKeys.clear();
+    currentKeys.clear();
     cachedBytes = 0;
     generation += 1;
   };
@@ -241,12 +251,16 @@ export function createPixiHeatmapLayer(options: {
     if (!job) return;
     pending.delete(job.key);
     activeJob = job;
-    preparer ??= createHeatmapFramePreparer(options.renderPreparation);
+    preparer ??=
+      options.preparerFactory?.() ??
+      options.preparer ??
+      createHeatmapFramePreparer(options.renderPreparation);
     void preparer
       .prepare(job.map, job.renderer)
       .then(async (image) => {
         if (
           destroyed ||
+          job.cancelled ||
           job.generation !== generation ||
           !wantedKeys.has(job.key)
         ) {
@@ -260,16 +274,20 @@ export function createPixiHeatmapLayer(options: {
         } catch (error) {
           texture?.destroy(true);
           image.close();
+          if (destroyed || job.cancelled || job.generation !== generation) {
+            return;
+          }
           failed.add(job.key);
           if (!warnedInvalidHeatmap) {
             console.warn("Skipping an invalid detection heatmap.", error);
             warnedInvalidHeatmap = true;
           }
-          options.onPreparedWindowChange?.();
+          if (currentKeys.has(job.key)) options.onPreparedWindowChange?.();
           return;
         }
         if (
           destroyed ||
+          job.cancelled ||
           job.generation !== generation ||
           !wantedKeys.has(job.key)
         ) {
@@ -285,16 +303,16 @@ export function createPixiHeatmapLayer(options: {
         cachedBytes += job.map.width * job.map.height * 4;
         evict();
         dirty = true;
-        options.onPreparedWindowChange?.();
+        if (currentKeys.has(job.key)) options.onPreparedWindowChange?.();
       })
       .catch((error: unknown) => {
-        if (destroyed || job.generation !== generation) return;
+        if (destroyed || job.cancelled || job.generation !== generation) return;
         failed.add(job.key);
         if (!warnedInvalidHeatmap) {
           console.warn("Skipping an invalid detection heatmap.", error);
           warnedInvalidHeatmap = true;
         }
-        options.onPreparedWindowChange?.();
+        if (currentKeys.has(job.key)) options.onPreparedWindowChange?.();
       })
       .finally(() => {
         if (activeJob === job) activeJob = undefined;
@@ -376,9 +394,11 @@ export function createPixiHeatmapLayer(options: {
     drawFrame(mediaTime: number) {
       const frame = options.detectionTimeline.selectFrame(mediaTime);
       if (!dirty && frame === lastFrame) return;
+      const previousFrame = lastFrame;
       clear();
       pending.clear();
       wantedKeys.clear();
+      currentKeys.clear();
       if (!frame || renderers.length === 0) {
         lastFrame = frame;
         dirty = false;
@@ -392,7 +412,10 @@ export function createPixiHeatmapLayer(options: {
       );
       for (const { detection, map, renderer } of maps) {
         const key = keyFor(map, renderer);
-        if (shouldPrepareAsync(map, visiblePixelCount)) wantedKeys.add(key);
+        if (shouldPrepareAsync(map, visiblePixelCount)) {
+          wantedKeys.add(key);
+          currentKeys.add(key);
+        }
         let texture = touch(key)?.texture;
         let temporaryTexture = false;
         if (!texture && !failed.has(key)) {
@@ -437,6 +460,9 @@ export function createPixiHeatmapLayer(options: {
         options.detectionTimeline,
       );
       const frameIndex = frames.indexOf(frame);
+      const priorFrameIndex = previousFrame
+        ? frames.indexOf(previousFrame)
+        : -1;
       const nextFrame = frames[frameIndex + 1];
       if (frameIndex >= 0 && nextFrame) {
         const nextMaps = visibleMaps(nextFrame);
@@ -450,6 +476,24 @@ export function createPixiHeatmapLayer(options: {
             enqueue(map, renderer);
           }
         }
+      }
+      const jumped =
+        previousFrame !== undefined &&
+        previousFrame !== frame &&
+        (frameIndex < 0 ||
+          priorFrameIndex < 0 ||
+          Math.abs(frameIndex - priorFrameIndex) > 1);
+      if (
+        jumped &&
+        activeJob &&
+        !wantedKeys.has(activeJob.key) &&
+        (!options.preparer || options.preparerFactory)
+      ) {
+        activeJob.cancelled = true;
+        preparer?.destroy();
+        preparer = undefined;
+        activeJob = undefined;
+        pump();
       }
     },
     destroy() {

@@ -5,6 +5,84 @@ import { createHeatmapFramePreparer } from "./heatmap-frame-preparer";
 import { HeatmapPreparationWorkerMessageType } from "./heatmap-preparation-worker-protocol";
 
 describe("heatmap frame preparer", () => {
+  it("stops copying a large map when its worker is cancelled", async () => {
+    const postMessage = vi.fn();
+    const terminate = vi.fn();
+    const preparer = createHeatmapFramePreparer({
+      mode: RenderPreparationMode.Worker,
+      workerFactory: {
+        createWorker: () =>
+          ({
+            addEventListener: vi.fn(),
+            postMessage,
+            terminate,
+          }) as unknown as Worker,
+      },
+    });
+    const preparation = preparer.prepare(
+      {
+        bounds: { x: 0, y: 0, width: 1, height: 1 },
+        width: 131_073,
+        height: 1,
+        values: new Float32Array(131_073),
+      },
+      annotationRenderers.heatmap(),
+    );
+
+    preparer.destroy();
+    await expect(preparation).rejects.toThrow("destroyed");
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(terminate).toHaveBeenCalledOnce();
+  });
+
+  it("transfers a private exact-score copy, leaving the caller's array intact", async () => {
+    const listeners = new Map<string, (event: MessageEvent) => void>();
+    const postMessage = vi.fn(
+      (
+        message: { requestId: number; map: { values: Float64Array } },
+        transfer: Transferable[],
+      ) => {
+        expect(message.map.values).toBeInstanceOf(Float64Array);
+        expect(message.map.values[0]).toBe(0.12345678912345678);
+        expect(transfer).toEqual([message.map.values.buffer]);
+        listeners.get("message")?.({
+          data: {
+            error: "test complete",
+            requestId: message.requestId,
+            type: HeatmapPreparationWorkerMessageType.Error,
+          },
+        } as MessageEvent);
+      },
+    );
+    const worker = {
+      addEventListener(type: string, listener: (event: MessageEvent) => void) {
+        listeners.set(type, listener);
+      },
+      postMessage,
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const preparer = createHeatmapFramePreparer({
+      mode: RenderPreparationMode.Worker,
+      workerFactory: { createWorker: () => worker },
+    });
+    const values = [0.12345678912345678];
+
+    await expect(
+      preparer.prepare(
+        {
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+          width: 1,
+          height: 1,
+          values,
+        },
+        annotationRenderers.heatmap(),
+      ),
+    ).rejects.toThrow("test complete");
+    expect(values).toEqual([0.12345678912345678]);
+    expect(postMessage).toHaveBeenCalledOnce();
+    preparer.destroy();
+  });
+
   it("does not retry invalid heatmap data on the main thread", async () => {
     const listeners = new Map<string, (event: MessageEvent) => void>();
     const terminate = vi.fn();

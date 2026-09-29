@@ -326,12 +326,14 @@ vi.mock("pixi.js", () => {
     ImageSource: Stub,
     Mesh: Stub,
     MeshGeometry: Stub,
+    PrepareSystem: Stub,
     Rectangle,
     Shader: Stub,
     Sprite,
     Text: Stub,
     Texture,
     UniformGroup: Stub,
+    extensions: { add: vi.fn() },
   };
 });
 

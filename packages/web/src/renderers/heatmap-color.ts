@@ -13,9 +13,13 @@ const DEFAULT_STOPS: readonly HeatmapColorStop[] = [
 const MAX_HEATMAP_PIXELS = 16_777_216;
 const MAX_HEATMAP_SIDE = 8_192;
 
+export type HeatmapRaster = Omit<DetectionHeatmap, "values"> & {
+  readonly values: DetectionHeatmap["values"] | Float64Array;
+};
+
 /** Turns semantic scores into an RGBA raster; no palette enters cold data. */
 export function colorizeHeatmap(
-  map: DetectionHeatmap,
+  map: HeatmapRaster,
   renderer: HeatmapAnnotationRenderer,
 ): Uint8ClampedArray<ArrayBuffer> {
   const { bounds, width, height, values } = map;
@@ -36,6 +40,7 @@ export function colorizeHeatmap(
     !(
       Array.isArray(values) ||
       values instanceof Float32Array ||
+      values instanceof Float64Array ||
       values instanceof Uint16Array
     ) ||
     values.length !== width * height

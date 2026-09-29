@@ -278,6 +278,109 @@ describe("pixi heatmap layer", () => {
     expect(onPreparedWindowChange).not.toHaveBeenCalled();
     layer.destroy();
   });
+
+  it("notifies after each map, even before the frame is fully prepared", async () => {
+    class FakeImageBitmap {
+      close = vi.fn();
+    }
+    vi.stubGlobal("ImageBitmap", FakeImageBitmap);
+    const complete: Array<
+      (value: { resource: FakeImageBitmap; close(): void }) => void
+    > = [];
+    const prepare = vi.fn(
+      () =>
+        new Promise<{ resource: FakeImageBitmap; close(): void }>((resolve) => {
+          complete.push(resolve);
+        }),
+    );
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [0, 1].map((id) => ({
+        id,
+        heatmap: {
+          bounds: { x: 0, y: 0, width: 256, height: 256 },
+          width: 256,
+          height: 256,
+          values: new Float32Array(256 * 256),
+        },
+      })),
+    };
+    const onPreparedWindowChange = vi.fn();
+    const layer = createPixiHeatmapLayer({
+      CanvasSource: FakeCanvasSource as never,
+      Container: FakeContainer as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {
+        selectFrame: () => frame,
+        getBufferedFrames: () => [frame],
+      } as unknown as BufferedDetectionTimeline,
+      isVisible: () => true,
+      onPreparedWindowChange,
+      preparer: { prepare, destroy: vi.fn() } as never,
+      renderers: [annotationRenderers.heatmap()],
+    });
+
+    layer.drawFrame(0);
+    complete[0]({ resource: new FakeImageBitmap(), close: vi.fn() });
+    await vi.waitFor(() =>
+      expect(onPreparedWindowChange).toHaveBeenCalledOnce(),
+    );
+    expect(layer.isArtifactPrepared(0)).toBe(false);
+    layer.drawFrame(0);
+    expect(
+      (layer.createContainer() as unknown as FakeContainer).children,
+    ).toHaveLength(1);
+    layer.destroy();
+  });
+
+  it("supersedes an obsolete active job after seeking", () => {
+    const frames: DetectionFrame[] = [0, 1, 2].map((mediaTime) => ({
+      mediaTime,
+      detections:
+        mediaTime === 1
+          ? []
+          : [
+              {
+                heatmap: {
+                  bounds: { x: 0, y: 0, width: 256, height: 256 },
+                  width: 256,
+                  height: 256,
+                  values: new Float32Array(256 * 256),
+                },
+              },
+            ],
+    }));
+    const preparers = [0, 1].map(() => ({
+      prepare: vi.fn(() => new Promise<never>(() => undefined)),
+      destroy: vi.fn(),
+    }));
+    const preparerFactory = vi
+      .fn()
+      .mockReturnValueOnce(preparers[0])
+      .mockReturnValueOnce(preparers[1]);
+    const layer = createPixiHeatmapLayer({
+      CanvasSource: FakeCanvasSource as never,
+      Container: FakeContainer as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {
+        selectFrame: (time: number) => frames[time],
+        getBufferedFrames: () => frames,
+      } as unknown as BufferedDetectionTimeline,
+      isVisible: () => true,
+      preparerFactory,
+      renderers: [annotationRenderers.heatmap()],
+    });
+
+    layer.drawFrame(0);
+    layer.drawFrame(2);
+
+    expect(preparers[0].destroy).toHaveBeenCalledOnce();
+    expect(preparers[1].prepare).toHaveBeenCalledOnce();
+    layer.destroy();
+  });
 });
 
 class FakeContainer {

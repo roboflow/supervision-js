@@ -100,7 +100,6 @@ import type {
   Graphics as PixiGraphics,
   Texture as PixiTexture,
 } from "pixi.js";
-import "pixi.js/prepare";
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -258,13 +257,17 @@ export async function createPixiMediaScene(
     ImageSource,
     Mesh,
     MeshGeometry,
+    PrepareSystem,
     Rectangle,
     Sprite,
     Shader,
     Text,
     Texture,
     UniformGroup,
+    extensions,
   } = pixi;
+  // The package build drops side-effect-only imports, so register explicitly.
+  extensions.add(PrepareSystem);
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
   /**
@@ -391,7 +394,8 @@ export async function createPixiMediaScene(
       detectionTimeline: annotationDetectionTimeline,
       isVisible: (detection) =>
         !resolveAnnotationStyleState(detection, currentVisibility).hidden,
-      onPreparedWindowChange: handlePreparedWindowChange,
+      // A partial heatmap completion must redraw even while other maps cook.
+      onPreparedWindowChange: redrawAnnotationsNow,
       prepareTexture: (texture) => app.renderer.prepare.upload(texture),
       renderPreparation: options.renderPreparation,
       renderers: currentHeatmapRenderers,
