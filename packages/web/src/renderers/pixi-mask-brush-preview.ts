@@ -8,6 +8,7 @@ import type {
 } from "pixi.js";
 
 import { resolveScreenLength } from "./pixi-path";
+import { fitTextureSize } from "./pixi-texture-size";
 
 export interface PixiMaskBrushPreview {
   readonly display: PixiContainer;
@@ -18,6 +19,9 @@ export interface PixiMaskBrushPreview {
 export function createPixiMaskBrushPreview(options: {
   readonly preview: MaskBrushPreviewOptions;
   readonly onInvalidate?: () => void;
+  /** GPU texture limit; a larger brush canvas is uploaded through a fitted copy. */
+  readonly maxTextureSize?: number;
+  readonly createCanvas?: () => HTMLCanvasElement;
   readonly CanvasSource: new (options: {
     dynamic: boolean;
     height: number;
@@ -33,11 +37,16 @@ export function createPixiMaskBrushPreview(options: {
   }) => PixiTexture;
 }): PixiMaskBrushPreview {
   const { editor } = options.preview;
+  const upload = createUploadCanvas(
+    editor.canvas,
+    options.maxTextureSize ?? Infinity,
+    options.createCanvas ?? (() => document.createElement("canvas")),
+  );
   const source = new options.CanvasSource({
     dynamic: true,
-    height: editor.canvas.height,
-    resource: editor.canvas,
-    width: editor.canvas.width,
+    height: upload.canvas.height,
+    resource: upload.canvas,
+    width: upload.canvas.width,
   });
   const texture = new options.Texture({ dynamic: true, source });
   const sprite = new options.Sprite({ texture });
@@ -54,6 +63,7 @@ export function createPixiMaskBrushPreview(options: {
   display.addChild(sprite, cursor);
 
   const updateTexture = () => {
+    upload.copy();
     source.update();
     scheduleInvalidation();
   };
@@ -78,6 +88,41 @@ export function createPixiMaskBrushPreview(options: {
       source.destroy();
     },
   };
+
+  /**
+   * The brush canvas is media-sized. Over the GPU limit its upload fails and the
+   * tinted preview sprite, which covers the whole picture, samples black and dims
+   * it; so the texture takes a fitted copy while the sprite keeps media size.
+   */
+  function createUploadCanvas(
+    brushCanvas: HTMLCanvasElement,
+    maxTextureSize: number,
+    createCanvas: () => HTMLCanvasElement,
+  ) {
+    const fitted = fitTextureSize(
+      brushCanvas.width,
+      brushCanvas.height,
+      maxTextureSize,
+    );
+    if (
+      fitted.width === brushCanvas.width &&
+      fitted.height === brushCanvas.height
+    ) {
+      return { canvas: brushCanvas, copy: () => undefined };
+    }
+
+    const canvas = createCanvas();
+    canvas.width = fitted.width;
+    canvas.height = fitted.height;
+    const context = canvas.getContext("2d");
+    const copy = () => {
+      if (!context) return;
+      context.clearRect(0, 0, fitted.width, fitted.height);
+      context.drawImage(brushCanvas, 0, 0, fitted.width, fitted.height);
+    };
+    copy();
+    return { canvas, copy };
+  }
 
   function scheduleInvalidation() {
     const onInvalidate = options.onInvalidate;

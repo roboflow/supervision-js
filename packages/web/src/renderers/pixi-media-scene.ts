@@ -532,6 +532,10 @@ export async function createPixiMediaScene(
         Texture,
         preview: options.maskBrush,
         onInvalidate: frameChannel ? renderNow : undefined,
+        maxTextureSize: resolveMaxTextureSize(
+          app.renderer as TextureLimitRenderer,
+          options.maxTextureSize,
+        ),
       })
     : undefined;
   let appliedPresentation: MediaRendererPresentation | undefined;
