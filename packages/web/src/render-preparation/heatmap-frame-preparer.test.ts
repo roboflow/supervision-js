@@ -5,6 +5,30 @@ import { createHeatmapFramePreparer } from "./heatmap-frame-preparer";
 import { HeatmapPreparationWorkerMessageType } from "./heatmap-preparation-worker-protocol";
 
 describe("heatmap frame preparer", () => {
+  it("does not colorize after a deferred main-thread job is cancelled", async () => {
+    vi.useFakeTimers();
+    try {
+      const preparer = createHeatmapFramePreparer({
+        mode: RenderPreparationMode.MainThread,
+      });
+      const preparation = preparer.prepare(
+        {
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+          width: 1,
+          height: 1,
+          values: [0.5],
+        },
+        annotationRenderers.heatmap(),
+      );
+      const rejection = expect(preparation).rejects.toThrow("destroyed");
+      preparer.destroy();
+      await vi.runAllTimersAsync();
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops copying a large map when its worker is cancelled", async () => {
     const postMessage = vi.fn();
     const terminate = vi.fn();

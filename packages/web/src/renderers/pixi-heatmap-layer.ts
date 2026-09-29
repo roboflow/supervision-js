@@ -336,6 +336,21 @@ export function createPixiHeatmapLayer(options: {
     pump();
   };
 
+  const cancelUnwantedJob = () => {
+    if (
+      !activeJob ||
+      wantedKeys.has(activeJob.key) ||
+      (options.preparer && !options.preparerFactory)
+    ) {
+      return;
+    }
+    activeJob.cancelled = true;
+    preparer?.destroy();
+    preparer = undefined;
+    activeJob = undefined;
+    pump();
+  };
+
   return {
     createContainer: () => container,
     setRenderers(next: readonly HeatmapAnnotationRenderer[]) {
@@ -394,7 +409,6 @@ export function createPixiHeatmapLayer(options: {
     drawFrame(mediaTime: number) {
       const frame = options.detectionTimeline.selectFrame(mediaTime);
       if (!dirty && frame === lastFrame) return;
-      const previousFrame = lastFrame;
       clear();
       pending.clear();
       wantedKeys.clear();
@@ -402,6 +416,7 @@ export function createPixiHeatmapLayer(options: {
       if (!frame || renderers.length === 0) {
         lastFrame = frame;
         dirty = false;
+        cancelUnwantedJob();
         return;
       }
 
@@ -460,9 +475,6 @@ export function createPixiHeatmapLayer(options: {
         options.detectionTimeline,
       );
       const frameIndex = frames.indexOf(frame);
-      const priorFrameIndex = previousFrame
-        ? frames.indexOf(previousFrame)
-        : -1;
       const nextFrame = frames[frameIndex + 1];
       if (frameIndex >= 0 && nextFrame) {
         const nextMaps = visibleMaps(nextFrame);
@@ -477,24 +489,7 @@ export function createPixiHeatmapLayer(options: {
           }
         }
       }
-      const jumped =
-        previousFrame !== undefined &&
-        previousFrame !== frame &&
-        (frameIndex < 0 ||
-          priorFrameIndex < 0 ||
-          Math.abs(frameIndex - priorFrameIndex) > 1);
-      if (
-        jumped &&
-        activeJob &&
-        !wantedKeys.has(activeJob.key) &&
-        (!options.preparer || options.preparerFactory)
-      ) {
-        activeJob.cancelled = true;
-        preparer?.destroy();
-        preparer = undefined;
-        activeJob = undefined;
-        pump();
-      }
+      cancelUnwantedJob();
     },
     destroy() {
       destroyed = true;

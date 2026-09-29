@@ -394,8 +394,8 @@ export async function createPixiMediaScene(
       detectionTimeline: annotationDetectionTimeline,
       isVisible: (detection) =>
         !resolveAnnotationStyleState(detection, currentVisibility).hidden,
-      // A partial heatmap completion must redraw even while other maps cook.
-      onPreparedWindowChange: redrawAnnotationsNow,
+      // A partial heatmap changes pixels before the all-ready token changes.
+      onPreparedWindowChange: () => redrawAnnotationsNow(true),
       prepareTexture: (texture) => app.renderer.prepare.upload(texture),
       renderPreparation: options.renderPreparation,
       renderers: currentHeatmapRenderers,
@@ -2277,19 +2277,17 @@ export async function createPixiMediaScene(
   }
 
   /** Redraws the frame on screen whether or not its readiness moved. */
-  function redrawAnnotationsNow() {
+  function redrawAnnotationsNow(forceRender = false) {
     if (isPresenting || isDestroyed) {
       return;
     }
 
     const { boxState, regionState } = drawAnnotationFrame(currentMediaTime);
 
-    if (
-      !frameChannel ||
-      !renderScheduler.renderOnChange(describeSceneRender())
-    ) {
-      return;
-    }
+    if (!frameChannel) return;
+    const signature = describeSceneRender();
+    if (forceRender) renderScheduler.render(signature);
+    else if (!renderScheduler.renderOnChange(signature)) return;
 
     options.onPresentationUpdate?.(
       createPresentedSampleState(currentMediaTime, boxState, regionState),

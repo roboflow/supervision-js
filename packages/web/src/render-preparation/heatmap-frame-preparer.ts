@@ -116,6 +116,9 @@ export function createHeatmapFramePreparer(
 
       // Deferred from the present, even in environments without workers.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (isDestroyed) {
+        throw new Error("Heatmap frame preparer has been destroyed.");
+      }
       const resource = new ImageData(
         colorizeHeatmap(map, renderer),
         map.width,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  annotationRenderers,
   AnnotationGestureStateKind,
   BaseFocusStyle,
   createArrayDetectionFrameSource,
@@ -63,6 +64,7 @@ vi.mock("pixi.js", () => {
     renderer = {
       background: { color: 0 },
       extract: { canvas: vi.fn() },
+      prepare: { upload: vi.fn(async () => undefined) },
       gpu: {
         device: {
           createTexture: (descriptor: {
@@ -91,6 +93,7 @@ vi.mock("pixi.js", () => {
 
   class Container {
     children: unknown[] = [];
+    destroy = vi.fn();
     on = vi.fn();
     position = { set: vi.fn() };
     scale = { set: vi.fn() };
@@ -135,6 +138,8 @@ vi.mock("pixi.js", () => {
     constructor(options: { texture?: unknown } = {}) {
       this.texture = options.texture;
     }
+    destroy = vi.fn();
+    removeFromParent = vi.fn();
   }
 
   class Texture {
@@ -144,6 +149,7 @@ vi.mock("pixi.js", () => {
       this.source = options.source;
     }
     update = vi.fn();
+    destroy = vi.fn();
   }
 
   class CanvasSource {
@@ -528,6 +534,82 @@ describe("the prepared annotation window under push presentation", () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(scene.renderCount()).toBe(presented + 1);
+  });
+
+  it("renders the first completed heatmap while another map is still cooking", async () => {
+    class FakeImageBitmap {
+      close = vi.fn();
+    }
+    vi.stubGlobal("ImageBitmap", FakeImageBitmap);
+    const listeners = new Set<(event: MessageEvent) => void>();
+    let requests = 0;
+    let completeFirst: (() => void) | undefined;
+    const respond = (data: unknown) => {
+      for (const listener of listeners) listener({ data } as MessageEvent);
+    };
+    const worker = {
+      addEventListener(type: string, listener: (event: MessageEvent) => void) {
+        if (type === "message") listeners.add(listener);
+      },
+      removeEventListener(
+        type: string,
+        listener: (event: MessageEvent) => void,
+      ) {
+        if (type === "message") listeners.delete(listener);
+      },
+      postMessage(message: {
+        job?: { key: string };
+        requestId: number;
+        type: string;
+      }) {
+        if (message.type === "prepare") {
+          respond({
+            key: message.job?.key,
+            requestId: message.requestId,
+            type: "empty",
+          });
+          return;
+        }
+        requests += 1;
+        if (requests !== 1) return;
+        completeFirst = () =>
+          respond({
+            imageBitmap: new FakeImageBitmap(),
+            requestId: message.requestId,
+            type: "heatmap-complete",
+          });
+      },
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const scene = await createScene({
+      detectionFrames: [
+        {
+          mediaTime: 1,
+          detections: [0, 1].map((id) => ({
+            id,
+            heatmap: {
+              bounds: { x: 10, y: 10, width: 256, height: 256 },
+              width: 256,
+              height: 256,
+              values: new Float32Array(256 * 256),
+            },
+          })),
+        },
+      ],
+      heatmapRenderers: [annotationRenderers.heatmap()],
+      renderPreparation: { workerFactory: { createWorker: () => worker } },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+    const beforeHeatmap = scene.renderCount();
+    completeFirst?.();
+    await scene.settleCooks();
+
+    expect(requests).toBe(2);
+    expect(scene.snapshot()?.playheadPrepared).toBe(false);
+    expect(scene.renderCount()).toBe(beforeHeatmap + 1);
+    scene.scene.destroy();
   });
 
   it("redraws for each cook that lands, whichever layer owns it", async () => {
@@ -977,6 +1059,7 @@ async function createScene(
   options: {
     readonly editingEngine?: AnnotationEditingEngine;
     readonly focusStyle?: FocusStyle | null;
+    readonly heatmapRenderers?: MediaRendererSceneOptions["heatmapRenderers"];
     readonly detectionFrames?: readonly DetectionFrame[];
     readonly detectionTimeline?: BufferedDetectionTimeline;
     readonly maskHaloStyle?: MaskHaloStyle | null;
@@ -1004,6 +1087,7 @@ async function createScene(
       detectionTimeline,
       editingEngine: options.editingEngine,
       focusStyle: options.focusStyle ?? null,
+      heatmapRenderers: options.heatmapRenderers,
       interaction: options.selectionHandles
         ? { mode: MediaInteractionMode.Always }
         : undefined,
