@@ -69,6 +69,7 @@ vi.mock("pixi.js", () => {
     ImageSource: class {},
     Mesh: class {},
     MeshGeometry: class {},
+    PrepareSystem: class {},
     Rectangle: class {},
     Shader: class {},
     Sprite,
@@ -76,6 +77,7 @@ vi.mock("pixi.js", () => {
     Texture,
     UniformGroup: class {},
     defaultFilterVert: "vertex",
+    extensions: { add: vi.fn() },
   };
 });
 

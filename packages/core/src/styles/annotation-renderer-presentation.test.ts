@@ -166,6 +166,43 @@ describe("annotation renderer presentation", () => {
     expect(presentation.boxStyle).toBeNull();
   });
 
+  it("keeps multiple uniquely identified heatmap renderers", () => {
+    const first = annotationRenderers.heatmap({
+      id: "heat-low",
+      thresholdScale: 0.5,
+    });
+    const second = annotationRenderers.heatmap({
+      id: "heat-high",
+      thresholdScale: 1,
+    });
+
+    const presentation = resolveAnnotationRendererPresentation({
+      renderers: [first, second],
+    });
+
+    expect(presentation.renderers).toEqual([first, second]);
+  });
+
+  it("rejects invalid heatmap settings when the presentation is applied", () => {
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [annotationRenderers.heatmap({ maximumScore: 0 })],
+      }),
+    ).toThrow('Invalid heatmap renderer settings for "heatmap"');
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [
+          annotationRenderers.heatmap({
+            colorStops: [
+              { position: 0.8, color: 0xff0000 },
+              { position: 0.2, color: 0x00ff00 },
+            ],
+          }),
+        ],
+      }),
+    ).toThrow('Invalid heatmap renderer settings for "heatmap"');
+  });
+
   it("keeps source-specific style overrides after renderer normalization", () => {
     const globalBoxStyle = new BaseBoxStyle({
       stroke: { color: 0x8b5cf6, width: 2 },

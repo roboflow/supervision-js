@@ -100,6 +100,27 @@ describe("resolveReactNativeFramePresentation", () => {
     );
   });
 
+  it("reports heatmaps as unsupported instead of omitting them", () => {
+    expect(() =>
+      resolveReactNativeFramePresentation({
+        detectionFrame: { detections: [], mediaTime: 0 },
+        mediaFrame: {
+          metadata: {
+            duration: 1 / 30,
+            frameIndex: 0,
+            height: 1080,
+            mediaTime: 0,
+            width: 1920,
+          },
+          payload: { nativeTextureId: "texture-heatmap" },
+        },
+        renderers: [annotationRenderers.heatmap()],
+      }),
+    ).toThrowError(
+      'React Native frame presentation does not support annotation renderer kind "heatmap".',
+    );
+  });
+
   it("resolves core styles for an externally supplied native frame", () => {
     const detectionFrame: DetectionFrame = {
       detections: [

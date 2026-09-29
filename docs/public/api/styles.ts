@@ -61,6 +61,8 @@ export {
   type BoxCornerStyle,
   type BoxCornerStyleContext,
   type EllipseAnnotationRenderer,
+  type HeatmapAnnotationRenderer,
+  type HeatmapColorStop,
   type EllipseDrawInstruction,
   type EllipseStyle,
   type EllipseStyleContext,

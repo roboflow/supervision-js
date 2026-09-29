@@ -27,6 +27,7 @@ type PresentedFrameStamp = Pick<PresentedVideoFrame, "frameId" | "mediaTimeS">;
  * at a resting playhead both have a media time and no frame identity.
  */
 export interface FramePresentLayers {
+  readonly drawHeatmap?: (mediaTime: number) => void;
   readonly drawMask:
     | ((mediaTime: number, presentedFrameId: PresentedFrameId | null) => void)
     | undefined;
@@ -113,6 +114,7 @@ export function drawFramePresentLayers(
   mediaTime: number,
   presented?: PresentedFrameStamp,
 ): FramePresentLayerStates {
+  maybeAt(layers.drawHeatmap, mediaTime, presented);
   maskAt(layers.drawMask, mediaTime, presented);
   const boxState = at(layers.drawBox, mediaTime, presented);
   maybeAt(layers.drawPolygon, mediaTime, presented);
@@ -160,6 +162,7 @@ export function measureFramePresentLayers(
     ),
     drawBox: timed("drawBox", layers.drawBox),
     drawFocus: timed("drawFocus", layers.drawFocus),
+    drawHeatmap: maybeTimed("drawHeatmap", layers.drawHeatmap),
     drawInteraction: maybeTimed("drawInteraction", layers.drawInteraction),
     drawInteractionPresentation: timed(
       "drawInteractionPresentation",

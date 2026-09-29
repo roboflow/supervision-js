@@ -1300,7 +1300,7 @@ function assertSupportedReactNativeAnnotationRenderers(
   presentation: MediaRendererPresentation,
 ) {
   const unsupportedRenderer = presentation.renderers?.find(
-    (renderer) => renderer.kind === "region",
+    (renderer) => renderer.kind === "region" || renderer.kind === "heatmap",
   );
   if (!unsupportedRenderer) return;
 

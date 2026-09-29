@@ -13,6 +13,7 @@ import { DemoShell } from "./components/DemoShell";
 import { EngineDiagnostics } from "./components/EngineDiagnostics";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
+import { DocsHeatmapPlayground } from "./components/DocsHeatmapPlayground";
 import { DocsTrackingPostProcessorPlayground } from "./components/DocsTrackingPostProcessorPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { PipelinePanel } from "./components/PipelinePanel";
@@ -68,6 +69,14 @@ export function App() {
     return (
       <EmbeddedPlaygroundFrame>
         <DocsBasketballPlayground />
+      </EmbeddedPlaygroundFrame>
+    );
+  }
+
+  if (embeddedView === "heatmap") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsHeatmapPlayground />
       </EmbeddedPlaygroundFrame>
     );
   }

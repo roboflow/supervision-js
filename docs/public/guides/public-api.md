@@ -129,10 +129,10 @@ session.setPresentation({
 });
 ```
 
-The current built-ins are `box`, `box-corners`, `ellipse`, `marker`, `mask`,
+The current built-ins are `box`, `box-corners`, `ellipse`, `heatmap`, `marker`, `mask`,
 `maskHalo`, `orientedBox`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
 the multi-instance `region` renderer for asset overlays and current-frame media
-crops;
+crops; `heatmap` also supports multiple instances with distinct ids;
 `annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list
 is authoritative: omitted built-ins are
@@ -151,7 +151,7 @@ which reuses the renderer's prepared GPU ID-mask artifact, or polygon coverage
 for canonical closed polygons. Asset transforms may use an
 explicit media- or screen-space size; screen-space assets stay the same visible
 size across differently sized detections and viewport zoom. Multiple region
-descriptors may coexist when each has a unique `id`.
+or heatmap descriptors may coexist when each has a unique `id`.
 Media sources may also request bounded `blur` or `pixelate` effects through
 `source.effect`; those semantic settings stay independent of the browser filter
 implementation and operate on the renderer-owned current frame.

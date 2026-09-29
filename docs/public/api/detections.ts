@@ -32,6 +32,7 @@ export {
   type CompositeDetectionFrameSourceEntry,
   type CompositeDetectionFrameSourceOptions,
   type Detection,
+  type DetectionHeatmap,
   type DetectionBufferOptions,
   type DetectionCoordinateSpace,
   type DetectionBufferPrepareOptions,

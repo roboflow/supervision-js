@@ -6,6 +6,7 @@ import {
 import type {
   AnnotationRenderer,
   AnnotationRendererKind,
+  HeatmapAnnotationRenderer,
 } from "#types/annotation-renderer";
 import type { MediaRendererPresentation } from "#types/media-rendering";
 
@@ -42,6 +43,9 @@ export function resolveAnnotationRendererPresentation(
   const rendererKinds = new Set<AnnotationRendererKind>();
 
   for (const renderer of renderers) {
+    if (renderer.kind === "heatmap") {
+      validateHeatmapRenderer(renderer);
+    }
     if (rendererIds.has(renderer.id)) {
       throw new RangeError(
         `MediaRendererPresentation.renderers contains duplicate renderer id "${renderer.id}".`,
@@ -66,6 +70,38 @@ export function resolveAnnotationRendererPresentation(
     ...presentation,
     ...resolved,
   };
+}
+
+function validateHeatmapRenderer(renderer: HeatmapAnnotationRenderer): void {
+  const stops = renderer.colorStops;
+  if (
+    (renderer.maximumScore !== undefined &&
+      (!Number.isFinite(renderer.maximumScore) ||
+        renderer.maximumScore <= 0)) ||
+    (renderer.thresholdScale !== undefined &&
+      (!Number.isFinite(renderer.thresholdScale) ||
+        renderer.thresholdScale < 0)) ||
+    (renderer.opacity !== undefined && !Number.isFinite(renderer.opacity)) ||
+    (renderer.minimumAlpha !== undefined &&
+      !Number.isFinite(renderer.minimumAlpha)) ||
+    (stops !== undefined &&
+      (!Array.isArray(stops) ||
+        stops.length === 0 ||
+        stops.some(
+          (stop, index) =>
+            !Number.isFinite(stop.position) ||
+            stop.position < 0 ||
+            stop.position > 1 ||
+            !Number.isInteger(stop.color) ||
+            stop.color < 0 ||
+            stop.color > 0xffffff ||
+            (index > 0 && stop.position < stops[index - 1].position),
+        )))
+  ) {
+    throw new RangeError(
+      `Invalid heatmap renderer settings for "${renderer.id}".`,
+    );
+  }
 }
 
 function isStyleBackedAnnotationRenderer(

@@ -5,6 +5,12 @@ import {
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+import { colorizeHeatmap } from "#renderers/heatmap-color";
+import {
+  HeatmapPreparationWorkerMessageType,
+  type HeatmapPreparationWorkerRequest,
+  type HeatmapPreparationWorkerResponse,
+} from "#render-preparation/heatmap-preparation-worker-protocol";
 import {
   MaskPreparationWorkerMessageType,
   type MaskPreparationWorkerRequest,
@@ -14,11 +20,17 @@ import {
 type MaskPreparationWorkerScope = {
   addEventListener(
     type: "message",
-    listener: (event: MessageEvent<MaskPreparationWorkerRequest>) => void,
+    listener: (
+      event: MessageEvent<
+        MaskPreparationWorkerRequest | HeatmapPreparationWorkerRequest
+      >,
+    ) => void,
   ): void;
-  postMessage(message: MaskPreparationWorkerResponse): void;
   postMessage(
-    message: MaskPreparationWorkerResponse,
+    message: MaskPreparationWorkerResponse | HeatmapPreparationWorkerResponse,
+  ): void;
+  postMessage(
+    message: MaskPreparationWorkerResponse | HeatmapPreparationWorkerResponse,
     transfer: Transferable[],
   ): void;
 };
@@ -28,12 +40,57 @@ const workerScope = globalThis as unknown as MaskPreparationWorkerScope;
 workerScope.addEventListener("message", (event) => {
   const message = event.data;
 
+  if (message.type === HeatmapPreparationWorkerMessageType.Prepare) {
+    prepareHeatmap(message);
+    return;
+  }
+
   if (message.type !== MaskPreparationWorkerMessageType.Prepare) {
     return;
   }
 
   prepareMaskFrame(message);
 });
+
+function prepareHeatmap(message: HeatmapPreparationWorkerRequest) {
+  try {
+    const data = colorizeHeatmap(message.map, message.renderer);
+    const imageData = new ImageData(
+      data,
+      message.map.width,
+      message.map.height,
+    );
+    const imageBitmap = createImageBitmapFromImageData(imageData);
+
+    if (imageBitmap) {
+      workerScope.postMessage(
+        {
+          imageBitmap,
+          requestId: message.requestId,
+          type: HeatmapPreparationWorkerMessageType.Complete,
+        },
+        [imageBitmap],
+      );
+      return;
+    }
+
+    workerScope.postMessage(
+      {
+        imageData,
+        requestId: message.requestId,
+        type: HeatmapPreparationWorkerMessageType.Complete,
+      },
+      [imageData.data.buffer],
+    );
+  } catch (error) {
+    workerScope.postMessage({
+      error:
+        error instanceof Error ? error.message : "Unable to prepare heatmap.",
+      requestId: message.requestId,
+      type: HeatmapPreparationWorkerMessageType.Error,
+    });
+  }
+}
 
 function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   try {

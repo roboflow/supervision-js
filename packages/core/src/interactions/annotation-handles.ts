@@ -202,6 +202,18 @@ export function offsetDetection(
           },
         }
       : {}),
+    ...(detection.heatmap
+      ? {
+          heatmap: {
+            ...detection.heatmap,
+            bounds: {
+              ...detection.heatmap.bounds,
+              x: detection.heatmap.bounds.x + dx,
+              y: detection.heatmap.bounds.y + dy,
+            },
+          },
+        }
+      : {}),
   };
 }
 

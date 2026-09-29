@@ -1,0 +1,23 @@
+{
+  "schema": "supervision-js.demo.fixture-meta",
+  "version": 1,
+  "datasetId": "pebbles_anomaly_patrick_v1",
+  "displayName": "Pebbles anomaly (Patrick)",
+  "inferenceLabel": "FoundAD + causal tracker",
+  "sampleName": "pebbles_anomaly",
+  "showInDemo": true,
+  "media": {
+    "file": "pebbles-1800.mp4",
+    "loadingStatusLabel": "opening pebbles anomaly sample",
+    "readyStatusLabel": "pebbles anomaly | 320 decodable frames"
+  },
+  "presentation": {
+    "boxesEnabled": false,
+    "heatmapsEnabled": true,
+    "confidenceThreshold": 0,
+    "labelsEnabled": false,
+    "masksEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  }
+}

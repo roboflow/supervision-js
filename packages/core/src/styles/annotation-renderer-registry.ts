@@ -118,6 +118,7 @@ export const annotationRendererRegistry: AnnotationRendererRegistry = {
     createCanonicalStyle: createDefaultEllipseStyle,
     styleField: "ellipseStyle",
   },
+  heatmap: { cardinality: "multiple" },
   keypoints: {
     cardinality: "singleton",
     createCanonicalStyle: createDefaultKeypointStyle,

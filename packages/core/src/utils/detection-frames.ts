@@ -67,6 +67,13 @@ export function copyDetectionFrame(frame: DetectionFrame): DetectionFrame {
               : undefined,
           }
         : undefined,
+      heatmap: detection.heatmap
+        ? {
+            ...detection.heatmap,
+            bounds: { ...detection.heatmap.bounds },
+            values: detection.heatmap.values.slice(),
+          }
+        : undefined,
       mask: detection.mask ? { ...detection.mask } : undefined,
       metadata: detection.metadata
         ? copyDetectionMetadata(detection.metadata)
@@ -289,6 +296,44 @@ export function validateDetectionFrames(
           () => `${detectionPath()}.rect.height`,
           { exclusiveMin: 0 },
         );
+      }
+      if (detection.heatmap) {
+        const heatmap = detection.heatmap;
+        const path = () => `${detectionPath()}.heatmap`;
+        validateNumber(heatmap.bounds.x, () => `${path()}.bounds.x`);
+        validateNumber(heatmap.bounds.y, () => `${path()}.bounds.y`);
+        validateNumber(heatmap.bounds.width, () => `${path()}.bounds.width`, {
+          exclusiveMin: 0,
+        });
+        validateNumber(heatmap.bounds.height, () => `${path()}.bounds.height`, {
+          exclusiveMin: 0,
+        });
+        validateNumber(heatmap.width, () => `${path()}.width`, {
+          integer: true,
+          exclusiveMin: 0,
+        });
+        validateNumber(heatmap.height, () => `${path()}.height`, {
+          integer: true,
+          exclusiveMin: 0,
+        });
+        if (
+          !(
+            Array.isArray(heatmap.values) ||
+            heatmap.values instanceof Float32Array ||
+            heatmap.values instanceof Uint16Array
+          ) ||
+          heatmap.values.length !== heatmap.width * heatmap.height
+        ) {
+          throw new Error(`${path()}.values must match width × height.`);
+        }
+        if (heatmap.valueScale !== undefined) {
+          validateNumber(heatmap.valueScale, () => `${path()}.valueScale`, {
+            exclusiveMin: 0,
+          });
+        }
+        if (heatmap.threshold !== undefined) {
+          validateNumber(heatmap.threshold, () => `${path()}.threshold`);
+        }
       }
       validatePoints(
         detection.polygon?.points,

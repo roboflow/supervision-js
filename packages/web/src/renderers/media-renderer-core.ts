@@ -1149,6 +1149,7 @@ export async function createMediaRendererCore(
       polylineStyle: currentPresentation.polylineStyle,
       presentedFrames: protectedPresentedFrames?.source,
       regionRenderers: resolveRegionRenderers(currentPresentation),
+      heatmapRenderers: resolveHeatmapRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {
@@ -1432,6 +1433,13 @@ export async function createMediaRendererCore(
 function resolveRegionRenderers(presentation: MediaRendererPresentation) {
   return (
     presentation.renderers?.filter((renderer) => renderer.kind === "region") ??
+    []
+  );
+}
+
+function resolveHeatmapRenderers(presentation: MediaRendererPresentation) {
+  return (
+    presentation.renderers?.filter((renderer) => renderer.kind === "heatmap") ??
     []
   );
 }

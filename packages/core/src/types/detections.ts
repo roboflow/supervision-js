@@ -134,6 +134,23 @@ export interface CompressedRleDetectionMask {
 export type DetectionMask = CompressedRleDetectionMask;
 
 /**
+ * Scalar samples in row-major order, independent of any colour palette.
+ * `bounds` locates the raster in media pixels; its resolution need not match
+ * the video or the source model's input size. Flatten an inference
+ * `anomaly_map[y][x]` to populate `values` without changing the scores.
+ */
+export interface DetectionHeatmap {
+  readonly bounds: Rect;
+  readonly width: number;
+  readonly height: number;
+  readonly values: readonly number[] | Float32Array | Uint16Array;
+  /** Multiplies stored samples before thresholding; defaults to 1. */
+  readonly valueScale?: number;
+  /** Model-supplied score cutoff, not a binary mask threshold. */
+  readonly threshold?: number;
+}
+
+/**
  * One semantic detection for a media frame.
  *
  * A detection may come directly from a model or from a semantic
@@ -195,6 +212,8 @@ export interface Detection {
    * Optional binary mask in semantic cold-storage form.
    */
   readonly mask?: DetectionMask;
+  /** Optional scalar heatmap, which the presentation colours at render time. */
+  readonly heatmap?: DetectionHeatmap;
   /**
    * Caller-owned metadata. The renderer does not interpret this field.
    */
