@@ -106,7 +106,7 @@
   },
   "provenance": {
     "rawSha256": "1592eab68ae5891c190cafb993e44704cedd4ebf8cb1da59243f52521c531fe4",
-    "mediaSha256": "6f724426e9ed1d41a4b7f66c484ce230d4f291a80c269d4385bdc49f8c9b8d05",
+    "mediaSha256": "80ea154050e73673f63eff73cf64d78bee4783b0588a4e033d9b286c88ba9045",
     "sourceFrameCount": 341,
     "includedFrameCount": 320,
     "policy": "Only confirmed tracker anomalies are detections. Hit frames carry score crops from matching hot spots; coast frames carry boxes but no synthetic heat.",

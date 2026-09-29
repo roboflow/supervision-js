@@ -8,8 +8,10 @@ summary: Colour scalar model scores over media without turning them into a binar
 A heatmap is a scalar raster, not a colour image or a binary segmentation mask.
 Attach one to a detection with media-space `bounds`, raster `width` and `height`,
 row-major `values`, and the model's optional `threshold`. The renderer colours
-it when that detection's frame is presented. It does not infer, track, or decide
-which detections should exist.
+small maps when their frame is presented and prepares larger maps ahead of
+playback when a worker is available. A large map may appear after its frame if
+preparation has not finished yet. It does not infer, track, or decide which
+detections should exist.
 
 <div class="supervision-layer-playground">
   <iframe
@@ -53,3 +55,10 @@ lower the cutoff only when you want to show weaker evidence. In the pebbles
 demo, the cutoff is 75% of the model threshold and only tracker-confirmed
 detections are displayed. A lower-resolution `anomaly_map` can cover full-image
 `bounds` without making a full-resolution texture.
+
+Each map is limited to 16,777,216 raster pixels, and the visible maps across
+all heatmap renderers share that same per-frame pixel budget. Maps beyond the
+budget are skipped with a console warning. The prepared raster cache is bounded
+and does not retain heatmaps for the whole video. For large maps, leave worker
+render preparation enabled; a main-thread-only setup may pause while it
+prepares a raster.

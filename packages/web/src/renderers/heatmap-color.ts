@@ -17,7 +17,7 @@ const MAX_HEATMAP_SIDE = 8_192;
 export function colorizeHeatmap(
   map: DetectionHeatmap,
   renderer: HeatmapAnnotationRenderer,
-): Uint8ClampedArray {
+): Uint8ClampedArray<ArrayBuffer> {
   const { bounds, width, height, values } = map;
   if (
     !Number.isFinite(bounds?.x) ||
@@ -76,7 +76,7 @@ export function colorizeHeatmap(
     throw new RangeError("Invalid heatmap scale, threshold, or color stops.");
   }
 
-  const rgba = new Uint8ClampedArray(values.length * 4);
+  const rgba = new Uint8ClampedArray(new ArrayBuffer(values.length * 4));
   if (maximumScore <= threshold || opacity === 0) return rgba;
 
   for (let index = 0; index < values.length; index += 1) {

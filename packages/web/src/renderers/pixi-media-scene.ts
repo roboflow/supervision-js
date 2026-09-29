@@ -100,6 +100,7 @@ import type {
   Graphics as PixiGraphics,
   Texture as PixiTexture,
 } from "pixi.js";
+import "pixi.js/prepare";
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -327,7 +328,7 @@ export async function createPixiMediaScene(
   const annotationWindow = createPreparedAnnotationWindow({
     detectionTimeline: options.detectionTimeline,
     getLayers: () =>
-      [maskLayer, polygonLayer].filter(
+      [maskLayer, polygonLayer, heatmapLayer].filter(
         (layer): layer is NonNullable<typeof layer> => layer !== undefined,
       ),
     getPlayheadMediaTime: () => currentMediaTime,
@@ -384,11 +385,15 @@ export async function createPixiMediaScene(
     (heatmapLayer ??= createPixiHeatmapLayer({
       CanvasSource,
       Container,
+      ImageSource,
       Sprite,
       Texture,
       detectionTimeline: annotationDetectionTimeline,
       isVisible: (detection) =>
         !resolveAnnotationStyleState(detection, currentVisibility).hidden,
+      onPreparedWindowChange: handlePreparedWindowChange,
+      prepareTexture: (texture) => app.renderer.prepare.upload(texture),
+      renderPreparation: options.renderPreparation,
       renderers: currentHeatmapRenderers,
     }));
   let polygonLayer =

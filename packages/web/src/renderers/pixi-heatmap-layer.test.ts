@@ -45,6 +45,7 @@ describe("pixi heatmap layer", () => {
       Texture: FakeTexture as never,
       detectionTimeline: {
         selectFrame: () => frame,
+        getBufferedFrames: () => [frame],
       } as unknown as BufferedDetectionTimeline,
       isVisible: () => true,
       renderers: [annotationRenderers.heatmap()],
@@ -105,6 +106,7 @@ describe("pixi heatmap layer", () => {
       Texture: FakeTexture as never,
       detectionTimeline: {
         selectFrame: () => frame,
+        getBufferedFrames: () => [frame],
       } as unknown as BufferedDetectionTimeline,
       isVisible: () => true,
       renderers: [annotationRenderers.heatmap()],
@@ -120,6 +122,162 @@ describe("pixi heatmap layer", () => {
     warning.mockRestore();
     layer.destroy();
   });
+
+  it("prepares large maps before drawing and reuses their texture", async () => {
+    class FakeImageBitmap {
+      close = vi.fn();
+    }
+    vi.stubGlobal("ImageBitmap", FakeImageBitmap);
+    const resource = new FakeImageBitmap();
+    let finishPreparation!: (value: {
+      resource: FakeImageBitmap;
+      close(): void;
+    }) => void;
+    const prepare = vi.fn(
+      () =>
+        new Promise<{
+          resource: FakeImageBitmap;
+          close(): void;
+        }>((resolve) => {
+          finishPreparation = resolve;
+        }),
+    );
+    const onPreparedWindowChange = vi.fn();
+    const map = {
+      bounds: { x: 128, y: 128, width: 256, height: 256 },
+      width: 256,
+      height: 256,
+      values: new Float32Array(256 * 256),
+    };
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [{ id: "large", heatmap: map }],
+    };
+    const layer = createPixiHeatmapLayer({
+      CanvasSource: FakeCanvasSource as never,
+      Container: FakeContainer as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {
+        selectFrame: () => frame,
+        getBufferedFrames: () => [frame],
+      } as unknown as BufferedDetectionTimeline,
+      isVisible: () => true,
+      onPreparedWindowChange,
+      preparer: { prepare, destroy: vi.fn() } as never,
+      renderers: [annotationRenderers.heatmap()],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+    expect(container.children).toHaveLength(0);
+    expect(layer.isArtifactPrepared(0)).toBe(false);
+    expect(prepare).toHaveBeenCalledOnce();
+
+    finishPreparation({ resource, close: resource.close });
+    await vi.waitFor(() =>
+      expect(onPreparedWindowChange).toHaveBeenCalledOnce(),
+    );
+    expect(layer.isArtifactPrepared(0)).toBe(true);
+    layer.drawFrame(0);
+    expect(container.children).toHaveLength(1);
+    layer.invalidate();
+    layer.drawFrame(0);
+    expect(prepare).toHaveBeenCalledOnce();
+    layer.destroy();
+    expect(resource.close).toHaveBeenCalledOnce();
+  });
+
+  it("prepares multiple small maps when their total raster is large", () => {
+    const prepare = vi.fn(() => new Promise<never>(() => undefined));
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: Array.from({ length: 5 }, (_, index) => ({
+        id: index,
+        heatmap: {
+          bounds: { x: 0, y: 0, width: 128, height: 128 },
+          width: 128,
+          height: 128,
+          values: new Float32Array(128 * 128),
+        },
+      })),
+    };
+    const layer = createPixiHeatmapLayer({
+      CanvasSource: FakeCanvasSource as never,
+      Container: FakeContainer as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {
+        selectFrame: () => frame,
+        getBufferedFrames: () => [frame],
+      } as unknown as BufferedDetectionTimeline,
+      isVisible: () => true,
+      preparer: { prepare, destroy: vi.fn() } as never,
+      renderers: [annotationRenderers.heatmap()],
+    });
+
+    layer.drawFrame(0);
+
+    expect(
+      (layer.createContainer() as unknown as FakeContainer).children,
+    ).toHaveLength(0);
+    expect(layer.isArtifactPrepared(0)).toBe(false);
+    expect(prepare).toHaveBeenCalledOnce();
+    layer.destroy();
+  });
+
+  it("discards a prepared raster after moving to another frame", async () => {
+    let finishPreparation!: (image: {
+      resource: ImageData;
+      close(): void;
+    }) => void;
+    const prepare = vi.fn(
+      () =>
+        new Promise<{ resource: ImageData; close(): void }>((resolve) => {
+          finishPreparation = resolve;
+        }),
+    );
+    const first: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          heatmap: {
+            bounds: { x: 0, y: 0, width: 256, height: 256 },
+            width: 256,
+            height: 256,
+            values: new Float32Array(256 * 256),
+          },
+        },
+      ],
+    };
+    const second: DetectionFrame = { mediaTime: 1, detections: [] };
+    let selected = first;
+    const onPreparedWindowChange = vi.fn();
+    const layer = createPixiHeatmapLayer({
+      CanvasSource: FakeCanvasSource as never,
+      Container: FakeContainer as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {
+        selectFrame: () => selected,
+        getBufferedFrames: () => [first, second],
+      } as unknown as BufferedDetectionTimeline,
+      isVisible: () => true,
+      onPreparedWindowChange,
+      preparer: { prepare, destroy: vi.fn() } as never,
+      renderers: [annotationRenderers.heatmap()],
+    });
+
+    layer.drawFrame(0);
+    selected = second;
+    layer.drawFrame(1);
+    const close = vi.fn();
+    finishPreparation({ resource: {} as ImageData, close });
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(onPreparedWindowChange).not.toHaveBeenCalled();
+    layer.destroy();
+  });
 });
 
 class FakeContainer {
@@ -132,6 +290,10 @@ class FakeContainer {
 }
 
 class FakeCanvasSource {
+  constructor(_options: unknown) {}
+}
+
+class FakeImageSource {
   constructor(_options: unknown) {}
 }
 
