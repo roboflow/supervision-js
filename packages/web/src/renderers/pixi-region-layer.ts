@@ -155,6 +155,15 @@ export function createPixiRegionLayer(options: {
     detectionFrameTime: number | null,
   ) => PixiActiveRegionMaskCoverage | null;
   readonly getMediaTexture: () => PixiTexture | undefined;
+  /**
+   * Media dimensions, which region geometry is expressed in. The media texture
+   * is smaller when the media exceeds the GPU texture limit; without this the
+   * texture is taken to be media-sized.
+   */
+  readonly getMediaSize?: () => {
+    readonly height: number;
+    readonly width: number;
+  };
   readonly onInvalidate?: () => void;
   readonly onAssetError?: (options: {
     readonly error: unknown;
@@ -278,7 +287,10 @@ export function createPixiRegionLayer(options: {
                 detection,
               );
               mediaCrop = sourceRegion
-                ? resolveMediaCrop(sourceRegion, mediaTexture)
+                ? resolveMediaCrop(
+                    sourceRegion,
+                    options.getMediaSize?.() ?? mediaTexture.source,
+                  )
                 : undefined;
               if (!mediaCrop) continue;
               entry = ensureMediaEntry(
@@ -477,6 +489,11 @@ export function createPixiRegionLayer(options: {
     crop: TopLeftCrop,
     detectionId: string | number | undefined,
   ) {
+    const frame = toTextureFrame(
+      crop,
+      mediaTexture,
+      options.getMediaSize?.() ?? mediaTexture.source,
+    );
     let entry = entries.get(key);
     if (!entry) {
       const poolKey = resolvePoolKey(rendererId, sourceKey);
@@ -488,7 +505,12 @@ export function createPixiRegionLayer(options: {
     if (!entry) {
       const texture = new options.Texture({
         dynamic: true,
-        frame: new options.Rectangle(crop.x, crop.y, crop.width, crop.height),
+        frame: new options.Rectangle(
+          frame.x,
+          frame.y,
+          frame.width,
+          frame.height,
+        ),
         source: mediaTexture.source,
       });
       const display = new options.Sprite({ texture });
@@ -508,7 +530,7 @@ export function createPixiRegionLayer(options: {
       entry.detectionId = detectionId;
     }
 
-    updateMediaTexture(entry.ownedTexture!, mediaTexture, crop);
+    updateMediaTexture(entry.ownedTexture!, mediaTexture, frame);
     entries.set(key, entry);
     return entry;
   }
@@ -856,10 +878,10 @@ function positionSprite(
 
 function resolveMediaCrop(
   region: Rect,
-  mediaTexture: PixiTexture,
+  media: { readonly height: number; readonly width: number },
 ): TopLeftCrop | undefined {
-  const sourceWidth = mediaTexture.source.width;
-  const sourceHeight = mediaTexture.source.height;
+  const sourceWidth = media.width;
+  const sourceHeight = media.height;
   if (
     !Number.isFinite(sourceWidth) ||
     !Number.isFinite(sourceHeight) ||
@@ -879,6 +901,24 @@ function resolveMediaCrop(
   return width > 0 && height > 0
     ? { height, width, x: left, y: top }
     : undefined;
+}
+
+/** Maps a crop in media pixels onto the media texture, which may be smaller. */
+function toTextureFrame(
+  crop: TopLeftCrop,
+  mediaTexture: PixiTexture,
+  media: { readonly height: number; readonly width: number },
+): TopLeftCrop {
+  const scaleX = mediaTexture.source.width / media.width;
+  const scaleY = mediaTexture.source.height / media.height;
+  if (scaleX === 1 && scaleY === 1) return crop;
+
+  return {
+    height: crop.height * scaleY,
+    width: crop.width * scaleX,
+    x: crop.x * scaleX,
+    y: crop.y * scaleY,
+  };
 }
 
 function updateMediaTexture(

@@ -18,6 +18,11 @@ export interface CanvasMediaFrameCaptureRequest {
   readonly capture: MediaFrameCaptureOptions | undefined;
   /** Creates the detached surface used to snapshot the presented pixels. */
   readonly createCanvas: () => HTMLCanvasElement;
+  /**
+   * Size to capture at, when `source` holds the media at another size: media
+   * over the GPU texture limit is staged downscaled.
+   */
+  readonly size?: { readonly height: number; readonly width: number };
 }
 
 /**
@@ -30,7 +35,7 @@ export interface CanvasMediaFrameCaptureRequest {
 export async function captureCanvasMediaFrame(
   request: CanvasMediaFrameCaptureRequest,
 ): Promise<MediaFrameCapture> {
-  const { height, width } = request.source;
+  const { height, width } = request.size ?? request.source;
 
   if (width <= 0 || height <= 0) {
     throw new Error("No media frame has been presented yet.");
@@ -54,7 +59,7 @@ export async function captureCanvasMediaFrame(
     throw new Error("Unable to create a media frame capture context.");
   }
 
-  context.drawImage(request.source, 0, 0);
+  context.drawImage(request.source, 0, 0, width, height);
 
   const blob = await encodeCanvas(snapshot, type, quality);
 

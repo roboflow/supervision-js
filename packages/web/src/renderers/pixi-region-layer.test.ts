@@ -382,6 +382,46 @@ describe("pixi region layer", () => {
     expect(mediaTexture.destroy).not.toHaveBeenCalled();
   });
 
+  it("crops a downscaled media texture at the same media region", () => {
+    // Media over the GPU texture limit is staged at half size here.
+    const mediaTexture = new FakeTexture({
+      source: { height: 100, width: 150 },
+    });
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(mediaTexture),
+      Assets: { load: vi.fn(), unload: vi.fn(async () => undefined) } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(frame),
+      getMediaSize: () => ({ height: 200, width: 300 }),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "big-heads",
+          region: { anchor: "head", kind: "keypoint-anchor" },
+          source: {
+            kind: "media",
+            region: { anchor: "head", kind: "keypoint-anchor" },
+          },
+          target: { className: "player" },
+          transform: { scale: 2 },
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(1);
+    const display = container.children[0]!;
+    const cropTexture = display.texture as FakeTexture;
+
+    // The media-sized case above crops (80, 18.8) 40x40 media pixels.
+    expect(cropTexture.frame.x).toBeCloseTo(40);
+    expect(cropTexture.frame.y).toBeCloseTo(9.4);
+    expect(cropTexture.frame.width).toBeCloseTo(20);
+    expect(cropTexture.frame.height).toBeCloseTo(20);
+    expect(display).toMatchObject({ height: 80, width: 80 });
+  });
+
   it("keeps prepared media effects sized in media pixels across viewport changes", () => {
     FakeBlurFilter.instances = [];
     const mediaTexture = new FakeTexture({

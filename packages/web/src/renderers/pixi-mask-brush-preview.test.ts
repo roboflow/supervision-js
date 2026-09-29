@@ -91,4 +91,75 @@ describe("Pixi mask brush preview", () => {
     expect(cursorListener).toBeNull();
     if (!notify) expect(queueMicrotask).not.toHaveBeenCalled();
   });
+
+  it("uploads a fitted copy of a brush canvas over the texture limit", () => {
+    let textureListener: (() => void) | null = null;
+    const drawImage = vi.fn();
+    const brushCanvas = { height: 1200, width: 8000 };
+    const uploadCanvas = {
+      getContext: () => ({ clearRect: vi.fn(), drawImage }),
+      height: 0,
+      width: 0,
+    };
+    const editor = {
+      canvas: brushCanvas,
+      getCursor: () => ({ mode: "add", point: null, radius: 3 }),
+      subscribeCursorUpdates: () => () => undefined,
+      subscribeTextureUpdates(listener: () => void) {
+        textureListener = listener;
+        return () => undefined;
+      },
+    } as unknown as MaskBrushEditor;
+    const sources: Array<{ resource: unknown; width: number; height: number }> =
+      [];
+    const sprites: Array<{ width: number; height: number }> = [];
+
+    createPixiMaskBrushPreview({
+      CanvasSource: class {
+        destroy = vi.fn();
+        update = vi.fn();
+        constructor(options: {
+          resource: unknown;
+          width: number;
+          height: number;
+        }) {
+          sources.push(options);
+        }
+      } as never,
+      Container: class {
+        addChild = vi.fn();
+      } as never,
+      Graphics: class {
+        circle = vi.fn();
+        clear = vi.fn();
+        stroke = vi.fn();
+      } as never,
+      Sprite: class {
+        alpha = 1;
+        height = 0;
+        tint = 0;
+        width = 0;
+        constructor() {
+          sprites.push(this);
+        }
+      } as never,
+      Texture: class {
+        destroy = vi.fn();
+      } as never,
+      createCanvas: () => uploadCanvas as unknown as HTMLCanvasElement,
+      maxTextureSize: 4096,
+      preview: { editor },
+    });
+
+    expect(sources[0]).toMatchObject({
+      height: 614,
+      resource: uploadCanvas,
+      width: 4096,
+    });
+    expect(drawImage).toHaveBeenLastCalledWith(brushCanvas, 0, 0, 4096, 614);
+    expect(sprites[0]).toMatchObject({ height: 1200, width: 8000 });
+
+    textureListener!();
+    expect(drawImage).toHaveBeenCalledTimes(2);
+  });
 });
