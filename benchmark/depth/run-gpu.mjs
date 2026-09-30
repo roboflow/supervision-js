@@ -6,14 +6,23 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
 const outputDir = path.join(rootDir, "benchmark/depth/results");
-const browser = readFlag("browser") ?? "chrome";
-const pageQuery = readFlag("query") ?? "";
+const { values: flags } = parseArgs({
+  options: {
+    // chrome (CDP, the default) or firefox (headless, reports over HTTP).
+    browser: { default: "chrome", type: "string" },
+    // Page query without "?", such as cases=exactness&backends=webgl.
+    query: { default: "", type: "string" },
+  },
+});
+const browser = flags.browser;
+const pageQuery = flags.query;
 const chromePath =
   process.env.CHROME_BIN ??
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -110,13 +119,6 @@ async function stopProcess(child) {
 
   child.kill("SIGTERM");
   await Promise.race([exited, delay(5000)]);
-}
-
-function readFlag(name) {
-  const prefix = `--${name}=`;
-  const arg = process.argv.find((value) => value.startsWith(prefix));
-
-  return arg ? arg.slice(prefix.length) : undefined;
 }
 
 function startViteServer() {
