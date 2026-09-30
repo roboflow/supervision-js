@@ -54,14 +54,6 @@ const MAX_PNG_PIXELS = 16_384 * 16_384;
 const HOST_IS_LITTLE_ENDIAN =
   new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
-const FilterType = {
-  None: 0,
-  Sub: 1,
-  Up: 2,
-  Average: 3,
-  Paeth: 4,
-} as const;
-
 /** Decodes a 16-bit grayscale PNG, as a depth producer writes one. */
 export async function decodePng16(
   bytes: ArrayBuffer | Uint8Array,
@@ -265,7 +257,10 @@ function checkInflatedLength(raw: Uint8Array, expected: number) {
  * back from the output, which already holds it unfiltered; the first row reads
  * a row of zeros, which is what PNG defines above the image.
  *
- * One loop per filter keeps the per-pixel work free of a filter switch.
+ * Each filter is its own small function with one loop, called once per row:
+ * no per-byte filter switch or call, and every engine compiles each loop on
+ * its own (SpiderMonkey slowed a Paeth loop that shared a function with the
+ * others to below the research prototype's speed).
  */
 function unfilterGray16(
   raw: Uint8Array,
@@ -278,75 +273,149 @@ function unfilterGray16(
 
   for (let y = 0; y < height; y += 1) {
     const filter = raw[y * rowBytes];
-    let s = y * rowBytes + 1;
-    const o = y * width;
-    const end = o + width;
-    const prev = y === 0 ? zeroRow : out;
-    let p = y === 0 ? 0 : o - width;
+    const unfilterRow = ROW_FILTERS_16[filter];
 
-    switch (filter) {
-      case FilterType.None:
-        for (let i = o; i < end; i += 1, s += 2) {
-          out[i] = (raw[s] << 8) | raw[s + 1];
-        }
-        break;
-
-      case FilterType.Sub: {
-        let hi = 0;
-        let lo = 0;
-
-        for (let i = o; i < end; i += 1, s += 2) {
-          hi = (raw[s] + hi) & 0xff;
-          lo = (raw[s + 1] + lo) & 0xff;
-          out[i] = (hi << 8) | lo;
-        }
-        break;
-      }
-
-      case FilterType.Up:
-        for (let i = o; i < end; i += 1, s += 2, p += 1) {
-          const up = prev[p];
-
-          out[i] =
-            (((raw[s] + (up >> 8)) & 0xff) << 8) | ((raw[s + 1] + up) & 0xff);
-        }
-        break;
-
-      case FilterType.Average: {
-        let hi = 0;
-        let lo = 0;
-
-        for (let i = o; i < end; i += 1, s += 2, p += 1) {
-          const up = prev[p];
-
-          hi = (raw[s] + ((hi + (up >> 8)) >> 1)) & 0xff;
-          lo = (raw[s + 1] + ((lo + (up & 0xff)) >> 1)) & 0xff;
-          out[i] = (hi << 8) | lo;
-        }
-        break;
-      }
-
-      case FilterType.Paeth: {
-        let hi = 0;
-        let lo = 0;
-        let upLeft = 0;
-
-        for (let i = o; i < end; i += 1, s += 2, p += 1) {
-          const up = prev[p];
-
-          hi = (raw[s] + paeth(hi, up >> 8, upLeft >> 8)) & 0xff;
-          lo = (raw[s + 1] + paeth(lo, up & 0xff, upLeft & 0xff)) & 0xff;
-          out[i] = (hi << 8) | lo;
-          upLeft = up;
-        }
-        break;
-      }
-
-      default:
-        throw new RangeError(`PNG row ${y} has unknown filter ${filter}.`);
+    if (!unfilterRow) {
+      throw new RangeError(`PNG row ${y} has unknown filter ${filter}.`);
     }
+
+    const o = y * width;
+
+    unfilterRow(
+      raw,
+      y * rowBytes + 1,
+      out,
+      o,
+      o + width,
+      y === 0 ? zeroRow : out,
+      y === 0 ? 0 : o - width,
+    );
   }
 }
+
+/** Unfilters one row: raw bytes from `s`, samples into `out[o..end)`, the row above at `prev[p..]`. */
+type RowFilter16 = (
+  raw: Uint8Array,
+  s: number,
+  out: Uint16Array,
+  o: number,
+  end: number,
+  prev: Uint16Array,
+  p: number,
+) => void;
+
+function noneRow16(
+  raw: Uint8Array,
+  s: number,
+  out: Uint16Array,
+  o: number,
+  end: number,
+) {
+  for (let i = o; i < end; i += 1, s += 2) {
+    out[i] = (raw[s] << 8) | raw[s + 1];
+  }
+}
+
+function subRow16(
+  raw: Uint8Array,
+  s: number,
+  out: Uint16Array,
+  o: number,
+  end: number,
+) {
+  let hi = 0;
+  let lo = 0;
+
+  for (let i = o; i < end; i += 1, s += 2) {
+    hi = (raw[s] + hi) & 0xff;
+    lo = (raw[s + 1] + lo) & 0xff;
+    out[i] = (hi << 8) | lo;
+  }
+}
+
+function upRow16(
+  raw: Uint8Array,
+  s: number,
+  out: Uint16Array,
+  o: number,
+  end: number,
+  prev: Uint16Array,
+  p: number,
+) {
+  for (let i = o; i < end; i += 1, s += 2, p += 1) {
+    const up = prev[p];
+
+    out[i] = (((raw[s] + (up >> 8)) & 0xff) << 8) | ((raw[s + 1] + up) & 0xff);
+  }
+}
+
+function averageRow16(
+  raw: Uint8Array,
+  s: number,
+  out: Uint16Array,
+  o: number,
+  end: number,
+  prev: Uint16Array,
+  p: number,
+) {
+  let hi = 0;
+  let lo = 0;
+
+  for (let i = o; i < end; i += 1, s += 2, p += 1) {
+    const up = prev[p];
+
+    hi = (raw[s] + ((hi + (up >> 8)) >> 1)) & 0xff;
+    lo = (raw[s + 1] + ((lo + (up & 0xff)) >> 1)) & 0xff;
+    out[i] = (hi << 8) | lo;
+  }
+}
+
+/** Paeth: per byte, whichever of left, up and up-left is closest to left + up - up-left. */
+function paethRow16(
+  raw: Uint8Array,
+  s: number,
+  out: Uint16Array,
+  o: number,
+  end: number,
+  prev: Uint16Array,
+  p: number,
+) {
+  let hi = 0;
+  let lo = 0;
+  let upLeftHi = 0;
+  let upLeftLo = 0;
+
+  for (let i = o; i < end; i += 1, s += 2, p += 1) {
+    const up = prev[p];
+    const upHi = up >> 8;
+    const upLo = up & 0xff;
+    let pa = Math.abs(upHi - upLeftHi);
+    let pb = Math.abs(hi - upLeftHi);
+    let pc = Math.abs(hi + upHi - upLeftHi - upLeftHi);
+
+    hi =
+      (raw[s] + (pa <= pb && pa <= pc ? hi : pb <= pc ? upHi : upLeftHi)) &
+      0xff;
+    pa = Math.abs(upLo - upLeftLo);
+    pb = Math.abs(lo - upLeftLo);
+    pc = Math.abs(lo + upLo - upLeftLo - upLeftLo);
+    lo =
+      (raw[s + 1] + (pa <= pb && pa <= pc ? lo : pb <= pc ? upLo : upLeftLo)) &
+      0xff;
+    out[i] = (hi << 8) | lo;
+    upLeftHi = upHi;
+    upLeftLo = upLo;
+  }
+}
+
+/** Indexed by the PNG filter type byte: None, Sub, Up, Average, Paeth. */
+const ROW_FILTERS_16: readonly RowFilter16[] = [
+  noneRow16,
+  subRow16,
+  upRow16,
+  averageRow16,
+  paethRow16,
+];
 
 function unfilterGray8(
   raw: Uint8Array,
@@ -359,71 +428,124 @@ function unfilterGray8(
 
   for (let y = 0; y < height; y += 1) {
     const filter = raw[y * rowBytes];
-    let s = y * rowBytes + 1;
-    const o = y * width;
-    const end = o + width;
-    const prev = y === 0 ? zeroRow : out;
-    let p = y === 0 ? 0 : o - width;
+    const unfilterRow = ROW_FILTERS_8[filter];
 
-    switch (filter) {
-      case FilterType.None:
-        out.set(raw.subarray(s, s + width), o);
-        break;
-
-      case FilterType.Sub: {
-        let left = 0;
-
-        for (let i = o; i < end; i += 1, s += 1) {
-          left = (raw[s] + left) & 0xff;
-          out[i] = left;
-        }
-        break;
-      }
-
-      case FilterType.Up:
-        for (let i = o; i < end; i += 1, s += 1, p += 1) {
-          out[i] = (raw[s] + prev[p]) & 0xff;
-        }
-        break;
-
-      case FilterType.Average: {
-        let left = 0;
-
-        for (let i = o; i < end; i += 1, s += 1, p += 1) {
-          left = (raw[s] + ((left + prev[p]) >> 1)) & 0xff;
-          out[i] = left;
-        }
-        break;
-      }
-
-      case FilterType.Paeth: {
-        let left = 0;
-        let upLeft = 0;
-
-        for (let i = o; i < end; i += 1, s += 1, p += 1) {
-          const up = prev[p];
-
-          left = (raw[s] + paeth(left, up, upLeft)) & 0xff;
-          out[i] = left;
-          upLeft = up;
-        }
-        break;
-      }
-
-      default:
-        throw new RangeError(`PNG row ${y} has unknown filter ${filter}.`);
+    if (!unfilterRow) {
+      throw new RangeError(`PNG row ${y} has unknown filter ${filter}.`);
     }
+
+    const o = y * width;
+
+    unfilterRow(
+      raw,
+      y * rowBytes + 1,
+      out,
+      o,
+      o + width,
+      y === 0 ? zeroRow : out,
+      y === 0 ? 0 : o - width,
+    );
   }
 }
 
-/** The PNG Paeth predictor for one byte: whichever of a, b, c is closest to a + b - c. */
-function paeth(a: number, b: number, c: number): number {
-  const pa = Math.abs(b - c);
-  const pb = Math.abs(a - c);
-  const pc = Math.abs(a + b - c - c);
+type RowFilter8 = (
+  raw: Uint8Array,
+  s: number,
+  out: Uint8Array,
+  o: number,
+  end: number,
+  prev: Uint8Array,
+  p: number,
+) => void;
 
-  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+function noneRow8(
+  raw: Uint8Array,
+  s: number,
+  out: Uint8Array,
+  o: number,
+  end: number,
+) {
+  out.set(raw.subarray(s, s + end - o), o);
 }
+
+function subRow8(
+  raw: Uint8Array,
+  s: number,
+  out: Uint8Array,
+  o: number,
+  end: number,
+) {
+  let left = 0;
+
+  for (let i = o; i < end; i += 1, s += 1) {
+    left = (raw[s] + left) & 0xff;
+    out[i] = left;
+  }
+}
+
+function upRow8(
+  raw: Uint8Array,
+  s: number,
+  out: Uint8Array,
+  o: number,
+  end: number,
+  prev: Uint8Array,
+  p: number,
+) {
+  for (let i = o; i < end; i += 1, s += 1, p += 1) {
+    out[i] = (raw[s] + prev[p]) & 0xff;
+  }
+}
+
+function averageRow8(
+  raw: Uint8Array,
+  s: number,
+  out: Uint8Array,
+  o: number,
+  end: number,
+  prev: Uint8Array,
+  p: number,
+) {
+  let left = 0;
+
+  for (let i = o; i < end; i += 1, s += 1, p += 1) {
+    left = (raw[s] + ((left + prev[p]) >> 1)) & 0xff;
+    out[i] = left;
+  }
+}
+
+function paethRow8(
+  raw: Uint8Array,
+  s: number,
+  out: Uint8Array,
+  o: number,
+  end: number,
+  prev: Uint8Array,
+  p: number,
+) {
+  let left = 0;
+  let upLeft = 0;
+
+  for (let i = o; i < end; i += 1, s += 1, p += 1) {
+    const up = prev[p];
+    const pa = Math.abs(up - upLeft);
+    const pb = Math.abs(left - upLeft);
+    const pc = Math.abs(left + up - upLeft - upLeft);
+
+    left =
+      (raw[s] + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft)) & 0xff;
+    out[i] = left;
+    upLeft = up;
+  }
+}
+
+const ROW_FILTERS_8: readonly RowFilter8[] = [
+  noneRow8,
+  subRow8,
+  upRow8,
+  averageRow8,
+  paethRow8,
+];
 
 /**
  * WebGL unpacks rows on four-byte boundaries, so an odd width of two-byte
