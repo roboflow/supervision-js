@@ -39,7 +39,6 @@ async function main() {
 
   const server = startViteServer();
   let browserProcess;
-  let cdp;
   let tempProfileDir;
 
   try {
@@ -61,11 +60,9 @@ async function main() {
       const chrome = await startChrome(tempProfileDir, pageQuery);
 
       browserProcess = chrome.process;
-      cdp = await createCdpClient(
-        await waitForPageWebSocketUrl(chrome.debuggingPort),
+      report = await waitForBenchmarkResult(async () =>
+        createCdpClient(await waitForPageWebSocketUrl(chrome.debuggingPort)),
       );
-      await cdp.send("Runtime.enable");
-      report = await waitForBenchmarkResult(cdp);
     }
 
     const name = browser === "firefox" ? "latest-firefox" : "latest-gpu";
@@ -96,7 +93,6 @@ async function main() {
       console.error("Exactness probe FAILED: some codes did not come back.");
     }
   } finally {
-    cdp?.close();
     await stopProcess(browserProcess);
     await stopProcess(server);
 
@@ -278,6 +274,17 @@ async function createCdpClient(webSocketUrl) {
     socket.addEventListener("error", reject, { once: true });
   });
 
+  const client = { closed: false };
+
+  socket.addEventListener("close", () => {
+    client.closed = true;
+    for (const { reject, timeout } of pending.values()) {
+      clearTimeout(timeout);
+      reject(new Error("The page's DevTools socket closed."));
+    }
+    pending.clear();
+  });
+
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
 
@@ -298,7 +305,7 @@ async function createCdpClient(webSocketUrl) {
     resolve(message.result);
   });
 
-  return {
+  return Object.assign(client, {
     close() {
       socket.close();
     },
@@ -318,38 +325,65 @@ async function createCdpClient(webSocketUrl) {
         socket.send(JSON.stringify({ id, method, params }));
       });
     },
-  };
+  });
 }
 
-async function waitForBenchmarkResult(cdp) {
+/**
+ * The page is cross-origin isolated, so Chrome moves it to a fresh process
+ * after the first load, and an evaluation can land between contexts. Such
+ * errors are retried, reconnecting to the page target when its socket went
+ * away with the old process.
+ */
+async function waitForBenchmarkResult(connect) {
   const startedAt = Date.now();
   let lastStatus = "";
+  let cdp = await connect();
 
-  while (Date.now() - startedAt < benchmarkTimeoutMs) {
-    const result = await cdp.send("Runtime.evaluate", {
-      expression:
+  const evaluate = async (expression) => {
+    for (;;) {
+      try {
+        const result = await cdp.send(
+          "Runtime.evaluate",
+          { expression, returnByValue: true },
+          10_000,
+        );
+
+        return result.result?.value;
+      } catch (error) {
+        if (Date.now() - startedAt > benchmarkTimeoutMs) throw error;
+        await delay(500);
+        if (cdp.closed) {
+          cdp = await connect();
+        }
+      }
+    }
+  };
+
+  try {
+    while (Date.now() - startedAt < benchmarkTimeoutMs) {
+      const value = await evaluate(
         "window.__SUPERVISION_DEPTH_GPU_BENCHMARK_RESULT__ ? JSON.stringify(window.__SUPERVISION_DEPTH_GPU_BENCHMARK_RESULT__) : null",
-      returnByValue: true,
-    });
-    const value = result.result?.value;
+      );
 
-    if (typeof value === "string") {
-      return JSON.parse(value);
+      if (typeof value === "string") {
+        return JSON.parse(value);
+      }
+
+      const text =
+        (await evaluate(
+          "document.querySelector('#status')?.textContent ?? ''",
+        )) ?? "";
+
+      if (text !== lastStatus) {
+        lastStatus = text;
+        console.log(`  ${text}`);
+        if (text.startsWith("Benchmark failed")) throw new Error(text);
+      }
+
+      await delay(500);
     }
-
-    const status = await cdp.send("Runtime.evaluate", {
-      expression: "document.querySelector('#status')?.textContent ?? ''",
-      returnByValue: true,
-    });
-    const text = status.result?.value ?? "";
-
-    if (text !== lastStatus) {
-      lastStatus = text;
-      console.log(`  ${text}`);
-      if (text.startsWith("Benchmark failed")) throw new Error(text);
-    }
-
-    await delay(500);
+  } finally {
+    cdp.close();
   }
 
   throw new Error(
