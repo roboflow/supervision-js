@@ -26,16 +26,16 @@ import {
   initialDocsDepthSettings,
   type DocsDepthSettings,
 } from "../docs-depth";
-import { prepareUploadedImageMedia } from "../media/upload-media";
 import "./dev-depth-playground.css";
 
 const MEDIA_WIDTH = 1280;
 const MEDIA_HEIGHT = 720;
 /** The yellow sphere swings to about half a metre from the camera here. */
 const SCENE_TIME_SECONDS = 1.25;
-/** The clip-wide colour range a producer would write: 0.8 m to 40 m. */
-const NEAREST_M = 0.8;
+/** The clip-wide colour range a producer would write: 2 m to 40 m. */
+const NEAREST_M = 2;
 const FARTHEST_M = 40;
+const CLIP_FRAME_RATE = 30;
 
 const colormaps: readonly DepthColormap[] = [
   "turbo",
@@ -524,22 +524,31 @@ async function createSyntheticMedia(
   }
 
   // The video engine presents through WebGPU, so the same still goes through
-  // it as a one-frame clip.
-  const png = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (blob) =>
-        blob ? resolve(blob) : reject(new Error("Unable to encode the scene.")),
-      "image/png",
-    ),
-  );
-  const prepared = await prepareUploadedImageMedia({
-    file: new File([png], "synthetic-scene.png", { type: "image/png" }),
+  // it as a one-second clip. (A single frame lasting the whole second stalls
+  // the engine's first presentation, so the clip carries one per 1/30 s.)
+  const { BufferTarget, CanvasSource, Mp4OutputFormat, Output, Quality } =
+    await import("mediabunny");
+  const target = new BufferTarget();
+  const output = new Output({ format: new Mp4OutputFormat(), target });
+  const source = new CanvasSource(canvas, {
+    codec: "avc",
+    keyFrameInterval: 1,
+    quality: new Quality({ bitrate: 8_000_000 }),
   });
 
-  if (!prepared.blob) throw new Error("Unable to encode the scene.");
+  output.addVideoTrack(source, { frameRate: CLIP_FRAME_RATE });
+  await output.start();
+  for (let frame = 0; frame < CLIP_FRAME_RATE; frame += 1) {
+    await source.add(frame / CLIP_FRAME_RATE, 1 / CLIP_FRAME_RATE);
+  }
+  await output.finalize();
+  if (!target.buffer) throw new Error("Unable to encode the scene.");
 
   return createWebVideoEngineMediaRendererSource({
-    source: { blob: prepared.blob, kind: SourceKind.Blob },
+    source: {
+      blob: new Blob([target.buffer], { type: "video/mp4" }),
+      kind: SourceKind.Blob,
+    },
   });
 }
 
