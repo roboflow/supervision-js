@@ -1,0 +1,372 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { annotationRenderers, type DepthMap } from "supervision-js-core";
+import type {
+  DepthFrameEntry,
+  DepthFrameProvider,
+} from "#render-preparation/depth-source";
+import { createPixiDepthLayer } from "#renderers/pixi-depth-layer";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+function depthMap(first: number): DepthMap {
+  return {
+    displayRange: { max: 100, min: 1 },
+    height: 2,
+    kind: "disparity_px",
+    samples: {
+      encoding: "scaled16",
+      scale: 256,
+      values: Uint16Array.from([first, 256, 512, 1024, 0, 2048, 4096, 8192]),
+    },
+    width: 4,
+  };
+}
+
+/** Depth for `[0, 1)` and `[1, 2)`, nothing from 2 on. */
+function twoFrameSource(first: DepthMap, second: DepthMap): DepthFrameProvider {
+  const entry = (map: DepthMap, frameIndex: number): DepthFrameEntry => ({
+    frameIndex,
+    map,
+    precision: "exact",
+  });
+
+  return {
+    destroy: vi.fn(),
+    getEntry: (mediaTime) =>
+      mediaTime < 1 ? entry(first, 0) : mediaTime < 2 ? entry(second, 1) : null,
+  };
+}
+
+function createLayer(
+  options: {
+    renderers?: Parameters<typeof createPixiDepthLayer>[0]["renderers"];
+    source?: DepthFrameProvider | null;
+  } = {},
+) {
+  vi.stubGlobal("document", {
+    createElement: () => ({ getContext: vi.fn(), height: 0, width: 0 }),
+  });
+  const pixi = createFakePixi();
+  const layer = createPixiDepthLayer({
+    ...pixi.constructors,
+    acceptsUnalignedTextureRows: () => false,
+    getMediaSize: () => ({ height: 20, width: 40 }),
+    renderers: options.renderers ?? [annotationRenderers.depth()],
+    source: options.source ?? null,
+  });
+
+  return { layer, pixi };
+}
+
+describe("pixi depth layer", () => {
+  it("never draws the previous frame's depth over the next one", () => {
+    const first = depthMap(1);
+    const { layer, pixi } = createLayer({
+      source: twoFrameSource(first, depthMap(2)),
+    });
+
+    layer.drawFrame(0.5);
+    const mesh = pixi.meshes[0]!;
+
+    expect(mesh.visible).toBe(true);
+    expect(layer.getActiveDepth()).toMatchObject({
+      frameIndex: 0,
+      map: first,
+      mediaHeight: 20,
+      mediaTime: 0.5,
+      mediaWidth: 40,
+      precision: "exact",
+    });
+
+    layer.drawFrame(2.5);
+
+    expect(mesh.visible).toBe(false);
+    expect(layer.getActiveDepth()).toBeNull();
+  });
+
+  it("binds each frame's own map", () => {
+    const first = depthMap(1);
+    const second = depthMap(2);
+    const { layer, pixi } = createLayer({
+      source: twoFrameSource(first, second),
+    });
+
+    layer.drawFrame(0);
+    const firstTexture = pixi.shaders[0]!.resources.uDepthTexture;
+    layer.drawFrame(1.5);
+
+    expect(pixi.shaders[0]!.resources.uDepthTexture).not.toBe(firstTexture);
+    expect(layer.getActiveDepth()?.map).toBe(second);
+  });
+
+  it("rewrites uniforms without re-uploading when a renderer changes", () => {
+    const { layer, pixi } = createLayer({
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+    const uploads = pixi.depthUploads();
+    const uniforms = pixi.uniformGroups[0]!;
+
+    layer.setRenderers([
+      annotationRenderers.depth({ colormap: "viridis", wipe: 0.5 }),
+    ]);
+    layer.drawFrame(0);
+
+    expect(pixi.depthUploads()).toBe(uploads);
+    expect(uploads).toBe(1);
+    expect(uniforms.update).toHaveBeenCalledTimes(2);
+    expect(uniforms.uniforms.uWipe).toBe(0.5);
+    expect(pixi.lutSources()).toBe(2);
+  });
+
+  it("writes nothing when the same map is drawn again under the same renderers", () => {
+    const { layer, pixi } = createLayer({
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+    layer.drawFrame(0.25);
+    layer.drawFrame(0.75);
+
+    expect(pixi.uniformGroups[0]!.update).toHaveBeenCalledOnce();
+  });
+
+  it("shares one upload between two depth renderers", () => {
+    const { layer, pixi } = createLayer({
+      renderers: [
+        annotationRenderers.depth({ id: "left", wipe: 0.5 }),
+        annotationRenderers.depth({ colormap: "magma", id: "right" }),
+      ],
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+
+    expect(pixi.meshes).toHaveLength(2);
+    expect(pixi.depthUploads()).toBe(1);
+    expect(pixi.shaders[0]!.resources.uDepthTexture).toBe(
+      pixi.shaders[1]!.resources.uDepthTexture,
+    );
+    expect(pixi.shaders[0]!.resources.uLutTexture).not.toBe(
+      pixi.shaders[1]!.resources.uLutTexture,
+    );
+  });
+
+  it("stacks one mesh per renderer in presentation order", () => {
+    const left = annotationRenderers.depth({ id: "left" });
+    const right = annotationRenderers.depth({ id: "right" });
+    const { layer, pixi } = createLayer({
+      renderers: [left, right],
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+    const [leftMesh, rightMesh] = pixi.meshes;
+
+    expect(container.children).toEqual([leftMesh, rightMesh]);
+
+    layer.setRenderers([right, left]);
+    layer.drawFrame(0);
+
+    expect(container.children).toEqual([rightMesh, leftMesh]);
+
+    layer.setRenderers([right]);
+    layer.drawFrame(0);
+
+    expect(container.children).toEqual([rightMesh]);
+    expect(leftMesh!.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("carries opacity on the mesh, clamped to 0..1", () => {
+    const { layer, pixi } = createLayer({
+      renderers: [annotationRenderers.depth({ opacity: 1.5 })],
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+    expect(pixi.meshes[0]!.alpha).toBe(1);
+
+    layer.setRenderers([annotationRenderers.depth({ opacity: 0.3 })]);
+    layer.drawFrame(0);
+    expect(pixi.meshes[0]!.alpha).toBe(0.3);
+  });
+
+  it("warns once when depth has to fall back to disparity", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { layer } = createLayer({
+      renderers: [annotationRenderers.depth({ quantity: "depth" })],
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+    layer.drawFrame(1.5);
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]![0]).toContain('Depth renderer "depth"');
+  });
+
+  it("names what is on screen in its content key", () => {
+    const { layer } = createLayer({
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    expect(layer.getContentKey()).toBe("none");
+    layer.drawFrame(0);
+    const first = layer.getContentKey();
+    layer.drawFrame(0.5);
+    expect(layer.getContentKey()).toBe(first);
+    layer.drawFrame(1.5);
+    expect(layer.getContentKey()).not.toBe(first);
+  });
+
+  it("hides and releases its textures when depth is removed", () => {
+    const { layer, pixi } = createLayer({
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+    layer.setDepthSource(null);
+
+    expect(pixi.meshes[0]!.visible).toBe(false);
+    expect(layer.getActiveDepth()).toBeNull();
+    expect(pixi.depthSources[0]!.destroy).toHaveBeenCalledOnce();
+
+    layer.drawFrame(0);
+    expect(pixi.meshes[0]!.visible).toBe(false);
+  });
+
+  it("draws nothing without a depth renderer", () => {
+    const { layer, pixi } = createLayer({
+      renderers: [],
+      source: twoFrameSource(depthMap(1), depthMap(2)),
+    });
+
+    layer.drawFrame(0);
+
+    expect(pixi.meshes).toHaveLength(0);
+    expect(pixi.depthUploads()).toBe(0);
+  });
+});
+
+class FakeContainer {
+  children: FakeMesh[] = [];
+  readonly destroy = vi.fn();
+
+  addChild(child: FakeMesh) {
+    child.removeFromParent();
+    this.children.push(child);
+    child.parent = this;
+  }
+}
+
+class FakeMesh {
+  alpha = 1;
+  parent?: FakeContainer;
+  shader: FakeShader;
+  visible = true;
+  readonly destroy = vi.fn();
+
+  constructor(options: { shader: FakeShader }) {
+    this.shader = options.shader;
+  }
+
+  removeFromParent() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter(
+      (child) => child !== this,
+    );
+    this.parent = undefined;
+  }
+}
+
+class FakeShader {
+  constructor(readonly resources: Record<string, unknown>) {}
+
+  readonly destroy = vi.fn();
+}
+
+interface FakeUniformGroup {
+  readonly uniforms: Record<string, unknown>;
+  readonly update: ReturnType<typeof vi.fn>;
+}
+
+interface FakeBufferSource {
+  readonly destroy: ReturnType<typeof vi.fn>;
+  readonly options: { readonly format: string };
+  readonly style: object;
+}
+
+function createFakePixi() {
+  const meshes: FakeMesh[] = [];
+  const shaders: FakeShader[] = [];
+  const uniformGroups: FakeUniformGroup[] = [];
+  const bufferSources: FakeBufferSource[] = [];
+
+  return {
+    bufferSources,
+    get depthSources() {
+      return bufferSources.filter(
+        ({ options }) => options.format !== "rgba8unorm",
+      );
+    },
+    depthUploads: () =>
+      bufferSources.filter(({ options }) => options.format !== "rgba8unorm")
+        .length,
+    lutSources: () =>
+      bufferSources.filter(({ options }) => options.format === "rgba8unorm")
+        .length,
+    meshes,
+    shaders,
+    uniformGroups,
+    constructors: {
+      BufferImageSource: class {
+        readonly destroy = vi.fn();
+        readonly style = {};
+        readonly update = vi.fn();
+
+        constructor(readonly options: { readonly format: string }) {
+          bufferSources.push(this);
+        }
+      } as never,
+      Container: FakeContainer as never,
+      ImageSource: class {
+        readonly destroy = vi.fn();
+        readonly style = {};
+      } as never,
+      Mesh: class extends FakeMesh {
+        constructor(options: { shader: FakeShader }) {
+          super(options);
+          meshes.push(this);
+        }
+      } as never,
+      MeshGeometry: class {
+        readonly destroy = vi.fn();
+      } as never,
+      Shader: {
+        from(options: { resources: Record<string, unknown> }) {
+          const shader = new FakeShader({ ...options.resources });
+
+          shaders.push(shader);
+          return shader;
+        },
+      } as never,
+      UniformGroup: class {
+        readonly uniforms: Record<string, unknown> = {};
+        readonly update = vi.fn();
+
+        constructor(uniforms: Record<string, { value: unknown }>) {
+          for (const [key, { value }] of Object.entries(uniforms)) {
+            this.uniforms[key] = value;
+          }
+          uniformGroups.push(this);
+        }
+      } as never,
+    },
+  };
+}
