@@ -161,15 +161,15 @@ The depth PNG is a standard 16-bit grayscale PNG, not interlaced, with 0 where
 there is no depth. Browsers decode it in JavaScript on top of their own zlib,
 and the PNG row filter the writer picks decides how much JavaScript work that
 is. Up and Sub rows undo in one addition per byte; Paeth rows need a
-three-way comparison per byte and take about 1.7 times as long, and most
-writers choose filters per row, mostly Paeth, by default (Pillow does; see the
-depth benchmark in `benchmark/depth/` for the numbers).
+three-way comparison per byte and take 1.7 to 2.3 times as long. Some writers
+choose a filter per row by default: Pillow picks mostly Paeth rows for depth
+maps. The depth benchmark in `benchmark/depth/` has the numbers.
 
 A writer that lets you choose should write every row with one simple filter:
 OpenCV's `cv2.imwrite(path, depth, [cv2.IMWRITE_PNG_FILTER, cv2.IMWRITE_PNG_FILTER_UP])`,
 or libpng's `png_set_filter(png, 0, PNG_FILTER_UP)`. The file stays a standard
-PNG that every tool opens; on the research scene it was up to 15% larger than
-Pillow's per-row choice.
+PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
+12% (Sub) larger than Pillow's per-row choice at the same compression level.
 
 ## Limits
 
