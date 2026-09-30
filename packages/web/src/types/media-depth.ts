@@ -11,8 +11,14 @@ import type { DepthManifest, DepthMap } from "supervision-js-core";
  * A `manifest` is the URL of a `depth.json`, or its `parseDepthManifest`
  * output. The session fetches the 16-bit PNG it names (and the confidence PNG,
  * when there is one), decodes it in the render-preparation worker, and draws
- * the map. Only still-image manifests (`image`) are drawn so far; a clip
- * manifest (`frames`) is refused with a `RangeError`.
+ * the map.
+ *
+ * A clip manifest (`frames`) pairs one PNG with each video frame, so it needs
+ * media with a frame index: `createWebVideoEngineMediaRendererSource()`. Other
+ * media refuse it with a `RangeError`. While playback runs, no depth is drawn.
+ * Once it rests, the session fetches the exact frame for the video frame on
+ * screen, then the two frames on either side, so stepping shows depth at
+ * once.
  */
 export type MediaRendererDepthInput =
   | {

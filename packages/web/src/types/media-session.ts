@@ -279,7 +279,9 @@ export interface MediaSessionOptions {
   /**
    * Depth drawn by `depth` annotation renderers, as its own channel beside
    * detections. A still `map` is drawn under every frame and stretched over
-   * the media rectangle, so it must share the media's aspect ratio.
+   * the media rectangle, so it must share the media's aspect ratio. A clip
+   * manifest (`frames`) needs `createWebVideoEngineMediaRendererSource()`
+   * media and draws each frame's exact depth once playback rests.
    */
   readonly depth?: MediaRendererDepthInput;
   /**

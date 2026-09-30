@@ -185,6 +185,7 @@ export {
   detectionFrameOverlapsRange,
   encodeCompressedRleCounts,
   filterDetectionFramesForRange,
+  PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS,
   selectDetectionFrame,
   validateDetectionFrames,
   type DecodedDetectionMask,

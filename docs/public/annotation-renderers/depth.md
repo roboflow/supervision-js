@@ -173,9 +173,15 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
 
 ## Limits
 
-- The session draws still depth: a `map`, or a manifest with an `image`. It
-  does not yet play depth video; a clip manifest (`frames`) is refused with a
-  `RangeError`.
+- A clip manifest (`frames`) pairs one PNG with each video frame, so it needs
+  media with a frame index: `createWebVideoEngineMediaRendererSource()`. Other
+  media refuse it with a `RangeError`, and so does a clip whose frame count
+  differs from the video's without `frames.times_s`.
+- A clip draws no depth while it plays. Once playback has rested for 0.15 s,
+  the session fetches the exact PNG for the frame on screen, then the two
+  frames on either side, so stepping shows depth at once. It keeps up to
+  128 MiB of decoded frames and drops the ones farthest from the frame on
+  screen first. The 8-bit `preview` video is not played yet.
 - On WebGL a map whose width is odd goes up with one padding texel per row,
   padded by the worker while it decodes a manifest's PNG; WebGPU uploads the
   samples as they are.

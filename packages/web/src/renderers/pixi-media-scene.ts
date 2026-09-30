@@ -307,6 +307,7 @@ export async function createPixiMediaScene(
   let currentDepthRenderers: readonly DepthAnnotationRenderer[] =
     options.depthRenderers ?? [];
   let depthSource: DepthFrameProvider | null = null;
+  let unsubscribeDepthSource: (() => void) | undefined;
   let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
     currentRegionRenderers,
   );
@@ -1192,6 +1193,7 @@ export async function createPixiMediaScene(
     setPlaybackActive(active) {
       isPlaybackActive = active;
       maskLayer?.setPlaybackActive(active);
+      depthSource?.setPlaybackActive?.(active);
     },
 
     setTimelineContext(context) {
@@ -1621,10 +1623,16 @@ export async function createPixiMediaScene(
     },
 
     setDepthSource(source) {
+      unsubscribeDepthSource?.();
       depthSource = source;
+      source?.setPlaybackActive?.(isPlaybackActive);
+      // A clip's exact frame lands after its frame was presented. The layer's
+      // content key is in the render signature, so each of these redraws
+      // renders only when the depth on screen actually changed.
+      unsubscribeDepthSource = source?.subscribe?.(() => {
+        if (hasPresentedSample) redrawAnnotationsNow();
+      });
       depthLayer?.setDepthSource(source);
-      // The layer's content key is in the render signature, so this renders
-      // only when the depth on screen actually changed.
       if (hasPresentedSample) redrawAnnotationsNow();
     },
 
@@ -1683,6 +1691,7 @@ export async function createPixiMediaScene(
       vectorLayer.destroy();
       regionLayer.destroy();
       heatmapLayer?.destroy();
+      unsubscribeDepthSource?.();
       depthLayer?.destroy();
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();

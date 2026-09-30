@@ -152,6 +152,37 @@ describe("media renderer depth", () => {
     renderer.destroy();
   });
 
+  it("refuses a clip manifest on media without a frame index", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            frames: { count: 3, exact: "exact/{index:06}.png" },
+            height: 18,
+            kind: "disparity_px",
+            schema: "supervision.depth-manifest",
+            storage: { format: "png16", no_depth: 0, scale: 256 },
+            version: 1,
+            width: 32,
+          }),
+        ),
+    );
+    const renderer = await createRenderer(false, false, {
+      renderers: [annotationRenderers.depth()],
+    });
+
+    await expect(
+      renderer.setDepth?.({ manifest: "https://example.test/clip/depth.json" }),
+    ).rejects.toThrow(
+      new RangeError(
+        "depth.json describes a clip (frames), which needs a media source with a frame index: pass createWebVideoEngineMediaRendererSource() as the media.",
+      ),
+    );
+    expect(renderer.getActiveDepth?.()).toBeNull();
+
+    renderer.destroy();
+  });
+
   it("draws a still map under the first presented frame", async () => {
     const map = depthMap();
     const renderer = await createRenderer(false, false, {

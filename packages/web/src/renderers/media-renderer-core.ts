@@ -193,6 +193,7 @@ export async function createMediaRendererCore(
       depthLoad = load;
       try {
         next = await openDepthSource(input, {
+          frameClock,
           media: mediaSize,
           padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
           preparer: () =>

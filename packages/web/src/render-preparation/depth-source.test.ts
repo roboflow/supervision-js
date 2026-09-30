@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseDepthManifest, type DepthMap } from "supervision-js-core";
 import { encodePng } from "../../../../test/depth-png";
 import { createDepthMapUpload } from "#renderers/depth-textures";
-import { createDepthFramePreparer } from "#render-preparation/depth-frame-preparer";
+import {
+  createDepthFramePreparer,
+  type DepthFramePreparer,
+} from "#render-preparation/depth-frame-preparer";
 import {
   openDepthSource,
+  type DepthFrameProvider,
+  type ExactDepthFrameOptions,
   resolveUrl,
   validateDepthInput,
 } from "#render-preparation/depth-source";
@@ -247,24 +252,6 @@ describe("depth source from an image manifest", () => {
     );
   });
 
-  it("refuses a clip manifest for now", async () => {
-    const fetch = fakeFetch({
-      "https://example.test/depth.json": wireManifest({
-        frames: { count: 3, exact: "exact/{index:06}.png" },
-        image: undefined,
-      }),
-    });
-
-    await expect(
-      openDepthSource(
-        { manifest: "https://example.test/depth.json" },
-        { fetch, media: MEDIA, preparer: mainThreadPreparer() },
-      ),
-    ).rejects.toThrow(
-      "depth.json describes a clip; the session draws still depth images only for now.",
-    );
-  });
-
   it("reports a missing file with its URL", async () => {
     const fetch = fakeFetch({
       "https://example.test/depth.json": wireManifest(),
@@ -311,6 +298,304 @@ describe("depth source from an image manifest", () => {
     );
   });
 });
+
+/** Ten one-second frames on the media's timeline, like the engine's clock. */
+const CLOCK = {
+  duration: 10,
+  durationAt: () => 1,
+  endTimestamp: 10,
+  firstTimestamp: 0,
+  frameCount: 10,
+  indexAtOrBefore: (time: number) => Math.min(9, Math.max(0, Math.floor(time))),
+  timeAt: (index: number) => index,
+};
+
+const CLIP_WIDTH = 16;
+const CLIP_HEIGHT = 9;
+const CLIP_FRAME_BYTES = CLIP_WIDTH * CLIP_HEIGHT * 2;
+
+/**
+ * A clip server whose frame PNGs are two bytes, the frame index, and a
+ * decoder that fills a map with that index times 256: every map says which
+ * file it came from, and nothing waits on real inflate.
+ */
+function clipServer(
+  frames: Record<string, unknown> = {},
+  count = CLOCK.frameCount,
+) {
+  const routes: Record<string, unknown> = {
+    "https://example.test/clip/depth.json": wireManifest({
+      frames: { count, exact: "exact/{index:06}.png", ...frames },
+      image: undefined,
+    }),
+  };
+
+  for (let index = 0; index < count; index += 1) {
+    routes[
+      `https://example.test/clip/exact/${String(index).padStart(6, "0")}.png`
+    ] = Uint8Array.of(index & 0xff, index >> 8);
+  }
+
+  const fetch = fakeFetch(routes);
+  const decodeDepth = vi.fn(async (bytes: ArrayBuffer) => {
+    const [low, high] = new Uint8Array(bytes);
+
+    return {
+      height: CLIP_HEIGHT,
+      values: new Uint16Array(CLIP_WIDTH * CLIP_HEIGHT).fill(
+        (low + 256 * high) * 256,
+      ),
+      width: CLIP_WIDTH,
+    };
+  });
+  const preparer = {
+    decodeConfidence: vi.fn(),
+    decodeDepth,
+    destroy: vi.fn(),
+  } as unknown as DepthFramePreparer;
+  const fetchedFrames = () =>
+    fetch.mock.calls
+      .map(([url]) => /exact\/(\d+)\.png$/.exec(String(url))?.[1])
+      .filter((index): index is string => index !== undefined)
+      .map(Number);
+
+  return { fetch, fetchedFrames, preparer: () => preparer };
+}
+
+async function openClip(
+  server: ReturnType<typeof clipServer>,
+  exactFrames: Partial<ExactDepthFrameOptions> = {},
+) {
+  return openDepthSource(
+    { manifest: "https://example.test/clip/depth.json" },
+    {
+      exactFrames: { settleSeconds: 0, ...exactFrames },
+      fetch: server.fetch,
+      frameClock: CLOCK,
+      media: MEDIA,
+      preparer: server.preparer,
+    },
+  );
+}
+
+/** The frame index a drawn map was decoded from. */
+function drawnFrame(source: DepthFrameProvider, mediaTime: number) {
+  const entry = source.getEntry(mediaTime);
+
+  return entry === null
+    ? null
+    : { frameIndex: entry.frameIndex, file: entry.map.samples.values[0] / 256 };
+}
+
+describe("depth source from a clip manifest", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses a clip without a frame index, as on the src path", async () => {
+    const server = clipServer();
+
+    await expect(
+      openDepthSource(
+        { manifest: "https://example.test/clip/depth.json" },
+        { fetch: server.fetch, media: MEDIA, preparer: server.preparer },
+      ),
+    ).rejects.toThrow(
+      new RangeError(
+        "depth.json describes a clip (frames), which needs a media source with a frame index: pass createWebVideoEngineMediaRendererSource() as the media.",
+      ),
+    );
+  });
+
+  it("refuses a clip whose frame count is not the media's", async () => {
+    await expect(openClip(clipServer({}, 9))).rejects.toThrow(
+      "depth.json has 9 frames and the media has 10; give frames.times_s when depth covers only some of the video's frames.",
+    );
+  });
+
+  it("fetches the frame on screen once playback has rested, then asks for one redraw", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = clipServer();
+    const source = await openClip(server, { settleSeconds: 0.15 });
+    const redraw = vi.fn();
+
+    source.subscribe?.(redraw);
+    expect(source.getEntry(3.2)).toBeNull();
+    await vi.advanceTimersByTimeAsync(149);
+    expect(server.fetchedFrames()).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(redraw).toHaveBeenCalledTimes(1));
+    expect(drawnFrame(source, 3.2)).toEqual({ file: 3, frameIndex: 3 });
+    expect(source.getEntry(3.2)).toMatchObject({ precision: "exact" });
+
+    source.destroy();
+  });
+
+  it("fetches the neighbours after the frame on screen, nearest first", async () => {
+    const server = clipServer();
+    const source = await openClip(server);
+
+    source.getEntry(5);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
+    expect(server.fetchedFrames()).toEqual([5, 6, 4, 7, 3]);
+
+    // A step lands on a neighbour already decoded: its depth shows at once.
+    expect(drawnFrame(source, 6)).toEqual({ file: 6, frameIndex: 6 });
+
+    source.destroy();
+  });
+
+  it("stays within the clip at its ends", async () => {
+    const server = clipServer();
+    const source = await openClip(server);
+
+    source.getEntry(0);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(3));
+    expect(server.fetchedFrames()).toEqual([0, 1, 2]);
+
+    source.destroy();
+  });
+
+  it("draws nothing while playback runs, even a frame it holds", async () => {
+    const server = clipServer();
+    const source = await openClip(server);
+    const redraw = vi.fn();
+
+    source.subscribe?.(redraw);
+    source.getEntry(2);
+    await vi.waitFor(() => expect(drawnFrame(source, 2)).not.toBeNull());
+
+    source.setPlaybackActive?.(true);
+    expect(redraw).toHaveBeenCalled();
+    expect(source.getEntry(2)).toBeNull();
+    expect(source.getEntry(3)).toBeNull();
+
+    // Frame 3 was fetched as a neighbour; resting there shows it again.
+    source.setPlaybackActive?.(false);
+    expect(drawnFrame(source, 3)).toEqual({ file: 3, frameIndex: 3 });
+
+    source.destroy();
+  });
+
+  it("fetches nothing while playback runs", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = clipServer();
+    const source = await openClip(server, { settleSeconds: 0.15 });
+
+    source.setPlaybackActive?.(true);
+    for (let time = 0; time < 5; time += 1) source.getEntry(time);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.fetchedFrames()).toEqual([]);
+
+    source.setPlaybackActive?.(false);
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.waitFor(() => expect(server.fetchedFrames()[0]).toBe(4));
+
+    source.destroy();
+  });
+
+  it("stops the neighbours not yet asked for when the frame on screen moves", async () => {
+    const server = clipServer();
+    const gate = createGate();
+    const decode = server.preparer().decodeDepth;
+
+    vi.mocked(decode).mockImplementationOnce(async (bytes) => {
+      await gate.promise;
+      return {
+        height: CLIP_HEIGHT,
+        values: new Uint16Array(CLIP_WIDTH * CLIP_HEIGHT).fill(
+          new Uint8Array(bytes)[0] * 256,
+        ),
+        width: CLIP_WIDTH,
+      };
+    });
+    const source = await openClip(server);
+
+    source.getEntry(5);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toEqual([5]));
+    source.getEntry(8);
+    gate.resolve();
+
+    await vi.waitFor(() =>
+      expect(drawnFrame(source, 8)).toEqual({ file: 8, frameIndex: 8 }),
+    );
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
+    // Frame 5 was in flight and is kept; 6, 4, 7 and 3 were never asked for.
+    expect(server.fetchedFrames()).toEqual([5, 8, 9, 7, 6]);
+    expect(drawnFrame(source, 5)).toEqual({ file: 5, frameIndex: 5 });
+
+    source.destroy();
+  });
+
+  it("keeps frames up to its byte budget, dropping the farthest first", async () => {
+    const server = clipServer();
+    const source = await openClip(server, {
+      maxCacheBytes: 3 * CLIP_FRAME_BYTES,
+      neighborFrameCount: 1,
+    });
+
+    source.getEntry(2);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(3));
+    source.getEntry(3);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(4));
+
+    // 1, 2, 3 and 4 were decoded; 1 is farthest from 3 and was dropped.
+    expect(server.fetchedFrames()).toEqual([2, 3, 1, 4]);
+    expect(drawnFrame(source, 4)).not.toBeNull();
+    source.getEntry(3);
+    expect(drawnFrame(source, 2)).not.toBeNull();
+    expect(source.getEntry(1)).toBeNull();
+
+    source.destroy();
+  });
+
+  it("pairs depth frames with media times through times_s", async () => {
+    const server = clipServer({ times_s: [0.5, 2, 6] }, 3);
+    const source = await openClip(server, { neighborFrameCount: 0 });
+
+    expect(source.getEntry(0.25)).toBeNull();
+
+    // Frame 1 covers [2, 6): the video frames in between keep it.
+    source.getEntry(4.5);
+    await vi.waitFor(() =>
+      expect(drawnFrame(source, 4.5)).toEqual({ file: 1, frameIndex: 1 }),
+    );
+    expect(drawnFrame(source, 2 - 0.0004)).toEqual({ file: 1, frameIndex: 1 });
+
+    source.destroy();
+  });
+
+  it("warns once and draws nothing over a frame that does not load", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const server = clipServer();
+
+    vi.mocked(server.preparer().decodeDepth).mockRejectedValue(
+      new Error("corrupt PNG"),
+    );
+    const source = await openClip(server);
+
+    source.getEntry(4);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    expect(warn.mock.calls[0][0]).toContain(
+      "Depth frame 4 did not load, so no depth is drawn over it",
+    );
+    expect(source.getEntry(4)).toBeNull();
+
+    warn.mockRestore();
+    source.destroy();
+  });
+});
+
+function createGate() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+
+  return { promise, resolve };
+}
 
 describe("resolveUrl", () => {
   it("resolves files against an absolute base, and leaves blob URLs whole", () => {
