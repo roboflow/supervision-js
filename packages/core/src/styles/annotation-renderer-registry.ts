@@ -113,6 +113,7 @@ export const annotationRendererRegistry: AnnotationRendererRegistry = {
     createCanonicalStyle: createDefaultBoxCornerStyle,
     styleField: "boxCornerStyle",
   },
+  depth: { cardinality: "multiple" },
   ellipse: {
     cardinality: "singleton",
     createCanonicalStyle: createDefaultEllipseStyle,

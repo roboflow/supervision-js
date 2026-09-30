@@ -1,5 +1,11 @@
 import type { BoxStyle } from "#types/box-style";
 import type { BoxCornerStyle } from "#types/box-corner-style";
+import type {
+  DepthColormap,
+  DepthQuantity,
+  DepthRange,
+  DepthSampling,
+} from "#types/depth-map";
 import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { LabelStyle } from "#types/label-style";
@@ -22,6 +28,7 @@ import type { Detection } from "#types/detections";
 export const annotationRendererKinds = [
   "box",
   "box-corners",
+  "depth",
   "ellipse",
   "heatmap",
   "keypoints",
@@ -49,6 +56,7 @@ export type AnnotationRendererKind = (typeof annotationRendererKinds)[number];
 export type AnnotationRenderer =
   | BoxAnnotationRenderer
   | BoxCornerAnnotationRenderer
+  | DepthAnnotationRenderer
   | EllipseAnnotationRenderer
   | HeatmapAnnotationRenderer
   | KeypointAnnotationRenderer
@@ -85,6 +93,49 @@ export interface BoxAnnotationRenderer extends BaseAnnotationRenderer {
 export interface BoxCornerAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "box-corners";
   readonly style?: BoxCornerStyle | null;
+}
+
+/**
+ * Colours the session's depth map over the media.
+ *
+ * Depth is its own per-frame channel, supplied through the session's `depth`
+ * option rather than through detections, and the map is stretched over the
+ * whole media rectangle. Every setting here is presentation: changing one
+ * recolours the map on screen without reloading or re-uploading it.
+ * Multiple descriptors with distinct ids may coexist, for example two
+ * colormaps split by `wipe`.
+ */
+export interface DepthAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "depth";
+  /** Colour table, with the near end warm or bright. Defaults to `"turbo"`. */
+  readonly colormap?: DepthColormap;
+  /**
+   * Colours disparity (inverse depth) or metric depth. Defaults to
+   * `"disparity"`. Depth needs metric data or a camera; without one the map
+   * is coloured as disparity.
+   */
+  readonly quantity?: DepthQuantity;
+  /**
+   * `"clip"` uses the map's own display range, `"auto"` the frame's 2nd to
+   * 98th percentile, and `{ min, max }` a fixed range in the quantity's unit
+   * (pixels of disparity or metres). Values outside clamp to the ends.
+   * Defaults to `"clip"`, which behaves as `"auto"` for a map without one.
+   */
+  readonly range?: "clip" | "auto" | DepthRange;
+  /** Overall alpha from 0 to 1. Defaults to 1. */
+  readonly opacity?: number;
+  /**
+   * `"auto"` samples the nearest map pixel when the map is at least media
+   * size and filters edge-aware when it is smaller. Defaults to `"auto"`.
+   */
+  readonly sampling?: DepthSampling;
+  /** Share of the media width, from the left, the map covers. Defaults to 1. */
+  readonly wipe?: number;
+  /**
+   * `0xRRGGBB` painted where the map has no depth, or `null` to leave those
+   * pixels unpainted. Defaults to `null`.
+   */
+  readonly noDepthColor?: number | null;
 }
 
 export interface EllipseAnnotationRenderer extends BaseAnnotationRenderer {
@@ -390,6 +441,11 @@ export type AnnotationRendererFactory = {
   readonly boxCorners: (
     options?: AnnotationRendererStyleOptions<"box-corners">,
   ) => BoxCornerAnnotationRenderer;
+  readonly depth: (
+    options?: Omit<DepthAnnotationRenderer, "kind" | "id"> & {
+      readonly id?: string;
+    },
+  ) => DepthAnnotationRenderer;
   readonly ellipse: (
     options?: AnnotationRendererStyleOptions<"ellipse">,
   ) => EllipseAnnotationRenderer;
@@ -431,7 +487,7 @@ export type AnnotationRendererFactory = {
 };
 
 type AnnotationRendererStyleOptions<
-  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap">,
+  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap" | "depth">,
 > = Pick<AnnotationRendererOfKind<TKind>, "style">;
 
 /**
@@ -445,6 +501,11 @@ type AnnotationRendererStyleOptions<
 export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
   boxCorners: (options) => createAnnotationRenderer("box-corners", options),
+  depth: (options) => ({
+    ...options,
+    id: options?.id ?? "depth",
+    kind: "depth",
+  }),
   ellipse: (options) => createAnnotationRenderer("ellipse", options),
   heatmap: (options) => ({
     ...options,
@@ -465,7 +526,7 @@ export const annotationRenderers: AnnotationRendererFactory = {
 };
 
 function createAnnotationRenderer<
-  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap">,
+  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap" | "depth">,
 >(
   kind: TKind,
   options: AnnotationRendererStyleOptions<TKind> | undefined,

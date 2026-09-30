@@ -163,6 +163,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.annotationRenderers).toEqual({
       box: expect.any(Function),
       boxCorners: expect.any(Function),
+      depth: expect.any(Function),
       ellipse: expect.any(Function),
       heatmap: expect.any(Function),
       keypoints: expect.any(Function),

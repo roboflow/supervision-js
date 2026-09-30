@@ -115,6 +115,7 @@ export {
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
   type BoxCornerAnnotationRenderer,
+  type DepthAnnotationRenderer,
   type EllipseAnnotationRenderer,
   type HeatmapAnnotationRenderer,
   type HeatmapColorStop,
