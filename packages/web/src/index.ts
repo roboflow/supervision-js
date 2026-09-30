@@ -165,6 +165,7 @@ export {
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
   type BoxCornerAnnotationRenderer,
+  type DepthAnnotationRenderer,
   type EllipseAnnotationRenderer,
   type HeatmapAnnotationRenderer,
   type HeatmapColorStop,
@@ -371,6 +372,30 @@ export {
   type SkeletonVertexDefinition,
   type TopLeftRect,
 } from "supervision-js-core";
+export {
+  DepthColormap,
+  DepthMapKind,
+  DepthQuantity,
+  DepthSampling,
+  computeDepthPercentileRange,
+  parseDepthManifest,
+  readDepthAt,
+  type DepthCamera,
+  type DepthClipFrames,
+  type DepthImageEntry,
+  type DepthManifest,
+  type DepthMap,
+  type DepthPercentileRangeOptions,
+  type DepthPreviewTrack,
+  type DepthRange,
+  type DepthReadout,
+  type PreviewDepthSamples,
+  type ScaledDepthSamples,
+} from "supervision-js-core";
+export type {
+  ActiveDepthMap,
+  MediaRendererDepthInput,
+} from "#types/media-depth";
 export type {
   MediaFrameMetadata,
   MediaTimelineMetadata,

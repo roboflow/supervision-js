@@ -29,6 +29,7 @@ import type { OrientedBoxStyle } from "supervision-js-core";
 import type { PercentageBarStyle } from "supervision-js-core";
 import type {
   RegionAnnotationRenderer,
+  DepthAnnotationRenderer,
   HeatmapAnnotationRenderer,
   PolygonStyle,
   PolylineStyle,
@@ -47,6 +48,8 @@ import type {
   ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
+import type { DepthFrameProvider } from "#render-preparation/depth-source";
+import type { ActiveDepthMap } from "#types/media-depth";
 import type { PresentedFrameSource } from "./presented-frame-channel";
 import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-window";
 
@@ -76,6 +79,7 @@ export interface MediaRendererSceneOptions {
   readonly keypointStyle: KeypointStyle | null | undefined;
   readonly regionRenderers: readonly RegionAnnotationRenderer[];
   readonly heatmapRenderers?: readonly HeatmapAnnotationRenderer[];
+  readonly depthRenderers?: readonly DepthAnnotationRenderer[];
   readonly interaction: MediaInteractionOptions | undefined;
   readonly interactionStyle: InteractionStyle | null | undefined;
   readonly canInteract: () => boolean;
@@ -189,6 +193,13 @@ export interface MediaRendererScene {
     selection: DetectionSelectionOptions | null,
     mediaTime: number,
   ): DetectionPickResult | null;
+  /**
+   * Replaces the depth the scene draws under its depth renderers and redraws
+   * the frame on screen; null removes it.
+   */
+  setDepthSource?(source: DepthFrameProvider | null): void;
+  /** The depth map the scene last drew, or null when none is on screen. */
+  getActiveDepth?(): ActiveDepthMap | null;
   destroy(): void;
 }
 

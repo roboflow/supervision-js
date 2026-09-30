@@ -6,6 +6,7 @@ import {
   createIdleDetectionBufferState,
   RegionRendererRegionKind,
   RegionRendererSourceKind,
+  type DepthMap,
   type DetectionFrame,
 } from "supervision-js-core";
 
@@ -310,12 +311,41 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class Mesh {
+    alpha = 1;
+    destroy = vi.fn();
+    removeFromParent = vi.fn();
+    shader: unknown;
+    visible = true;
+
+    constructor(options: { shader: unknown }) {
+      this.shader = options.shader;
+    }
+  }
+
+  class Destroyable {
+    destroy = vi.fn();
+    style = {};
+  }
+
+  class UniformGroup {
+    uniforms: Record<string, unknown> = {};
+    update = vi.fn();
+  }
+
+  const Shader = {
+    from: (options: { resources: Record<string, unknown> }) => ({
+      destroy: vi.fn(),
+      resources: { ...options.resources },
+    }),
+  };
+
   return {
     AlphaMask: Stub,
     Application,
     Assets: { load: vi.fn(), unload: vi.fn() },
     BlurFilter: Stub,
-    BufferImageSource: Stub,
+    BufferImageSource: Destroyable,
     CanvasSource,
     ColorMatrixFilter,
     Container,
@@ -323,16 +353,16 @@ vi.mock("pixi.js", () => {
     ExternalSource,
     Filter: Stub,
     Graphics,
-    ImageSource: Stub,
-    Mesh: Stub,
-    MeshGeometry: Stub,
+    ImageSource: Destroyable,
+    Mesh,
+    MeshGeometry: Destroyable,
     PrepareSystem: Stub,
     Rectangle,
-    Shader: Stub,
+    Shader,
     Sprite,
     Text: Stub,
     Texture,
-    UniformGroup: Stub,
+    UniformGroup,
     extensions: { add: vi.fn() },
   };
 });
@@ -847,6 +877,80 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
   });
 
+  it("draws depth from the presented timestamp alone", async () => {
+    const map = createDepthMap();
+    const asked: number[] = [];
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry(mediaTime) {
+        asked.push(mediaTime);
+        return { frameIndex: null, map, precision: "exact" };
+      },
+    });
+
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(4250));
+
+    expect(asked).toEqual([1, 4.25]);
+    expect(scene.getActiveDepth?.()).toMatchObject({ map, mediaTime: 4.25 });
+  });
+
+  it("never leaves the previous frame's depth on the next one", async () => {
+    const map = createDepthMap();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry: (mediaTime) =>
+        mediaTime < 2 ? { frameIndex: 0, map, precision: "exact" } : null,
+    });
+
+    channel.present(presentedFrame(1000));
+    expect(scene.getActiveDepth?.()?.map).toBe(map);
+
+    channel.present(presentedFrame(2000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+  });
+
+  it("renders a depth swap once, and a repeat of it never", async () => {
+    const map = createDepthMap();
+    const source = {
+      destroy: vi.fn(),
+      getEntry: () => ({ frameIndex: null, map, precision: "exact" as const }),
+    };
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+    const settled = scene.getRenderCount?.() ?? 0;
+
+    scene.setDepthSource?.(source);
+    expect(scene.getRenderCount?.()).toBe(settled + 1);
+
+    scene.setDepthSource?.(source);
+    expect(scene.getRenderCount?.()).toBe(settled + 1);
+
+    scene.setDepthSource?.(null);
+    expect(scene.getRenderCount?.()).toBe(settled + 2);
+    expect(scene.getActiveDepth?.()).toBeNull();
+  });
+
   it("renders a display adjustment once, and a repeat of it never", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
@@ -1159,6 +1263,19 @@ function stubAnimationFrames() {
 
 /** A timeline whose answer for a media time is whatever the test says it is
  *  at the moment it is asked. */
+function createDepthMap(): DepthMap {
+  return {
+    height: 24,
+    kind: "disparity_px",
+    samples: {
+      encoding: "scaled16",
+      scale: 256,
+      values: new Uint16Array(32 * 24).fill(2560),
+    },
+    width: 32,
+  };
+}
+
 function stubDetectionTimeline(
   answer: () => DetectionFrame | undefined,
 ): MediaRendererSceneOptions["detectionTimeline"] {

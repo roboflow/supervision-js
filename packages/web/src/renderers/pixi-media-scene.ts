@@ -7,6 +7,7 @@ import {
   type BoxCornerStyle,
   type Detection,
   type DetectionFrame,
+  type DepthAnnotationRenderer,
   type HeatmapAnnotationRenderer,
   type EllipseStyle,
   type MarkerStyle,
@@ -63,6 +64,7 @@ import {
   resolvePaintedMaskHalo,
 } from "./pixi-mask-halo";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
+import { createPixiDepthLayer } from "./pixi-depth-layer";
 import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
@@ -77,6 +79,7 @@ import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
 import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
+import type { DepthFrameProvider } from "#render-preparation/depth-source";
 import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
@@ -166,6 +169,7 @@ const FRAME_DRAW_TIMING_BUCKETS: Partial<
   Record<FramePresentStep, keyof FrameDrawTimings>
 > = {
   drawBox: "boxMs",
+  drawDepth: "maskMs",
   drawFocus: "focusMs",
   drawHeatmap: "maskMs",
   drawInteraction: "interactionMs",
@@ -295,6 +299,9 @@ export async function createPixiMediaScene(
     options.regionRenderers;
   let currentHeatmapRenderers: readonly HeatmapAnnotationRenderer[] =
     options.heatmapRenderers ?? [];
+  let currentDepthRenderers: readonly DepthAnnotationRenderer[] =
+    options.depthRenderers ?? [];
+  let depthSource: DepthFrameProvider | null = null;
   let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
     currentRegionRenderers,
   );
@@ -399,6 +406,21 @@ export async function createPixiMediaScene(
       prepareTexture: (texture) => app.renderer.prepare.upload(texture),
       renderPreparation: options.renderPreparation,
       renderers: currentHeatmapRenderers,
+    }));
+  let depthLayer: ReturnType<typeof createPixiDepthLayer> | undefined;
+  const ensureDepthLayer = () =>
+    (depthLayer ??= createPixiDepthLayer({
+      BufferImageSource,
+      Container,
+      ImageSource,
+      Mesh,
+      MeshGeometry,
+      Shader,
+      UniformGroup,
+      acceptsUnalignedTextureRows,
+      getMediaSize: () => ({ height: mediaHeight, width: mediaWidth }),
+      renderers: currentDepthRenderers,
+      source: depthSource,
     }));
   let polygonLayer =
     options.polygonStyle !== undefined &&
@@ -561,6 +583,7 @@ export async function createPixiMediaScene(
   let polygonDisplay: PixiContainer | undefined;
   let timelineContext: MediaRendererSceneTimelineContext | undefined;
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
+  const depthSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Depth);
   const heatmapSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Heatmap);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
   const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
@@ -575,6 +598,7 @@ export async function createPixiMediaScene(
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
     mediaSlot,
+    depthSlot,
     heatmapSlot,
     maskSlot,
     boxSlot,
@@ -939,6 +963,7 @@ export async function createPixiMediaScene(
   };
 
   const presentLayers: FramePresentLayers = {
+    drawDepth: (mediaTime) => depthLayer?.drawFrame(mediaTime),
     drawHeatmap: (mediaTime) => heatmapLayer?.drawFrame(mediaTime),
     advanceFocus: advanceFocusAnimation,
     drawAnnotationOverlay: (mediaTime) =>
@@ -1017,6 +1042,7 @@ export async function createPixiMediaScene(
       boxLayer.invalidate();
       return boxLayer.drawFrame(mediaTime, viewportScale);
     },
+    drawDepth: undefined,
     drawInteraction: undefined,
     drawMask: undefined,
   };
@@ -1105,6 +1131,9 @@ export async function createPixiMediaScene(
       mediaSprite.height = mediaHeight;
       if (!retainedBoxes) boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
+      if (currentDepthRenderers.length > 0) {
+        depthSlot.setDisplay(ensureDepthLayer().createContainer());
+      }
       if (currentHeatmapRenderers.length > 0) {
         heatmapSlot.setDisplay(ensureHeatmapLayer().createContainer());
       }
@@ -1485,6 +1514,19 @@ export async function createPixiMediaScene(
       } else {
         heatmapLayer?.setRenderers([]);
       }
+      currentDepthRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is DepthAnnotationRenderer =>
+            renderer.kind === "depth",
+        ) ?? [];
+      if (currentDepthRenderers.length > 0) {
+        const layer = ensureDepthLayer();
+        layer.setRenderers(currentDepthRenderers);
+        depthSlot.setDisplay(layer.createContainer());
+        syncSceneChildren();
+      } else {
+        depthLayer?.setRenderers([]);
+      }
       const nextRegionMaskCoverageKey = resolveRegionMaskCoverageKey(
         currentRegionRenderers,
       );
@@ -1572,6 +1614,18 @@ export async function createPixiMediaScene(
       return createPresentedSampleState(mediaTime, boxState, regionState);
     },
 
+    setDepthSource(source) {
+      depthSource = source;
+      depthLayer?.setDepthSource(source);
+      // The layer's content key is in the render signature, so this renders
+      // only when the depth on screen actually changed.
+      if (hasPresentedSample) redrawAnnotationsNow();
+    },
+
+    getActiveDepth() {
+      return depthLayer?.getActiveDepth() ?? null;
+    },
+
     setSelectedDetection(selection, mediaTime) {
       const pick =
         interactionLayer?.setSelectedDetection(
@@ -1623,6 +1677,7 @@ export async function createPixiMediaScene(
       vectorLayer.destroy();
       regionLayer.destroy();
       heatmapLayer?.destroy();
+      depthLayer?.destroy();
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
@@ -2493,6 +2548,8 @@ export async function createPixiMediaScene(
       presentedFrameSerial,
       currentMediaTime,
       annotationWindow.getReadinessToken(currentMediaTime),
+      // A new depth map lands without a new presented frame or presentation.
+      depthLayer?.getContentKey(),
       viewportScale,
       baseFit?.x,
       baseFit?.y,

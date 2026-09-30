@@ -4,6 +4,7 @@ import {
   createDefaultAnnotationPresentation,
   createProjectedDetectionFrameSource,
   resolveAnnotationRendererPresentation,
+  type DepthAnnotationRenderer,
 } from "supervision-js-core";
 import {
   createBufferedDetectionTimeline,
@@ -45,6 +46,12 @@ import {
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
+import {
+  openDepthSource,
+  validateDepthInput,
+  type DepthFrameProvider,
+} from "#render-preparation/depth-source";
+import type { MediaRendererDepthInput } from "#types/media-depth";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import { createMediaFrameNavigation } from "./media-frame-navigation";
 import {
@@ -120,6 +127,9 @@ export async function createMediaRendererCore(
       "playbackRate must be a finite number greater than zero.",
     );
   }
+  if (options.depth) {
+    validateDepthInput(options.depth);
+  }
   const defaultPresentation = createDefaultAnnotationPresentation();
   const resolvePresentation = (
     presentation: MediaRendererPresentation,
@@ -150,6 +160,23 @@ export async function createMediaRendererCore(
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
+  let mediaSize = { height: 0, width: 0 };
+  let depthSource: DepthFrameProvider | null = null;
+  /**
+   * Opens depth against the media it will stretch over and hands it to the
+   * scene, which redraws the frame on screen with it.
+   */
+  const applyDepth = (input: MediaRendererDepthInput | null) => {
+    if (!mediaScene?.setDepthSource) {
+      throw new Error("Media renderer is not ready.");
+    }
+
+    const next = input === null ? null : openDepthSource(input, mediaSize);
+
+    mediaScene.setDepthSource(next);
+    depthSource?.destroy();
+    depthSource = next;
+  };
   // A drag is a run of scrubs closed by the seek that lands it, the pairing the
   // transport already keeps for the producer.
   let isSeekGestureInFlight = false;
@@ -938,6 +965,18 @@ export async function createMediaRendererCore(
       return detectionTimeline?.selectFrame(runtimeState.currentTime()) ?? null;
     },
 
+    async setDepth(depth) {
+      if (runtimeState.isDestroyed()) {
+        throw new Error("Media renderer has been destroyed.");
+      }
+
+      applyDepth(depth);
+    },
+
+    getActiveDepth() {
+      return mediaScene?.getActiveDepth?.() ?? null;
+    },
+
     setSelectedDetection(selection) {
       if (runtimeState.isDestroyed()) {
         return null;
@@ -1033,6 +1072,8 @@ export async function createMediaRendererCore(
       destroyMediaInput();
       runtimeState.setSourceDestroyed();
       mediaScene?.destroy();
+      depthSource?.destroy();
+      depthSource = null;
       detectionTimeline?.destroy();
     },
   };
@@ -1115,6 +1156,7 @@ export async function createMediaRendererCore(
       : undefined;
 
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
+    mediaSize = mediaDimensions;
     mediaScene = await providers.createScene({
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
       backgroundColor: currentPresentation.backgroundColor,
@@ -1150,6 +1192,7 @@ export async function createMediaRendererCore(
       presentedFrames: protectedPresentedFrames?.source,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       heatmapRenderers: resolveHeatmapRenderers(currentPresentation),
+      depthRenderers: resolveDepthRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {
@@ -1169,6 +1212,7 @@ export async function createMediaRendererCore(
     detectionTimeline.setTimelineContext?.(timelineContext);
     mediaScene.setTimelineContext?.(timelineContext);
     mediaScene.initializeMedia(mediaDimensions);
+    if (options.depth) applyDepth(options.depth);
     runtimeState.setSourceReady(metadata);
 
     if (presentedFrameChannel) {
@@ -1441,6 +1485,15 @@ function resolveHeatmapRenderers(presentation: MediaRendererPresentation) {
   return (
     presentation.renderers?.filter((renderer) => renderer.kind === "heatmap") ??
     []
+  );
+}
+
+function resolveDepthRenderers(presentation: MediaRendererPresentation) {
+  return (
+    presentation.renderers?.filter(
+      (renderer): renderer is DepthAnnotationRenderer =>
+        renderer.kind === "depth",
+    ) ?? []
   );
 }
 

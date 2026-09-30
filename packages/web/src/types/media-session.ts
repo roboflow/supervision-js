@@ -40,6 +40,7 @@ import type {
 import type { RenderPreparationDiagnostics } from "#types/render-preparation";
 import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaFrameNavigation } from "#types/media-frame-navigation";
+import type { MediaRendererDepthInput } from "#types/media-depth";
 
 export {
   MediaSessionActivityKind,
@@ -276,6 +277,12 @@ export interface MediaSessionOptions {
    */
   readonly detections?: MediaSessionDetectionOptions;
   /**
+   * Depth drawn by `depth` annotation renderers, as its own channel beside
+   * detections. A still `map` is drawn under every frame and stretched over
+   * the media rectangle, so it must share the media's aspect ratio.
+   */
+  readonly depth?: MediaRendererDepthInput;
+  /**
    * Buffered playback: hold the picture until the frame it is about to show has
    * both its detections and its prepared annotation artifacts. Opening still
    * presents an initial media frame so the session can accept future appends;
@@ -457,6 +464,12 @@ export interface MediaSession {
    */
   captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
   setPresentation(presentation: MediaRendererPresentation): void;
+  /**
+   * Optionally replace the session's depth, or remove it with `null`, and
+   * redraw the frame on screen. `session.renderer.getActiveDepth()` reads
+   * back what is drawn.
+   */
+  setDepth?(depth: MediaRendererDepthInput | null): Promise<void>;
   setRenderQuality(quality: MediaRendererQuality): void;
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;
   getState(): MediaSessionState;

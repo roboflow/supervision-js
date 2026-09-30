@@ -49,6 +49,55 @@ describe("media session consumer workflows", () => {
     session.destroy();
   });
 
+  it("draws a still depth map the host hands the session, and swaps it later", async () => {
+    resetMocks();
+    const { annotationRenderers, createMediaSession, readDepthAt } =
+      await import("./index");
+    const depthMap = (disparity: number) => ({
+      height: 9,
+      kind: "disparity_px" as const,
+      samples: {
+        encoding: "scaled16" as const,
+        scale: 256,
+        values: new Uint16Array(16 * 9).fill(disparity * 256),
+      },
+      width: 16,
+    });
+    const session = await createMediaSession({
+      container: createContainer(),
+      depth: { map: depthMap(8) },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [annotationRenderers.depth({ colormap: "viridis" })],
+      },
+      renderer: { autoPlay: false, loop: false },
+    });
+    const readout = () => {
+      const active = session.renderer.getActiveDepth?.();
+
+      return active
+        ? readDepthAt(
+            active.map,
+            { x: 640, y: 360 },
+            { height: active.mediaHeight, width: active.mediaWidth },
+          )
+        : null;
+    };
+
+    expect(readout()).toMatchObject({ disparityPx: 8, x: 8, y: 4 });
+
+    await session.setDepth?.({ map: depthMap(20) });
+    expect(readout()).toMatchObject({ disparityPx: 20 });
+
+    await session.setDepth?.(null);
+    expect(readout()).toBeNull();
+
+    session.destroy();
+    await expect(session.setDepth?.(null)).rejects.toThrow(
+      "Media session has been destroyed.",
+    );
+  });
+
   it("creates a session, appends detections, seeks, updates styles, and destroys cleanly", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];
