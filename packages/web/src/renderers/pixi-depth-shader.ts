@@ -87,19 +87,22 @@ export interface PixiDepthShaderRenderer {
 /**
  * Shader terms for one map under one renderer. The quantity and range come
  * from core's mapping, the rest from the descriptor and the media size.
+ * `texels` is the size of the image the texture holds, which is smaller than
+ * the map when a map too large for the GPU went up decimated.
  */
 export function resolveDepthShaderUniforms(
   map: DepthMap,
   mapping: DepthColorMapping,
   renderer: DepthAnnotationRenderer,
   media: { readonly width: number; readonly height: number },
+  texels: { readonly width: number; readonly height: number } = map,
 ): DepthShaderUniforms {
   const { samples } = map;
   const sampling = renderer.sampling ?? "auto";
   const edgeAware =
     sampling === "edge-aware" ||
     (sampling === "auto" &&
-      (map.width < media.width || map.height < media.height));
+      (texels.width < media.width || texels.height < media.height));
   const noDepthColor = renderer.noDepthColor ?? null;
 
   return {
@@ -107,7 +110,7 @@ export function resolveDepthShaderUniforms(
     uEncoding: samples.encoding === "scaled16" ? 0 : 1,
     uInnerOffset: mapping.innerOffset,
     uInvScale: samples.encoding === "scaled16" ? 1 / samples.scale : 1,
-    uMapSize: new Float32Array([map.width, map.height]),
+    uMapSize: new Float32Array([texels.width, texels.height]),
     uNearIsLow: mapping.nearIsLow ? 1 : 0,
     uNoDepthColor:
       noDepthColor === null

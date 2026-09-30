@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { DepthMap } from "supervision-js-core";
 import {
   createDepthLutCache,
+  createDepthMapUpload,
   createDepthTextureRing,
   createPackedDepthUpload,
   createPreviewUpload,
+  queryMaxTextureSize,
 } from "#renderers/depth-textures";
 
 function scaledMap(width: number, height: number, first = 1): DepthMap {
@@ -69,6 +71,109 @@ describe("depth texture uploads", () => {
     ]);
     expect(aligned.textureWidth).toBe(4);
     expect(createPreviewUpload(codes, 5, 2, true).bytes).toBe(codes);
+  });
+});
+
+describe("maps larger than the GPU's largest texture", () => {
+  it("go up nearest-decimated to fit, keeping real samples", () => {
+    const width = 8193;
+    const height = 4;
+    const map = scaledMap(width, height);
+    const values = map.samples.values as Uint16Array;
+
+    const upload = createDepthMapUpload(map, true, 8192);
+
+    expect(upload.displaySize).toEqual({ height: 2, width: 4097 });
+    expect(upload.textureWidth).toBe(4097);
+    const texels = new Uint16Array(
+      upload.bytes.buffer,
+      upload.bytes.byteOffset,
+      4097 * 2,
+    );
+    for (const [x, y] of [
+      [0, 0],
+      [1, 0],
+      [2048, 1],
+      [4096, 1],
+    ]) {
+      const column = Math.min(
+        width - 1,
+        Math.floor(((x + 0.5) * width) / 4097),
+      );
+      const row = Math.floor(((y + 0.5) * height) / 2);
+
+      expect(texels[y * 4097 + x]).toBe(values[row * width + column]);
+    }
+    // The map itself keeps every sample for readouts.
+    expect(values).toHaveLength(width * height);
+  });
+
+  it("pad a decimated copy whose width WebGL cannot take as it is", () => {
+    const upload = createDepthMapUpload(scaledMap(8193, 2), false, 8192);
+
+    expect(upload.displaySize).toEqual({ height: 1, width: 4097 });
+    expect(upload.textureWidth).toBe(4098);
+  });
+
+  it("decimate preview codes the same way", () => {
+    const map: DepthMap = {
+      height: 1,
+      kind: "disparity_px",
+      samples: {
+        encoding: "preview8",
+        range: { max: 100, min: 0 },
+        reservedMax: 15,
+        values: Uint8Array.from({ length: 9000 }, (_, i) => i % 251),
+      },
+      width: 9000,
+    };
+
+    const upload = createDepthMapUpload(map, true, 4096);
+
+    expect(upload).toMatchObject({
+      displaySize: { height: 1, width: 3000 },
+      format: "r8unorm",
+    });
+    expect(upload.bytes[1]).toBe(map.samples.values[4]);
+  });
+
+  it("leave a map that fits untouched", () => {
+    const map = scaledMap(8192, 1);
+
+    const upload = createDepthMapUpload(map, true, 8192);
+
+    expect(upload.displaySize).toEqual({ height: 1, width: 8192 });
+    expect(upload.bytes.buffer).toBe(
+      (map.samples.values as Uint16Array).buffer,
+    );
+  });
+});
+
+describe("queryMaxTextureSize", () => {
+  it("reads WebGPU's device limit", () => {
+    expect(
+      queryMaxTextureSize({
+        gpu: { device: { limits: { maxTextureDimension2D: 16_384 } } },
+        name: "webgpu",
+      }),
+    ).toBe(16_384);
+  });
+
+  it("reads WebGL's MAX_TEXTURE_SIZE", () => {
+    const getParameter = vi.fn((name: number) => (name === 3379 ? 8192 : 0));
+
+    expect(
+      queryMaxTextureSize({
+        gl: { MAX_TEXTURE_SIZE: 3379, getParameter },
+        name: "webgl",
+      }),
+    ).toBe(8192);
+  });
+
+  it("falls back to what each API guarantees", () => {
+    expect(queryMaxTextureSize({ name: "webgpu" })).toBe(8192);
+    expect(queryMaxTextureSize({ name: "webgl" })).toBe(2048);
+    expect(queryMaxTextureSize(null)).toBe(2048);
   });
 });
 
@@ -136,6 +241,25 @@ describe("depth texture ring", () => {
     expect(sources).toHaveLength(2);
     expect(sources[0].destroy).toHaveBeenCalledOnce();
     expect(sources[1].options.width).toBe(8);
+  });
+
+  it("reports the decimated size of a map too large for the GPU", () => {
+    const sources: { options: { width: number; height: number } }[] = [];
+    const ring = createDepthTextureRing({
+      BufferImageSource: class {
+        readonly destroy = vi.fn();
+        constructor(readonly options: { width: number; height: number }) {
+          sources.push(this);
+        }
+      } as never,
+      acceptsUnalignedTextureRows: () => true,
+      maxTextureSize: () => 8192,
+    });
+
+    const slot = ring.acquire(scaledMap(16_384, 2));
+
+    expect(slot.displaySize).toEqual({ height: 1, width: 8192 });
+    expect(sources[0]!.options).toMatchObject({ height: 1, width: 8192 });
   });
 
   it("releases every texture on destroy", () => {

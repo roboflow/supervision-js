@@ -63,6 +63,8 @@ export function createPixiDepthLayer(options: {
   readonly Shader: InjectedShaderFactory;
   readonly UniformGroup: DepthShaderOptions["UniformGroup"];
   readonly acceptsUnalignedTextureRows: () => boolean;
+  /** The GPU's largest texture side, asked once per backend. */
+  readonly maxTextureSize?: () => number;
   readonly getMediaSize: () => { width: number; height: number };
   readonly renderers: readonly DepthAnnotationRenderer[];
   readonly source?: DepthFrameProvider | null;
@@ -214,10 +216,13 @@ export function createPixiDepthLayer(options: {
     target.renderer.render(
       texture.source,
       luts.get(descriptor.colormap ?? "turbo"),
-      resolveDepthShaderUniforms(entry.map, mapping, descriptor, {
-        height: meshHeight,
-        width: meshWidth,
-      }),
+      resolveDepthShaderUniforms(
+        entry.map,
+        mapping,
+        descriptor,
+        { height: meshHeight, width: meshWidth },
+        texture.displaySize,
+      ),
     );
     target.drawnDescriptor = descriptor;
     target.drawnMap = entry.map;
@@ -275,6 +280,7 @@ export function createPixiDepthLayer(options: {
       ring ??= createDepthTextureRing({
         BufferImageSource: options.BufferImageSource,
         acceptsUnalignedTextureRows: options.acceptsUnalignedTextureRows,
+        maxTextureSize: options.maxTextureSize,
       });
 
       const texture = ring.acquire(entry.map);

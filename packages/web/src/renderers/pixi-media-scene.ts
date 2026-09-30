@@ -64,6 +64,7 @@ import {
   resolvePaintedMaskHalo,
 } from "./pixi-mask-halo";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
+import { queryMaxTextureSize } from "./depth-textures";
 import { createPixiDepthLayer } from "./pixi-depth-layer";
 import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
@@ -281,6 +282,10 @@ export async function createPixiMediaScene(
    * four channels there instead. The renderer is only known after init.
    */
   const acceptsUnalignedTextureRows = () => app.renderer?.name === "webgpu";
+  let maxTextureSide: number | undefined;
+  /** Asked of the backend once; nothing larger can be one texture. */
+  const maxTextureSize = () =>
+    (maxTextureSide ??= queryMaxTextureSize(app.renderer));
   const frameChannel = options.presentedFrames;
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
@@ -419,6 +424,7 @@ export async function createPixiMediaScene(
       UniformGroup,
       acceptsUnalignedTextureRows,
       getMediaSize: () => ({ height: mediaHeight, width: mediaWidth }),
+      maxTextureSize,
       renderers: currentDepthRenderers,
       source: depthSource,
     }));

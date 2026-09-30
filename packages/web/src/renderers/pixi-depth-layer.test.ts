@@ -43,6 +43,7 @@ function twoFrameSource(first: DepthMap, second: DepthMap): DepthFrameProvider {
 
 function createLayer(
   options: {
+    maxTextureSize?: number;
     renderers?: Parameters<typeof createPixiDepthLayer>[0]["renderers"];
     source?: DepthFrameProvider | null;
   } = {},
@@ -55,6 +56,10 @@ function createLayer(
     ...pixi.constructors,
     acceptsUnalignedTextureRows: () => false,
     getMediaSize: () => ({ height: 20, width: 40 }),
+    maxTextureSize:
+      options.maxTextureSize === undefined
+        ? undefined
+        : () => options.maxTextureSize!,
     renderers: options.renderers ?? [annotationRenderers.depth()],
     source: options.source ?? null,
   });
@@ -239,6 +244,24 @@ describe("pixi depth layer", () => {
 
     layer.drawFrame(0);
     expect(pixi.meshes[0]!.visible).toBe(false);
+  });
+
+  it("draws a map too large for the GPU decimated, and reads it back whole", () => {
+    const map = depthMap(1);
+    const { layer, pixi } = createLayer({
+      maxTextureSize: 2,
+      source: twoFrameSource(map, map),
+    });
+
+    layer.drawFrame(0);
+
+    expect(pixi.depthSources[0]!.options).toMatchObject({ height: 1 });
+    expect(
+      Array.from(pixi.uniformGroups[0]!.uniforms.uMapSize as Float32Array),
+    ).toEqual([2, 1]);
+    // Smaller than the media, so "auto" sampling filters edge-aware.
+    expect(pixi.uniformGroups[0]!.uniforms.uSampling).toBe(1);
+    expect(layer.getActiveDepth()?.map).toBe(map);
   });
 
   it("draws nothing without a depth renderer", () => {
