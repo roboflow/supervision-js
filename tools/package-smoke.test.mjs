@@ -349,6 +349,38 @@ test("built heatmap path retains Pixi prepare registration", () => {
   assert.match(entrypoint, /renderer\.prepare\.upload\(texture\)/);
 });
 
+test("packages that ship the depth colour tables carry their notices", () => {
+  const core = readFileSync(
+    new URL("../packages/core/dist/index.js", import.meta.url),
+    "utf8",
+  );
+
+  // Turbo's first entry and Cividis's notice are in the shipped JavaScript.
+  assert.match(core, /30123b/);
+  assert.match(core, /Battelle Memorial Institute/);
+
+  for (const packageDir of ["../packages/core/", "../packages/web/"]) {
+    const manifest = JSON.parse(
+      readFileSync(
+        new URL(`${packageDir}package.json`, import.meta.url),
+        "utf8",
+      ),
+    );
+    const notices = readFileSync(
+      new URL(`${packageDir}THIRD_PARTY_NOTICES.md`, import.meta.url),
+      "utf8",
+    );
+
+    assert.ok(
+      manifest.files.includes("THIRD_PARTY_NOTICES.md"),
+      `${manifest.name} must publish THIRD_PARTY_NOTICES.md`,
+    );
+    assert.match(notices, /Copyright 2019 Google LLC/);
+    assert.match(notices, /Apache License\s+Version 2\.0, January 2004/);
+    assert.match(notices, /Copyright \(c\) 2017, Battelle Memorial Institute/);
+  }
+});
+
 test("public browser declarations do not leak Pixi implementation types", () => {
   for (const declaration of [
     "../packages/web/dist/index.d.ts",
