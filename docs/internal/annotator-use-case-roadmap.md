@@ -89,7 +89,8 @@ configures annotation visualization through one public surface while the
 browser backend keeps the established specialized box, mask, label, polygon,
 polyline, and keypoint paths. The current vocabulary includes boxes, box
 corners, ellipses, markers, masks, mask halos, labels, polygons, polylines,
-keypoints and skeletons, plus the multi-instance `region` renderer.
+keypoints and skeletons, heatmaps, and depth maps, plus the multi-instance
+`region` renderer.
 
 `region` composes external assets and exact current-frame media crops without
 another decoder or canvas readback. Asset regions support explicit media- or
@@ -367,20 +368,21 @@ claim a live playground. A renderer primitive alone is not enough: the
 playground must consume a committed fixture containing the matching semantic
 field. Do not inject docs-only detections to simulate coverage.
 
-| Visualization capability | Browser renderer and style  | Frozen fixture evidence                                                                                                                                                           | Public docs state | Next required work                                                                     |
-| ------------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| Boxes                    | Implemented (`box`)         | `basketball_sam3.rect`                                                                                                                                                            | Live playground   | Maintain regression coverage with the basketball fixture                               |
-| Box corners              | Implemented (`box-corners`) | `basketball_sam3.rect`                                                                                                                                                            | Live playground   | Maintain screen-space length and interaction-order coverage                            |
-| Ellipses                 | Implemented (`ellipse`)     | `basketball_sam3.rect`                                                                                                                                                            | Live playground   | Maintain closed ellipse, arc, rotation, fill, and stroke coverage                      |
-| Markers                  | Implemented (`marker`)      | `basketball_sam3.rect` and keypoint anchors                                                                                                                                       | Live playground   | Maintain shape, anchor, rotation, and media/screen-space size coverage                 |
-| Masks                    | Implemented (`mask`)        | `basketball_sam3.mask` (compressed RLE)                                                                                                                                           | Live playground   | Maintain mask-preparation and visual coverage                                          |
-| Heatmaps                 | Implemented (`heatmap`)     | `pebbles_anomaly` confirmed FoundAD tracker detections with scalar score crops                                                                                                    | Live playground   | Maintain score projection, palette, and temporal fixture coverage                      |
-| Mask halos               | Implemented (`maskHalo`)    | `basketball_sam3.mask` (compressed RLE)                                                                                                                                           | Live playground   | Maintain artifact reuse, per-detection spread, and GPU-bound blur coverage             |
-| Labels                   | Implemented (`label`)       | `basketball_sam3.className` and `confidence`                                                                                                                                      | Live playground   | Maintain label layout and contrast coverage                                            |
-| Polygons                 | Implemented (`polygon`)     | `basketball_sam3.polygon`                                                                                                                                                         | Live playground   | Maintain contour and fill/stroke coverage                                              |
-| Keypoints and skeletons  | Implemented (`keypoints`)   | `basketball_sam3.keypoints` including edges and visibility                                                                                                                        | Live playground   | Maintain pose association and visibility coverage                                      |
-| Polylines                | Implemented (`polyline`)    | `basketball_sam3` motion-gated basketball track plus mask (versioned bounded center trace)                                                                                        | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
-| Regions                  | Implemented (`region`)      | `basketball_regions` stabilized direct SAM3 head masks, original media, badges, and `player-fire.gif`; pre-normalized `basketball_sam3` team-player masks for blur and pixelation | Live playground   | Maintain media-effect resource lifetime and fixture provenance                         |
+| Visualization capability | Browser renderer and style  | Frozen fixture evidence                                                                                                                                                           | Public docs state   | Next required work                                                                     |
+| ------------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------- |
+| Boxes                    | Implemented (`box`)         | `basketball_sam3.rect`                                                                                                                                                            | Live playground     | Maintain regression coverage with the basketball fixture                               |
+| Box corners              | Implemented (`box-corners`) | `basketball_sam3.rect`                                                                                                                                                            | Live playground     | Maintain screen-space length and interaction-order coverage                            |
+| Ellipses                 | Implemented (`ellipse`)     | `basketball_sam3.rect`                                                                                                                                                            | Live playground     | Maintain closed ellipse, arc, rotation, fill, and stroke coverage                      |
+| Markers                  | Implemented (`marker`)      | `basketball_sam3.rect` and keypoint anchors                                                                                                                                       | Live playground     | Maintain shape, anchor, rotation, and media/screen-space size coverage                 |
+| Masks                    | Implemented (`mask`)        | `basketball_sam3.mask` (compressed RLE)                                                                                                                                           | Live playground     | Maintain mask-preparation and visual coverage                                          |
+| Heatmaps                 | Implemented (`heatmap`)     | `pebbles_anomaly` confirmed FoundAD tracker detections with scalar score crops                                                                                                    | Live playground     | Maintain score projection, palette, and temporal fixture coverage                      |
+| Depth maps               | Implemented (`depth`)       | None yet: a real stereo fixture is pending; the dev-only `?embed=depth-dev` route draws a synthetic scene generated at run time, not model output                                 | Page, no playground | Commit a frozen stereo fixture with provenance, then the playground                    |
+| Mask halos               | Implemented (`maskHalo`)    | `basketball_sam3.mask` (compressed RLE)                                                                                                                                           | Live playground     | Maintain artifact reuse, per-detection spread, and GPU-bound blur coverage             |
+| Labels                   | Implemented (`label`)       | `basketball_sam3.className` and `confidence`                                                                                                                                      | Live playground     | Maintain label layout and contrast coverage                                            |
+| Polygons                 | Implemented (`polygon`)     | `basketball_sam3.polygon`                                                                                                                                                         | Live playground     | Maintain contour and fill/stroke coverage                                              |
+| Keypoints and skeletons  | Implemented (`keypoints`)   | `basketball_sam3.keypoints` including edges and visibility                                                                                                                        | Live playground     | Maintain pose association and visibility coverage                                      |
+| Polylines                | Implemented (`polyline`)    | `basketball_sam3` motion-gated basketball track plus mask (versioned bounded center trace)                                                                                        | Live playground     | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
+| Regions                  | Implemented (`region`)      | `basketball_regions` stabilized direct SAM3 head masks, original media, badges, and `player-fire.gif`; pre-normalized `basketball_sam3` team-player masks for blur and pixelation | Live playground     | Maintain media-effect resource lifetime and fixture provenance                         |
 
 The basketball fixtures are therefore the current visual baseline for eleven
 renderers: boxes, box corners, ellipses, markers, masks, mask halos, labels,
@@ -767,6 +769,12 @@ Review every roadmap PR against these questions:
    coverage gap?
 10. Which Inference image digest and aliases become the first frozen authoring
     toolchain?
+11. For `depth_m` and `relative_inverse` clips, should the 8-bit preview carry
+    normalised inverse depth or the native value? Previews are limited to
+    `disparity_px` until the Python producer settles it.
+12. When a second producer (live in-browser models, React Native) needs to
+    supply depth frames, should the internal depth frame provider become a
+    public source contract?
 
 ## Decision
 

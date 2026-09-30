@@ -113,7 +113,9 @@ edge take their labels off the canvas entirely.
 Masks are the exception. A `DetectionMask` carries the pixel size its `counts`
 are encoded against, and the mask layer stretches the sprite onto whatever the
 media is, so a mask lands correctly at any raster. That difference is why a
-rescaled source shows correct masks beside misplaced boxes.
+rescaled source shows correct masks beside misplaced boxes. A depth map behaves
+like a mask: it is stretched over the media rectangle and never projected by
+`coordinateSpace`.
 
 Vector geometry is reconciled by declaring where it came from.
 `DetectionFrame.coordinateSpace` names the pixel space a frame's geometry was
