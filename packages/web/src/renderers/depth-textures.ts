@@ -45,6 +45,20 @@ export interface DepthMapUpload extends DepthTextureUpload {
   readonly displaySize: DepthDisplaySize;
 }
 
+/**
+ * Upload bytes prepared off the main thread for a map, such as the padded rows
+ * the render-preparation worker writes while it decodes a PNG. They are used
+ * when they fit the backend the map is drawn on.
+ */
+const preparedUploads = new WeakMap<DepthMap, DepthTextureUpload>();
+
+export function rememberPreparedDepthUpload(
+  map: DepthMap,
+  upload: DepthTextureUpload,
+): void {
+  preparedUploads.set(map, upload);
+}
+
 const HOST_IS_LITTLE_ENDIAN =
   new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
@@ -140,6 +154,19 @@ export function createDepthMapUpload(
 ): DepthMapUpload {
   if (map.width <= maxTextureSize && map.height <= maxTextureSize) {
     const displaySize = { height: map.height, width: map.width };
+    const prepared = preparedUploads.get(map);
+
+    if (
+      prepared &&
+      prepared.textureWidth ===
+        alignedWidth(
+          map.width,
+          prepared.format === "rg8unorm" ? 2 : 1,
+          acceptsUnalignedRows,
+        )
+    ) {
+      return { ...prepared, displaySize };
+    }
 
     return {
       ...uploadSamples(map, map.width, map.height, acceptsUnalignedRows),

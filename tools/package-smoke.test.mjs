@@ -349,6 +349,22 @@ test("built heatmap path retains Pixi prepare registration", () => {
   assert.match(entrypoint, /renderer\.prepare\.upload\(texture\)/);
 });
 
+test("the render-preparation worker decodes depth PNGs, embedded or deployed", () => {
+  const worker = readFileSync(
+    new URL("../packages/web/dist/mask-preparation.worker.js", import.meta.url),
+    "utf8",
+  );
+  const entrypoint = readFileSync(
+    new URL("../packages/web/dist/index.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(worker, /depth-decode/);
+  assert.match(worker, /DecompressionStream/);
+  // The Blob-worker default runs the copy embedded in the entry.
+  assert.match(entrypoint, /depth-decode-complete/);
+});
+
 test("packages that ship the depth colour tables carry their notices", () => {
   const core = readFileSync(
     new URL("../packages/core/dist/index.js", import.meta.url),

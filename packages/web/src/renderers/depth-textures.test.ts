@@ -8,6 +8,7 @@ import {
   createPackedDepthUpload,
   createPreviewUpload,
   queryMaxTextureSize,
+  rememberPreparedDepthUpload,
 } from "#renderers/depth-textures";
 
 function scaledMap(width: number, height: number, first = 1): DepthMap {
@@ -174,6 +175,26 @@ describe("queryMaxTextureSize", () => {
     expect(queryMaxTextureSize({ name: "webgpu" })).toBe(8192);
     expect(queryMaxTextureSize({ name: "webgl" })).toBe(2048);
     expect(queryMaxTextureSize(null)).toBe(2048);
+  });
+});
+
+describe("uploads prepared off the main thread", () => {
+  it("are used when they fit the backend's row alignment", () => {
+    const map = scaledMap(3, 2);
+    const prepared = createPackedDepthUpload(
+      map.samples.values as Uint16Array,
+      3,
+      2,
+      false,
+    );
+
+    rememberPreparedDepthUpload(map, prepared);
+
+    expect(createDepthMapUpload(map, false).bytes).toBe(prepared.bytes);
+    // WebGPU takes the rows unpadded, so the padded copy does not fit.
+    expect(createDepthMapUpload(map, true).bytes.buffer).toBe(
+      (map.samples.values as Uint16Array).buffer,
+    );
   });
 });
 

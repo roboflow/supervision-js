@@ -16,21 +16,32 @@ import {
   type MaskPreparationWorkerRequest,
   type MaskPreparationWorkerResponse,
 } from "#render-preparation/mask-preparation-worker-protocol";
+import {
+  DepthPreparationWorkerMessageType,
+  type DepthPreparationWorkerRequest,
+  type DepthPreparationWorkerResponse,
+} from "#render-preparation/depth-preparation-worker-protocol";
+import { decodeDepthPreparationRequest } from "#render-preparation/depth-frame-decode";
+
+type PreparationWorkerResponse =
+  | MaskPreparationWorkerResponse
+  | HeatmapPreparationWorkerResponse
+  | DepthPreparationWorkerResponse;
 
 type MaskPreparationWorkerScope = {
   addEventListener(
     type: "message",
     listener: (
       event: MessageEvent<
-        MaskPreparationWorkerRequest | HeatmapPreparationWorkerRequest
+        | MaskPreparationWorkerRequest
+        | HeatmapPreparationWorkerRequest
+        | DepthPreparationWorkerRequest
       >,
     ) => void,
   ): void;
+  postMessage(message: PreparationWorkerResponse): void;
   postMessage(
-    message: MaskPreparationWorkerResponse | HeatmapPreparationWorkerResponse,
-  ): void;
-  postMessage(
-    message: MaskPreparationWorkerResponse | HeatmapPreparationWorkerResponse,
+    message: PreparationWorkerResponse,
     transfer: Transferable[],
   ): void;
 };
@@ -42,6 +53,11 @@ workerScope.addEventListener("message", (event) => {
 
   if (message.type === HeatmapPreparationWorkerMessageType.Prepare) {
     prepareHeatmap(message);
+    return;
+  }
+
+  if (message.type === DepthPreparationWorkerMessageType.Decode) {
+    void decodeDepthFrame(message);
     return;
   }
 
@@ -90,6 +106,13 @@ function prepareHeatmap(message: HeatmapPreparationWorkerRequest) {
       type: HeatmapPreparationWorkerMessageType.Error,
     });
   }
+}
+
+/** Decoding waits on the platform's inflate, so replies arrive out of order. */
+async function decodeDepthFrame(message: DepthPreparationWorkerRequest) {
+  const { response, transfer } = await decodeDepthPreparationRequest(message);
+
+  workerScope.postMessage(response, transfer);
 }
 
 function prepareMaskFrame(message: MaskPreparationWorkerRequest) {

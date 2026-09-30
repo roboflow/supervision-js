@@ -16,6 +16,23 @@ than the media as long as it keeps the media's aspect ratio (within 1%).
 This page has no live playground yet. A playground needs a committed stereo
 fixture with real model output, and that fixture is still pending.
 
+A producer's `depth.json` and 16-bit PNG load with `depth: { manifest }`. The
+session fetches the PNG, decodes it in its render-preparation worker, and
+draws it; relative file names resolve against the manifest's URL:
+
+```ts
+import { annotationRenderers, createMediaSession } from "supervision";
+
+const session = await createMediaSession({
+  container,
+  media: "left.png",
+  depth: { manifest: "depth/depth.json" },
+  presentation: { renderers: [annotationRenderers.depth()] },
+});
+```
+
+A map you already hold in memory goes in as `depth: { map }`:
+
 ```ts
 import {
   annotationRenderers,
@@ -70,7 +87,8 @@ reloading or re-uploading it:
 
 Two depth renderers with distinct ids can share one map, for example two
 colormaps split by `wipe`. `session.setDepth()` swaps or removes the map without
-reopening the media.
+reopening the media; it takes a map or a manifest, and a call made while a
+manifest is still loading wins over it.
 
 ## Reading depth under the pointer
 
@@ -96,7 +114,8 @@ container.addEventListener("pointermove", (event) => {
     height: active.mediaHeight,
   });
 
-  // readout?.valid, readout?.disparityPx, readout?.depthM, readout?.step
+  // readout?.valid, readout?.disparityPx, readout?.depthM, readout?.step,
+  // readout?.confidence (0 to 1, when the map has a confidence plane)
 });
 ```
 
@@ -129,18 +148,38 @@ a stored 0 is no depth. A scale of 256 keeps 1/256-pixel disparity steps up to
 ```
 
 `display_range` is the display range in the kind's unit; `display_range_px` is
-its name for disparity. A clip manifest replaces `image` with `frames` (a frame
-count and an `exact/{index:06}.png` pattern) and may add an 8-bit `preview`
-video. Preview code `c` above the reserved codes `T` stands for
+its name for disparity. `image.confidence_file` names an optional 8-bit
+grayscale PNG of the same size, 0 to 255 per pixel, which readouts report as
+`confidence` from 0 to 1. A clip manifest replaces `image` with `frames` (a
+frame count and an `exact/{index:06}.png` pattern) and may add an 8-bit
+`preview` video. Preview code `c` above the reserved codes `T` stands for
 `lo + (c - T - 1) / (254 - T) * (hi - lo)` of its `range_px`.
+
+### Writing depth PNGs that decode fast
+
+The depth PNG is a standard 16-bit grayscale PNG, not interlaced, with 0 where
+there is no depth. Browsers decode it in JavaScript on top of their own zlib,
+and the PNG row filter the writer picks decides how much JavaScript work that
+is. Up and Sub rows undo in one addition per byte; Paeth rows need a
+three-way comparison per byte and take about 1.7 times as long, and most
+writers choose filters per row, mostly Paeth, by default (Pillow does; see the
+depth benchmark in `benchmark/depth/` for the numbers).
+
+A writer that lets you choose should write every row with one simple filter:
+OpenCV's `cv2.imwrite(path, depth, [cv2.IMWRITE_PNG_FILTER, cv2.IMWRITE_PNG_FILTER_UP])`,
+or libpng's `png_set_filter(png, 0, PNG_FILTER_UP)`. The file stays a standard
+PNG that every tool opens; on the research scene it was up to 15% larger than
+Pillow's per-row choice.
 
 ## Limits
 
-- The session draws still maps you pass as `depth: { map }`. It does not yet
-  fetch a manifest, decode PNG files or play depth video; decode the 16-bit PNG
-  yourself and pass its values.
-- On WebGL a map whose width is odd is copied once with row padding; WebGPU
-  uploads the samples as they are.
-- A map must fit the GPU's maximum texture size (commonly 8192 or 16384
-  pixels a side).
+- The session draws still depth: a `map`, or a manifest with an `image`. It
+  does not yet play depth video; a clip manifest (`frames`) is refused with a
+  `RangeError`.
+- On WebGL a map whose width is odd goes up with one padding texel per row,
+  padded by the worker while it decodes a manifest's PNG; WebGPU uploads the
+  samples as they are.
+- A map wider or taller than the GPU's largest texture (asked of the backend
+  once; commonly 16384 on WebGL and 8192 on WebGPU) is drawn from a
+  nearest-decimated copy that fits. Readouts still read every sample.
 - React Native reports the depth renderer as unsupported.

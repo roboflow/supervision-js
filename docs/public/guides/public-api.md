@@ -68,8 +68,9 @@ Start here for normal application code:
   sources, composite sources, and appended frames all behave the same. A
   composite composes children that were each inferred at a different size, and
   every child is projected from its own space before composition
-- depth maps: `MediaSessionOptions.depth`, `DepthMap`, and the `depth`
-  annotation renderer. Depth is its own channel beside detections, never a
+- depth maps: `MediaSessionOptions.depth` (a `DepthMap`, or a `depth.json`
+  manifest the session fetches and decodes), and the `depth` annotation
+  renderer. Depth is its own channel beside detections, never a
   `DetectionFrame` field, and a map is stretched over the media rectangle
   rather than projected by `coordinateSpace`
 - `Detection`
@@ -229,8 +230,8 @@ not the first thing most users should reach for:
   one media item;
 - `session.setRenderQuality()` for runtime DPR/quality changes without
   rebuilding the media session;
-- `session.setDepth()` to swap or remove a depth map without reopening the
-  media, `renderer.getActiveDepth()` for the map on screen, `readDepthAt()`
+- `session.setDepth()` to swap or remove a depth map or manifest without
+  reopening the media, `renderer.getActiveDepth()` for the map on screen, `readDepthAt()`
   for the stored value, disparity, metres, and confidence under a media point,
   `computeDepthPercentileRange()` to lock a frame's automatic colour range,
   and `parseDepthManifest()` to validate the `depth.json` a producer writes;

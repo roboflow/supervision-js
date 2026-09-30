@@ -51,6 +51,10 @@ import {
   validateDepthInput,
   type DepthFrameProvider,
 } from "#render-preparation/depth-source";
+import {
+  createDepthFramePreparer,
+  type DepthFramePreparer,
+} from "#render-preparation/depth-frame-preparer";
 import type { MediaRendererDepthInput } from "#types/media-depth";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import { createMediaFrameNavigation } from "./media-frame-navigation";
@@ -162,18 +166,58 @@ export async function createMediaRendererCore(
   let mediaScene: MediaRendererScene | undefined;
   let mediaSize = { height: 0, width: 0 };
   let depthSource: DepthFrameProvider | null = null;
+  let depthPreparer: DepthFramePreparer | undefined;
+  let depthGeneration = 0;
+  let depthLoad: AbortController | undefined;
   /**
    * Opens depth against the media it will stretch over and hands it to the
-   * scene, which redraws the frame on screen with it.
+   * scene, which redraws the frame on screen with it. A manifest loads and
+   * decodes first; a later call supersedes one still loading, whose result is
+   * dropped.
    */
-  const applyDepth = (input: MediaRendererDepthInput | null) => {
+  const applyDepth = async (input: MediaRendererDepthInput | null) => {
     if (!mediaScene?.setDepthSource) {
       throw new Error("Media renderer is not ready.");
     }
 
-    const next = input === null ? null : openDepthSource(input, mediaSize);
+    const generation = ++depthGeneration;
 
-    mediaScene.setDepthSource(next);
+    depthLoad?.abort();
+    depthLoad = undefined;
+
+    let next: DepthFrameProvider | null = null;
+
+    if (input !== null) {
+      const load = new AbortController();
+
+      depthLoad = load;
+      try {
+        next = await openDepthSource(input, {
+          media: mediaSize,
+          padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
+          preparer: () =>
+            (depthPreparer ??= createDepthFramePreparer(
+              options.renderPreparation,
+            )),
+          signal: load.signal,
+        });
+      } catch (error) {
+        // Superseded or torn down: the newer state stands and this is not an error.
+        if (generation !== depthGeneration || runtimeState.isDestroyed()) {
+          return;
+        }
+        throw error;
+      } finally {
+        if (depthLoad === load) depthLoad = undefined;
+      }
+    }
+
+    if (generation !== depthGeneration || runtimeState.isDestroyed()) {
+      next?.destroy();
+      return;
+    }
+
+    mediaScene?.setDepthSource?.(next);
     depthSource?.destroy();
     depthSource = next;
   };
@@ -970,7 +1014,7 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer has been destroyed.");
       }
 
-      applyDepth(depth);
+      await applyDepth(depth);
     },
 
     getActiveDepth() {
@@ -1072,8 +1116,10 @@ export async function createMediaRendererCore(
       destroyMediaInput();
       runtimeState.setSourceDestroyed();
       mediaScene?.destroy();
+      depthLoad?.abort();
       depthSource?.destroy();
       depthSource = null;
+      depthPreparer?.destroy();
       detectionTimeline?.destroy();
     },
   };
@@ -1212,7 +1258,10 @@ export async function createMediaRendererCore(
     detectionTimeline.setTimelineContext?.(timelineContext);
     mediaScene.setTimelineContext?.(timelineContext);
     mediaScene.initializeMedia(mediaDimensions);
-    if (options.depth) applyDepth(options.depth);
+    if (options.depth) {
+      await applyDepth(options.depth);
+      if (runtimeState.isDestroyed()) return renderer;
+    }
     runtimeState.setSourceReady(metadata);
 
     if (presentedFrameChannel) {
