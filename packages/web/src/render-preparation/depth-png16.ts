@@ -120,8 +120,12 @@ export async function inflateWithDecompressionStream(
   const stream = new DecompressionStream("deflate");
   const writer = stream.writable.getWriter();
   const reader = stream.readable.getReader();
+  // Writers split IDAT into many small chunks (libpng's default is 8 KiB).
+  // One write of the joined stream costs a copy of the compressed bytes and
+  // saves a stream round trip per chunk.
+  const zlib = chunks.length === 1 ? chunks[0] : joinChunks(chunks);
   const writing = (async () => {
-    for (const chunk of chunks) await writer.write(chunk as BufferSource);
+    await writer.write(zlib as BufferSource);
     await writer.close();
   })();
   const output = new Uint8Array(byteLength);
@@ -151,6 +155,20 @@ export async function inflateWithDecompressionStream(
   }
 
   return offset === byteLength ? output : output.subarray(0, offset);
+}
+
+function joinChunks(chunks: readonly Uint8Array[]) {
+  const joined = new Uint8Array(
+    chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
+  );
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return joined;
 }
 
 interface PngHeader {
