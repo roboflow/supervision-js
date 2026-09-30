@@ -1,0 +1,85 @@
+/* Dev-only depth playground; loaded with its lazy component. */
+
+.dev-depth-playground__mount {
+  inset: 0;
+  position: absolute;
+}
+
+.dev-depth-playground__badge {
+  background: rgba(23, 18, 36, 0.82);
+  border-radius: 999px;
+  color: #fef3c7;
+  font-size: 0.7rem;
+  font-weight: 720;
+  left: 0.8rem;
+  margin: 0;
+  padding: 0.3rem 0.7rem;
+  pointer-events: none;
+  position: absolute;
+  top: 0.8rem;
+}
+
+.dev-depth-playground__range-inputs {
+  align-items: end;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr 1fr;
+}
+
+.dev-depth-playground__range-inputs label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.dev-depth-playground__range-inputs strong {
+  color: var(--muted-strong);
+  font-size: 0.7rem;
+}
+
+.dev-depth-playground__range-inputs input {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  inline-size: 100%;
+}
+
+.dev-depth-playground__range-inputs button {
+  grid-column: 1 / -1;
+}
+
+.dev-depth-playground__note {
+  color: var(--muted);
+  font-size: 0.68rem;
+  margin: 0;
+}
+
+.dev-depth-playground__no-depth {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.dev-depth-playground__readout {
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  display: grid;
+  font-size: 0.72rem;
+  gap: 0.35rem;
+  padding: 0.7rem 0.85rem;
+}
+
+.dev-depth-playground__readout dl {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+.dev-depth-playground__readout dl > div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.dev-depth-playground__readout dd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
