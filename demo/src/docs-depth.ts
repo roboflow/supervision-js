@@ -2,8 +2,10 @@ import {
   annotationRenderers,
   type DepthAnnotationRenderer,
   type DepthColormap,
+  type DepthMapKind,
   type DepthQuantity,
   type DepthRange,
+  type DepthReadout,
   type DepthSampling,
 } from "supervision";
 
@@ -81,4 +83,74 @@ export function createDocsDepthSnippet(settings: DocsDepthSettings): string {
     }),
   ],
 });`;
+}
+
+/** One line of the pointer readout. */
+export interface DocsDepthReadoutRow {
+  readonly label: string;
+  readonly value: string;
+}
+
+/** What the pointer readout shows: a status line and a fixed set of rows. */
+export interface DocsDepthReadoutView {
+  readonly status: string;
+  readonly rows: readonly DocsDepthReadoutRow[];
+}
+
+const NOT_AVAILABLE = "—";
+
+/**
+ * The pointer readout as text. It always has the same rows, whether the
+ * pointer is off the picture, over a pixel without depth or over depth, so
+ * the panel around it never changes height as the pointer moves; a row with
+ * nothing to say reads "—".
+ */
+export function describeDepthReadout(
+  readout: DepthReadout | null,
+  kind: DepthMapKind = "disparity_px",
+): DocsDepthReadoutView {
+  const unit = kind === "depth_m" ? "m" : kind === "disparity_px" ? "px" : "";
+  const valid = readout?.valid === true;
+  const value = (number: number | undefined, digits: number, suffix: string) =>
+    valid && number !== undefined
+      ? `${number.toFixed(digits)}${suffix ? ` ${suffix}` : ""}`
+      : NOT_AVAILABLE;
+
+  return {
+    rows: [
+      {
+        label: "Map pixel",
+        value: readout ? `${readout.x}, ${readout.y}` : NOT_AVAILABLE,
+      },
+      {
+        label: "Stored",
+        value: readout ? String(readout.stored) : NOT_AVAILABLE,
+      },
+      kind === "relative_inverse"
+        ? {
+            label: "Inverse depth",
+            value: value(readout?.relativeInverse, 4, ""),
+          }
+        : {
+            label: "Disparity",
+            value: value(readout?.disparityPx, 3, "px"),
+          },
+      { label: "Depth", value: value(readout?.depthM, 3, "m") },
+      { label: "Step", value: value(readout?.step, 5, unit) },
+      {
+        label: "Confidence",
+        value:
+          readout?.confidence === undefined
+            ? NOT_AVAILABLE
+            : `${(readout.confidence * 100).toFixed(1)} %`,
+      },
+    ],
+    status: !readout
+      ? "Point at the picture"
+      : !readout.valid
+        ? "No depth at this pixel"
+        : readout.precision === "preview"
+          ? "≈ 8-bit preview value"
+          : "Exact value",
+  };
 }

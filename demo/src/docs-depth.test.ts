@@ -4,6 +4,7 @@ import {
   DocsDepthRangeMode,
   createDocsDepthRenderer,
   createDocsDepthSnippet,
+  describeDepthReadout,
   initialDocsDepthSettings,
   type DocsDepthSettings,
 } from "./docs-depth";
@@ -68,5 +69,75 @@ describe("depth playground settings", () => {
     expect(createDocsDepthSnippet(initialDocsDepthSettings)).toContain(
       'range: "clip"',
     );
+  });
+});
+
+describe("depth pointer readout", () => {
+  const exact = {
+    confidence: 0.5,
+    depthM: 1.2345,
+    disparityPx: 97.25,
+    precision: "exact" as const,
+    step: 1 / 256,
+    stored: 24_896,
+    valid: true,
+    x: 640,
+    y: 12,
+  };
+
+  it("keeps the same rows off the picture, over a hole and over depth", () => {
+    const states = [
+      describeDepthReadout(null),
+      describeDepthReadout({
+        precision: "exact",
+        stored: 0,
+        valid: false,
+        x: 3,
+        y: 4,
+      }),
+      describeDepthReadout(exact),
+    ];
+    const labels = states.map(({ rows }) => rows.map(({ label }) => label));
+
+    expect(labels[1]).toEqual(labels[0]);
+    expect(labels[2]).toEqual(labels[0]);
+    expect(states.map(({ status }) => status)).toEqual([
+      "Point at the picture",
+      "No depth at this pixel",
+      "Exact value",
+    ]);
+    expect(states[0]!.rows.every(({ value }) => value === "—")).toBe(true);
+  });
+
+  it("formats values with fixed decimals and units", () => {
+    expect(describeDepthReadout(exact).rows).toEqual([
+      { label: "Map pixel", value: "640, 12" },
+      { label: "Stored", value: "24896" },
+      { label: "Disparity", value: "97.250 px" },
+      { label: "Depth", value: "1.234 m" },
+      { label: "Step", value: "0.00391 px" },
+      { label: "Confidence", value: "50.0 %" },
+    ]);
+    expect(
+      describeDepthReadout({ ...exact, precision: "preview" }).status,
+    ).toBe("≈ 8-bit preview value");
+  });
+
+  it("names the relative quantity for monocular maps", () => {
+    const view = describeDepthReadout(
+      {
+        precision: "exact",
+        relativeInverse: 0.25,
+        step: 1 / 1000,
+        stored: 250,
+        valid: true,
+        x: 0,
+        y: 0,
+      },
+      "relative_inverse",
+    );
+
+    expect(view.rows[2]).toEqual({ label: "Inverse depth", value: "0.2500" });
+    expect(view.rows[4]).toEqual({ label: "Step", value: "0.00100" });
   });
 });

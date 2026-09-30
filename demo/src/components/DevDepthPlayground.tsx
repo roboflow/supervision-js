@@ -26,6 +26,7 @@ import {
   initialDocsDepthSettings,
   type DocsDepthSettings,
 } from "../docs-depth";
+import { DepthReadoutPanel } from "./DepthReadoutPanel";
 import "./dev-depth-playground.css";
 
 const MEDIA_WIDTH = 1280;
@@ -355,13 +356,7 @@ export function DevDepthPlayground() {
             </span>
           </label>
         </div>
-        <section
-          className="dev-depth-playground__readout"
-          aria-label="Depth under the pointer"
-        >
-          <strong>Under the pointer</strong>
-          {readout ? <ReadoutRows readout={readout} /> : <span>—</span>}
-        </section>
+        <DepthReadoutPanel readout={readout} />
         <section
           className="docs-layer-playground__code"
           aria-label="Live presentation code"
@@ -376,38 +371,6 @@ export function DevDepthPlayground() {
         </section>
       </section>
     </main>
-  );
-}
-
-function ReadoutRows({ readout }: { readonly readout: DepthReadout }) {
-  const rows: [string, string][] = [
-    ["Map pixel", `${readout.x}, ${readout.y}`],
-    ["Stored", String(readout.stored)],
-  ];
-
-  if (!readout.valid) {
-    rows.push(["Depth", "no depth"]);
-  } else {
-    if (readout.depthM !== undefined) {
-      rows.push(["Depth", `${readout.depthM.toFixed(3)} m`]);
-    }
-    if (readout.disparityPx !== undefined) {
-      rows.push(["Disparity", `${readout.disparityPx.toFixed(3)} px`]);
-    }
-  }
-  if (readout.step !== undefined) {
-    rows.push(["Step", `${readout.step.toFixed(4)} px`]);
-  }
-
-  return (
-    <dl>
-      {rows.map(([name, value]) => (
-        <div key={name}>
-          <dt>{name}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
