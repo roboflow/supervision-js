@@ -27,6 +27,8 @@ export interface DepthGpuBenchmarkReport {
   };
   readonly environment: {
     readonly userAgent: string;
+    /** Whether the page sees WebGPU at all, and whether it gets an adapter. */
+    readonly webGpu: { readonly api: boolean; readonly adapter: boolean };
     readonly hardwareConcurrency: number;
     readonly backends: readonly BackendDescription[];
     readonly errors: readonly string[];
@@ -168,6 +170,9 @@ async function run() {
     }
   }
 
+  const gpu = (navigator as Navigator & { gpu?: GPU }).gpu;
+  const adapter = gpu ? await gpu.requestAdapter().catch(() => null) : null;
+
   const result: DepthGpuBenchmarkReport = {
     benchmark: {
       budgets: DEPTH_BUDGET_DEFAULTS,
@@ -182,6 +187,7 @@ async function run() {
       errors,
       hardwareConcurrency: navigator.hardwareConcurrency,
       userAgent: navigator.userAgent,
+      webGpu: { adapter: adapter !== null, api: gpu !== undefined },
     },
     exactness,
     memory: cases.has("memory") ? resolutions.map(computeMemoryCase) : [],

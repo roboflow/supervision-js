@@ -55,7 +55,7 @@ async function main() {
       const resultFile = path.join(outputDir, "latest-firefox.json");
 
       await fs.rm(resultFile, { force: true });
-      browserProcess = startFirefox(tempProfileDir, pageQuery);
+      browserProcess = await startFirefox(tempProfileDir, pageQuery);
       report = await waitForResultFile(resultFile);
     } else {
       const chrome = await startChrome(tempProfileDir, pageQuery);
@@ -203,7 +203,22 @@ async function startChrome(tempProfileDir, query) {
  * Firefox has no CDP, so the page reports through the benchmark server
  * (`?report=firefox`) and the runner waits for the file it writes.
  */
-function startFirefox(tempProfileDir, query) {
+async function startFirefox(tempProfileDir, query) {
+  // A throwaway automation profile: no update checks or downloads, no default
+  // browser prompt, no telemetry, as geckodriver's profiles set them.
+  await fs.writeFile(
+    path.join(tempProfileDir, "user.js"),
+    [
+      'user_pref("app.update.auto", false);',
+      'user_pref("app.update.checkInstallTime", false);',
+      'user_pref("app.update.disabledForTesting", true);',
+      'user_pref("browser.shell.checkDefaultBrowser", false);',
+      'user_pref("datareporting.policy.dataSubmissionEnabled", false);',
+      'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);',
+      "",
+    ].join("\n"),
+  );
+
   const url = `${benchmarkUrl}?${[query, "report=firefox"].filter(Boolean).join("&")}`;
   const firefox = spawn(
     firefoxPath,
@@ -372,6 +387,7 @@ function renderConsoleSummary(report) {
       (backend) =>
         `Backend ${backend.requested} -> ${backend.rendererName} (${backend.gpu}), max texture ${backend.maxTextureSize}`,
     ),
+    `WebGPU: navigator.gpu ${report.environment.webGpu?.api ? "present" : "absent"}, adapter ${report.environment.webGpu?.adapter ? "granted" : "none"}`,
     ...report.environment.errors.map((error) => `Note: ${error}`),
     "",
     ...report.exactness.map(
@@ -426,6 +442,7 @@ function renderReport(report) {
 Generated: ${report.benchmark.generatedAt}
 
 - User agent: ${report.environment.userAgent}
+- WebGPU: navigator.gpu ${report.environment.webGpu?.api ? "present" : "absent"}, adapter ${report.environment.webGpu?.adapter ? "granted" : "none"}
 - Host load average (1, 5, 15 min) before / after: ${report.runner?.loadAverageBefore?.join(", ")} / ${report.runner?.loadAverageAfter?.join(", ")} on ${report.runner?.cpus} CPUs
 ${report.environment.backends
   .map(
