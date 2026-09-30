@@ -1,0 +1,40 @@
+{
+  "schema": "supervision-js.demo.fixture-meta",
+  "version": 1,
+  "datasetId": "spring_0021_stereo_v1",
+  "displayName": "Spring 0021 stereo depth",
+  "inferenceLabel": "OpenCV StereoSGBM (HH, 64 disparities)",
+  "sampleName": "spring_stereo_depth",
+  "showInDemo": false,
+  "media": {
+    "file": "left.mp4",
+    "loadingStatusLabel": "opening Spring stereo sample",
+    "readyStatusLabel": "Spring 0021 | 192 frames, 24 fps"
+  },
+  "presentation": {
+    "boxesEnabled": false,
+    "heatmapsEnabled": false,
+    "confidenceThreshold": 0,
+    "labelsEnabled": false,
+    "masksEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  },
+  "depth": {
+    "defaultLayer": "sgbm",
+    "layers": [
+      {
+        "id": "ground-truth",
+        "label": "Ground truth (Spring)",
+        "manifest": "ground-truth/depth.json",
+        "source": "ground_truth"
+      },
+      {
+        "id": "sgbm",
+        "label": "Stereo matcher (OpenCV SGBM)",
+        "manifest": "sgbm/depth.json",
+        "source": "prediction"
+      }
+    ]
+  }
+}

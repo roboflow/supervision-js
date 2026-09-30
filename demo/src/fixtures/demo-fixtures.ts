@@ -85,6 +85,31 @@ interface DemoFixtureMeta {
   };
   readonly presentation?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
+  readonly depth?: unknown;
+}
+
+/** Where a depth layer's values come from. */
+export const DemoFixtureDepthSource = {
+  GroundTruth: "ground_truth",
+  Prediction: "prediction",
+} as const;
+
+export type DemoFixtureDepthSource =
+  (typeof DemoFixtureDepthSource)[keyof typeof DemoFixtureDepthSource];
+
+/** One depth map sequence a fixture ships, described by its own depth.json. */
+export interface DemoFixtureDepthLayer {
+  readonly id: string;
+  readonly label: string;
+  /** The layer's depth.json, relative to the fixture folder. */
+  readonly manifest: string;
+  readonly source: DemoFixtureDepthSource;
+}
+
+/** The `depth` block of a fixture.meta.json. */
+export interface DemoFixtureDepth {
+  readonly defaultLayer: string;
+  readonly layers: readonly DemoFixtureDepthLayer[];
 }
 
 export interface DemoFixturePresentationDefaults {
@@ -102,7 +127,13 @@ export interface DemoFixturePresentationDefaults {
 export interface DemoFixtureDefinition {
   readonly basePath: string;
   readonly datasetId: string;
-  readonly detectionsManifestSrc: string;
+  /** Null for a fixture that ships depth and no detections. */
+  readonly detectionsManifestSrc: string | null;
+  /**
+   * The fixture's depth layers, each with the URL of its depth.json. The
+   * files a manifest names sit next to it, so they resolve against that URL.
+   */
+  readonly depth: DemoFixtureDepthDefinition | null;
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
@@ -115,6 +146,98 @@ export interface DemoFixtureDefinition {
   /** Declared detection-timeline transcode, or null when the fixture has none. */
   readonly proxyVideoSrc: string | null;
   readonly videoSrc: string;
+}
+
+export interface DemoFixtureDepthDefinition {
+  readonly defaultLayer: string;
+  readonly layers: readonly (DemoFixtureDepthLayer & {
+    readonly manifestSrc: string;
+  })[];
+}
+
+const depthLayerSources: readonly string[] = Object.values(
+  DemoFixtureDepthSource,
+);
+
+/**
+ * Checks a fixture.meta.json `depth` block: at least one layer, each with a
+ * unique id, a label, a depth.json inside the fixture folder and where its
+ * values come from, and a default layer that is one of them.
+ */
+export function parseDemoFixtureDepth(value: unknown): DemoFixtureDepth {
+  const fail = (message: string): never => {
+    throw new Error(`fixture.meta.json depth: ${message}`);
+  };
+
+  if (typeof value !== "object" || value === null) fail("must be an object");
+
+  const block = value as Record<string, unknown>;
+
+  if (!Array.isArray(block.layers) || block.layers.length === 0) {
+    fail("layers must be a non-empty array");
+  }
+
+  const ids = new Set<string>();
+  const layers = (block.layers as unknown[]).map((entry, index) => {
+    const layer = (
+      typeof entry === "object" && entry !== null ? entry : {}
+    ) as Record<string, unknown>;
+    const at = `layers[${index}]`;
+
+    if (typeof layer.id !== "string" || layer.id === "") {
+      fail(`${at}.id must be a non-empty string`);
+    }
+    if (ids.has(layer.id as string)) fail(`${at}.id "${layer.id}" repeats`);
+    ids.add(layer.id as string);
+    if (typeof layer.label !== "string" || layer.label === "") {
+      fail(`${at}.label must be a non-empty string`);
+    }
+    if (
+      typeof layer.manifest !== "string" ||
+      !layer.manifest.endsWith(".json") ||
+      layer.manifest.startsWith("/") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(layer.manifest) ||
+      layer.manifest.split("/").includes("..")
+    ) {
+      fail(`${at}.manifest must be a .json path inside the fixture folder`);
+    }
+    if (!depthLayerSources.includes(layer.source as string)) {
+      fail(`${at}.source must be one of ${depthLayerSources.join(", ")}`);
+    }
+
+    return {
+      id: layer.id as string,
+      label: layer.label as string,
+      manifest: layer.manifest as string,
+      source: layer.source as DemoFixtureDepthSource,
+    };
+  });
+
+  if (typeof block.defaultLayer !== "string" || !ids.has(block.defaultLayer)) {
+    fail("defaultLayer must name one of the layers");
+  }
+
+  return { defaultLayer: block.defaultLayer as string, layers };
+}
+
+/**
+ * Fixture depth folders are served as they are, not as hashed assets: a
+ * depth.json names its frame files by pattern, relative to itself, so they
+ * must keep their names and places. The demo build copies them the same way.
+ */
+function resolveFixtureDepth(
+  depth: DemoFixtureDepth,
+  basePath: string,
+): DemoFixtureDepthDefinition {
+  const folder = basePath.split("/").pop();
+
+  return {
+    defaultLayer: depth.defaultLayer,
+    layers: depth.layers.map((layer) => ({
+      ...layer,
+      manifestSrc: `${import.meta.env.BASE_URL}fixtures/${folder}/${layer.manifest}`,
+    })),
+  };
 }
 
 /** Layers that draw nothing unless the detections carry the matching geometry. */
@@ -267,6 +390,10 @@ export type DemoFixtureDetectionSourceTransform = (
 export async function loadDemoFixtureDetectionManifest(
   definition: DemoFixtureDefinition = defaultDemoFixture,
 ): Promise<DemoFixtureDetectionManifest> {
+  if (definition.detectionsManifestSrc === null) {
+    throw new Error(`Fixture ${definition.sampleName} has no detections.`);
+  }
+
   const response = await fetch(definition.detectionsManifestSrc);
 
   if (!response.ok) {
@@ -312,7 +439,7 @@ export function createDemoFixtureDetectionSource(
 ): DemoFixtureDetectionSource {
   const detectionSpace = resolveDemoFixtureDetectionSpace(manifest);
   const chunkedDetectionSource = createChunkedDetectionFrameSource({
-    baseUrl: definition.detectionsManifestSrc,
+    baseUrl: definition.detectionsManifestSrc ?? undefined,
     fetchChunk: async (chunk) => {
       const loaded = await fetchDemoFixtureDetectionChunk(
         chunk,
@@ -480,13 +607,28 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
       const proxyPath = meta.media.proxyFile
         ? normalizeFixturePath(basePath, meta.media.proxyFile)
         : null;
-      const detectionsManifestSrc = fixtureManifestUrls[manifestPath];
+      const detectionsManifestSrc = fixtureManifestUrls[manifestPath] ?? null;
       const videoSrc = fixtureMediaUrls[mediaPath];
       const proxyVideoSrc = proxyPath ? fixtureMediaUrls[proxyPath] : null;
+      let depth: DemoFixtureDepthDefinition | null = null;
 
-      if (!detectionsManifestSrc || !videoSrc) {
+      if (meta.depth !== undefined) {
+        try {
+          depth = resolveFixtureDepth(
+            parseDemoFixtureDepth(meta.depth),
+            basePath,
+          );
+        } catch (error) {
+          console.warn(
+            `Skipping demo fixture ${meta.sampleName}: ${error instanceof Error ? error.message : String(error)}.`,
+          );
+          return [];
+        }
+      }
+
+      if ((!detectionsManifestSrc && !depth) || !videoSrc) {
         console.warn(
-          `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${manifestPath} and ${mediaPath}.`,
+          `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${mediaPath} and ${manifestPath} or a depth block.`,
         );
         return [];
       }
@@ -502,6 +644,7 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
         {
           basePath,
           datasetId: meta.datasetId,
+          depth,
           detectionsManifestSrc,
           displayName: meta.displayName,
           inferenceLabel: meta.inferenceLabel,

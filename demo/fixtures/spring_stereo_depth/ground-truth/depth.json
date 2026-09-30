@@ -1,0 +1,38 @@
+{
+  "schema": "supervision.depth-manifest",
+  "version": 1,
+  "kind": "disparity_px",
+  "view": "left",
+  "width": 1280,
+  "height": 720,
+  "storage": {
+    "format": "png16",
+    "scale": 1024,
+    "no_depth": 0
+  },
+  "camera": {
+    "fx_px": 1346.8013,
+    "baseline_m": 0.065,
+    "doffs_px": 0,
+    "cx_px": 640.0,
+    "cy_px": 360.0
+  },
+  "display_range_px": [
+    2.01,
+    32.229
+  ],
+  "frames": {
+    "count": 192,
+    "exact": "exact/{index:06}.png",
+    "times_s": null
+  },
+  "preview": {
+    "file": "preview.mp4",
+    "codec": "avc1.64001f",
+    "reserved_max": 15,
+    "range_px": [
+      0,
+      38.584
+    ]
+  }
+}

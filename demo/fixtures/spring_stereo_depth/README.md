@@ -1,0 +1,189 @@
+# Spring 0021 stereo depth fixture
+
+Eight seconds of a rendered stereo shot with two disparity layers for the left view. Both layers cover
+every frame.
+
+- **`sgbm/`**: what a classic stereo matcher (OpenCV semi-global matching) finds on the stereo pair.
+  Real matching errors and real holes. This is the "prediction" layer.
+- **`ground-truth/`**: the exact disparity Spring rendered for the same frames. Use it for an error
+  view.
+
+Source: Spring dataset, train sequence `0021`, frames 1–192, left and right views
+(https://spring-benchmark.org, doi:10.18419/darus-3376, version 2.0).
+
+The shot shows a girl in a rocky hollow under an overhead bone bridge, filmed by a slowly moving camera.
+There is near rock, a mid-ground figure, a back wall and a little distant sky (1–3 % of pixels).
+
+## Files
+
+| Path | What | Bytes |
+|---|---|---|
+| `left.mp4` | Left view, 1280x720, 24 fps, 192 frames (8 s), H.264 High 3.1 (`avc1.64001f`) yuv420p bt709, keyframe every 1 s, faststart | 4,276,966 |
+| `sgbm/depth.json` | Manifest for the SGBM layer | < 1 kB |
+| `sgbm/exact/000000.png` … `000191.png` | 16-bit disparity × 1024, 0 = no depth | 42,937,912 (about 224 kB/frame) |
+| `sgbm/preview.mp4` | 8-bit preview of the same, `range_px` [0, 63.0] | 2,505,744 |
+| `ground-truth/depth.json` | Manifest for the ground-truth layer | < 1 kB |
+| `ground-truth/exact/000000.png` … `000191.png` | 16-bit disparity × 1024, 0 = no depth (sky) | 63,492,343 (about 331 kB/frame) |
+| `ground-truth/preview.mp4` | 8-bit preview, `range_px` [0, 38.584] | 2,074,301 |
+| `fixture.meta.json` | Demo metadata, pebbles shape plus a `depth` block | < 1 kB |
+| `sources.tsv` | The 577 Spring members used, with DaRUS zip, id, size, CRC-32 | 64 kB |
+| `outputs.sha256` | SHA-256 of every generated file in this folder | 35 kB |
+
+In total, about 115.3 MB. The PNGs and MP4s are Git LFS objects. `outputs.sha256` pins their bytes:
+run `shasum -a 256 -c outputs.sha256` in this folder after `git lfs pull`.
+
+There are no detections for this clip, so the folder has no `detections.manifest.json`. The demo
+opens it for depth only.
+
+- **Frame numbering:** fixture frame `k` (zero-based) is:
+  - `left.mp4` frame `k` at `k / 24` s;
+  - `exact/{k:06}.png` in each layer;
+  - Spring frame `k + 1` (`frame_left_{k+1:04d}.png`).
+- **Frame rate:** 24 fps, native. The Spring open movie is 24 fps. No frames are dropped, duplicated or
+  retimed.
+- **Coordinates:** both layers are 1280x720, the same size as `left.mp4`. They were computed on exactly
+  the downscaled frames that were encoded into `left.mp4`.
+
+## Depth manifests (`*/depth.json`)
+
+Each layer has a manifest in the research/09 §1.4 wire format.
+
+- **Identity:** `schema` `"supervision.depth-manifest"`, `version` 1, `kind` `"disparity_px"`, `view`
+  `"left"`.
+- **`storage`:** `png16`. Stored value = round(disparity × `scale`); 0 = no depth. `scale` is the
+  largest power of two that keeps the clip maximum under 65535 (1024 for both layers).
+- **`camera`:**
+  - `fx_px` 1346.8013: Spring's fx of 2020.2020 at 1920 wide, × 1280/1920.
+  - `cx_px` 640 and `cy_px` 360: Spring's 960 and 540, scaled the same way.
+  - `baseline_m` 0.065 and `doffs_px` 0: Spring's parallel rig.
+  - Metric depth is `Z = fx_px × baseline_m / d`.
+- **`display_range_px`:** the 2nd–98th percentile of valid disparity over the whole clip, one range per
+  layer.
+- **`frames`:** `{count: 192, exact: "exact/{index:06}.png", times_s: null}`.
+- **`preview`:** `preview.mp4`. Its `codec` string is read from the file's avcC box.
+  - `reserved_max` 15; `range_px` `[0, clip max]`.
+  - Encode: `code = clamp(16 + round((d − lo) / (hi − lo) × 239), 16, 255)`, with `[lo, hi]` =
+    `range_px`. Codes 0–15 mean no depth.
+  - Encoding: 8-bit gray in the luma of H.264 yuv420p, chroma fixed at 128, full-range flag, CRF 18,
+    `-tune psnr`, a keyframe every second, faststart.
+- **PNG details:** every exact PNG is 16-bit grayscale, with PNG filter type 2 (Up) on every row for
+  fast browser decode. Written by the research workspace's `fixture/tools/png16.py` (see Rebuild).
+  - The build proves the round trip on frame 0 of each layer with two independent decoders: the
+    script's own reader, and OpenCV/libpng.
+
+## How each layer was made
+
+**Ground truth**
+
+- Spring stores left-view disparity for each frame as a float16 HDF5 map at 3840x2160. Values are in
+  1920-wide pixels, and sky is exactly 0.
+- The builder takes the maximum of each 3x3 block, which keeps the nearest surface in each 720p pixel
+  and preserves thin foreground structure. It then multiplies by 1280/1920.
+- Sky stays 0, i.e. "no depth". In reality it is infinitely far.
+
+**SGBM**
+
+- Both views are downscaled from 1920x1080 to 1280x720 with `cv2.INTER_AREA`.
+- The matcher is `cv2.StereoSGBM_create(minDisparity=0, numDisparities=64, blockSize=5, P1=600, P2=2400,
+  disp12MaxDiff=1, preFilterCap=63, uniquenessRatio=10, speckleWindowSize=100, speckleRange=2,
+  mode=STEREO_SGBM_MODE_HH)`.
+- Unmatched pixels (negative output) and zero disparity are stored as 0.
+- No filtering or hole filling is applied.
+- The leftmost 64 columns have no candidate match in the right view within the 64-px search range, so
+  they are always no depth.
+
+**Measured on this clip (all 192 frames, from the stored PNGs)**
+
+| | Ground truth | SGBM |
+|---|---|---|
+| No depth | 2.08 % (sky) | 8.38 % (left band, occlusions, rejected matches) |
+| `display_range_px` (2nd–98th percentile) | 2.01–32.229 px | 2.0–33.0 px |
+| Clip maximum | 38.583 px | 63.0 px (outliers at the edge of the search range) |
+
+Where both layers have depth, SGBM's mean error against ground truth is 0.77 px. 3.9 % of those pixels
+are off by more than 1 px and 2.8 % by more than 3 px. SGBM covers 92.6 % of the pixels where ground
+truth has depth. The worst frame's mean error is 1.26 px.
+
+**`left.mp4`**
+
+- The same 1280x720 frames, H.264 High yuv420p, bt709, CRF 18, a keyframe every 24 frames (1 s),
+  faststart.
+- `ffprobe` reports 192 frames at 24/1, with keyframes at 0–7 s.
+
+## Licences and attribution
+
+The data files in this folder are **CC BY 4.0, not MIT**. That covers `left.mp4` and both layers:
+they are material adapted from the Spring dataset.
+
+> This fixture contains material adapted from the Spring dataset by Lukas Mehl, Jenny Schmalfuss,
+> Azin Jahedi, Yaroslava Nalivayko and Andrés Bruhn (University of Stuttgart), "Spring: A
+> High-Resolution High-Detail Dataset and Benchmark for Scene Flow, Optical Flow and Stereo", CVPR
+> 2023, https://doi.org/10.18419/darus-3376, licensed under CC BY 4.0
+> (https://creativecommons.org/licenses/by/4.0/). The Spring movie assets
+> (https://cloud.blender.org/spring) by Blender Foundation are licensed under CC BY 4.0.
+> Changes made:
+>
+> - sequence 0021, frames 1–192;
+> - left view downscaled to 1280x720 and encoded as H.264;
+> - ground-truth disparity max-pooled to 1280x720, rescaled, and quantised to 1/1024 px as 16-bit PNG
+>   and an 8-bit preview video;
+> - added a disparity layer computed with OpenCV StereoSGBM from the downscaled left and right views.
+>
+> Provided as is, without warranties (see the licence).
+
+- **Spring dataset:** DaRUS record doi:10.18419/darus-3376, licence field "CC BY 4.0", data source
+  "The Spring movie assets (https://cloud.blender.org/spring) by Blender Foundation are licensed under
+  CC BY 4.0". Please also cite the paper.
+- **"Spring" open movie:** Blender Studio (Blender Foundation), 2019, CC BY 4.0. The Blender Studio
+  credit line is "(CC) Blender Foundation | studio.blender.org".
+- **OpenCV:** `opencv-python-headless` 5.0.0.93, Apache-2.0. It computed the SGBM layer. The SGBM
+  layer is data, not OpenCV code, and no model weights are involved.
+- **Build scripts:** `fixture/tools/*.py` belong to the depth-map rendering research workspace the
+  fixture was built in, not to supervision-js.
+
+No learned stereo model was used, deliberately: every public stereo checkpoint was trained on data with
+research-only or non-commercial terms. See `research/11-real-fixture-sourcing.md` §5 and §9.
+
+## Rebuild
+
+The fixture was built in the depth-map rendering research workspace, which also holds Turbo check
+stills of frames 0, 96 and 191 (the video frame, ground truth over it, ground truth, and SGBM). From
+the root of that workspace (Python 3.14.7, numpy 2.5.3, opencv-python-headless 5.0.0.93,
+h5py 3.16.0, FFmpeg 8.1.1 with x264 core 165 r3222):
+
+```sh
+python3 -m venv .tools/fixture-venv
+.tools/fixture-venv/bin/pip install numpy==2.5.3 opencv-python-headless==5.0.0.93 h5py==3.16.0
+PY=.tools/fixture-venv/bin/python
+
+# Spring members for sequence 0021, frames 1–192. This reads only each DaRUS zip's index and the
+# requested members, about 1.3 GB, not the 42 GB of zips.
+for k in frame_left frame_right disp1_left cam_data; do
+  $PY fixture/tools/fetch_spring.py 0021 1 192 data/spring --kinds $k
+done > data/spring-0021-members.tsv
+
+$PY fixture/tools/build_spring_fixture.py data/spring/spring/train/0021 1 192 \
+  fixture/spring_0021 data/work/spring_0021
+$PY fixture/tools/write_sources.py data/spring-0021-members.tsv 0021 1 192 fixture/spring_0021/sources.tsv
+```
+
+- **Build time:** about 27 minutes on an M3 Max. Nearly all of it is zlib level 9 on the
+  384 PNGs (about 5 s each).
+- **`sources.tsv`:** lists all 577 Spring members used, with DaRUS zip, datafile id, size and CRC-32.
+  The fetch checks each CRC on extraction.
+- **`outputs.sha256`:** hashes every generated file in this folder. The hand-written `README.md`,
+  `fixture.meta.json` and `sources.tsv` are excluded.
+- **Reproducibility:** different FFmpeg/x264 builds may not reproduce the MP4 bytes. The PNGs and
+  `depth.json` should match exactly with the same numpy/OpenCV/h5py versions.
+
+## Known quirks
+
+- **Sky is no depth, not infinitely far.** Spring's ground truth puts 0 there, and 0 is the no-depth
+  code.
+- **SGBM outliers:** SGBM has occasional outliers up to 63 px, the top of its 64-px search range,
+  while the true maximum is 38.6 px.
+  - `preview.range_px` for `sgbm/` is therefore wider than for `ground-truth/`, and the preview step is
+    coarser: 0.264 px, against 0.161 px for ground truth.
+  - `display_range_px` (2nd–98th percentile) is unaffected.
+- **Blur and focus:** Spring's images include motion blur and depth of field; its ground truth does
+  not. SGBM errors in blurred areas are real errors on the input.

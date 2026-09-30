@@ -19,6 +19,7 @@ import {
   defaultDemoFixture,
   demoFixtureCatalog,
   demoFixtures,
+  parseDemoFixtureDepth,
   resolveDemoFixture,
   resolveDemoFixtureAvailability,
   resolveDemoFixturePlaybackSrc,
@@ -561,6 +562,67 @@ describe("fixture layer availability", () => {
   });
 });
 
+describe("fixture depth metadata", () => {
+  const layer = {
+    id: "sgbm",
+    label: "Stereo matcher",
+    manifest: "sgbm/depth.json",
+    source: "prediction",
+  };
+
+  it("accepts layers with a default among them", () => {
+    expect(
+      parseDemoFixtureDepth({ defaultLayer: "sgbm", layers: [layer] }),
+    ).toEqual({ defaultLayer: "sgbm", layers: [layer] });
+  });
+
+  it.each([
+    [{ defaultLayer: "sgbm", layers: [] }, "layers must be a non-empty array"],
+    [
+      { defaultLayer: "sgbm", layers: [layer, layer] },
+      'layers[1].id "sgbm" repeats',
+    ],
+    [
+      { defaultLayer: "gt", layers: [layer] },
+      "defaultLayer must name one of the layers",
+    ],
+    [
+      { defaultLayer: "sgbm", layers: [{ ...layer, manifest: "../x.json" }] },
+      "layers[0].manifest must be a .json path inside the fixture folder",
+    ],
+    [
+      {
+        defaultLayer: "sgbm",
+        layers: [{ ...layer, manifest: "https://cdn.test/depth.json" }],
+      },
+      "layers[0].manifest must be a .json path inside the fixture folder",
+    ],
+    [
+      { defaultLayer: "sgbm", layers: [{ ...layer, source: "model" }] },
+      "layers[0].source must be one of ground_truth, prediction",
+    ],
+    [
+      { defaultLayer: "sgbm", layers: [{ ...layer, label: "" }] },
+      "layers[0].label must be a non-empty string",
+    ],
+  ])("rejects %j", (depth, message) => {
+    expect(() => parseDemoFixtureDepth(depth)).toThrow(
+      `fixture.meta.json depth: ${message}`,
+    );
+  });
+
+  it("points every declared depth layer at a committed depth.json", () => {
+    const layers = demoFixtureCatalog.flatMap((fixture) =>
+      (fixture.depth?.layers ?? []).map((depthLayer) =>
+        join(fixturesRoot, basename(fixture.basePath), depthLayer.manifest),
+      ),
+    );
+
+    expect(layers.length).toBeGreaterThan(0);
+    for (const path of layers) expect(existsSync(path), path).toBe(true);
+  });
+});
+
 describe("fixture playback media", () => {
   it("plays the declared detection-timeline proxy", () => {
     expect(
@@ -815,6 +877,7 @@ describe("basketball region fixture", () => {
 const baseDefinition = {
   basePath: "../../fixtures/sample",
   datasetId: "sample_v1",
+  depth: null,
   detectionsManifestSrc: "/detections.manifest.json",
   displayName: "Sample",
   inferenceLabel: "SAM3",
