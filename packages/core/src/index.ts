@@ -370,6 +370,41 @@ export {
   type SkeletonVertexDefinition,
   type TopLeftRect,
 } from "#types/detections";
+export {
+  DepthColormap,
+  DepthMapKind,
+  DepthQuantity,
+  DepthSampling,
+  type DepthCamera,
+  type DepthClipFrames,
+  type DepthImageEntry,
+  type DepthManifest,
+  type DepthMap,
+  type DepthPreviewTrack,
+  type DepthRange,
+  type DepthReadout,
+  type PreviewDepthSamples,
+  type ScaledDepthSamples,
+} from "#types/depth-map";
+export {
+  parseDepthManifest,
+  resolveDepthFrameFile,
+  validateDepthMap,
+} from "#utils/depth-manifest";
+export { readDepthAt } from "#utils/depth-readout";
+export {
+  computeDepthPercentileRange,
+  depthColorCoordinate,
+  resolveDepthColorMapping,
+  resolveDepthQuantity,
+  type DepthColorMapping,
+  type DepthColorMappingOptions,
+  type DepthPercentileRangeOptions,
+} from "#utils/depth-color-mapping";
+export {
+  createDepthColormapLut,
+  isDepthColormap,
+} from "#utils/depth-colormaps";
 export type {
   MediaFrameMetadata,
   MediaTimelineMetadata,
