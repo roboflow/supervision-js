@@ -902,7 +902,7 @@ const FIXTURE_BUTTONS = `[...document.querySelectorAll(${startingAt(FIXTURE_PREF
     disabled: button.disabled,
   }))`;
 
-async function readFixtureButtons(session) {
+export async function readFixtureButtons(session) {
   await openTab(session, SOURCE_TAB);
   return session.readJson(FIXTURE_BUTTONS);
 }
@@ -921,7 +921,7 @@ const clickFixture = (id) => `(() => {
  * the page answers with is a different object afterwards. Waiting for a ready
  * status alone would be answered by the outgoing one straight away.
  */
-async function selectFixture(session, id, timeoutMs = 90_000) {
+export async function selectFixture(session, id, timeoutMs = 90_000) {
   const buttons = await readFixtureButtons(session);
   const wanted = buttons.find((button) => button.id === id);
   if (!wanted) {

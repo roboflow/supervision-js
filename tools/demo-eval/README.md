@@ -59,7 +59,8 @@ compares against a baseline recorded in another view says so instead of
 printing deltas between two different pages.
 
 Scenario names: `sync`, `latency`, `layers`, `cadence`, `throttle`, `blanking`,
-`drag`, `playhead`, `backscrub`, `focus`, `battery`.
+`drag`, `playhead`, `backscrub`, `focus`, `depth-drag`, `depth-backdrag`,
+`battery`.
 
 The run prints a summary and writes
 `{ startedAt, source, media, fixture, backend, mediaPath, scenarios, metrics,
@@ -375,6 +376,29 @@ on, and reduces the pair to two numbers: how much dark the overlay added, and
 how much of the picture it left bright. An overlay that vanishes adds no dark;
 an overlay that loses its cutout leaves nothing bright. The first is what
 shipped.
+
+### Depth under a drag
+
+**depth-drag** and **depth-backdrag** open the Spring stereo clip, whose depth
+layer is on, rest on exact depth at 15% (or 85%), then drag the timeline to 85%
+(or back to 15%) over a paced 1200ms and let go. Depth plays only on the web
+video engine path, so these need `?mediaPath=engine`; on Mediabunny they report
+`invalid-environment`. A depth clip's preview is a video decoded beside the
+picture, and with the session's playback gate on, a frame waits for its depth
+before it shows, so a decoder that cannot follow the hand shows up as a picture
+that falls behind the thumb rather than as frames without depth. Each reports:
+how far the picture trailed the thumb (mean and p95, as the time the thumb took
+to cover that distance), how many frames a second reached the screen and the
+longest one stayed, how many frames showed without their depth and how long
+the rest waited for it, depth drawn for any frame other than the one on screen
+(the only right number is 0), how often the page's preview decoder was
+configured for a new run, and how long after letting go the landed frame drew
+its depth and then its exact depth.
+
+The backward drag is the one the decoder finds hard: it can only decode forward
+from a key frame. Before depth followed drags it read 72ms behind on average,
+179ms at p95, held one frame for 200ms and showed 30 frames a second, against
+28ms, 34ms, 34ms and 59 frames a second with depth removed.
 
 **battery** opens the FrameSampler story, injects the gesture stress harness and
 runs `battery(1)`: sixteen scripted scrub, fling, jitter and play-pause-spam
