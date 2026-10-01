@@ -98,27 +98,6 @@ const session = await createMediaSession({
 });
 ```
 
-The web video engine source plays the same manifest the same way, and keeps
-the video frames it has decoded, so a drag paints sooner:
-
-```ts
-import {
-  annotationRenderers,
-  createMediaSession,
-  createWebVideoEngineMediaRendererSource,
-} from "supervision";
-import { SourceKind } from "supervision/web-video-engine";
-
-const session = await createMediaSession({
-  container,
-  media: createWebVideoEngineMediaRendererSource({
-    source: { kind: SourceKind.Url, url: "left.mp4" },
-  }),
-  depth: { manifest: "sgbm/depth.json" },
-  presentation: { renderers: [annotationRenderers.depth()] },
-});
-```
-
 A map you already hold in memory goes in as `depth: { map }`:
 
 ```ts
@@ -192,6 +171,10 @@ video frame.
 | Still image                                                   | Yes                                                      | No video to pair it with                                              |
 | `MediaStream` (camera): `createMediaStreamRendererSource()`   | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                         |
 
+Media that cannot pair a clip refuses its manifest with a `RangeError` that
+says why, and so does a clip whose frame count differs from the video's
+without `frames.times_s`.
+
 Depth video draws the same frames on the default path and on the web video
 engine. What differs is how the video gets there:
 
@@ -235,12 +218,15 @@ the mask window reads it:
   backwards, each run from a key frame keeps every frame up to the playhead,
   so a backward drag decodes each group of pictures once instead of once per
   move. Decoding follows the positions the hand asks for rather than the
-  frames that land behind it.
+  frames that land behind it. A jump far back waits for its group of pictures,
+  and with the gate on, a decoder that cannot keep up shows as a picture
+  trailing the hand.
 - At rest it keeps a small margin, as the mask window does: one schedule
   batch past the frame on screen (`maskFrame.scheduleBatchSize`, so three
   frames on a renderer and seventeen in a session). A step backwards fills
   behind. A step at rest waits only for its own frame, and an exact frame
-  already loaded is enough.
+  already loaded is enough. Starting playback from rest at 4x or faster waits
+  for the lead the gate asks for, since this margin is shorter than it.
 
 While the page is hidden the preview decodes nothing and no exact frame is
 loaded; both pick up from the playhead when the page shows again.
@@ -336,7 +322,8 @@ preview when that lead falls under a quarter or the frame about to show is
 missing, then waits 1 s before trying again, doubling to at most 16 s with
 each hand-back; ten seconds of steady exact playback earn the short wait
 back. Starting playback, resuming after a drag, or a seek starts over on the
-preview without counting against exact depth. Either way the depth drawn is
+preview without counting against exact depth, and a drag always draws the
+preview. Either way the depth drawn is
 the frame on screen's own, never a neighbour's, and `readDepthAt` and
 `getActiveDepth()` say `precision: "exact"` when it is exact. Exact frames
 that fail to load hand playback to the preview for good, with a console
@@ -525,34 +512,6 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
 
 ## Limits
 
-- A clip manifest (`frames`) pairs one PNG with each video frame, so it needs
-  media with a frame index: a URL or file, or
-  `createWebVideoEngineMediaRendererSource()`. A still image, a `MediaStream`
-  and a file still converting under `normalize: { stream: true }` refuse it
-  with a `RangeError` that says why, and so does a clip whose frame count
-  differs from the video's without `frames.times_s`.
-- Exact depth plays only while its frames load as fast as playback presents
-  them; in `"auto"`, below that rate the preview's precision is what plays:
-  one step of `range_px` (a 203rd of it in TV range with 31 reserved codes,
-  0.18 px on the Spring clips), plus the codec's error. A clip without a
-  `preview`, or on a browser that cannot decode it, plays exact frames, which
-  the gate waits for. A drag always draws the preview; exact depth then needs
-  the playhead to rest for 0.15 s.
-- Exact frames playing load ahead next to the preview in `"auto"`, so they
-  cost their fetch and decode even while the preview is what plays, and they
-  are judged by their lead, not by a measured rate: a link that only just
-  keeps up may stay on the preview.
-- A preview decodes at the browser's pace. Where that is slower than the
-  rate asks for (in a benchmark, Firefox decoded a 4K preview at about 51
-  frames a second, so 8x of a 24 fps clip outran it), the playback gate
-  stops playback until the decoded lead catches up, each stop bounded by
-  `maxWaitSeconds`; with the gate off, frames the decoder has not reached
-  draw no depth. Starting playback from rest at 4x or faster waits for the
-  lead the gate asks for, since the rest margin is shorter than it.
-- The preview decoder only moves forward from a key frame. A backward drag
-  decodes each group of pictures once, from its key frame; a jump far back
-  waits for that group. With the gate on, frames wait for their depth, so a
-  decoder that cannot keep up shows as a picture trailing the hand.
 - On WebGL a map whose width is odd goes up with one padding texel per row,
   padded by the worker while it decodes a manifest's PNG; WebGPU uploads the
   samples as they are.

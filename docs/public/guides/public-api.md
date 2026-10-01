@@ -69,14 +69,11 @@ Start here for normal application code:
   composite composes children that were each inferred at a different size, and
   every child is projected from its own space before composition
 - depth maps: `MediaSessionOptions.depth` (a `DepthMap`, or a `depth.json`
-  manifest the session fetches and decodes: a still image, or a clip drawn
-  over video media, exact frames while playing when they keep up and its
-  8-bit preview video otherwise, exact frames once playback rests), and the
-  `depth`
-  annotation renderer. Depth is its own channel beside detections, never a
-  `DetectionFrame` field, and a map is stretched over the media rectangle
-  rather than projected by `coordinateSpace`. Depth video plays over a URL or
-  file and over the web video engine source; which media draws which depth is in
+  manifest the session fetches and decodes, for a still image or a clip over
+  video media), and the `depth` annotation renderer. Depth is its own channel
+  beside detections, never a `DetectionFrame` field, and a map is stretched
+  over the media rectangle rather than projected by `coordinateSpace`. Which
+  media draws which depth, and what plays, is in
   [Depth maps](../annotation-renderers/depth.md#where-depth-works)
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
