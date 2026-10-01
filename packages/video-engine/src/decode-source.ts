@@ -742,8 +742,15 @@ async function openInput(
   }
   const displayWidth = videoTrack.displayWidth;
   const displayHeight = videoTrack.displayHeight;
-  const durationS = asSec(await readTrackDurationS(videoTrack));
   const timeline = await readFrameTimeline(videoTrack);
+  // The demuxer measures a track to the end of its last packet, which falls
+  // short when that packet states no duration and the timeline found one.
+  const durationS = asSec(
+    Math.max(
+      await readTrackDurationS(videoTrack),
+      timeline.endTicksAt(timeline.frameCount - 1) / timeline.tickRate,
+    ),
+  );
   // Mediabunny ships a measured native fps via computePacketStats:
   // averagePacketRate "for video tracks, equals the average frame rate". We
   // bound the packet sample to a small slice so the load promise doesn't stall
@@ -816,6 +823,7 @@ async function resolveVideoTrack(
 interface TrackWithTimeResolution {
   getTimeResolution?: () => Promise<number>;
   timeResolution?: number;
+  getDurationFromMetadata?: () => Promise<number | null>;
 }
 
 /**
@@ -825,7 +833,9 @@ interface TrackWithTimeResolution {
  *
  * Decode order is not presentation order on a B-frame source, so the table is
  * sorted before it is indexed, and the trailing frame's duration comes from the
- * packet that ends up last in that order.
+ * packet that ends up last in that order. A WebM block need not state a
+ * duration, and the demuxer reads the last one that does not as lasting no
+ * time, so that frame's duration is then found another way.
  */
 async function readFrameTimeline(videoTrack: unknown): Promise<FrameTimeline> {
   const track = videoTrack as TrackWithTimeResolution;
@@ -862,11 +872,47 @@ async function readFrameTimeline(videoTrack: unknown): Promise<FrameTimeline> {
     );
   }
   ticks.sort((a, b) => a - b);
+  if (lastDurationTicks === 0) {
+    lastDurationTicks = await unstatedLastDurationTicks(track, ticks, tickRate);
+  }
   return FrameTimeline.from({
     lastDurationTicks,
     tickRate,
     ticks: Float64Array.from(ticks),
   });
+}
+
+/**
+ * How long the last frame lasts when its packet does not say: until the end
+ * the container states for the track, else as long as the frame before it. A
+ * lone frame with neither keeps a span of no time.
+ */
+async function unstatedLastDurationTicks(
+  track: TrackWithTimeResolution,
+  ticks: readonly number[],
+  tickRate: number,
+): Promise<number> {
+  const lastTicks = ticks[ticks.length - 1];
+  const statedEndS = await readStatedEndS(track);
+  if (statedEndS !== null) {
+    const toStatedEnd = Math.round(statedEndS * tickRate) - lastTicks;
+    if (toStatedEnd > 0) return toStatedEnd;
+  }
+  let before = ticks.length - 2;
+  while (before >= 0 && ticks[before] === lastTicks) before -= 1;
+  return before >= 0 ? lastTicks - ticks[before] : 0;
+}
+
+async function readStatedEndS(
+  track: TrackWithTimeResolution,
+): Promise<number | null> {
+  if (typeof track.getDurationFromMetadata !== "function") return null;
+  try {
+    const endS = await track.getDurationFromMetadata();
+    return typeof endS === "number" && Number.isFinite(endS) ? endS : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

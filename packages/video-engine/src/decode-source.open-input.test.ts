@@ -29,6 +29,12 @@ interface FakeTrackConfig {
   containerUnreadable?: boolean;
   otherTrackCount?: number;
   packetCount?: number;
+  /** What the demuxer reports for the last frame's packet. A WebM block that
+   *  states no duration reads as zero. Every other packet lasts 1/30 s. */
+  lastPacketDuration?: number;
+  /** The track end the container's own metadata states, null when it states
+   *  none. */
+  statedDurationS?: number | null;
 }
 
 /** A whole multiple of both 30fps and every origin these tests use, so the fake
@@ -58,8 +64,17 @@ class FakeVideoTrack {
   getTimeResolution(): Promise<number> {
     return Promise.resolve(TICK_RATE);
   }
+  /** Where mediabunny measures a track to: the end of its last packet. */
   computeDuration(): Promise<number> {
-    return Promise.resolve(5);
+    const count = trackConfig.packetCount ?? 5;
+    return Promise.resolve(
+      trackConfig.firstTimestamp +
+        (count - 1) / 30 +
+        (trackConfig.lastPacketDuration ?? 1 / 30),
+    );
+  }
+  getDurationFromMetadata(): Promise<number | null> {
+    return Promise.resolve(trackConfig.statedDurationS ?? null);
   }
   computePacketStats(): Promise<{ averagePacketRate: number }> {
     return Promise.resolve({ averagePacketRate: 30 });
@@ -116,7 +131,10 @@ vi.mock("mediabunny", () => {
         for (const step of [...Array(count).keys()].reverse()) {
           yield {
             timestamp: trackConfig.firstTimestamp + step / 30,
-            duration: 1 / 30,
+            duration:
+              step === count - 1
+                ? (trackConfig.lastPacketDuration ?? 1 / 30)
+                : 1 / 30,
           };
         }
       }
@@ -250,6 +268,75 @@ describe("openInput frame timeline", () => {
     ).track;
 
     expect(firstTimestampS).toBe(timeline.timeAt(0));
+  });
+
+  it("a last frame its packet gives no duration ends where the container says the track ends", async () => {
+    trackConfig = {
+      canDecode: true,
+      firstTimestamp: 0,
+      lastPacketDuration: 0,
+      packetCount: 3,
+      statedDurationS: 0.2,
+    };
+    const { durationS, timeline } = (await openDecodeSource({ source: SOURCE }))
+      .track;
+
+    expect(timeline.endTicksAt(2)).toBe(120);
+    expect(durationS).toBe(0.2);
+  });
+
+  it("a lone frame its packet gives no duration lasts until the container's stated end", async () => {
+    trackConfig = {
+      canDecode: true,
+      firstTimestamp: 0,
+      lastPacketDuration: 0,
+      packetCount: 1,
+      statedDurationS: 1,
+    };
+    const { durationS, timeline } = (await openDecodeSource({ source: SOURCE }))
+      .track;
+
+    expect(timeline.endTicksAt(0)).toBe(TICK_RATE);
+    expect(durationS).toBe(1);
+  });
+
+  it.each([
+    { stated: "no end", statedDurationS: null },
+    {
+      stated: "an end no later than the frame's start",
+      statedDurationS: 2 / 30,
+    },
+  ])(
+    "with $stated stated, a last frame without a duration lasts as long as the one before it",
+    async ({ statedDurationS }) => {
+      trackConfig = {
+        canDecode: true,
+        firstTimestamp: 0,
+        lastPacketDuration: 0,
+        packetCount: 3,
+        statedDurationS,
+      };
+      const { durationS, timeline } = (
+        await openDecodeSource({ source: SOURCE })
+      ).track;
+
+      expect(timeline.endTicksAt(2)).toBe(60);
+      expect(durationS).toBe(0.1);
+    },
+  );
+
+  it("a last frame's own packet duration outranks the container's stated end", async () => {
+    trackConfig = {
+      canDecode: true,
+      firstTimestamp: 0,
+      packetCount: 3,
+      statedDurationS: 0.5,
+    };
+    const { durationS, timeline } = (await openDecodeSource({ source: SOURCE }))
+      .track;
+
+    expect(timeline.endTicksAt(2)).toBe(60);
+    expect(durationS).toBe(0.1);
   });
 });
 
