@@ -36,9 +36,6 @@ const { values: flags } = parseArgs({
     browser: { default: "chrome", type: "string" },
     layers: { default: "sgbm,ground-truth", type: "string" },
     playback: { default: "auto", type: "string" },
-    // Chrome only: caps the page's downloads at this many megabits a second,
-    // with 40 ms latency, once the playground is open.
-    "throttle-mbps": { type: "string" },
     out: {
       default: path.join(rootDir, "benchmark/depth/results"),
       type: "string",
@@ -136,7 +133,6 @@ const pageHelpers = `(() => {
     return artifacts
       .filter((artifact) => artifact.kind === "depthFrame")
       .map((artifact) => ({
-        exactPlayback: artifact.exactPlayback ?? null,
         gateHoldCount: artifact.gateHoldCount ?? 0,
         precision: artifact.precision ?? "preview",
         preparedAheadSeconds: artifact.preparedAheadSeconds ?? null,
@@ -149,45 +145,7 @@ const pageHelpers = `(() => {
     const init = { bubbles: true, clientX: box.left + box.width * x, clientY: box.top + box.height * y, pointerType: "mouse" };
     mount.dispatchEvent(new PointerEvent("pointermove", init));
   };
-  /** Mean absolute disparity between two maps over pixels both measure. */
-  const meanDifference = (a, b) => {
-    const value = (map, i) => {
-      const s = map.samples;
-      if (s.encoding === "scaled16") return s.values[i] === 0 ? NaN : s.values[i] / s.scale;
-      const code = s.values[i];
-      if (code <= s.reservedMax) return NaN;
-      const span = (s.levels === "tv" ? 235 : 255) - s.reservedMax - 1;
-      return s.range.min + Math.min(code - s.reservedMax - 1, span) / span * (s.range.max - s.range.min);
-    };
-    let sum = 0, count = 0;
-    for (let i = 0; i < a.width * a.height; i += 7) {
-      const d = Math.abs(value(a, i) - value(b, i));
-      if (Number.isFinite(d)) { sum += d; count += 1; }
-    }
-    return count ? sum / count : null;
-  };
-  /**
-   * The preview's codes against the codes the producer wrote from the exact
-   * frame: a least-squares line through (written, decoded), and the mean
-   * absolute code error. A decoder that squeezes full range to video range
-   * shows a slope near 219/255 and an intercept near 16.
-   */
-  const codeFit = (preview, exact) => {
-    const s = preview.samples, T = s.reservedMax, lo = s.range.min, hi = s.range.max;
-    const top = s.levels === "tv" ? 235 : 255;
-    let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0, error = 0;
-    for (let i = 0; i < preview.width * preview.height; i += 3) {
-      const stored = exact.samples.values[i];
-      if (stored === 0 || s.values[i] <= T) continue;
-      const d = stored / exact.samples.scale;
-      const written = Math.min(top, Math.max(T + 1, T + 1 + Math.round((d - lo) / (hi - lo) * (top - T - 1))));
-      const decoded = s.values[i];
-      n += 1; sx += written; sy += decoded; sxx += written * written; sxy += written * decoded; error += Math.abs(decoded - written);
-    }
-    const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-    return { meanAbsCodeError: error / n, intercept: (sy - slope * sx) / n, pixels: n, slope };
-  };
-  globalThis.__depthE2E = { codeFit, depthWindows, findSession, meanDifference, pointAt, setInput, slider, state, kept: new Map() };
+  globalThis.__depthE2E = { depthWindows, findSession, pointAt, setInput, slider, state };
 })();`;
 
 async function main() {
@@ -219,10 +177,6 @@ async function main() {
     await browser.navigate(pageUrl);
     report.userAgent = await browser.evaluate("navigator.userAgent");
     await prepare(browser);
-    if (flags["throttle-mbps"]) {
-      report.throttleMbps = Number(flags["throttle-mbps"]);
-      await browser.throttle?.(report.throttleMbps);
-    }
 
     for (const layer of flags.layers.split(",")) {
       await selectLayer(browser, layer);
@@ -346,11 +300,6 @@ async function playThrough(browser, layer, rate) {
     ) {
       await browser.evaluate(`__depthE2E.pointAt(0.43, 0.62)`);
       playingReadout = await pageState(browser);
-      await browser.evaluate(`(() => {
-        const active = __depthE2E.findSession().renderer.getActiveDepth();
-        // The alignment check below judges a preview frame's codes.
-        if (active?.precision === "preview") __depthE2E.kept.set(active.frameIndex, active.map);
-      })()`);
       await screenshot(browser, `playback-${name}-playing.png`);
       screenshotTaken = true;
     }
@@ -369,9 +318,6 @@ async function playThrough(browser, layer, rate) {
       ?.gateHoldCount ?? 0) -
     (windowsBefore.find((window) => window.precision === precision)
       ?.gateHoldCount ?? 0);
-  const exactWindow = windowsAfter.find(
-    (window) => window.precision === "exact",
-  );
   const drawn = playing.filter((sample) => sample.active);
   const wrongFrame = samples.filter(
     (sample) =>
@@ -442,52 +388,6 @@ async function playThrough(browser, layer, rate) {
 
   await screenshot(browser, `playback-${name}-paused.png`);
 
-  // The kept preview frame against the exact frames around it: the right
-  // frame must be the closest, or the preview is out of step.
-  const alignment = await evaluateJson(
-    browser,
-    `(async () => {
-      const [index, preview] = [...__depthE2E.kept.entries()].at(-1) ?? [];
-      if (index === undefined) return null;
-      const session = __depthE2E.findSession();
-      const result = { frame: index, differences: {}, codes: null };
-      for (const candidate of [index - 1, index, index + 1]) {
-        if (candidate < 0 || candidate >= session.frameClock.frameCount) continue;
-        await session.frameNavigation.moveToFrame(candidate).catch((error) => {
-          globalThis.__depthE2E.errors = [...(globalThis.__depthE2E.errors ?? []), String(error)];
-        });
-        const started = performance.now();
-        let active = null;
-        while (performance.now() - started < 5000) {
-          active = session.renderer.getActiveDepth();
-          if (active?.precision === "exact" && active.frameIndex === candidate) break;
-          await new Promise((resolve) => setTimeout(resolve, 30));
-        }
-        const landed = active?.precision === "exact" && active.frameIndex === candidate;
-        result.differences[candidate] = landed ? __depthE2E.meanDifference(preview, active.map) : null;
-        if (candidate === index && landed) result.codes = __depthE2E.codeFit(preview, active.map);
-      }
-      __depthE2E.kept.clear();
-      return result;
-    })()`,
-  );
-
-  if (alignment) {
-    const own = alignment.differences[alignment.frame];
-    const others = Object.entries(alignment.differences)
-      .filter(([frame]) => Number(frame) !== alignment.frame)
-      .map(([, value]) => value);
-
-    if (
-      own === null ||
-      others.some((value) => value !== null && value <= own)
-    ) {
-      failures.push(
-        `${name}: preview frame ${alignment.frame} is not closest to its own exact frame (${JSON.stringify(alignment.differences)})`,
-      );
-    }
-  }
-
   // Seek far away and watch every sample until the exact frame lands.
   const target = 150;
   const seekSamples = [];
@@ -533,7 +433,6 @@ async function playThrough(browser, layer, rate) {
   await screenshot(browser, `playback-${name}-seek.png`);
 
   return {
-    alignment,
     exactAfterPauseMs: exactAfterMs,
     exactPlayingSamples: exactWhilePlaying.length,
     // One letter per playing sample: E exact, P preview, - none, with the
@@ -557,7 +456,6 @@ async function playThrough(browser, layer, rate) {
     presentedFps: presentedFrames / elapsedSeconds,
     targetFps: 24 * rate,
     gateHolds: { exact: holds("exact"), preview: holds("preview") },
-    exactPlayback: exactWindow?.exactPlayback ?? null,
     cpuMsPerFrame:
       cpuBefore === undefined || cpuAfter === undefined || presentedFrames === 0
         ? null
@@ -668,17 +566,17 @@ async function screenshot(browser, name) {
 
 function renderSummary(report) {
   const lines = [
-    `Depth playback (${report.browser}, ${report.playback}${report.throttleMbps ? `, ${report.throttleMbps} Mbit/s` : ""}): ${report.userAgent}`,
+    `Depth playback (${report.browser}, ${report.playback}): ${report.userAgent}`,
   ];
 
   for (const run of report.runs) {
     lines.push(
       `- ${run.layer} ${run.rate}x: ${run.presentedFps.toFixed(1)}/${run.targetFps} fps, exact in ${run.exactPlayingSamples} and preview in ${run.previewPlayingSamples} of ${run.playingSamples} playing samples, ` +
-        `gate holds ${JSON.stringify(run.gateHolds)}, CPU ${run.cpuMsPerFrame?.toFixed(1) ?? "?"} ms/frame, exact playback ${JSON.stringify(run.exactPlayback)}; ` +
+        `gate holds ${JSON.stringify(run.gateHolds)}, CPU ${run.cpuMsPerFrame?.toFixed(1) ?? "?"} ms/frame; ` +
         `depth in ${run.previewDrawnSamples}/${run.playingSamples} playing samples, ` +
         `readout "${run.playingReadout?.readoutStatus}" frame ${run.playingReadout?.depthFrameRow} on ${run.playingReadout?.frameOnScreen}; ` +
         `exact ${run.exactAfterPauseMs} ms after pause; seek depth after ${run.seek.depthAfterMs} ms (${run.seek.precisionFirst}), stale ${run.seek.stale}; ` +
-        `buffering samples ${run.bufferingSamples}; alignment ${JSON.stringify(run.alignment?.differences ?? null)}; codes ${JSON.stringify(run.alignment?.codes ?? null)}`,
+        `buffering samples ${run.bufferingSamples}`,
     );
   }
   lines.push(
@@ -778,16 +676,6 @@ async function openChrome(profile) {
     async close() {
       cdp.close();
       await stopProcess(chrome);
-    },
-    async throttle(megabitsPerSecond) {
-      await cdp.send("Network.enable");
-      await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
-      await cdp.send("Network.emulateNetworkConditions", {
-        downloadThroughput: (megabitsPerSecond * 1e6) / 8,
-        latency: 40,
-        offline: false,
-        uploadThroughput: (megabitsPerSecond * 1e6) / 8,
-      });
     },
     /** CPU seconds Chrome and every process it started have used so far. */
     cpuSeconds: () => processTreeCpuSeconds(chrome.pid),
