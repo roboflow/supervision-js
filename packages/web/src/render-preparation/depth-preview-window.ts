@@ -39,14 +39,29 @@ const DEFAULT_PAUSED_FRAME_COUNT = 3;
  */
 const STEADY_STRIDE_SAMPLE_COUNT = 8;
 
-/** What the window decodes from: a depth preview track, or a test double. */
-export interface DepthPreviewFrameSource {
+/** One pass over a frame source, from where it was started forward. */
+export interface DepthFrameRun<Frame> {
+  /** The next frame, or null once the source has ended or the run was cancelled. */
+  next(): Promise<Frame | null>;
+  cancel(): void;
+}
+
+/**
+ * What the window decodes from: a depth preview track, the exact PNGs, or a
+ * test double. A video track decodes from a key frame forward; a source with
+ * `randomAccess` starts a run at any frame and skips the frames `keep`
+ * turns away at no cost, so one run serves every frame ahead of it.
+ */
+export interface DepthPreviewFrameSource<
+  Frame extends { readonly index: number } = DepthPreviewLumaFrame,
+> {
   readonly frameCount: number;
+  readonly randomAccess?: boolean;
   keyIndexAtOrBefore(index: number): number;
   decode(
     fromIndex: number,
     options: DepthPreviewDecodeOptions,
-  ): DepthPreviewDecodeRun;
+  ): DepthFrameRun<Frame> | DepthPreviewDecodeRun;
 }
 
 export interface DepthPreviewEntry {
@@ -55,16 +70,22 @@ export interface DepthPreviewEntry {
   readonly bytes: number;
 }
 
-export interface DepthPreviewWindowOptions {
-  readonly frames: DepthPreviewFrameSource;
+export interface DepthPreviewWindowOptions<
+  Frame extends { readonly index: number } = DepthPreviewLumaFrame,
+> {
+  readonly frames: DepthPreviewFrameSource<Frame>;
   /** Start of frame `index` on the media timeline, in seconds. */
   readonly timeAt: (index: number) => number;
   /** End of frame `index` on the media timeline, in seconds. */
   readonly endAt: (index: number) => number;
   /** Wraps one frame's luma as the map the layer draws. */
-  readonly createMap: (frame: DepthPreviewLumaFrame) => DepthMap;
+  readonly createMap: (frame: Frame) => DepthMap;
   /** Bytes one decoded frame holds. */
   readonly frameBytes: number;
+  /** Bytes a decoded frame holds, when frames differ; else `frameBytes`. */
+  readonly bytesOf?: (frame: Frame) => number;
+  /** Names the frames in diagnostics and warnings. Defaults to "preview". */
+  readonly precision?: "exact" | "preview";
   /** Decoded luma kept, in bytes. */
   readonly maxBytes: number;
   /**
@@ -135,13 +156,19 @@ export interface DepthPreviewWindow {
    */
   upcoming(index: number, count: number, skip?: number): DepthPreviewEntry[];
   getDiagnostics(): RenderPreparationArtifactDiagnostics;
+  /**
+   * The most lead the window decodes ahead of `index` while playing, in
+   * seconds of media; Infinity where that reaches the end of a clip that
+   * does not loop.
+   */
+  wantedLeadSeconds(index: number): number;
   /** The decoder failed; the window stops waiting and decoding. */
   readonly failure: unknown;
   destroy(): void;
 }
 
-interface ActiveRun {
-  readonly run: DepthPreviewDecodeRun;
+interface ActiveRun<Frame> {
+  readonly run: DepthFrameRun<Frame>;
   /** One past the highest frame this run has delivered. */
   next: number;
   ended: boolean;
@@ -185,10 +212,11 @@ interface Span {
  * the budget is short, frames the window no longer wants go first, then the
  * ones farthest the other way from where the playhead heads.
  */
-export function createDepthPreviewWindow(
-  options: DepthPreviewWindowOptions,
-): DepthPreviewWindow {
+export function createDepthPreviewWindow<
+  Frame extends { readonly index: number } = DepthPreviewLumaFrame,
+>(options: DepthPreviewWindowOptions<Frame>): DepthPreviewWindow {
   const { frames } = options;
+  const what = options.precision === "exact" ? "exact depth" : "depth preview";
   const frameCount = frames.frameCount;
   const lastIndex = frameCount - 1;
   const entries = new Map<number, DepthPreviewEntry>();
@@ -211,7 +239,7 @@ export function createDepthPreviewWindow(
   let scrubbing = false;
   let looping = options.loop === true;
   let hidden = false;
-  let active: ActiveRun | null = null;
+  let active: ActiveRun<Frame> | null = null;
   let pumping = false;
   let wakePump: (() => void) | null = null;
   let progress = 0;
@@ -459,7 +487,7 @@ export function createDepthPreviewWindow(
     if (missing === restartedFor) {
       restartsForSameFrame += 1;
       if (restartsForSameFrame >= MAX_RESTARTS_FOR_ONE_FRAME) {
-        fail(new Error(`The depth preview has no decodable frame ${missing}.`));
+        fail(new Error(`The ${what} has no decodable frame ${missing}.`));
         return;
       }
     } else {
@@ -533,8 +561,8 @@ export function createDepthPreviewWindow(
     try {
       active = {
         ended: false,
-        next: frames.keyIndexAtOrBefore(target),
-        run: frames.decode(target, { keep }),
+        next: frames.randomAccess ? target : frames.keyIndexAtOrBefore(target),
+        run: frames.decode(target, { keep }) as DepthFrameRun<Frame>,
       };
     } catch (error) {
       fail(error);
@@ -546,7 +574,9 @@ export function createDepthPreviewWindow(
     active?.run.cancel();
     active = null;
     console.warn(
-      `The depth preview stopped decoding, so playback shows no depth: ${String(error)}`,
+      options.precision === "exact"
+        ? `Exact depth stopped loading ahead, so playback draws the preview: ${String(error)}`
+        : `The depth preview stopped decoding, so playback shows no depth: ${String(error)}`,
     );
     changed();
   };
@@ -560,7 +590,8 @@ export function createDepthPreviewWindow(
     active !== null &&
     !active.ended &&
     active.next <= target &&
-    frames.keyIndexAtOrBefore(target) <= active.next;
+    (frames.randomAccess === true ||
+      frames.keyIndexAtOrBefore(target) <= active.next);
 
   const wake = () => {
     const resolve = wakePump;
@@ -610,7 +641,7 @@ export function createDepthPreviewWindow(
           continue;
         }
 
-        let frame: DepthPreviewLumaFrame | null;
+        let frame: Frame | null;
 
         try {
           frame = await current.run.next();
@@ -633,7 +664,10 @@ export function createDepthPreviewWindow(
         makeRoom(options.frameBytes);
 
         const map = options.createMap(frame);
-        const bytes = frame.luma.byteLength;
+        const bytes =
+          options.bytesOf?.(frame) ??
+          (frame as { readonly luma?: Uint8Array }).luma?.byteLength ??
+          options.frameBytes;
 
         entries.set(frame.index, { bytes, index: frame.index, map });
         heldBytes += bytes;
@@ -842,6 +876,8 @@ export function createDepthPreviewWindow(
     },
 
     getPreparationProgress: () => progress,
+
+    wantedLeadSeconds: (index) => reachableSeconds(clampIndex(index)),
 
     upcoming(index, count, skip = 1) {
       const found: DepthPreviewEntry[] = [];

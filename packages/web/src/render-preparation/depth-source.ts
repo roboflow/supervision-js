@@ -25,13 +25,22 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationArtifactDiagnostics,
+  type DepthPlaybackSource,
   type RenderPreparationDepthOptions,
   type RenderPreparationDiagnostics,
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
+import {
+  createExactDepthFrameSource,
+  type ExactDepthFrame,
+  type ExactDepthFrameSource,
+} from "./depth-exact-frames";
 import { abortable, type DepthFramePreparer } from "./depth-frame-preparer";
 import type { DepthPreviewLumaCopier } from "./depth-preview-luma";
-import { createDepthPreviewWindow } from "./depth-preview-window";
+import {
+  createDepthPreviewWindow,
+  type DepthPreviewWindow,
+} from "./depth-preview-window";
 import {
   getPausedPreparedWindowFrameCount,
   WINDOW_LEAD_FRACTION,
@@ -51,9 +60,19 @@ const DEFAULT_PREVIEW_RETAIN_SECONDS = 0.25;
 export const DEFAULT_DEPTH_TIMING_OPTIONS = {
   exactNeighborFrameCount: 2,
   exactSettleSeconds: 0.15,
+  playback: "auto",
   previewPrefetchSeconds: DEFAULT_PREVIEW_PREFETCH_SECONDS,
   previewRetainSeconds: DEFAULT_PREVIEW_RETAIN_SECONDS,
 } as const satisfies RenderPreparationDepthOptions;
+/** Of the lead exact playback loads ahead, the share it needs to take over. */
+const EXACT_TAKEOVER_SHARE = 0.75;
+/** And the share below which it hands back to the preview. */
+const EXACT_HANDBACK_SHARE = 0.25;
+/** The first wait before exact playback is tried again; each hand-back doubles it. */
+const EXACT_RETRY_START_MS = 1000;
+const EXACT_RETRY_MAX_MS = 16_000;
+/** Exact playback this long without a hand-back earns the first wait back. */
+const EXACT_STEADY_MS = 10_000;
 /** The preview budget's floor: what a 1080p clip needs for a 1.35 s lead. */
 const MIN_DEFAULT_PREVIEW_CACHE_BYTES = 96 * MEBIBYTE;
 /** And its ceiling: 64 frames of 4K, about two seconds at 30 fps. */
@@ -441,6 +460,17 @@ async function openDepthClip(
     { scheduleBatchSize: context.scheduleBatchSize },
   );
   const options = { ...budgets.exact, ...context.exactFrames };
+  const exactFrameBytes =
+    manifest.width *
+    manifest.height *
+    (frames.confidence === undefined ? 2 : 3);
+  const exactFiles = (index: number): DepthMapFiles => ({
+    confidenceFile:
+      frames.confidence === undefined
+        ? undefined
+        : resolveDepthFrameFile(frames.confidence, index),
+    file: resolveDepthFrameFile(frames.exact, index),
+  });
   const listeners = new Set<() => void>();
   const cache = new Map<number, CachedDepthFrame>();
   const loading = new Map<number, Promise<void>>();
@@ -462,6 +492,7 @@ async function openDepthClip(
   let cachedBytes = 0;
   let onScreen: number | null = null;
   let active = false;
+  let scrubbing = false;
   let hidden = false;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   let run: AbortController | undefined;
@@ -527,7 +558,28 @@ async function openDepthClip(
 
     context.onDiagnostics?.({
       artifacts: [
-        ...(previewWindow ? [previewWindow.getDiagnostics()] : []),
+        ...(previewWindow
+          ? [
+              {
+                ...previewWindow.getDiagnostics(),
+                precision: "preview" as const,
+              },
+            ]
+          : []),
+        ...(exactWindow
+          ? [
+              {
+                ...exactWindow.getDiagnostics(),
+                exactPlayback: {
+                  drawn: playsExact,
+                  fallbackCount: exactFallbacks,
+                  loadRate: exactFrames?.loadRate() ?? null,
+                  meanLoadMs: exactFrames?.meanLoadMs() ?? null,
+                },
+                precision: "exact" as const,
+              },
+            ]
+          : []),
         exactDiagnostics(),
       ],
       // The decoder runs where the browser puts it; the work this page
@@ -601,6 +653,123 @@ async function openDepthClip(
       })
     : null;
 
+  const playbackSource = budgets.playback.source;
+  const exactFrames: ExactDepthFrameSource | null =
+    playbackSource === "preview"
+      ? null
+      : createExactDepthFrameSource({
+          concurrency: () => exactConcurrency(),
+          frameCount: frames.count,
+          load: (index, signal) => {
+            const kept = cache.get(index);
+
+            if (kept) return Promise.resolve(kept.entry.map);
+
+            return loadDepthMap(
+              manifest,
+              exactFiles(index),
+              base,
+              context,
+              AbortSignal.any([teardown.signal, signal]),
+            );
+          },
+        });
+  const exactEntries = new WeakMap<DepthMap, DepthFrameEntry>();
+  const exactWindow: DepthPreviewWindow | null = exactFrames
+    ? createDepthPreviewWindow<ExactDepthFrame>({
+        bytesOf: ({ map }) =>
+          map.samples.values.byteLength + (map.confidence?.byteLength ?? 0),
+        createMap: ({ map }) => map,
+        endAt,
+        frameBytes: exactFrameBytes,
+        frames: exactFrames,
+        maxBytes: budgets.playback.maxExactCacheBytes,
+        onChange: () => {
+          if (
+            exactWindow?.failure !== null &&
+            exactWindow?.failure !== undefined
+          ) {
+            dropExactPlayback();
+          }
+          scheduleDiagnostics();
+        },
+        onFrame: (index) => {
+          if (index === onScreen && playsExact) notify();
+        },
+        pausedFrameCount: budgets.preview.pausedFrameCount,
+        precision: "exact",
+        prefetchSeconds: budgets.preview.prefetchSeconds,
+        retainSeconds: budgets.preview.retainSeconds,
+        timeAt,
+      })
+    : null;
+  /** Whether playback draws exact frames now; "auto" moves it with their lead. */
+  let playsExact =
+    exactWindow !== null && (playbackSource === "exact" || !previewWindow);
+  let exactFallbacks = 0;
+  /** Wall time before which "auto" does not try exact playback again. */
+  let exactRetryAt = 0;
+  let exactBackoffMs = EXACT_RETRY_START_MS;
+  let exactSince = 0;
+
+  /** Exact frames that stop loading leave playback to the preview, for good. */
+  function dropExactPlayback() {
+    if (!playsExact || !previewWindow) return;
+    playsExact = false;
+    exactFallbacks += 1;
+    exactRetryAt = Number.POSITIVE_INFINITY;
+  }
+
+  /**
+   * Which depth plays the frame at `index`. "auto" takes exact depth once its
+   * lead reaches three quarters of what it loads ahead, and hands back to the
+   * preview when that lead falls under a quarter or the frame is missing,
+   * waiting longer each time before it tries again; a stretch of steady
+   * exact playback earns the short wait back.
+   */
+  const playsExactAt = (index: number): boolean => {
+    if (!exactWindow || exactWindow.failure !== null) return false;
+    if (playbackSource !== "auto" || !previewWindow) return true;
+
+    const lead = exactWindow.leadSeconds(index);
+    // Near the end of a clip that does not loop, the end is all there is to lead.
+    const wanted = Math.min(
+      exactWindow.wantedLeadSeconds(index),
+      endAt(frames.count - 1) - timeAt(index),
+    );
+    const clock = performance.now();
+
+    if (playsExact) {
+      if (
+        exactWindow.getEntry(index) !== null &&
+        lead >= wanted * EXACT_HANDBACK_SHARE
+      ) {
+        if (clock - exactSince > EXACT_STEADY_MS)
+          exactBackoffMs = EXACT_RETRY_START_MS;
+        return true;
+      }
+      playsExact = false;
+      exactFallbacks += 1;
+      exactRetryAt = clock + exactBackoffMs;
+      exactBackoffMs = Math.min(EXACT_RETRY_MAX_MS, exactBackoffMs * 2);
+      scheduleDiagnostics();
+      return false;
+    }
+    if (
+      clock >= exactRetryAt &&
+      exactWindow.getEntry(index) !== null &&
+      lead >= wanted * EXACT_TAKEOVER_SHARE
+    ) {
+      playsExact = true;
+      exactSince = clock;
+      scheduleDiagnostics();
+    }
+
+    return playsExact;
+  };
+
+  const playing = () => active && !scrubbing;
+
   scheduleDiagnostics();
 
   /**
@@ -609,18 +778,48 @@ async function openDepthClip(
    * of its own.
    */
   const followPlayhead = (index: number) => {
-    if (!previewWindow || prefetchDriven) return;
+    if ((!previewWindow && !exactWindow) || prefetchDriven) return;
     if (queuedPlayhead === null) {
       queueMicrotask(() => {
         const next = queuedPlayhead;
 
         queuedPlayhead = null;
-        if (next !== null && !destroyed && !prefetchDriven) {
-          previewWindow.setPlayhead(next);
-        }
+        if (next !== null && !destroyed && !prefetchDriven) moveWindows(next);
       });
     }
     queuedPlayhead = index;
+  };
+
+  /**
+   * Decoding ahead follows the playhead. Exact frames load ahead only while
+   * playback runs and they may play; the preview is left alone only while
+   * exact depth plays in "exact".
+   */
+  const moveWindows = (index: number) => {
+    const exactMayPlay = exactWindow !== null && exactWindow.failure === null;
+
+    if (exactMayPlay && playing()) exactWindow.setPlayhead(index);
+    if (
+      previewWindow &&
+      !(playing() && exactMayPlay && playbackSource === "exact")
+    ) {
+      previewWindow.setPlayhead(index);
+    }
+  };
+
+  const exactPlaybackEntry = (index: number): DepthFrameEntry | null => {
+    const entry = exactWindow?.getEntry(index);
+
+    if (!entry) return null;
+
+    let wrapped = exactEntries.get(entry.map);
+
+    if (!wrapped) {
+      wrapped = { frameIndex: index, map: entry.map, precision: "exact" };
+      exactEntries.set(entry.map, wrapped);
+    }
+
+    return wrapped;
   };
 
   const previewEntry = (index: number): DepthFrameEntry | null => {
@@ -668,22 +867,26 @@ async function openDepthClip(
     }
   };
 
-  /** Fetches and decodes one frame once; a second ask shares the first. */
+  /**
+   * Fetches and decodes one frame once; a second ask shares the first. A
+   * frame playback already loaded ahead is kept, not fetched again.
+   */
   const load = (index: number): Promise<void> => {
     if (cache.has(index)) return Promise.resolve();
+
+    const played = exactWindow?.getEntry(index);
+
+    if (played) {
+      store(index, played.map);
+      return Promise.resolve();
+    }
 
     let pending = loading.get(index);
 
     if (!pending) {
       pending = loadDepthMap(
         manifest,
-        {
-          confidenceFile:
-            frames.confidence === undefined
-              ? undefined
-              : resolveDepthFrameFile(frames.confidence, index),
-          file: resolveDepthFrameFile(frames.exact, index),
-        },
+        exactFiles(index),
         base,
         context,
         teardown.signal,
@@ -763,12 +966,14 @@ async function openDepthClip(
     if (next === hidden || destroyed) return;
     hidden = next;
     previewWindow?.setHidden(hidden);
+    exactWindow?.setHidden(hidden);
     settle();
   };
 
   if (typeof document !== "undefined") {
     hidden = document.visibilityState === "hidden";
     previewWindow?.setHidden(hidden);
+    exactWindow?.setHidden(hidden);
     document.addEventListener("visibilitychange", onVisibility);
   }
 
@@ -801,10 +1006,18 @@ async function openDepthClip(
         if (index !== null) followPlayhead(index);
       }
       if (index === null) return null;
-
-      // Exact depth is drawn only at rest. Mixing it into playback would
-      // flicker: a preview step is coarser than a colour step.
-      const exact = active ? null : (cache.get(index)?.entry ?? null);
+      if (playing()) {
+        // One depth plays at a time: switching for single frames would
+        // flicker, a preview step being coarser than a colour step. A frame
+        // the exact frames miss draws its preview, never another frame.
+        return playsExactAt(index)
+          ? (exactPlaybackEntry(index) ?? previewEntry(index))
+          : previewEntry(index);
+      }
+      // A drag draws the preview; at rest the exact frame replaces it.
+      const exact = active
+        ? null
+        : (cache.get(index)?.entry ?? exactPlaybackEntry(index));
 
       return exact ?? previewEntry(index);
     },
@@ -818,6 +1031,7 @@ async function openDepthClip(
         frameIndex: index,
         prepared:
           (!active && cache.has(index)) ||
+          (playing() && playsExact && exactWindow?.getEntry(index) != null) ||
           previewWindow?.getEntry(index) != null,
       };
     },
@@ -825,15 +1039,24 @@ async function openDepthClip(
     prefetch(mediaTime) {
       const index = indexAt(mediaTime);
 
-      if (index === null || destroyed || !previewWindow) return;
+      if (index === null || destroyed || (!previewWindow && !exactWindow)) {
+        return;
+      }
       prefetchDriven = true;
-      previewWindow.setPlayhead(index);
+      moveWindows(index);
     },
 
     getUpcomingEntries(mediaTime, count, skip) {
       const index = indexAt(mediaTime);
 
-      if (!previewWindow || !active || index === null) return [];
+      if (!active || index === null) return [];
+      if (playing() && playsExact && exactWindow) {
+        return exactWindow
+          .upcoming(index, count, skip)
+          .map((entry) => exactPlaybackEntry(entry.index)!)
+          .filter(Boolean);
+      }
+      if (!previewWindow) return [];
 
       return previewWindow
         .upcoming(index, count, skip)
@@ -844,7 +1067,11 @@ async function openDepthClip(
     needsPlaybackGateWait(mediaTime, thresholds) {
       const index = indexAt(mediaTime);
 
-      if (previewWindow === null || index === null) return false;
+      if (index === null) return false;
+      if (playing() && playsExactAt(index)) {
+        return exactWindow!.needsPlaybackGateWait(index, thresholds);
+      }
+      if (previewWindow === null) return false;
       // At rest an exact frame already in draws without its preview.
       if (!active && cache.has(index)) return false;
 
@@ -854,7 +1081,12 @@ async function openDepthClip(
     waitForReady(mediaTime, thresholds, signal) {
       const index = indexAt(mediaTime);
 
-      if (!previewWindow || index === null) return Promise.resolve();
+      if (index === null) return Promise.resolve();
+      if (playing() && playsExactAt(index)) {
+        // The window is held at the frame about to show and loads from there.
+        return exactWindow!.waitForReady(index, thresholds, signal);
+      }
+      if (!previewWindow) return Promise.resolve();
       if (!active && cache.has(index)) return Promise.resolve();
 
       const settled = new AbortController();
@@ -875,12 +1107,16 @@ async function openDepthClip(
       });
     },
 
-    getPreparationProgress: () => previewWindow?.getPreparationProgress() ?? 0,
+    getPreparationProgress: () =>
+      (previewWindow?.getPreparationProgress() ?? 0) +
+      (exactWindow?.getPreparationProgress() ?? 0),
 
     setPlaybackActive(next) {
       if (next === active || destroyed) return;
       active = next;
       previewWindow?.setPlaybackActive(next);
+      exactWindow?.setPlaybackActive(playing());
+      if (playing() && onScreen !== null) moveWindows(onScreen);
       settle();
       // The frame on screen swaps between its exact and its preview depth.
       notify();
@@ -888,10 +1124,14 @@ async function openDepthClip(
 
     setLoop(loop) {
       previewWindow?.setLoop(loop);
+      exactWindow?.setLoop(loop);
     },
 
-    setScrubbing(scrubbing) {
-      previewWindow?.setScrubbing(scrubbing);
+    setScrubbing(next) {
+      scrubbing = next;
+      previewWindow?.setScrubbing(next);
+      // Exact frames load ahead for playback only; a drag draws the preview.
+      exactWindow?.setPlaybackActive(playing());
     },
 
     subscribe(listener) {
@@ -911,6 +1151,7 @@ async function openDepthClip(
       teardown.abort();
       for (const landed of [...landingWaiters]) landed();
       previewWindow?.destroy();
+      exactWindow?.destroy();
       preview?.reader.dispose();
       listeners.clear();
       cache.clear();
@@ -1184,6 +1425,11 @@ export function resolveDepthClipOptions(
   shared: { readonly scheduleBatchSize?: number } = {},
 ): {
   readonly exact: ExactDepthFrameOptions;
+  readonly playback: {
+    readonly source: DepthPlaybackSource;
+    /** Exact frames loaded ahead for playback, in bytes. */
+    readonly maxExactCacheBytes: number;
+  };
   readonly preview: {
     readonly maxCacheBytes: number;
     /** Frames a resting playhead keeps decoded ahead, its own included. */
@@ -1212,6 +1458,11 @@ export function resolveDepthClipOptions(
   const previewSpanFrames = Math.ceil(
     (2 * prefetchSeconds + retainSeconds) * frameRate,
   );
+  const scaledBudget = (frameBytes: number) =>
+    Math.min(
+      MAX_DEFAULT_PREVIEW_CACHE_BYTES,
+      Math.max(MIN_DEFAULT_PREVIEW_CACHE_BYTES, frameBytes * previewSpanFrames),
+    );
 
   return {
     exact: {
@@ -1228,16 +1479,18 @@ export function resolveDepthClipOptions(
           defaultExactDepthFrameOptions.settleSeconds,
       ),
     },
+    playback: {
+      maxExactCacheBytes:
+        options.maxExactPlaybackCacheBytes ??
+        scaledBudget(clip.exactFrameBytes),
+      source:
+        options.playback === "exact" || options.playback === "preview"
+          ? options.playback
+          : "auto",
+    },
     preview: {
       maxCacheBytes:
-        options.maxPreviewCacheBytes ??
-        Math.min(
-          MAX_DEFAULT_PREVIEW_CACHE_BYTES,
-          Math.max(
-            MIN_DEFAULT_PREVIEW_CACHE_BYTES,
-            clip.previewFrameBytes * previewSpanFrames,
-          ),
-        ),
+        options.maxPreviewCacheBytes ?? scaledBudget(clip.previewFrameBytes),
       // What the mask window keeps at rest, one schedule batch past the
       // frame on screen, and never fewer than the neighbours a step reaches.
       pausedFrameCount: Math.max(

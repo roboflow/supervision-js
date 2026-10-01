@@ -14,7 +14,10 @@ import {
   resolveUrl,
   validateDepthInput,
 } from "#render-preparation/depth-source";
-import { RenderPreparationMode } from "#types/render-preparation";
+import {
+  RenderPreparationMode,
+  type RenderPreparationDepthOptions,
+} from "#types/render-preparation";
 
 const MEDIA = { height: 720, width: 1280 };
 
@@ -365,10 +368,12 @@ function clipServer(
 async function openClip(
   server: ReturnType<typeof clipServer>,
   exactFrames: Partial<ExactDepthFrameOptions> = {},
+  depth: RenderPreparationDepthOptions = {},
 ) {
   return openDepthSource(
     { manifest: "https://example.test/clip/depth.json" },
     {
+      depth,
       exactFrames: { settleSeconds: 0, ...exactFrames },
       fetch: server.fetch,
       frameClock: CLOCK,
@@ -490,9 +495,9 @@ describe("depth source from a clip manifest", () => {
     source.destroy();
   });
 
-  it("draws nothing while playback runs, even a frame it holds", async () => {
+  it("draws nothing while the preview plays and there is none, even a frame it holds", async () => {
     const server = clipServer();
-    const source = await openClip(server);
+    const source = await openClip(server, {}, { playback: "preview" });
     const redraw = vi.fn();
 
     source.subscribe?.(redraw);
@@ -511,10 +516,14 @@ describe("depth source from a clip manifest", () => {
     source.destroy();
   });
 
-  it("fetches nothing while playback runs", async () => {
+  it("fetches nothing while the preview plays", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const server = clipServer();
-    const source = await openClip(server, { settleSeconds: 0.15 });
+    const source = await openClip(
+      server,
+      { settleSeconds: 0.15 },
+      { playback: "preview" },
+    );
 
     source.setPlaybackActive?.(true);
     for (let time = 0; time < 5; time += 1) source.getEntry(time);

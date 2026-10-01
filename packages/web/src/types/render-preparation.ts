@@ -265,6 +265,23 @@ export interface RenderPreparationArtifactDiagnostics {
   readonly gateHoldCount?: number;
   readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
+  /**
+   * A `DepthFrame` window's depth: `"preview"` for the preview video,
+   * `"exact"` for exact frames loaded ahead for playback.
+   */
+  readonly precision?: "exact" | "preview";
+  /**
+   * For exact frames loaded ahead for playback: whether they are what plays
+   * now, and how fast they load, in frames a second while loading (fetch and
+   * decode), with the wall milliseconds one load takes on average.
+   */
+  readonly exactPlayback?: {
+    readonly drawn: boolean;
+    readonly loadRate: number | null;
+    readonly meanLoadMs: number | null;
+    /** Times playback handed exact depth back to the preview. */
+    readonly fallbackCount: number;
+  };
   readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
@@ -308,16 +325,49 @@ export interface RenderPreparationDiagnostics {
 }
 
 /**
+ * Which depth a clip draws while playback runs.
+ *
+ * - `"preview"`: the 8-bit preview video, decoded ahead of the playhead.
+ * - `"exact"`: the exact 16-bit PNGs, loaded ahead of the playhead through
+ *   the decode workers; the playback gate holds for them as it does for the
+ *   preview. A clip whose exact frames stop loading falls back to its
+ *   preview.
+ * - `"auto"` (the default): the exact PNGs while they keep up, the preview
+ *   otherwise. Both load ahead; exact depth takes over once its lead reaches
+ *   three quarters of what it loads ahead, and hands back to the preview
+ *   when the lead falls under a quarter or a frame is missing, waiting
+ *   longer each time before it tries again. A clip without a preview plays
+ *   exact depth.
+ *
+ * Whichever is drawn, it is always the depth of the frame on screen;
+ * `getActiveDepth().precision` says which it is.
+ */
+export type DepthPlaybackSource = "auto" | "exact" | "preview";
+
+/**
  * Memory and timing for a depth clip, the `depth` channel a session draws
  * under its `depth` renderers.
  *
- * While playback runs, the clip's 8-bit preview video is decoded ahead of the
- * playhead and drawn frame by frame; once playback rests, the exact 16-bit
- * frame on screen replaces it. Every byte budget defaults to a size that
- * scales with the clip's resolution, so a 4K clip keeps as many seconds as a
- * 720p one, within a ceiling.
+ * While playback runs, the clip's 8-bit preview video, or its exact 16-bit
+ * frames when `playback` picks them, are loaded ahead of the playhead and
+ * drawn frame by frame; once playback rests, the exact 16-bit frame on screen
+ * is drawn. Every byte budget defaults to a size that scales with the clip's
+ * resolution, so a 4K clip keeps as many seconds as a 720p one, within a
+ * ceiling.
  */
 export interface RenderPreparationDepthOptions {
+  /**
+   * Which depth plays: the preview, the exact frames, or the exact frames
+   * while they keep up. Defaults to `"auto"`. See {@link DepthPlaybackSource}.
+   */
+  readonly playback?: DepthPlaybackSource;
+  /**
+   * Exact frames loaded ahead for playback, in bytes. Defaults to room for
+   * twice `previewPrefetchSeconds` plus `previewRetainSeconds` of exact
+   * frames, at least 96 MiB and at most 512 MiB; a shorter budget lowers the
+   * lead exact playback reaches.
+   */
+  readonly maxExactPlaybackCacheBytes?: number;
   /**
    * Decoded exact frames kept, in bytes. Defaults to 128 MiB, or room for
    * twice the frame on screen and its neighbours when that is more.
@@ -331,8 +381,9 @@ export interface RenderPreparationDepthOptions {
    */
   readonly maxPreviewCacheBytes?: number;
   /**
-   * How far ahead of the playhead the preview is decoded while playing, in
-   * seconds of media. Defaults to 1. Above 1x it stretches by how many frames
+   * How far ahead of the playhead the preview, and exact frames when they
+   * play, are decoded while playing, in seconds of media. Defaults to 1, or
+   * 0.5 in a stream session. Above 1x it stretches by how many frames
    * each present moves, as the mask window's cooks spread over the frames
    * presents land on; a drag spends the same span both ways, most of it the
    * way the hand heads. At rest the preview keeps the mask window's paused

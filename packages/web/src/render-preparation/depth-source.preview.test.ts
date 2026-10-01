@@ -25,6 +25,7 @@ import {
   RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
   RenderPreparationWorkerStatus,
+  type DepthPlaybackSource,
   type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 
@@ -503,6 +504,165 @@ describe("depth source from a clip with a preview", () => {
   });
 });
 
+describe("exact depth while playing", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('plays exact frames loaded ahead in "exact", and holds playback for them', async () => {
+    const clip = await openPreviewClip({ gatedExact: true, playback: "exact" });
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(0), OPEN)).toBe(
+      true,
+    );
+
+    let ready = false;
+    const wait = clip.source.waitForReady!(CLOCK.timeAt(0), OPEN).then(
+      () => (ready = true),
+    );
+
+    // Two load at once, one per decode worker, nearest first.
+    await vi.waitFor(() => expect(clip.fetchedExact()).toEqual([0, 1]));
+    await clip.releaseExact(1);
+    expect(ready).toBe(false);
+    // Two seconds ahead is the resume lead.
+    await clip.releaseExact(1);
+    await wait;
+
+    expect(clip.source.getEntry(CLOCK.timeAt(0))).toMatchObject({
+      frameIndex: 0,
+      precision: "exact",
+    });
+    expect(clip.source.getEntry(CLOCK.timeAt(1))).toMatchObject({
+      frameIndex: 1,
+      precision: "exact",
+    });
+    // Never a neighbour's depth for a frame not loaded yet: its preview,
+    // which "exact" does not decode while playing, or nothing.
+    expect(clip.source.getEntry(CLOCK.timeAt(8))).toBeNull();
+    clip.source.destroy();
+  });
+
+  it('starts on the preview in "auto", takes exact once its lead builds, and hands back when it runs short', async () => {
+    let diagnostics: RenderPreparationDiagnostics | null = null;
+    const clip = await openPreviewClip({
+      gatedExact: true,
+      onDiagnostics: (next) => (diagnostics = next),
+      playback: "auto",
+    });
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await settle();
+    expect(clip.source.getEntry(CLOCK.timeAt(0))?.precision).toBe("preview");
+
+    // Five seconds ahead is wanted; four in a row is past three quarters.
+    await clip.releaseExact(4);
+    expect(clip.source.getEntry(CLOCK.timeAt(0))).toMatchObject({
+      frameIndex: 0,
+      precision: "exact",
+    });
+    expect(
+      clip.source
+        .getUpcomingEntries?.(CLOCK.timeAt(0), 2)
+        .map((entry) => entry.precision),
+    ).toEqual(["exact", "exact"]);
+
+    // At frame 3 only one second is loaded ahead, under a quarter of five.
+    clip.source.prefetch?.(CLOCK.timeAt(3));
+    expect(clip.source.getEntry(CLOCK.timeAt(3))).toMatchObject({
+      frameIndex: 3,
+      precision: "preview",
+    });
+    await vi.waitFor(() =>
+      expect(
+        diagnostics?.artifacts.find(
+          (artifact) => artifact.precision === "exact",
+        )?.exactPlayback,
+      ).toMatchObject({ drawn: false, fallbackCount: 1 }),
+    );
+    clip.source.destroy();
+  });
+
+  it('plays exact frames in "auto" when the clip has no preview', async () => {
+    const server = previewlessServer();
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        exactFrames: { settleSeconds: 0 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: MEDIA,
+        openPreviewTrack: null,
+        preparer: server.preparer,
+      },
+    );
+
+    source.setPlaybackActive?.(true);
+    source.prefetch?.(CLOCK.timeAt(2));
+    await vi.waitFor(() =>
+      expect(source.getEntry(CLOCK.timeAt(2))).toMatchObject({
+        frameIndex: 2,
+        precision: "exact",
+      }),
+    );
+    source.destroy();
+  });
+
+  it("budgets exact playback like the preview, scaled to the exact frame", () => {
+    const resolved = resolveDepthClipOptions(
+      { exactFrameBytes: 3840 * 2160 * 2, frameRate: 30, previewFrameBytes: 0 },
+      { playback: "exact" },
+    );
+
+    expect(resolved.playback).toEqual({
+      maxExactCacheBytes: 512 * 1024 * 1024,
+      source: "exact",
+    });
+  });
+});
+
+/** A clip without a preview whose exact frames say which file they are. */
+function previewlessServer() {
+  const manifest = {
+    display_range_px: [2, 60],
+    frames: { count: COUNT, exact: "exact/{index:06}.png" },
+    height: HEIGHT,
+    kind: "disparity_px",
+    schema: "supervision.depth-manifest",
+    storage: { format: "png16", no_depth: 0, scale: 256 },
+    version: 1,
+    width: WIDTH,
+  };
+  const fetch = vi.fn(async (url: string | URL | Request) => {
+    const text = String(url);
+
+    if (text.endsWith("depth.json")) {
+      return new Response(JSON.stringify(manifest));
+    }
+
+    return new Response(
+      Uint8Array.of(Number(/exact\/(\d+)\.png$/.exec(text)?.[1])),
+    );
+  }) as unknown as typeof globalThis.fetch;
+  const preparer = {
+    concurrency: 2,
+    decodeConfidence: vi.fn(),
+    decodeDepth: vi.fn(async (bytes: ArrayBuffer) => ({
+      height: HEIGHT,
+      values: new Uint16Array(WIDTH * HEIGHT).fill(
+        new Uint8Array(bytes)[0] * 256 + 1,
+      ),
+      width: WIDTH,
+    })),
+    destroy: vi.fn(),
+  } as unknown as DepthFramePreparer;
+
+  return { fetch, preparer: () => preparer };
+}
+
 describe("assertDepthPreviewTimeline", () => {
   const preview = (times: number[]) => ({
     frameCount: times.length,
@@ -587,6 +747,7 @@ describe("resolveDepthClipOptions", () => {
       ),
     ).toEqual({
       exact: { maxCacheBytes: 1, neighborFrameCount: 1, settleSeconds: 0.5 },
+      playback: { maxExactCacheBytes: 96 * 1024 * 1024, source: "auto" },
       preview: {
         maxCacheBytes: 2,
         pausedFrameCount: 3,
@@ -642,6 +803,10 @@ interface PreviewClipOptions {
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
   /** Decodes the preview through fake decoders that behave this way. */
   readonly decoder?: FakeDecoders;
+  /** Which depth plays; these tests are about the preview unless they say. */
+  readonly playback?: DepthPlaybackSource;
+  /** Holds every exact frame's decode until released. */
+  readonly gatedExact?: boolean;
 }
 
 type FakeDecoders = (
@@ -709,16 +874,26 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     fetched.push(index);
     return new Response(Uint8Array.of(index));
   }) as unknown as typeof globalThis.fetch;
+  let exactAllowance = 0;
+  const exactWaiters = new Set<() => void>();
   const preparer = {
-    concurrency: 1,
+    concurrency: 2,
     decodeConfidence: vi.fn(),
-    decodeDepth: vi.fn(async (bytes: ArrayBuffer) => ({
-      height: HEIGHT,
-      values: new Uint16Array(WIDTH * HEIGHT).fill(
-        new Uint8Array(bytes)[0] * 256 + 1,
-      ),
-      width: WIDTH,
-    })),
+    decodeDepth: vi.fn(async (bytes: ArrayBuffer) => {
+      if (options.gatedExact) {
+        while (exactAllowance === 0) {
+          await new Promise<void>((resolve) => exactWaiters.add(resolve));
+        }
+        exactAllowance -= 1;
+      }
+      return {
+        height: HEIGHT,
+        values: new Uint16Array(WIDTH * HEIGHT).fill(
+          new Uint8Array(bytes)[0] * 256 + 1,
+        ),
+        width: WIDTH,
+      };
+    }),
     destroy: vi.fn(),
   } as unknown as DepthFramePreparer;
   const reader: DepthPreviewTrackReader = {
@@ -808,7 +983,10 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     {
       choosePreviewDecoding: options.choosePreviewDecoding ?? null,
       // One-second frames: five seconds ahead is five frames.
-      depth: { previewPrefetchSeconds: 5 },
+      depth: {
+        playback: options.playback ?? "preview",
+        previewPrefetchSeconds: 5,
+      },
       exactFrames: { neighborFrameCount: 0, settleSeconds: 0 },
       fetch,
       frameClock: CLOCK,
@@ -832,6 +1010,17 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
   return {
     disposed: () => disposed,
     fetchedExact: () => [...fetched],
+    /** Lets `count` more exact decodes finish, in the order they were asked. */
+    async releaseExact(count: number) {
+      for (let step = 0; step < count; step += 1) {
+        exactAllowance += 1;
+        for (const wake of [...exactWaiters]) {
+          exactWaiters.delete(wake);
+          wake();
+        }
+        await settle();
+      }
+    },
     async release(count: number) {
       allowance += count;
       wake?.();
