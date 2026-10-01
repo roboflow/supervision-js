@@ -223,7 +223,7 @@ export function DepthLiveCode(props: { readonly settings: DocsDepthSettings }) {
   );
 }
 
-export function PlaygroundSelect(props: {
+function PlaygroundSelect(props: {
   readonly label: string;
   readonly onChange: (value: string) => void;
   readonly options: readonly (readonly [string, string])[];

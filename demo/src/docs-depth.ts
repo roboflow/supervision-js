@@ -295,6 +295,6 @@ export function resolveDepthColourRange(
 }
 
 /** Three decimals at most, as the range inputs and the snippet show them. */
-export function roundRange(value: number) {
+function roundRange(value: number) {
   return Number(value.toFixed(3));
 }
