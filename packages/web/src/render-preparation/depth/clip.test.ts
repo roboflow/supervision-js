@@ -5,7 +5,7 @@ import {
   fakeProbeClip,
   openFakeDepthPreviewTrack,
   type FakeDecoderBehaviour,
-} from "../../../../test/fake-video-decoder";
+} from "../../../../../test/fake-video-decoder";
 import type { DepthPreviewDecoding } from "#media/depth-preview-probe";
 import type {
   DepthPreviewDecodeOptions,
@@ -13,14 +13,16 @@ import type {
   DepthPreviewTrackOptions,
   DepthPreviewTrackReader,
 } from "#media/depth-preview-track";
-import type { DepthFramePreparer } from "#render-preparation/depth-frame-preparer";
+import type { DepthFramePreparer } from "#render-preparation/depth/frame-preparer";
 import {
   assertDepthPreviewTimeline,
   describePreviewDecoding,
+} from "#render-preparation/depth/clip-preview";
+import { resolveDepthClipOptions } from "#render-preparation/depth/options";
+import {
   openDepthSource,
-  resolveDepthClipOptions,
   type DepthFrameProvider,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/source";
 import {
   RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,

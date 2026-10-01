@@ -9,10 +9,10 @@ import {
   openDepthPreviewTrack,
   type DepthPreviewTrackReader,
 } from "../../../../packages/web/src/media/depth-preview-track";
-import { createDepthPreviewLumaCopier } from "../../../../packages/web/src/render-preparation/depth-preview-luma-copier";
-import type { DepthPreviewLumaCopier } from "../../../../packages/web/src/render-preparation/depth-preview-luma";
-import { createDepthPreviewWindow } from "../../../../packages/web/src/render-preparation/depth-preview-window";
-import { resolveDepthClipOptions } from "../../../../packages/web/src/render-preparation/depth-source";
+import { createDepthPreviewLumaCopier } from "../../../../packages/web/src/render-preparation/depth/preview-luma-copier";
+import type { DepthPreviewLumaCopier } from "../../../../packages/web/src/render-preparation/depth/preview-luma";
+import { createDepthFrameWindow } from "../../../../packages/web/src/render-preparation/depth/frame-window";
+import { resolveDepthClipOptions } from "../../../../packages/web/src/render-preparation/depth/options";
 import { createDepthDraw, createLut } from "./depth-draw";
 import type { BenchBackend } from "./pixi-backend";
 import { summarize, type TimingSummary } from "./timing";
@@ -395,7 +395,7 @@ export async function runPreviewPlayback(
   });
   const timeAt = (index: number) => reader.times[index];
   const endAt = (index: number) => reader.times[index] + frameDuration;
-  const window = createDepthPreviewWindow({
+  const window = createDepthFrameWindow({
     createMap: (frame) =>
       ({
         height: frame.height,

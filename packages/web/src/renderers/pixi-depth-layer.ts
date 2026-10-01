@@ -17,7 +17,7 @@ import type {
 import type {
   DepthFrameEntry,
   DepthFrameProvider,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/source";
 import type {
   InjectedMeshConstructor,
   InjectedMeshGeometryConstructor,

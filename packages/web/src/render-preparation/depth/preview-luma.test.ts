@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DepthPreparationWorkerMessageType } from "./depth-preparation-worker-protocol";
-import { createDepthPreviewLumaCopier } from "./depth-preview-luma-copier";
-import {
-  createMainThreadLumaCopier,
-  readVideoFrameLuma,
-} from "./depth-preview-luma";
+import { DepthPreparationWorkerMessageType } from "./worker-protocol";
+import { createDepthPreviewLumaCopier } from "./preview-luma-copier";
+import { createMainThreadLumaCopier, readVideoFrameLuma } from "./preview-luma";
 import { RenderPreparationMode } from "#types/render-preparation";
 
 const WIDTH = 6;

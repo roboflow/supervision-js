@@ -1,4 +1,4 @@
-import { resolveDepthClipOptions } from "../../../../packages/web/src/render-preparation/depth-source";
+import { resolveDepthClipOptions } from "../../../../packages/web/src/render-preparation/depth/options";
 import type { Resolution } from "./upload-render";
 
 /**

@@ -1,4 +1,4 @@
-import { decodePng16 } from "../../../../packages/web/src/render-preparation/depth-png16";
+import { decodePng16 } from "../../../../packages/web/src/render-preparation/depth/png16";
 import { encodePng16, PngFilter } from "./png-encode";
 import { summarize, type TimingSummary } from "./timing";
 import type { Resolution } from "./upload-render";

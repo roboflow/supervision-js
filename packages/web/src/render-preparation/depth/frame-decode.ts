@@ -1,10 +1,10 @@
-import { decodePng16, decodePng8Gray } from "./depth-png16";
+import { decodePng16, decodePng8Gray } from "./png16";
 import {
   DepthPreparationWorkerMessageType,
   type DecimatedDepthUpload,
   type DepthPreparationWorkerRequest,
   type DepthPreparationWorkerResponse,
-} from "./depth-preparation-worker-protocol";
+} from "./worker-protocol";
 
 const HOST_IS_LITTLE_ENDIAN =
   new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;

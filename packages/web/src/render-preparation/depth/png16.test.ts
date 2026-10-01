@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { deflate, encodePng } from "../../../../test/depth-png";
+import { deflate, encodePng } from "../../../../../test/depth-png";
 import {
   decodePng16,
   decodePng8Gray,
   inflateWithDecompressionStream,
-} from "./depth-png16";
+} from "./png16";
 
 /** Every 16-bit code once, shuffled so neighbouring bytes differ. */
 function everyCode() {

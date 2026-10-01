@@ -991,7 +991,7 @@ describe("push-presented Pixi scene", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const channel = createChannel();
     const { openDepthSource } =
-      await import("#render-preparation/depth-source");
+      await import("#render-preparation/depth/source");
     const { createPixiMediaScene } = await import("./pixi-media-scene");
     const scene = await createPixiMediaScene({
       ...createSceneOptions(channel.channel),

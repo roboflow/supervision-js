@@ -77,6 +77,7 @@ export default [
     files: [
       "packages/web/src/media/video-engine-media-source.ts",
       "packages/web/src/media/mediabunny-frame-clock.ts",
+      "packages/web/src/media/track-frame-index.ts",
       "packages/web/src/media/video-engine-media-source.test.ts",
       "packages/web/src/web-video-engine/index.ts",
     ],

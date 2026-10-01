@@ -17,7 +17,7 @@ import {
   createPresentedFrameStride,
   MAX_PRESENTED_FRAME_STRIDE,
   WINDOW_LEAD_FRACTION,
-} from "./playhead-motion";
+} from "../playhead-motion";
 
 /**
  * Of the lead a stop asks for, the share the window has to be able to hold.
@@ -50,7 +50,7 @@ export interface DepthFrameRun<Frame> {
  * `randomAccess` starts a run at any frame and skips the frames `keep`
  * turns away at no cost, so one run serves every frame ahead of it.
  */
-export interface DepthPreviewFrameSource<
+export interface DepthFrameSource<
   Frame extends { readonly index: number } = DepthPreviewLumaFrame,
 > {
   readonly frameCount: number;
@@ -62,16 +62,16 @@ export interface DepthPreviewFrameSource<
   ): DepthFrameRun<Frame> | DepthPreviewDecodeRun;
 }
 
-export interface DepthPreviewEntry {
+export interface DepthWindowEntry {
   readonly index: number;
   readonly map: DepthMap;
   readonly bytes: number;
 }
 
-export interface DepthPreviewWindowOptions<
+export interface DepthFrameWindowOptions<
   Frame extends { readonly index: number } = DepthPreviewLumaFrame,
 > {
-  readonly frames: DepthPreviewFrameSource<Frame>;
+  readonly frames: DepthFrameSource<Frame>;
   /** Start of frame `index` on the media timeline, in seconds. */
   readonly timeAt: (index: number) => number;
   /** End of frame `index` on the media timeline, in seconds. */
@@ -106,9 +106,9 @@ export interface DepthPreviewWindowOptions<
   readonly onChange?: () => void;
 }
 
-export interface DepthPreviewWindow {
+export interface DepthFrameWindow {
   /** The decoded preview for frame `index`, or null while it is not. */
-  getEntry(index: number): DepthPreviewEntry | null;
+  getEntry(index: number): DepthWindowEntry | null;
   /**
    * The playhead moved to `index`: decoding follows it, and where it lands
    * says whether it plays, is dragged, and which way it goes.
@@ -151,7 +151,7 @@ export interface DepthPreviewWindow {
    * Decoded entries for `count` frames in a row from `skip` frames after
    * `index`, nearest first, stopping at the first one not decoded.
    */
-  upcoming(index: number, count: number, skip?: number): DepthPreviewEntry[];
+  upcoming(index: number, count: number, skip?: number): DepthWindowEntry[];
   getDiagnostics(): RenderPreparationArtifactDiagnostics;
   /**
    * The most lead the window decodes ahead of `index` while playing, in
@@ -209,14 +209,14 @@ interface Span {
  * the budget is short, frames the window no longer wants go first, then the
  * ones farthest the other way from where the playhead heads.
  */
-export function createDepthPreviewWindow<
+export function createDepthFrameWindow<
   Frame extends { readonly index: number } = DepthPreviewLumaFrame,
->(options: DepthPreviewWindowOptions<Frame>): DepthPreviewWindow {
+>(options: DepthFrameWindowOptions<Frame>): DepthFrameWindow {
   const { frames } = options;
   const what = options.precision === "exact" ? "exact depth" : "depth preview";
   const frameCount = frames.frameCount;
   const lastIndex = frameCount - 1;
-  const entries = new Map<number, DepthPreviewEntry>();
+  const entries = new Map<number, DepthWindowEntry>();
   const waiters = new Set<Waiter>();
   const motion = createPlayheadMotion();
   const stride = createPresentedFrameStride(STEADY_STRIDE_SAMPLE_COUNT);
@@ -874,7 +874,7 @@ export function createDepthPreviewWindow<
     wantedLeadSeconds: (index) => reachableSeconds(clampIndex(index)),
 
     upcoming(index, count, skip = 1) {
-      const found: DepthPreviewEntry[] = [];
+      const found: DepthWindowEntry[] = [];
       const limit = wraps() ? frameCount : lastIndex - index + 1;
 
       for (

@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseDepthManifest, type DepthMap } from "supervision-js-core";
-import { encodePng } from "../../../../test/depth-png";
+import { encodePng } from "../../../../../test/depth-png";
 import { createDepthMapUpload } from "#renderers/depth-textures";
 import {
   createDepthFramePreparer,
   type DepthFramePreparer,
-} from "#render-preparation/depth-frame-preparer";
+} from "#render-preparation/depth/frame-preparer";
+import { resolveUrl } from "#render-preparation/depth/files";
 import {
   openDepthSource,
   type DepthFrameProvider,
-  resolveUrl,
   validateDepthInput,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/source";
 import {
   RenderPreparationMode,
   type RenderPreparationDepthOptions,

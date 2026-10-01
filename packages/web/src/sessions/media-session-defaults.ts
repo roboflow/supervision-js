@@ -1,7 +1,7 @@
 import {
   DEFAULT_DEPTH_TIMING_OPTIONS,
   STREAM_DEPTH_TIMING_OPTIONS,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/options";
 import type {
   DetectionBufferOptions,
   DetectionFrameRetentionOptions,

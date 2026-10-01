@@ -10,7 +10,7 @@ import {
   createDepthPreviewTrackReader,
   FLUSH_SILENCE_MILLISECONDS,
 } from "./depth-preview-track";
-import type { TrackFrameIndex } from "./mediabunny-frame-clock";
+import type { TrackFrameIndex } from "./track-frame-index";
 
 const WIDTH = 8;
 const HEIGHT = 4;

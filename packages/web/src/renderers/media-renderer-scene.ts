@@ -48,7 +48,7 @@ import type {
   ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
-import type { DepthFrameProvider } from "#render-preparation/depth-source";
+import type { DepthFrameProvider } from "#render-preparation/depth/source";
 import type { ActiveDepthMap } from "#types/media-depth";
 import type { PresentedFrameSource } from "./presented-frame-channel";
 import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-window";

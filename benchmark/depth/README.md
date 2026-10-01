@@ -3,7 +3,7 @@
 Browser benchmark for the depth renderer: whether 16-bit depth reaches the
 shader exactly, what a 16-bit PNG costs to decode, and what a depth map costs
 to upload and draw. It drives the library's own code: the PNG decoder
-(`packages/web/src/render-preparation/depth-png16.ts`), the texture ring
+(`packages/web/src/render-preparation/depth/png16.ts`), the texture ring
 (`depth-textures.ts`) and the depth shader (`pixi-depth-shader.ts`), on Pixi
 apps created with `preference: "webgl"` and `preference: "webgpu"`.
 

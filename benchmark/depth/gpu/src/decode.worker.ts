@@ -1,4 +1,4 @@
-import { decodePng16 } from "../../../../packages/web/src/render-preparation/depth-png16";
+import { decodePng16 } from "../../../../packages/web/src/render-preparation/depth/png16";
 
 interface DecodeRequest {
   readonly id: number;

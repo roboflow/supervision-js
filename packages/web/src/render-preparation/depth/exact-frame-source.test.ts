@@ -1,7 +1,7 @@
 import type { DepthMap } from "supervision-js-core";
 import { describe, expect, it } from "vitest";
 
-import { createExactDepthFrameSource } from "./depth-exact-frames";
+import { createExactDepthFrameSource } from "./exact-frame-source";
 
 function map(index: number): DepthMap {
   return {

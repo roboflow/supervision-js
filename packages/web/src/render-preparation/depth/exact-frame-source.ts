@@ -1,8 +1,5 @@
 import type { DepthMap } from "supervision-js-core";
-import type {
-  DepthFrameRun,
-  DepthPreviewFrameSource,
-} from "./depth-preview-window";
+import type { DepthFrameRun, DepthFrameSource } from "./frame-window";
 
 /** One exact 16-bit depth frame, loaded and decoded. */
 export interface ExactDepthFrame {
@@ -20,7 +17,7 @@ const MAX_SKIPPED_FRAMES = 64;
 /** Completions the load rate is measured over. */
 const RATE_SAMPLE_COUNT = 24;
 
-export interface ExactDepthFrameSource extends DepthPreviewFrameSource<ExactDepthFrame> {
+export interface ExactDepthFrameSource extends DepthFrameSource<ExactDepthFrame> {
   /**
    * Frames loaded per second while at least one was loading, over the last
    * few loads; null before there are enough. Fetch and decode both count.

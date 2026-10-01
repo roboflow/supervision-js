@@ -22,12 +22,12 @@ import {
   type DepthPreparationWorkerResponse,
   type DepthPreviewLumaWorkerRequest,
   type DepthPreviewLumaWorkerResponse,
-} from "#render-preparation/depth-preparation-worker-protocol";
-import { decodeDepthPreparationRequest } from "#render-preparation/depth-frame-decode";
+} from "#render-preparation/depth/worker-protocol";
+import { decodeDepthPreparationRequest } from "#render-preparation/depth/frame-decode";
 import {
   readVideoFrameLuma,
   type DepthPreviewLumaScratch,
-} from "#render-preparation/depth-preview-luma";
+} from "#render-preparation/depth/preview-luma";
 
 type PreparationWorkerResponse =
   | MaskPreparationWorkerResponse

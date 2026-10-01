@@ -4,7 +4,7 @@ import { annotationRenderers, type DepthMap } from "supervision-js-core";
 import type {
   DepthFrameEntry,
   DepthFrameProvider,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/source";
 import { createPixiDepthLayer } from "#renderers/pixi-depth-layer";
 
 afterEach(() => {

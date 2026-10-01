@@ -5,7 +5,7 @@ import { annotationRenderers, type DepthMap } from "supervision-js-core";
 import type {
   DepthFrameEntry,
   DepthFrameProvider,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/source";
 import {
   createMockSample,
   createRenderer,
@@ -21,9 +21,9 @@ const depth = vi.hoisted(() => ({
 
 // The Mediabunny pull path drives a depth clip through the provider's
 // contract; a fake provider shows what the path asks of it and when.
-vi.mock("#render-preparation/depth-source", async (importOriginal) => ({
+vi.mock("#render-preparation/depth/source", async (importOriginal) => ({
   ...(await importOriginal<
-    typeof import("#render-preparation/depth-source")
+    typeof import("#render-preparation/depth/source")
   >()),
   openDepthSource: vi.fn(async (_input: unknown, context: unknown) => {
     depth.contexts.push(context);

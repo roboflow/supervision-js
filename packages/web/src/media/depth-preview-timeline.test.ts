@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { assertDepthPreviewTimeline } from "#render-preparation/depth-source";
+import { assertDepthPreviewTimeline } from "#render-preparation/depth/clip-preview";
 import { depthPreviewProbeBytes } from "./depth-preview-probe";
-import { readMediabunnyFrameIndex } from "./mediabunny-frame-clock";
+import { readTrackFrameIndex } from "./track-frame-index";
 
 const mediabunny =
   await vi.importActual<typeof import("mediabunny")>("mediabunny");
@@ -60,7 +60,7 @@ async function timelineOf(bytes: Uint8Array) {
   });
 
   try {
-    const timeline = await readMediabunnyFrameIndex(
+    const timeline = await readTrackFrameIndex(
       (await input.getPrimaryVideoTrack())!,
     );
 

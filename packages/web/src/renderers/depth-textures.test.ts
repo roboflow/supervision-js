@@ -10,8 +10,8 @@ import {
   queryMaxTextureSize,
   rememberPreparedDepthUpload,
 } from "#renderers/depth-textures";
-import { decimateDepthUpload } from "#render-preparation/depth-frame-decode";
-import { displayDecimation } from "#render-preparation/depth-source";
+import { decimateDepthUpload } from "#render-preparation/depth/frame-decode";
+import { displayDecimation } from "#render-preparation/depth/files";
 
 function scaledMap(width: number, height: number, first = 1): DepthMap {
   return {

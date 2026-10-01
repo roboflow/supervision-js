@@ -1,4 +1,4 @@
-import type { DepthPreviewLumaPath } from "./depth-preview-luma";
+import type { DepthPreviewLumaPath } from "./preview-luma";
 
 /**
  * Messages between the depth source and the render-preparation worker, which

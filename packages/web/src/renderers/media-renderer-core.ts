@@ -51,15 +51,15 @@ import {
   openDepthSource,
   validateDepthInput,
   type DepthFrameProvider,
-} from "#render-preparation/depth-source";
+} from "#render-preparation/depth/source";
 import {
   createDepthFramePreparer,
   type DepthFramePreparer,
-} from "#render-preparation/depth-frame-preparer";
+} from "#render-preparation/depth/frame-preparer";
 import {
   createDepthPreviewLumaCopier,
   type DepthPreviewLumaCopier,
-} from "#render-preparation/depth-preview-luma-copier";
+} from "#render-preparation/depth/preview-luma-copier";
 import type { MediaRendererDepthInput } from "#types/media-depth";
 import { createRenderPreparationReport } from "./render-preparation-report";
 

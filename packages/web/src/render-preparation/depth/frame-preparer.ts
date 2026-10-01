@@ -1,12 +1,12 @@
-import { createDefaultRenderPreparationWorkerFactory } from "./default-render-preparation-worker";
-import { decodeDepthPreparationRequest } from "./depth-frame-decode";
-import { getBrowserMaskPreparationWorkerCount } from "./mask-preparation-worker-count";
+import { createDefaultRenderPreparationWorkerFactory } from "../default-render-preparation-worker";
+import { decodeDepthPreparationRequest } from "./frame-decode";
+import { getBrowserMaskPreparationWorkerCount } from "../mask-preparation-worker-count";
 import {
   DepthPreparationWorkerMessageType,
   type DecimatedDepthUpload,
   type DepthPreparationWorkerRequest,
   type DepthPreparationWorkerResponse,
-} from "./depth-preparation-worker-protocol";
+} from "./worker-protocol";
 import {
   RenderPreparationMode,
   type RenderPreparationOptions,

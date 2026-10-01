@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { encodePng } from "../../../../test/depth-png";
-import { decodeDepthPreparationRequest } from "./depth-frame-decode";
-import { createDepthFramePreparer } from "./depth-frame-preparer";
-import type { DepthPreparationWorkerRequest } from "./depth-preparation-worker-protocol";
+import { encodePng } from "../../../../../test/depth-png";
+import { decodeDepthPreparationRequest } from "./frame-decode";
+import { createDepthFramePreparer } from "./frame-preparer";
+import type { DepthPreparationWorkerRequest } from "./worker-protocol";
 import { RenderPreparationMode } from "#types/render-preparation";
 
 afterEach(() => {

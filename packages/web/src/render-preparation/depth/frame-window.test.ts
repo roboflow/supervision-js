@@ -10,10 +10,7 @@ import {
   RenderPreparationArtifactKind,
   RenderPreparationGateHoldReason,
 } from "#types/render-preparation";
-import {
-  createDepthPreviewWindow,
-  type DepthPreviewFrameSource,
-} from "./depth-preview-window";
+import { createDepthFrameWindow, type DepthFrameSource } from "./frame-window";
 
 const FPS = 10;
 const FRAME_BYTES = 4;
@@ -415,7 +412,7 @@ function range(from: number, to: number) {
 }
 
 function stored(
-  window: ReturnType<typeof createDepthPreviewWindow>,
+  window: ReturnType<typeof createDepthFrameWindow>,
   from: number,
   to: number,
 ) {
@@ -448,7 +445,7 @@ interface SetupOptions {
 
 function setup(options: SetupOptions = {}) {
   const source = new FakeFrames(options);
-  const window = createDepthPreviewWindow({
+  const window = createDepthFrameWindow({
     createMap: (frame) =>
       ({
         height: frame.height,
@@ -477,7 +474,7 @@ function setup(options: SetupOptions = {}) {
   return { source, window };
 }
 
-class FakeFrames implements DepthPreviewFrameSource {
+class FakeFrames implements DepthFrameSource {
   readonly frameCount: number;
   readonly starts: number[] = [];
   cancelled = 0;

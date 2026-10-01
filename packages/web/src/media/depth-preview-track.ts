@@ -4,13 +4,10 @@ import {
   createMainThreadLumaCopier,
   type DepthPreviewLumaCopier,
   type DepthPreviewLumaPath,
-} from "#render-preparation/depth-preview-luma";
+} from "#render-preparation/depth/preview-luma";
 import { formatSeconds, withinDecoderDeadline } from "./decoder-deadline";
 import { MediaSourceError } from "./media-errors";
-import {
-  readMediabunnyFrameIndex,
-  type TrackFrameIndex,
-} from "./mediabunny-frame-clock";
+import { readTrackFrameIndex, type TrackFrameIndex } from "./track-frame-index";
 
 /**
  * Decode requests kept waiting in the decoder. Enough to keep a hardware
@@ -184,7 +181,7 @@ export async function openDepthPreviewTrack(
       );
     }
 
-    const timeline = await readMediabunnyFrameIndex(track);
+    const timeline = await readTrackFrameIndex(track);
     const packetSink = new mediabunny.EncodedPacketSink(track);
 
     if (signal?.aborted) throw signal.reason;

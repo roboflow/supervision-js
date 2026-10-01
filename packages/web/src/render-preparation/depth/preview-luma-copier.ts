@@ -1,15 +1,12 @@
-import { createDefaultRenderPreparationWorkerFactory } from "./default-render-preparation-worker";
+import { createDefaultRenderPreparationWorkerFactory } from "../default-render-preparation-worker";
 import {
   DepthPreparationWorkerMessageType,
   type DepthPreviewLumaWorkerRequest,
   type DepthPreviewLumaWorkerResponse,
-} from "./depth-preparation-worker-protocol";
+} from "./worker-protocol";
 // Types only: the luma reader itself ships in the lazily loaded preview
 // decoder, which copies on the page whenever this copier declines a frame.
-import type {
-  DepthPreviewLuma,
-  DepthPreviewLumaCopier,
-} from "./depth-preview-luma";
+import type { DepthPreviewLuma, DepthPreviewLumaCopier } from "./preview-luma";
 import {
   RenderPreparationMode,
   type RenderPreparationOptions,

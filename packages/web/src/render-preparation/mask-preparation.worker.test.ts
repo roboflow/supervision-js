@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { encodePng } from "../../../../test/depth-png";
-import { DepthPreparationWorkerMessageType } from "./depth-preparation-worker-protocol";
+import { DepthPreparationWorkerMessageType } from "./depth/worker-protocol";
 
 type MessageListener = (event: { data: unknown }) => void;
 

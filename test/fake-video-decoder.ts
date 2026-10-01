@@ -3,7 +3,7 @@ import {
   type DepthPreviewTrackOptions,
   type DepthPreviewTrackReader,
 } from "../packages/web/src/media/depth-preview-track";
-import type { TrackFrameIndex } from "../packages/web/src/media/mediabunny-frame-clock";
+import type { TrackFrameIndex } from "../packages/web/src/media/track-frame-index";
 
 /**
  * How a fake decoder treats what it is fed, after the ways real ones do:

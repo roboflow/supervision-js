@@ -80,7 +80,7 @@ import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
 import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
-import type { DepthFrameProvider } from "#render-preparation/depth-source";
+import type { DepthFrameProvider } from "#render-preparation/depth/source";
 import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
