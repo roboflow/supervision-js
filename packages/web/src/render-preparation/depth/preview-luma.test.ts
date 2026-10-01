@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DepthPreparationWorkerMessageType } from "./worker-protocol";
 import { createDepthPreviewLumaCopier } from "./preview-luma-copier";
-import { createMainThreadLumaCopier, readVideoFrameLuma } from "./preview-luma";
+import { readVideoFrameLuma } from "./preview-luma";
 import { RenderPreparationMode } from "#types/render-preparation";
 
 const WIDTH = 6;
@@ -85,16 +85,6 @@ describe("readVideoFrameLuma", () => {
 });
 
 describe("depth preview luma copier", () => {
-  it("copies on the page and closes each frame", async () => {
-    const copier = createMainThreadLumaCopier();
-    const frame = fakeFrame("I420");
-    const copied = await copier.copy(frame as unknown as VideoFrame, null);
-
-    expect([...copied!.luma]).toEqual(codes);
-    expect(frame.close).toHaveBeenCalledOnce();
-    expect(copier.offMainThread).toBe(false);
-  });
-
   it("hands frames to the worker, transferred, and takes the luma back", async () => {
     const { posts, worker } = fakeWorker("copy");
     const copier = createDepthPreviewLumaCopier({
@@ -158,19 +148,6 @@ describe("depth preview luma copier", () => {
     await expect(
       copier.copy(fakeFrame("I420") as unknown as VideoFrame, null),
     ).rejects.toThrow("copy failed");
-  });
-
-  it("leaves every frame to the page in main-thread mode", () => {
-    const createWorker = vi.fn();
-    const copier = createDepthPreviewLumaCopier({
-      mode: RenderPreparationMode.MainThread,
-      workerFactory: { createWorker },
-    });
-
-    expect(
-      copier.copy(fakeFrame("I420") as unknown as VideoFrame, null),
-    ).toBeNull();
-    expect(createWorker).not.toHaveBeenCalled();
   });
 });
 

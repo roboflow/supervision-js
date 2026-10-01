@@ -280,30 +280,6 @@ export function resolveDepthColorMapping(
   return { ...conversion, hi: range.max, lo: range.min };
 }
 
-/**
- * The colour coordinate the depth shader computes for one stored value, or
- * null where there is no depth. 1 is always the near end.
- */
-export function depthColorCoordinate(
-  stored: number,
-  samples: ScaledDepthSamples | PreviewDepthSamples,
-  mapping: DepthColorMapping,
-): number | null {
-  const value = decodeDepthSample(stored, samples);
-
-  if (value === null) {
-    return null;
-  }
-
-  const converted = convertDepthValue(value, mapping);
-  const t = Math.min(
-    1,
-    Math.max(0, (converted - mapping.lo) / (mapping.hi - mapping.lo)),
-  );
-
-  return mapping.nearIsLow ? 1 - t : t;
-}
-
 interface DepthCodeHistogram {
   readonly counts: Uint32Array;
   readonly sampled: number;

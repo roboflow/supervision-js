@@ -1,16 +1,14 @@
 import type { DepthMap } from "supervision-js-core";
-import type {
-  DepthPlaybackSource,
-  RenderPreparationArtifactDiagnostics,
-} from "#types/render-preparation";
+import type { DepthPlaybackSource } from "#types/render-preparation";
 import { MAX_PRESENTED_FRAME_STRIDE } from "../playhead-motion";
 import type { DepthClipTiming } from "./clip-timing";
-import {
-  createExactDepthFrameSource,
-  type ExactDepthFrame,
-} from "./exact-frame-source";
 import { exactMapBytes } from "./files";
-import { createDepthFrameWindow, type DepthFrameWindow } from "./frame-window";
+import {
+  createDepthFrameWindow,
+  type DepthFrameRun,
+  type DepthFrameSource,
+  type DepthFrameWindow,
+} from "./frame-window";
 import type { DepthClipOptions } from "./options";
 
 /** Of the lead exact playback loads ahead, the share it needs to take over. */
@@ -39,7 +37,6 @@ export interface ExactPlayback {
   playsAt(index: number): boolean;
   /** Playback starts, or resumes after a drag: "auto" opens on the preview. */
   restart(): void;
-  diagnostics(): RenderPreparationArtifactDiagnostics;
 }
 
 export function createExactPlayback(options: {
@@ -57,13 +54,12 @@ export function createExactPlayback(options: {
 }): ExactPlayback {
   const { hasPreview, timing, budgets } = options;
   const source = options.source;
-  const frames = createExactDepthFrameSource({
+  const frames = createExactFrameSource({
     concurrency: options.concurrency,
     frameCount: timing.frameCount,
     load: options.load,
   });
   let drawn = source === "exact" || !hasPreview;
-  let fallbackCount = 0;
   /** Wall time before which "auto" does not try exact playback again. */
   let retryAt = 0;
   let backoffMs = EXACT_RETRY_START_MS;
@@ -82,7 +78,6 @@ export function createExactPlayback(options: {
       // Exact frames that stop loading leave playback to the preview, for good.
       if (frameWindow.failure !== null && drawn && hasPreview) {
         drawn = false;
-        fallbackCount += 1;
         retryAt = Number.POSITIVE_INFINITY;
       }
       options.onChange();
@@ -132,7 +127,6 @@ export function createExactPlayback(options: {
         return true;
       }
       drawn = false;
-      fallbackCount += 1;
       retryAt = now + backoffMs;
       backoffMs = Math.min(EXACT_RETRY_MAX_MS, backoffMs * 2);
       options.onChange();
@@ -161,15 +155,91 @@ export function createExactPlayback(options: {
       if (source === "auto" && hasPreview) drawn = false;
     },
     window: frameWindow,
-    diagnostics: () => ({
-      ...frameWindow.getDiagnostics(),
-      exactPlayback: {
-        drawn,
-        fallbackCount,
-        loadRate: frames.loadRate(),
-        meanLoadMs: frames.meanLoadMs(),
-      },
-      precision: "exact",
-    }),
+  };
+}
+
+/**
+ * Frames a run walks past without one to load before it stops and lets the
+ * window start over at the next frame it wants. Above 1x a run skips the
+ * frames presents do not land on; past the window's reach it would
+ * otherwise walk to the end of the clip.
+ */
+const MAX_SKIPPED_FRAMES = 64;
+
+interface ExactDepthFrame {
+  readonly index: number;
+  readonly map: DepthMap;
+}
+
+/**
+ * The exact PNGs as a frame source the window can play from. Any frame can
+ * start a run; a run loads up to `concurrency()` frames at once, in frame
+ * order, and hands them over in that order, so the window sees one frame
+ * after another while the worker pool decodes several.
+ */
+function createExactFrameSource(options: {
+  readonly frameCount: number;
+  readonly load: (index: number, signal: AbortSignal) => Promise<DepthMap>;
+  readonly concurrency: () => number;
+}): DepthFrameSource<ExactDepthFrame> {
+  return {
+    frameCount: options.frameCount,
+    randomAccess: true,
+    keyIndexAtOrBefore: (index) => index,
+
+    decode(fromIndex, { keep } = {}): DepthFrameRun<ExactDepthFrame> {
+      const abort = new AbortController();
+      const queue: { index: number; map: Promise<DepthMap> }[] = [];
+      let cursor = Math.max(0, fromIndex);
+      let cancelled = false;
+
+      const fill = () => {
+        let skipped = 0;
+
+        while (
+          !cancelled &&
+          queue.length < Math.max(1, options.concurrency()) &&
+          cursor < options.frameCount &&
+          skipped < MAX_SKIPPED_FRAMES
+        ) {
+          const index = cursor;
+
+          cursor += 1;
+          if (keep && !keep(index)) {
+            skipped += 1;
+            continue;
+          }
+
+          const map = options.load(index, abort.signal);
+
+          // A run cancelled with loads in flight drops their answers.
+          map.catch(() => undefined);
+          queue.push({ index, map });
+        }
+      };
+
+      return {
+        async next() {
+          fill();
+
+          const head = queue.shift();
+
+          if (!head || cancelled) return null;
+
+          const map = await head.map;
+
+          if (cancelled) return null;
+          fill();
+
+          return { index: head.index, map };
+        },
+
+        cancel() {
+          cancelled = true;
+          queue.length = 0;
+          abort.abort();
+        },
+      };
+    },
   };
 }

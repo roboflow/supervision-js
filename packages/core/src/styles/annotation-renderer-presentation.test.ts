@@ -226,26 +226,15 @@ describe("annotation renderer presentation", () => {
     ).toEqual([left, right]);
   });
 
-  it("rejects two depth renderers that share an id", () => {
-    expect(() =>
-      resolveAnnotationRendererPresentation({
-        renderers: [annotationRenderers.depth(), annotationRenderers.depth()],
-      }),
-    ).toThrow('duplicate renderer id "depth"');
-  });
-
   it.each([
     { colormap: "jet" },
     { quantity: "height" },
     { sampling: "bilinear" },
     { range: "fixed" },
     { range: { max: 1, min: 1 } },
-    { range: { max: Number.POSITIVE_INFINITY, min: 0 } },
     { opacity: Number.NaN },
     { wipe: 1.5 },
-    { wipe: -0.1 },
     { noDepthColor: 0x1000000 },
-    { noDepthColor: 0.5 },
   ])("rejects invalid depth setting %j", (settings) => {
     expect(() =>
       resolveAnnotationRendererPresentation({

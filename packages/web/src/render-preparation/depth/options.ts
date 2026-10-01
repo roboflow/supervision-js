@@ -6,29 +6,13 @@ import { getPausedPreparedWindowFrameCount } from "../playhead-motion";
 import { DEFAULT_MASK_SCHEDULE_BATCH_SIZE } from "../prepared-render-window";
 
 const MEBIBYTE = 1024 * 1024;
-
-/**
- * Depth's timing defaults. The byte budgets are left out because they scale
- * with each clip's size.
- */
-export const DEFAULT_DEPTH_TIMING_OPTIONS = {
-  exactNeighborFrameCount: 2,
-  exactSettleSeconds: 0.15,
-  playback: "auto",
-  previewPrefetchSeconds: 1,
-  previewRetainSeconds: 0.25,
-} as const satisfies RenderPreparationDepthOptions;
-
-/**
- * A stream session decodes depth half as far ahead: what is ahead of a live
- * playhead is still arriving, and depth shares the link with it.
- */
-export const STREAM_DEPTH_TIMING_OPTIONS = {
-  ...DEFAULT_DEPTH_TIMING_OPTIONS,
-  previewPrefetchSeconds:
-    DEFAULT_DEPTH_TIMING_OPTIONS.previewPrefetchSeconds / 2,
-} as const satisfies RenderPreparationDepthOptions;
-
+const DEFAULT_PREFETCH_SECONDS = 1;
+/** Kept behind the playhead, in seconds of media. */
+const RETAIN_SECONDS = 0.25;
+/** Rest before the exact frame on screen loads. */
+const EXACT_SETTLE_SECONDS = 0.15;
+/** Exact frames loaded on each side of the frame at rest, for stepping. */
+const EXACT_NEIGHBOR_FRAME_COUNT = 2;
 const MIN_EXACT_CACHE_BYTES = 128 * MEBIBYTE;
 /** The window budgets' floor: what a 1080p preview needs for a 1.35 s lead. */
 const MIN_WINDOW_CACHE_BYTES = 96 * MEBIBYTE;
@@ -39,7 +23,6 @@ export interface DepthClipOptions {
   /** Exact frames loaded around the frame at rest. */
   readonly exact: {
     readonly settleSeconds: number;
-    /** Frames loaded on each side of the frame at rest. */
     readonly neighborFrameCount: number;
     /** The frame on screen is always kept, whatever this says. */
     readonly maxCacheBytes: number;
@@ -74,25 +57,14 @@ export function resolveDepthClipOptions(
   options: RenderPreparationDepthOptions = {},
   shared: { readonly scheduleBatchSize?: number } = {},
 ): DepthClipOptions {
-  const defaults = DEFAULT_DEPTH_TIMING_OPTIONS;
-  const neighborFrameCount = Math.max(
-    0,
-    Math.floor(
-      options.exactNeighborFrameCount ?? defaults.exactNeighborFrameCount,
-    ),
-  );
   const prefetchSeconds = Math.max(
     0,
-    options.previewPrefetchSeconds ?? defaults.previewPrefetchSeconds,
-  );
-  const retainSeconds = Math.max(
-    0,
-    options.previewRetainSeconds ?? defaults.previewRetainSeconds,
+    options.previewPrefetchSeconds ?? DEFAULT_PREFETCH_SECONDS,
   );
   const frameRate =
     Number.isFinite(clip.frameRate) && clip.frameRate > 0 ? clip.frameRate : 30;
   const windowSpanFrames = Math.ceil(
-    (2 * prefetchSeconds + retainSeconds) * frameRate,
+    (2 * prefetchSeconds + RETAIN_SECONDS) * frameRate,
   );
   const windowBudget = (frameBytes: number) =>
     Math.min(
@@ -102,17 +74,12 @@ export function resolveDepthClipOptions(
 
   return {
     exact: {
-      maxCacheBytes:
-        options.maxExactCacheBytes ??
-        Math.max(
-          MIN_EXACT_CACHE_BYTES,
-          clip.exactFrameBytes * (2 * neighborFrameCount + 1) * 2,
-        ),
-      neighborFrameCount,
-      settleSeconds: Math.max(
-        0,
-        options.exactSettleSeconds ?? defaults.exactSettleSeconds,
+      maxCacheBytes: Math.max(
+        MIN_EXACT_CACHE_BYTES,
+        clip.exactFrameBytes * (2 * EXACT_NEIGHBOR_FRAME_COUNT + 1) * 2,
       ),
+      neighborFrameCount: EXACT_NEIGHBOR_FRAME_COUNT,
+      settleSeconds: EXACT_SETTLE_SECONDS,
     },
     playback: {
       maxExactCacheBytes:
@@ -129,7 +96,7 @@ export function resolveDepthClipOptions(
       // The mask window's paused margin, and never fewer than the neighbours
       // a step reaches.
       pausedFrameCount: Math.max(
-        neighborFrameCount + 1,
+        EXACT_NEIGHBOR_FRAME_COUNT + 1,
         getPausedPreparedWindowFrameCount({
           prefetchFrameCount: Math.ceil(prefetchSeconds * frameRate),
           scheduleBatchSize: Math.max(
@@ -139,7 +106,7 @@ export function resolveDepthClipOptions(
         }),
       ),
       prefetchSeconds,
-      retainSeconds,
+      retainSeconds: RETAIN_SECONDS,
     },
   };
 }

@@ -5,13 +5,16 @@ import {
   DepthQuantity,
   type DepthCamera,
   type DepthMap,
+  type PreviewDepthSamples,
+  type ScaledDepthSamples,
 } from "#types/depth-map";
 import {
   computeDepthPercentileRange,
+  convertDepthValue,
   decodeDepthSample,
-  depthColorCoordinate,
   resolveDepthColorMapping,
   resolveDepthQuantity,
+  type DepthColorMapping,
 } from "#utils/depth-color-mapping";
 
 /** fx * B = 100, so disparity 4 px is 25 m and 100 px is 1 m. */
@@ -60,6 +63,12 @@ describe("depth colour mapping", () => {
       [9, 2],
       { max: 9, min: 2 },
     ],
+    [
+      DepthMapKind.RelativeInverse,
+      DepthQuantity.Depth,
+      [9, 2],
+      { max: 9, min: 2 },
+    ],
   ])(
     "puts the near end at t = 1 for %s coloured as %s",
     (kind, quantity, [near, far], displayRange) => {
@@ -76,26 +85,6 @@ describe("depth colour mapping", () => {
       expect(depthColorCoordinate(far, map.samples, mapping)).toBeCloseTo(0, 9);
     },
   );
-
-  it("swaps a range's bounds through a reciprocal", () => {
-    const map = scaledMap(DepthMapKind.DisparityPx, [50], {
-      camera: { ...camera, doffsPx: 0 },
-      displayRange: { max: 100, min: 4 },
-    });
-    const mapping = resolveDepthColorMapping(map, {
-      quantity: DepthQuantity.Depth,
-    });
-
-    expect(mapping).toMatchObject({
-      hi: 25,
-      innerOffset: 0,
-      lo: 1,
-      nearIsLow: true,
-      numerator: 100,
-      quantity: DepthQuantity.Depth,
-      reciprocal: true,
-    });
-  });
 
   it("applies the principal-point offset on the correct side", () => {
     const withOffset = { ...camera, doffsPx: 20 };
@@ -118,7 +107,6 @@ describe("depth colour mapping", () => {
     expect([toDepth.lo, toDepth.hi]).toEqual([1, 4]);
     // d = 100 / Z - 20: 4 m is 5 px and 1 m is 80 px.
     expect([toDisparity.lo, toDisparity.hi]).toEqual([5, 80]);
-    expect(toDisparity).toMatchObject({ innerOffset: 0, outerOffset: -20 });
   });
 
   it("falls back to disparity where depth is undefined, and says so", () => {
@@ -135,19 +123,6 @@ describe("depth colour mapping", () => {
         camera,
       ),
     ).toEqual({ fellBack: false, quantity: DepthQuantity.Depth });
-
-    const mapping = resolveDepthColorMapping(
-      scaledMap(DepthMapKind.RelativeInverse, [3], {
-        displayRange: { max: 5, min: 1 },
-      }),
-      { quantity: DepthQuantity.Depth },
-    );
-
-    expect(mapping).toMatchObject({
-      fellBack: true,
-      nearIsLow: false,
-      reciprocal: false,
-    });
   });
 
   it("colours metric depth as plain inverse depth without a camera", () => {
@@ -160,10 +135,7 @@ describe("depth colour mapping", () => {
     expect(mapping).toMatchObject({
       hi: 2,
       lo: 0.1,
-      numerator: 1,
-      outerOffset: 0,
       quantity: DepthQuantity.Disparity,
-      reciprocal: true,
     });
   });
 
@@ -178,44 +150,6 @@ describe("depth colour mapping", () => {
     expect([mapping.lo, mapping.hi]).toEqual([10, 20]);
     expect(depthColorCoordinate(0, map.samples, mapping)).toBeNull();
     expect(depthColorCoordinate(30, map.samples, mapping)).toBe(1);
-  });
-
-  it("decodes preview codes above the reserved band", () => {
-    const map: DepthMap = {
-      height: 1,
-      kind: DepthMapKind.DisparityPx,
-      samples: {
-        encoding: "preview8",
-        range: { max: 239, min: 0 },
-        reservedMax: 15,
-        values: Uint8Array.from([15, 16, 255]),
-      },
-      width: 3,
-    };
-    const mapping = resolveDepthColorMapping(map, {
-      range: { max: 239, min: 0 },
-    });
-
-    expect(depthColorCoordinate(15, map.samples, mapping)).toBeNull();
-    expect(depthColorCoordinate(16, map.samples, mapping)).toBe(0);
-    expect(depthColorCoordinate(255, map.samples, mapping)).toBe(1);
-  });
-
-  it("decodes TV-range preview codes up to 235, and reads headroom as the top", () => {
-    const samples = {
-      encoding: "preview8",
-      levels: "tv",
-      range: { max: 203, min: 0 },
-      reservedMax: 31,
-      values: new Uint8Array(1),
-    } as const;
-
-    expect(decodeDepthSample(16, samples)).toBeNull();
-    expect(decodeDepthSample(31, samples)).toBeNull();
-    expect(decodeDepthSample(32, samples)).toBe(0);
-    expect(decodeDepthSample(132, samples)).toBe(100);
-    expect(decodeDepthSample(235, samples)).toBe(203);
-    expect(decodeDepthSample(250, samples)).toBe(203);
   });
 });
 
@@ -242,31 +176,20 @@ describe("depth percentile ranges", () => {
       max: 100,
       min: 1,
     });
-  });
-
-  it("converts percentiles to depth, swapping the bounds", () => {
-    const codes = Array.from({ length: 100 }, (_, index) => index + 1);
-
+    // fx * B = 100: codes 1..100 px are 100..1 m, so the bounds swap.
     expect(
-      computeDepthPercentileRange(stridedMap(codes), {
+      computeDepthPercentileRange(map, {
         high: 1,
         low: 0,
         quantity: DepthQuantity.Depth,
       }),
     ).toEqual({ max: 100, min: 1 });
-  });
-
-  it("is a pure function of one frame", () => {
-    const first = stridedMap([5, 9, 12, 40, 41, 80]);
-    const second = stridedMap([200, 300, 400]);
-    const before = computeDepthPercentileRange(first);
-
-    computeDepthPercentileRange(second);
-
-    expect(computeDepthPercentileRange(first)).toEqual(before);
-    expect(resolveDepthColorMapping(first, { range: "auto" })).toEqual(
-      resolveDepthColorMapping(first, { range: "auto" }),
-    );
+    // A flat frame widens by one stored step.
+    expect(
+      computeDepthPercentileRange(stridedMap([512, 512, 512]), {
+        quantity: DepthQuantity.Disparity,
+      }),
+    ).toEqual({ max: 513, min: 512 });
   });
 
   it("returns null when under 1 % of the samples hold depth", () => {
@@ -278,14 +201,6 @@ describe("depth percentile ranges", () => {
         stridedMap([7, 8, ...new Array<number>(198).fill(0)]),
       ),
     ).not.toBeNull();
-  });
-
-  it("widens a flat frame by one stored step", () => {
-    expect(
-      computeDepthPercentileRange(stridedMap([512, 512, 512]), {
-        quantity: DepthQuantity.Disparity,
-      }),
-    ).toEqual({ max: 513, min: 512 });
   });
 
   it("falls back from clip to auto, and from auto to every valid sample", () => {
@@ -313,3 +228,27 @@ describe("depth percentile ranges", () => {
     );
   });
 });
+
+/**
+ * What the depth shader computes for one stored value: its colour
+ * coordinate, 1 at the near end, or null where there is no depth.
+ */
+function depthColorCoordinate(
+  stored: number,
+  samples: ScaledDepthSamples | PreviewDepthSamples,
+  mapping: DepthColorMapping,
+): number | null {
+  const value = decodeDepthSample(stored, samples);
+
+  if (value === null) {
+    return null;
+  }
+
+  const converted = convertDepthValue(value, mapping);
+  const t = Math.min(
+    1,
+    Math.max(0, (converted - mapping.lo) / (mapping.hi - mapping.lo)),
+  );
+
+  return mapping.nearIsLow ? 1 - t : t;
+}

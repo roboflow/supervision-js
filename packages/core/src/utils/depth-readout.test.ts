@@ -27,7 +27,7 @@ const disparityMap: DepthMap = {
 };
 
 describe("depth readout", () => {
-  it("scales a media point onto a smaller map", () => {
+  it("reads the map pixel under a media point, with its confidence scaled to 0..1", () => {
     // Media 400x200 over a 4x2 map: (250, 150) lands on map pixel (2, 1).
     const readout = readDepthAt(
       disparityMap,
@@ -36,6 +36,7 @@ describe("depth readout", () => {
     );
 
     expect(readout).toMatchObject({
+      confidence: 1,
       disparityPx: 0.5,
       precision: "exact",
       stored: 128,
@@ -44,10 +45,7 @@ describe("depth readout", () => {
       y: 1,
     });
     expect(readout?.depthM).toBeCloseTo(200, 9);
-    expect(readout?.confidence).toBe(1);
-  });
-
-  it("reads map pixels directly without a coordinate space", () => {
+    // Without a coordinate space the point is in map pixels.
     expect(readDepthAt(disparityMap, { x: 1.9, y: 0.2 })).toMatchObject({
       depthM: 10,
       disparityPx: 10,
@@ -55,6 +53,11 @@ describe("depth readout", () => {
       x: 1,
       y: 0,
     });
+    expect(readDepthAt(disparityMap, { x: 2, y: 0 })?.confidence).toBeCloseTo(
+      0.2,
+      9,
+    );
+    expect(readDepthAt(disparityMap, { x: 3, y: 1 })?.confidence).toBe(0);
   });
 
   it("returns null outside the map", () => {
@@ -75,9 +78,7 @@ describe("depth readout", () => {
   });
 
   it("marks a stored 0 as no depth and reports nothing else", () => {
-    const readout = readDepthAt(disparityMap, { x: 0, y: 0 });
-
-    expect(readout).toEqual({
+    expect(readDepthAt(disparityMap, { x: 0, y: 0 })).toEqual({
       confidence: 1,
       precision: "exact",
       step: 1 / 256,
@@ -88,7 +89,25 @@ describe("depth readout", () => {
     });
   });
 
-  it("converts disparity to metres with and without the principal-point offset", () => {
+  it("converts between disparity and metres only where the camera allows", () => {
+    const metric: DepthMap = {
+      ...disparityMap,
+      kind: DepthMapKind.DepthM,
+      samples: {
+        encoding: "scaled16",
+        scale: 1000,
+        values: new Uint16Array(8).fill(2000),
+      },
+    };
+    const relative = readDepthAt(
+      {
+        ...disparityMap,
+        camera: undefined,
+        kind: DepthMapKind.RelativeInverse,
+      },
+      { x: 1, y: 0 },
+    );
+
     expect(readDepthAt(disparityMap, { x: 2, y: 0 })?.depthM).toBeCloseTo(5, 9);
     expect(
       readDepthAt(
@@ -99,19 +118,6 @@ describe("depth readout", () => {
     expect(
       readDepthAt({ ...disparityMap, camera: undefined }, { x: 2, y: 0 }),
     ).not.toHaveProperty("depthM");
-  });
-
-  it("converts metric depth to disparity when the camera is known", () => {
-    const metric: DepthMap = {
-      ...disparityMap,
-      kind: DepthMapKind.DepthM,
-      samples: {
-        encoding: "scaled16",
-        scale: 1000,
-        values: new Uint16Array(8).fill(2000),
-      },
-    };
-
     expect(readDepthAt(metric, { x: 3, y: 1 })).toMatchObject({
       depthM: 2,
       disparityPx: 50,
@@ -120,79 +126,57 @@ describe("depth readout", () => {
     expect(
       readDepthAt({ ...metric, camera: undefined }, { x: 3, y: 1 }),
     ).not.toHaveProperty("disparityPx");
+    expect(relative).toMatchObject({ relativeInverse: 10, valid: true });
+    expect(relative).not.toHaveProperty("depthM");
+    expect(relative).not.toHaveProperty("disparityPx");
   });
 
-  it("reports relative inverse depth as its own quantity", () => {
-    const relative: DepthMap = {
-      ...disparityMap,
-      camera: undefined,
-      kind: DepthMapKind.RelativeInverse,
-    };
-    const readout = readDepthAt(relative, { x: 1, y: 0 });
-
-    expect(readout).toMatchObject({ relativeInverse: 10, valid: true });
-    expect(readout).not.toHaveProperty("depthM");
-    expect(readout).not.toHaveProperty("disparityPx");
-  });
-
-  it("decodes preview codes and their step with 15 reserved codes", () => {
-    const preview: DepthMap = {
+  it("decodes full- and TV-range preview codes and their step", () => {
+    const preview = (
+      levels: "full" | "tv",
+      reservedMax: number,
+      max: number,
+      codes: number[],
+    ): DepthMap => ({
       height: 1,
       kind: DepthMapKind.DisparityPx,
       samples: {
         encoding: "preview8",
-        range: { max: 192, min: 0 },
-        reservedMax: 15,
-        values: Uint8Array.from([15, 16, 135, 255]),
+        levels,
+        range: { max, min: 0 },
+        reservedMax,
+        values: Uint8Array.from(codes),
       },
-      width: 4,
-    };
+      width: codes.length,
+    });
+    const full = preview("full", 15, 192, [15, 16, 135, 255]);
     const step = 192 / 239;
 
-    expect(readDepthAt(preview, { x: 0, y: 0 })).toMatchObject({
+    expect(readDepthAt(full, { x: 0, y: 0 })).toMatchObject({
       precision: "preview",
       stored: 15,
       valid: false,
     });
-    expect(readDepthAt(preview, { x: 1, y: 0 })?.disparityPx).toBe(0);
-    expect(readDepthAt(preview, { x: 2, y: 0 })?.disparityPx).toBeCloseTo(
+    expect(readDepthAt(full, { x: 1, y: 0 })?.disparityPx).toBe(0);
+    expect(readDepthAt(full, { x: 2, y: 0 })?.disparityPx).toBeCloseTo(
       119 * step,
       9,
     );
-    expect(readDepthAt(preview, { x: 3, y: 0 })).toMatchObject({
+    expect(readDepthAt(full, { x: 3, y: 0 })).toMatchObject({
       disparityPx: 192,
       precision: "preview",
     });
-    expect(readDepthAt(preview, { x: 3, y: 0 })?.step).toBeCloseTo(step, 12);
-  });
+    expect(readDepthAt(full, { x: 3, y: 0 })?.step).toBeCloseTo(step, 12);
 
-  it("decodes TV-range preview codes and their step", () => {
-    const preview: DepthMap = {
-      height: 1,
-      kind: DepthMapKind.DisparityPx,
-      samples: {
-        encoding: "preview8",
-        levels: "tv",
-        range: { max: 63, min: 0 },
-        reservedMax: 31,
-        values: Uint8Array.from([16, 32, 235]),
-      },
-      width: 3,
-    };
+    // TV range tops out at 235 and reads the headroom above it as the top.
+    const tv = preview("tv", 31, 63, [16, 32, 235, 250]);
 
-    expect(readDepthAt(preview, { x: 0, y: 0 })?.valid).toBe(false);
-    expect(readDepthAt(preview, { x: 1, y: 0 })?.disparityPx).toBe(0);
-    expect(readDepthAt(preview, { x: 2, y: 0 })).toMatchObject({
+    expect(readDepthAt(tv, { x: 0, y: 0 })?.valid).toBe(false);
+    expect(readDepthAt(tv, { x: 1, y: 0 })?.disparityPx).toBe(0);
+    expect(readDepthAt(tv, { x: 2, y: 0 })).toMatchObject({
       disparityPx: 63,
       step: 63 / 203,
     });
-  });
-
-  it("scales confidence to 0..1", () => {
-    expect(readDepthAt(disparityMap, { x: 2, y: 0 })?.confidence).toBeCloseTo(
-      0.2,
-      9,
-    );
-    expect(readDepthAt(disparityMap, { x: 3, y: 1 })?.confidence).toBe(0);
+    expect(readDepthAt(tv, { x: 3, y: 0 })?.disparityPx).toBe(63);
   });
 });

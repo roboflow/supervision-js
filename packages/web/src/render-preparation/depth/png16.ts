@@ -17,8 +17,7 @@ export interface DecodedPng16 {
   readonly values: Uint16Array<ArrayBuffer>;
   /**
    * The samples as `rg8` texture bytes with every row padded to a multiple of
-   * four bytes, present only when padding was asked for, the width is odd and
-   * the host is little-endian.
+   * four bytes, present only when padding was asked for and the width is odd.
    */
   readonly paddedUpload?: {
     readonly bytes: Uint8Array<ArrayBuffer>;
@@ -51,8 +50,6 @@ const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 const COLOR_TYPE_GRAY = 0;
 /** 16384 x 16384, beyond any GPU texture; a header claiming more is refused. */
 const MAX_PNG_PIXELS = 16_384 * 16_384;
-const HOST_IS_LITTLE_ENDIAN =
-  new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
 export async function decodePng16(
   bytes: ArrayBuffer | Uint8Array,
@@ -72,7 +69,7 @@ export async function decodePng16(
   return {
     height: header.height,
     paddedUpload:
-      options.padRowsForWebGl && header.width % 2 === 1 && HOST_IS_LITTLE_ENDIAN
+      options.padRowsForWebGl && header.width % 2 === 1
         ? padRows(values, header.width, header.height)
         : undefined,
     values,

@@ -6,9 +6,6 @@ import {
   type DepthPreparationWorkerResponse,
 } from "./worker-protocol";
 
-const HOST_IS_LITTLE_ENDIAN =
-  new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
-
 /**
  * Answers one decode request, in the worker or on the main thread: the reply
  * and the buffers it can transfer. A file that does not decode is an error
@@ -97,7 +94,7 @@ export async function decodeDepthPreparationRequest(
 /**
  * Depth for a texture `factor` times smaller on each side, each texel the
  * sample at its block's centre, as the renderer decimates a map larger than
- * the GPU allows. Null on a big-endian host, which uploads the full map.
+ * the GPU allows.
  */
 export function decimateDepthUpload(
   values: Uint16Array,
@@ -106,7 +103,7 @@ export function decimateDepthUpload(
   factor: number,
   padRowsForWebGl: boolean,
 ): DecimatedDepthUpload<Uint8Array> | null {
-  if (!HOST_IS_LITTLE_ENDIAN || factor < 2) return null;
+  if (factor < 2) return null;
 
   const targetWidth = Math.ceil(width / factor);
   const targetHeight = Math.ceil(height / factor);

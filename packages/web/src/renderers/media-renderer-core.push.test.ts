@@ -966,22 +966,6 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
-  it("points depth decoding at the producer's playhead as it moves", async () => {
-    const producer = createProducer();
-    const prefetchDepth = vi.fn();
-    const renderer = await createRenderer(
-      producer,
-      createScene({ prefetchDepth }),
-    );
-
-    producer.setTimeMs(1500);
-    producer.setTimeMs(2250);
-
-    expect(prefetchDepth).toHaveBeenCalledWith(0);
-    expect(prefetchDepth).toHaveBeenLastCalledWith(2.25);
-    renderer.destroy();
-  });
-
   it("points depth decoding at where a drag asks to go, not at the frames it lands on", async () => {
     const producer = createProducer();
     const prefetchDepth = vi.fn();

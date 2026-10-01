@@ -104,7 +104,6 @@ export function createDepthPreviewLumaCopier(
           }
 
           return {
-            busyMs: 0,
             height: response.height,
             luma: new Uint8Array(response.luma),
             path: response.path,

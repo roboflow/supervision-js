@@ -17,9 +17,6 @@ describe("static image media source", () => {
       primaryVideoHeight: 200,
       primaryVideoWidth: 320,
     });
-    expect(source.frameClockUnavailableReason).toMatch(
-      /^a still image has no time axis/,
-    );
     const sample = await source.sampleSink.getSample(0);
     const context = {} as CanvasRenderingContext2D;
     sample?.draw(context, 1, 2, 30, 40);

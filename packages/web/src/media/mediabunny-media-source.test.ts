@@ -65,7 +65,5 @@ describe("openMediabunnyMediaSource", () => {
       }),
     );
     expect(source.sampleSink).not.toBe(mediabunny.videoSampleSink);
-    expect(source.readFrameClock).toBeTypeOf("function");
-    expect(source.frameClockUnavailableReason).toBeUndefined();
   });
 });

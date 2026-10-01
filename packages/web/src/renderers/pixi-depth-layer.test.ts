@@ -8,7 +8,6 @@ import type {
 import { createPixiDepthLayer } from "#renderers/pixi-depth-layer";
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -77,16 +76,12 @@ function twoFrameSource(first: DepthMap, second: DepthMap): DepthFrameProvider {
 
 function createLayer(
   options: {
-    prepareTexture?: (source: unknown) => void;
     maxTextureSize?: number;
     renderers?: Parameters<typeof createPixiDepthLayer>[0]["renderers"];
     source?: DepthFrameProvider | null;
     hidden?: boolean;
   } = {},
 ) {
-  vi.stubGlobal("document", {
-    createElement: () => ({ getContext: vi.fn(), height: 0, width: 0 }),
-  });
   const pixi = createFakePixi();
   const layer = createPixiDepthLayer({
     ...pixi.constructors,
@@ -97,7 +92,6 @@ function createLayer(
       options.maxTextureSize === undefined
         ? undefined
         : () => options.maxTextureSize!,
-    prepareTexture: options.prepareTexture as never,
     renderers: options.renderers ?? [annotationRenderers.depth()],
     source: options.source ?? null,
   });
@@ -106,35 +100,16 @@ function createLayer(
 }
 
 describe("pixi depth layer", () => {
-  it("reads whether a frame's depth is decoded without loading it, and owes none when it draws none", () => {
-    let prepared = false;
-    const getEntry = vi.fn(() => null);
-    const { layer } = createLayer({
-      source: {
-        destroy: vi.fn(),
-        getEntry,
-        getFrameStatus: () => ({ frameIndex: 3, prepared }),
-      },
-    });
-
-    expect(layer.isArtifactPrepared(0.1)).toBe(false);
-    prepared = true;
-    expect(layer.isArtifactPrepared(0.1)).toBe(true);
-    expect(getEntry).not.toHaveBeenCalled();
-
-    prepared = false;
-    layer.setRenderers([]);
-    expect(layer.isArtifactPrepared(0.1)).toBe(true);
-  });
-
-  it("never draws the previous frame's depth over the next one", () => {
+  it("binds each frame's own map, and none where a frame has no depth", () => {
     const first = depthMap(1);
+    const second = depthMap(2);
     const { layer, pixi } = createLayer({
-      source: twoFrameSource(first, depthMap(2)),
+      source: twoFrameSource(first, second),
     });
 
     layer.drawFrame(0.5);
     const mesh = pixi.meshes[0]!;
+    const firstTexture = pixi.shaders[0]!.resources.uDepthTexture;
 
     expect(mesh.visible).toBe(true);
     expect(layer.getActiveDepth()).toMatchObject({
@@ -146,83 +121,17 @@ describe("pixi depth layer", () => {
       precision: "exact",
     });
 
-    layer.drawFrame(2.5);
+    layer.drawFrame(1.5);
+    expect(pixi.shaders[0]!.resources.uDepthTexture).not.toBe(firstTexture);
+    expect(layer.getActiveDepth()?.map).toBe(second);
 
+    layer.drawFrame(2.5);
     expect(mesh.visible).toBe(false);
     expect(layer.getActiveDepth()).toBeNull();
   });
 
-  it("binds each frame's own map", () => {
-    const first = depthMap(1);
-    const second = depthMap(2);
-    const { layer, pixi } = createLayer({
-      source: twoFrameSource(first, second),
-    });
-
-    layer.drawFrame(0);
-    const firstTexture = pixi.shaders[0]!.resources.uDepthTexture;
-    layer.drawFrame(1.5);
-
-    expect(pixi.shaders[0]!.resources.uDepthTexture).not.toBe(firstTexture);
-    expect(layer.getActiveDepth()?.map).toBe(second);
-  });
-
-  it("rewrites uniforms without re-uploading when a renderer changes", () => {
-    const { layer, pixi } = createLayer({
-      source: twoFrameSource(depthMap(1), depthMap(2)),
-    });
-
-    layer.drawFrame(0);
-    const uploads = pixi.depthUploads();
-    const uniforms = pixi.uniformGroups[0]!;
-
-    layer.setRenderers([
-      annotationRenderers.depth({ colormap: "viridis", wipe: 0.5 }),
-    ]);
-    layer.drawFrame(0);
-
-    expect(pixi.depthUploads()).toBe(uploads);
-    expect(uploads).toBe(1);
-    expect(uniforms.update).toHaveBeenCalledTimes(2);
-    expect(uniforms.uniforms.uWipe).toBe(0.5);
-    expect(pixi.lutSources()).toBe(2);
-  });
-
-  it("writes nothing when the same map is drawn again under the same renderers", () => {
-    const { layer, pixi } = createLayer({
-      source: twoFrameSource(depthMap(1), depthMap(2)),
-    });
-
-    layer.drawFrame(0);
-    layer.drawFrame(0.25);
-    layer.drawFrame(0.75);
-
-    expect(pixi.uniformGroups[0]!.update).toHaveBeenCalledOnce();
-  });
-
-  it("shares one upload between two depth renderers", () => {
-    const { layer, pixi } = createLayer({
-      renderers: [
-        annotationRenderers.depth({ id: "left", wipe: 0.5 }),
-        annotationRenderers.depth({ colormap: "magma", id: "right" }),
-      ],
-      source: twoFrameSource(depthMap(1), depthMap(2)),
-    });
-
-    layer.drawFrame(0);
-
-    expect(pixi.meshes).toHaveLength(2);
-    expect(pixi.depthUploads()).toBe(1);
-    expect(pixi.shaders[0]!.resources.uDepthTexture).toBe(
-      pixi.shaders[1]!.resources.uDepthTexture,
-    );
-    expect(pixi.shaders[0]!.resources.uLutTexture).not.toBe(
-      pixi.shaders[1]!.resources.uLutTexture,
-    );
-  });
-
-  it("stacks one mesh per renderer in presentation order", () => {
-    const left = annotationRenderers.depth({ id: "left" });
+  it("stacks one mesh per renderer in presentation order, at its opacity", () => {
+    const left = annotationRenderers.depth({ id: "left", opacity: 0.3 });
     const right = annotationRenderers.depth({ id: "right" });
     const { layer, pixi } = createLayer({
       renderers: [left, right],
@@ -234,6 +143,7 @@ describe("pixi depth layer", () => {
     const [leftMesh, rightMesh] = pixi.meshes;
 
     expect(container.children).toEqual([leftMesh, rightMesh]);
+    expect(leftMesh!.alpha).toBe(0.3);
 
     layer.setRenderers([right, left]);
     layer.drawFrame(0);
@@ -245,20 +155,6 @@ describe("pixi depth layer", () => {
 
     expect(container.children).toEqual([rightMesh]);
     expect(leftMesh!.destroy).toHaveBeenCalledOnce();
-  });
-
-  it("carries opacity on the mesh, clamped to 0..1", () => {
-    const { layer, pixi } = createLayer({
-      renderers: [annotationRenderers.depth({ opacity: 1.5 })],
-      source: twoFrameSource(depthMap(1), depthMap(2)),
-    });
-
-    layer.drawFrame(0);
-    expect(pixi.meshes[0]!.alpha).toBe(1);
-
-    layer.setRenderers([annotationRenderers.depth({ opacity: 0.3 })]);
-    layer.drawFrame(0);
-    expect(pixi.meshes[0]!.alpha).toBe(0.3);
   });
 
   it("warns once when depth has to fall back to disparity", () => {
@@ -273,20 +169,6 @@ describe("pixi depth layer", () => {
 
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toContain('Depth renderer "depth"');
-  });
-
-  it("names what is on screen in its content key", () => {
-    const { layer } = createLayer({
-      source: twoFrameSource(depthMap(1), depthMap(2)),
-    });
-
-    expect(layer.getContentKey()).toBe("none");
-    layer.drawFrame(0);
-    const first = layer.getContentKey();
-    layer.drawFrame(0.5);
-    expect(layer.getContentKey()).toBe(first);
-    layer.drawFrame(1.5);
-    expect(layer.getContentKey()).not.toBe(first);
   });
 
   it("hides and releases its textures when depth is removed", () => {
@@ -309,9 +191,6 @@ describe("pixi depth layer", () => {
     // The shader let go of the texture before it was destroyed.
     expect(boundWhenDestroyed).toBeDefined();
     expect(boundWhenDestroyed).not.toBe(uploaded);
-
-    layer.drawFrame(0);
-    expect(pixi.meshes[0]!.visible).toBe(false);
   });
 
   it("draws a map too large for the GPU decimated, and reads it back whole", () => {
@@ -332,201 +211,56 @@ describe("pixi depth layer", () => {
     expect(layer.getActiveDepth()?.map).toBe(map);
   });
 
-  it("uploads the next frames ahead, so the presents that draw them only bind", () => {
-    const maps = [
-      previewMap(20),
-      previewMap(30),
-      previewMap(40),
-      previewMap(50),
-    ];
-    const prepared: unknown[] = [];
-    const { layer, pixi } = createLayer({
-      prepareTexture: (source) => prepared.push(source),
-      source: previewSource(maps),
-    });
-
-    layer.drawFrame(0);
-    layer.uploadAhead(0);
-    const sources = pixi.depthUploads();
-
-    layer.drawFrame(1);
-    layer.drawFrame(2);
-
-    expect(pixi.depthUploads()).toBe(sources);
-    expect(prepared).toHaveLength(2);
-    expect(layer.getUploadCounts()).toEqual({ ahead: 2, inPresent: 1 });
-    expect(layer.getActiveDepth()).toMatchObject({
-      frameIndex: 2,
-      precision: "preview",
-    });
-  });
-
-  it("uploads ahead the frames a fast rate will present, not the ones it skips", () => {
-    const maps = Array.from({ length: 12 }, (_, index) =>
-      previewMap(20 + index),
-    );
-    const skips: (number | undefined)[] = [];
-    const source = previewSource(maps);
-    const upcoming = source.getUpcomingEntries!;
-
-    source.getUpcomingEntries = (mediaTime, count, skip) => {
-      skips.push(skip);
-      return upcoming(mediaTime, count);
-    };
-
-    const { layer } = createLayer({ source });
-
-    layer.drawFrame(0);
-    layer.drawFrame(3);
-    layer.uploadAhead(3);
-    layer.drawFrame(3.5);
-    layer.uploadAhead(3.5);
-
-    expect(skips).toEqual([3, 3]);
-  });
-
-  it("uploads both frames an 8x present can land on", () => {
-    const maps = Array.from({ length: 40 }, (_, index) =>
-      previewMap(20 + index),
-    );
-    const { layer } = createLayer({ source: previewSource(maps) });
-
-    // A 24 fps clip at 8x on 60 Hz moves 3.2 frames a present.
-    for (const frame of [0, 3, 6, 10, 13, 16, 19, 22, 26, 29, 32]) {
-      layer.drawFrame(frame);
-      layer.uploadAhead(frame);
-    }
-
-    // The first frame, and the first jump before the layer knows the pace.
-    expect(layer.getUploadCounts().inPresent).toBe(2);
-  });
-
-  it("keeps frames uploaded ahead through a present that repeats the frame on screen", () => {
-    const maps = Array.from({ length: 8 }, (_, index) =>
-      previewMap(20 + index),
-    );
-    const { layer } = createLayer({ source: previewSource(maps) });
-
+  it.each([
     // 48 fps on a 60 Hz display: every fifth present repeats its frame.
-    for (const time of [0, 1, 2, 2.5, 3, 4, 4.5, 5]) {
-      layer.drawFrame(time);
-      layer.uploadAhead(time);
-    }
+    ["a present that repeats its frame", [0, 1, 2, 2.5, 3, 4, 4.5, 5], 1],
+    // A 24 fps clip at 8x on 60 Hz moves 3.2 frames a present; the first
+    // jump comes before the layer knows the pace.
+    ["an 8x rate", [0, 3, 6, 10, 13, 16, 19, 22, 26, 29, 32], 2],
+  ])(
+    "uploads ahead the frames %s lands on, never over the texture on screen",
+    (_, times, inPresent) => {
+      const maps = Array.from({ length: 40 }, (_, index) =>
+        previewMap(20 + index),
+      );
+      const { layer, pixi } = createLayer({ source: previewSource(maps) });
 
-    expect(layer.getUploadCounts().inPresent).toBe(1);
-  });
+      for (const time of times) {
+        layer.drawFrame(time);
+        layer.uploadAhead(time);
 
-  it("never uploads over the texture on screen while uploading ahead", () => {
-    const maps = Array.from({ length: 8 }, (_, index) =>
-      previewMap(20 + index),
-    );
-    const { layer, pixi } = createLayer({ source: previewSource(maps) });
+        const bound = pixi.shaders[0]!.resources.uDepthTexture as {
+          readonly update: ReturnType<typeof vi.fn>;
+        };
+        const updates = bound.update.mock.calls.length;
 
-    for (let frame = 0; frame < 6; frame += 1) {
-      layer.drawFrame(frame);
-      layer.uploadAhead(frame);
+        layer.uploadAhead(time);
+        expect(bound.update.mock.calls.length).toBe(updates);
+        expect(layer.getActiveDepth()?.map).toBe(maps[Math.floor(time)]);
+      }
 
-      const bound = pixi.shaders[0]!.resources.uDepthTexture as {
-        readonly update: ReturnType<typeof vi.fn>;
-      };
-      const updates = bound.update.mock.calls.length;
+      expect(layer.getUploadCounts().inPresent).toBe(inPresent);
+    },
+  );
 
-      layer.uploadAhead(frame);
-      expect(bound.update.mock.calls.length).toBe(updates);
-    }
-  });
-
-  it("keeps exact and preview textures apart, so a swap destroys none", () => {
-    const exact = depthMap(1);
-    const preview = previewMap(40);
-    let precision: "exact" | "preview" = "exact";
-    const { layer, pixi } = createLayer({
-      source: {
-        destroy: vi.fn(),
-        getEntry: () =>
-          precision === "exact"
-            ? { frameIndex: 0, map: exact, precision }
-            : { frameIndex: 0, map: preview, precision },
-      },
-    });
-
-    for (const next of ["exact", "preview", "exact", "preview"] as const) {
-      precision = next;
-      layer.drawFrame(0);
-    }
-
-    expect(pixi.depthUploads()).toBe(2);
-    expect(
-      pixi.depthSources.every(({ destroy }) => !destroy.mock.calls.length),
-    ).toBe(true);
-    expect(layer.getContentKey()).toContain("preview");
-  });
-
-  it("waits for depth and prefetches it only while a depth renderer draws", () => {
+  it("holds playback for depth only while a depth renderer shows it", () => {
     const thresholds = { resumeAtSeconds: 0.3, stopBelowSeconds: 0.1 };
-    const needsPlaybackGateWait = vi.fn(() => true);
-    const waitForReady = vi.fn(async () => undefined);
-    const prefetch = vi.fn();
     const source = previewSource([previewMap(20)], {
-      getPreparationProgress: () => 7,
-      needsPlaybackGateWait,
-      prefetch,
-      waitForReady,
+      getFrameStatus: () => ({ frameIndex: 0, prepared: false }),
+      needsPlaybackGateWait: () => true,
     });
-    const { layer } = createLayer({ source });
+    const { layer } = createLayer({ hidden: true, source });
 
+    expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(false);
+    expect(layer.isArtifactPrepared(0)).toBe(true);
+
+    layer.setHidden(false);
     expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(true);
-    void layer.waitForRenderPreparation(0, thresholds);
-    layer.prefetch(2);
-    expect(waitForReady).toHaveBeenCalledOnce();
-    expect(prefetch).toHaveBeenCalledWith(2);
-    expect(layer.getPreparationProgress()).toBe(7);
+    expect(layer.isArtifactPrepared(0)).toBe(false);
 
     layer.setRenderers([]);
     expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(false);
-    void layer.waitForRenderPreparation(0, thresholds);
-    layer.prefetch(3);
-    expect(waitForReady).toHaveBeenCalledOnce();
-    expect(prefetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides with the annotations, stops waiting and prefetching, and comes back", () => {
-    const thresholds = { resumeAtSeconds: 0.3, stopBelowSeconds: 0.1 };
-    const prefetch = vi.fn();
-    const source = previewSource([previewMap(20), previewMap(30)], {
-      needsPlaybackGateWait: () => true,
-      prefetch,
-    });
-    const { layer, pixi } = createLayer({ hidden: true, source });
-
-    layer.drawFrame(0);
-    layer.prefetch(1);
-    expect(pixi.meshes).toHaveLength(0);
-    expect(layer.getActiveDepth()).toBeNull();
-    expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(false);
-    expect(prefetch).not.toHaveBeenCalled();
-
-    layer.setHidden(false);
-    layer.drawFrame(0);
-    expect(layer.getActiveDepth()).not.toBeNull();
-    expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(true);
-
-    layer.setHidden(true);
-    layer.drawFrame(1);
-    expect(layer.getActiveDepth()).toBeNull();
-    expect(pixi.meshes.every((mesh) => !mesh.visible)).toBe(true);
-  });
-
-  it("draws nothing without a depth renderer", () => {
-    const { layer, pixi } = createLayer({
-      renderers: [],
-      source: twoFrameSource(depthMap(1), depthMap(2)),
-    });
-
-    layer.drawFrame(0);
-
-    expect(pixi.meshes).toHaveLength(0);
-    expect(pixi.depthUploads()).toBe(0);
+    expect(layer.isArtifactPrepared(0)).toBe(true);
   });
 });
 
@@ -585,18 +319,11 @@ function createFakePixi() {
   const bufferSources: FakeBufferSource[] = [];
 
   return {
-    bufferSources,
     get depthSources() {
       return bufferSources.filter(
         ({ options }) => options.format !== "rgba8unorm",
       );
     },
-    depthUploads: () =>
-      bufferSources.filter(({ options }) => options.format !== "rgba8unorm")
-        .length,
-    lutSources: () =>
-      bufferSources.filter(({ options }) => options.format === "rgba8unorm")
-        .length,
     meshes,
     shaders,
     uniformGroups,

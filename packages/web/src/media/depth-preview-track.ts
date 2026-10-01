@@ -36,7 +36,7 @@ const STALLED_DECODER_FLUSH_MILLISECONDS = 100;
  * How long a flush may go without returning a frame before the decoder is
  * taken for stuck. A flush waits on the decoder alone, never the network.
  */
-export const FLUSH_SILENCE_MILLISECONDS = 3000;
+const FLUSH_SILENCE_MILLISECONDS = 3000;
 /** How long the browser may take to say whether it decodes the preview. */
 export const DECODER_SUPPORT_MILLISECONDS = 3000;
 const MICROSECONDS_PER_SECOND = 1_000_000;
@@ -87,14 +87,6 @@ export interface DepthPreviewDecodeOptions {
   readonly keep?: (index: number) => boolean;
 }
 
-export interface DepthPreviewTrackStats {
-  readonly framesDecoded: number;
-  readonly framesCopied: number;
-  /** Main-thread time spent handing frames over and copying their luma. */
-  readonly copyMainThreadMs: number;
-  readonly lumaPath: DepthPreviewLumaPath | null;
-}
-
 /**
  * The 8-bit preview video of a depth clip, decoded to luma codes.
  *
@@ -117,7 +109,8 @@ export interface DepthPreviewTrackReader {
     fromIndex: number,
     options?: DepthPreviewDecodeOptions,
   ): DepthPreviewDecodeRun;
-  getStats(): DepthPreviewTrackStats;
+  /** How decoded frames reached their codes; null before the first. */
+  lumaPath(): DepthPreviewLumaPath | null;
   dispose(): void;
 }
 
@@ -256,12 +249,7 @@ export function createDepthPreviewTrackReader(options: {
   let current: RunState | null = null;
   let disposed = false;
   const pageCopier = createMainThreadLumaCopier();
-  const stats = {
-    copyMainThreadMs: 0,
-    framesCopied: 0,
-    framesDecoded: 0,
-    lumaPath: null as DepthPreviewLumaPath | null,
-  };
+  let lumaPath: DepthPreviewLumaPath | null = null;
 
   /** A decoded timestamp is its packet's, truncated to microseconds. */
   const indexOfTimestamp = (microseconds: number) => {
@@ -321,20 +309,14 @@ export function createDepthPreviewTrackReader(options: {
     frame: VideoFrame,
     index: number,
   ): Promise<DepthPreviewLumaFrame | null> => {
-    const started = performance.now();
     const correction = options.correction ?? null;
     const copied =
       options.copier?.copy(frame, correction) ??
       pageCopier.copy(frame, correction);
 
-    stats.copyMainThreadMs += performance.now() - started;
-
     return copied.then((result) => {
       if (!result) return null;
-      stats.copyMainThreadMs += result.busyMs;
-      stats.framesCopied += 1;
-      stats.lumaPath =
-        result.path === "rgb" ? "rgb" : (stats.lumaPath ?? "plane");
+      lumaPath = result.path === "rgb" ? "rgb" : (lumaPath ?? "plane");
 
       return {
         height: result.height,
@@ -453,7 +435,6 @@ export function createDepthPreviewTrackReader(options: {
         return cancelled;
       },
       accept(frame) {
-        stats.framesDecoded += 1;
         delivered += 1;
         lastProgressAt = performance.now();
         if (!flushing) stalled = false;
@@ -613,7 +594,7 @@ export function createDepthPreviewTrackReader(options: {
       return startRun(fromIndex, runOptions);
     },
 
-    getStats: () => ({ ...stats }),
+    lumaPath: () => lumaPath,
 
     dispose() {
       if (disposed) return;

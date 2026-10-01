@@ -252,14 +252,12 @@ codec's error; `readDepthAt` reports `precision: "preview"` and the `step`
 for it.
 
 `renderPreparation.depth` sets the budgets, and
-`resolveMediaSessionDefaults()` reports the timing a session runs on. By
-default the session keeps about 2.25 seconds of preview (twice the 1-second
+By default a session keeps about 2.25 seconds of preview (twice the 1-second
 prefetch, plus a quarter second behind the playhead) at the clip's resolution,
 at least 96 MiB and at most 512 MiB, the same span of exact frames for
 playback within the same bounds (`maxExactPlaybackCacheBytes`), and 128 MiB of
 exact frames at rest, more for clips too large to hold the frame at rest and
-its neighbours twice. A session in `MediaSessionMode.Stream` decodes depth
-0.5 s ahead instead of 1 s, as its mask window cooks 3 s ahead instead of 7. The gate's
+its neighbours twice. The gate's
 `requiredAheadSeconds` caps the lead a stop waits for, never how far depth
 decodes, as it does for masks:
 
@@ -330,10 +328,7 @@ that fail to load hand playback to the preview for good, with a console
 warning.
 
 The diagnostics add a second `depthFrame` artifact with `precision: "exact"`
-for the frames loaded for playback; its `exactPlayback` says whether they are
-what plays (`drawn`), how fast they load (`loadRate` in frames a second while
-loading, `meanLoadMs` per frame, fetch and decode together) and how often
-playback handed back to the preview (`fallbackCount`).
+for the frames loaded for playback.
 
 How to choose: leave `"auto"` unless you know the link and the machine. Pick
 `"exact"` when every value has to be exact, such as for measuring while the
@@ -343,8 +338,8 @@ benchmark's findings (`benchmark/depth/findings.md`) have what each choice
 cost on the Spring clip, locally and on a capped link.
 
 Exact frames shown in a box smaller than they are go up smaller. When the
-host gives `renderPreparation.depth.display` (or `maskFrame.display`, which
-masks use for the same), exact depth that the box cannot show at least twice
+host gives `renderPreparation.maskFrame.display`, which masks use for the
+same, exact depth that the box cannot show at least twice
 over, at its pixel ratio capped as for masks, is decimated by that whole
 factor in the decode workers, and that copy is what goes to the GPU; readouts
 still read the full map. A 4K map in a 1920-wide box at 1x uploads 4 MiB a

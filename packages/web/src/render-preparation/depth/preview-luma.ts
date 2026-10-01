@@ -26,8 +26,6 @@ export interface DepthPreviewLuma {
   readonly width: number;
   readonly height: number;
   readonly path: DepthPreviewLumaPath;
-  /** Time this thread spent on the copy, outside the browser's own awaits. */
-  readonly busyMs: number;
 }
 
 /** A buffer reused from one copy to the next, grown as needed. */
@@ -54,8 +52,6 @@ export async function readVideoFrameLuma(
   const { width, height } = rect;
   const format = frame.format;
   const planar = format !== null && PLANAR_8_BIT_FORMATS.has(format);
-  let started = performance.now();
-  let busyMs = 0;
   let bytes: Uint8Array;
   let plane: PlaneLayout | undefined;
 
@@ -65,11 +61,7 @@ export async function readVideoFrameLuma(
     if (scratch.buffer.byteLength < size)
       scratch.buffer = new ArrayBuffer(size);
 
-    const copied = frame.copyTo(scratch.buffer, { rect });
-
-    busyMs += performance.now() - started;
-    [plane] = await copied;
-    started = performance.now();
+    [plane] = await frame.copyTo(scratch.buffer, { rect });
     bytes = new Uint8Array(scratch.buffer);
   } else {
     // A frame in a layout no copy can read is drawn to a canvas, which
@@ -109,9 +101,7 @@ export async function readVideoFrameLuma(
     }
   }
 
-  busyMs += performance.now() - started;
-
-  return { busyMs, height, luma, path: planar ? "plane" : "rgb", width };
+  return { height, luma, path: planar ? "plane" : "rgb", width };
 }
 
 /** Copies decoded preview frames' luma out, wherever that costs least. */

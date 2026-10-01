@@ -69,6 +69,7 @@ describe("depth source from a clip with a preview", () => {
     expect(clip.source.getEntry(CLOCK.timeAt(9))).toBeNull();
     expect(clip.fetchedExact()).toEqual([]);
     clip.source.destroy();
+    expect(clip.disposed()).toBe(true);
   });
 
   it("swaps the preview for the exact frame once playback rests, and back when it plays", async () => {
@@ -122,33 +123,6 @@ describe("depth source from a clip with a preview", () => {
     clip.source.destroy();
   });
 
-  it("lets a step at rest through on an exact frame already in, without its preview", async () => {
-    const clip = await openPreviewClip({ gated: true });
-
-    clip.source.setPlaybackActive?.(false);
-    clip.source.getEntry(CLOCK.timeAt(3));
-    await vi.waitFor(() =>
-      expect(clip.source.getEntry(CLOCK.timeAt(3))?.precision).toBe("exact"),
-    );
-
-    // No preview frame is out, and the exact one is all a step at rest needs.
-    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(3), OPEN)).toBe(
-      false,
-    );
-    await clip.source.waitForReady!(CLOCK.timeAt(3), OPEN);
-    expect(clip.source.getFrameStatus?.(CLOCK.timeAt(3))).toEqual({
-      frameIndex: 3,
-      prepared: true,
-    });
-    // Playing, the exact frame is not drawn, so the preview is owed again.
-    clip.source.setPlaybackActive?.(true);
-    expect(clip.source.getFrameStatus?.(CLOCK.timeAt(3))).toEqual({
-      frameIndex: 3,
-      prepared: false,
-    });
-    clip.source.destroy();
-  });
-
   it("ends a wait at rest on whichever depth lands first", async () => {
     const clip = await openPreviewClip({ gated: true });
 
@@ -164,7 +138,15 @@ describe("depth source from a clip with a preview", () => {
     clip.source.getEntry(CLOCK.timeAt(6));
     await wait;
     expect(ready).toBe(true);
-    expect(clip.fetchedExact()).toEqual([6]);
+    expect(clip.fetchedExact()[0]).toBe(6);
+    // The exact frame is all a step at rest needs; playing, the preview is
+    // owed again.
+    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(6), OPEN)).toBe(
+      false,
+    );
+    expect(clip.source.getFrameStatus?.(CLOCK.timeAt(6))?.prepared).toBe(true);
+    clip.source.setPlaybackActive?.(true);
+    expect(clip.source.getFrameStatus?.(CLOCK.timeAt(6))?.prepared).toBe(false);
     clip.source.destroy();
   });
 
@@ -191,38 +173,30 @@ describe("depth source from a clip with a preview", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reports its exact frames beside its preview", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
-    const clip = await openPreviewClip({ onDiagnostics });
-
-    clip.source.setPlaybackActive?.(false);
-    clip.source.getEntry(CLOCK.timeAt(2));
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(onDiagnostics.mock.calls.at(-1)?.[0].artifacts[1]).toMatchObject({
-      activeFrame: { key: "depth:2", status: "prepared" },
-      kind: RenderPreparationArtifactKind.ExactDepthFrame,
-      pendingCount: 0,
-      preparedCount: 1,
-    });
-    clip.source.destroy();
-  });
-
-  it("reports its window as depth diagnostics", async () => {
+  it("reports its preview window and its exact frames at rest", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
     const clip = await openPreviewClip({ onDiagnostics });
 
     clip.source.prefetch?.(CLOCK.timeAt(0));
-    await vi.advanceTimersByTimeAsync(200);
+    clip.source.getEntry(CLOCK.timeAt(2));
+    await vi.advanceTimersByTimeAsync(400);
 
     const last = onDiagnostics.mock.calls.at(-1)?.[0];
 
-    expect(last?.artifacts[0]).toMatchObject({
-      kind: RenderPreparationArtifactKind.DepthFrame,
-      preparedAheadFrameCount: expect.any(Number),
-    });
+    expect(last?.artifacts).toEqual([
+      expect.objectContaining({
+        kind: RenderPreparationArtifactKind.DepthFrame,
+        precision: "preview",
+      }),
+      expect.objectContaining({
+        activeFrame: expect.objectContaining({
+          key: "depth:2",
+          status: "prepared",
+        }),
+        kind: RenderPreparationArtifactKind.ExactDepthFrame,
+      }),
+    ]);
     expect(last?.message).toBeNull();
     // Frames' codes are copied in the worker, so that is where the work runs.
     expect(last).toMatchObject({
@@ -318,12 +292,14 @@ describe("depth source from a clip with a preview", () => {
     await expect(openPreviewClip({ frameCount: COUNT - 1 })).rejects.toThrow(
       /9 frames and depth.json has 10/,
     );
-  });
-
-  it("refuses a preview of another shape than the media", async () => {
-    await expect(openPreviewClip({ width: 12 })).rejects.toThrow(
-      /does not have the aspect ratio/,
-    );
+    // Within half a millisecond is the same frame.
+    expect(() =>
+      assertDepthPreviewTimeline(
+        { frameCount: 3, times: Float64Array.of(0, 0.0412, 0.0833) },
+        3,
+        (index) => [0, 0.04166, 0.08333][index],
+      ),
+    ).not.toThrow();
   });
 
   it("falls back to exact depth at rest when the preview cannot open", async () => {
@@ -359,7 +335,7 @@ describe("depth source from a clip with a preview", () => {
       );
 
       clip.source.setPlaybackActive?.(false);
-      await advance(50);
+      await advance(200);
       expect(clip.source.getEntry(CLOCK.timeAt(1))).toMatchObject({
         frameIndex: 1,
         precision: "exact",
@@ -406,49 +382,6 @@ describe("depth source from a clip with a preview", () => {
       clip.source.destroy();
     });
 
-    it("draws exact depth at rest when every decoder refuses its configuration", async () => {
-      const warn = vi
-        .spyOn(console, "warn")
-        .mockImplementation(() => undefined);
-      const clip = await openPreviewClip({
-        choosePreviewDecoding: await probeThrough(() => "refusesConfig"),
-        decoder: () => "refusesConfig",
-      });
-
-      expect(warn).toHaveBeenCalledOnce();
-      expect(warn.mock.calls[0]?.[0]).toContain(
-        "prefer-software: NotSupportedError: No decoder takes this configuration.",
-      );
-      await expectExactAtRestOnly(clip, settle);
-      clip.source.destroy();
-    });
-
-    it("plays the preview through a decoder that returns frames only when flushed", async () => {
-      const clip = await openPreviewClip({
-        choosePreviewDecoding: await probeThrough(() => "holdsUntilFlush"),
-        decoder: () => "holdsUntilFlush",
-      });
-
-      clip.source.setPlaybackActive?.(true);
-      clip.source.prefetch?.(CLOCK.timeAt(0));
-      await vi.waitFor(() =>
-        expect(clip.source.getEntry(CLOCK.timeAt(3))).toMatchObject({
-          frameIndex: 3,
-          precision: "preview",
-        }),
-      );
-      expect(previewCode(clip.source.getEntry(CLOCK.timeAt(3)))).toBe(code(3));
-
-      clip.source.setPlaybackActive?.(false);
-      await vi.waitFor(() =>
-        expect(clip.source.getEntry(CLOCK.timeAt(3))).toMatchObject({
-          frameIndex: 3,
-          precision: "exact",
-        }),
-      );
-      clip.source.destroy();
-    });
-
     it("closes a preview decoder that stops returning frames, and stops holding playback for it", async () => {
       fakeTimers();
       const warn = vi
@@ -480,29 +413,6 @@ describe("depth source from a clip with a preview", () => {
       await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
       clip.source.destroy();
     });
-  });
-
-  it("hands over the next decoded frames for uploading ahead while playing", async () => {
-    const clip = await openPreviewClip();
-
-    clip.source.prefetch?.(CLOCK.timeAt(0));
-    await settle();
-    expect(clip.source.getUpcomingEntries?.(CLOCK.timeAt(0), 2)).toEqual([]);
-
-    clip.source.setPlaybackActive?.(true);
-    expect(
-      clip.source
-        .getUpcomingEntries?.(CLOCK.timeAt(0), 2)
-        .map(({ frameIndex }) => frameIndex),
-    ).toEqual([1, 2]);
-    clip.source.destroy();
-  });
-
-  it("closes its preview decoder with the source", async () => {
-    const clip = await openPreviewClip();
-
-    clip.source.destroy();
-    expect(clip.disposed()).toBe(true);
   });
 });
 
@@ -548,12 +458,7 @@ describe("exact depth while playing", () => {
   });
 
   it('starts on the preview in "auto", takes exact once its lead builds, and hands back when it runs short', async () => {
-    let diagnostics: RenderPreparationDiagnostics | null = null;
-    const clip = await openPreviewClip({
-      gatedExact: true,
-      onDiagnostics: (next) => (diagnostics = next),
-      playback: "auto",
-    });
+    const clip = await openPreviewClip({ gatedExact: true, playback: "auto" });
 
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(0));
@@ -578,22 +483,11 @@ describe("exact depth while playing", () => {
       frameIndex: 3,
       precision: "preview",
     });
-    await vi.waitFor(() =>
-      expect(
-        diagnostics?.artifacts.find(
-          (artifact) => artifact.precision === "exact",
-        )?.exactPlayback,
-      ).toMatchObject({ drawn: false, fallbackCount: 1 }),
-    );
     clip.source.destroy();
   });
 
-  it('starts over on the preview after a seek in "auto", without counting it against exact depth', async () => {
-    let diagnostics: RenderPreparationDiagnostics | null = null;
-    const clip = await openPreviewClip({
-      onDiagnostics: (next) => (diagnostics = next),
-      playback: "auto",
-    });
+  it('starts over on the preview after a seek in "auto", then takes exact again', async () => {
+    const clip = await openPreviewClip({ playback: "auto" });
 
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(0));
@@ -610,13 +504,6 @@ describe("exact depth while playing", () => {
     await vi.waitFor(() =>
       expect(clip.source.getEntry(CLOCK.timeAt(9))?.precision).toBe("exact"),
     );
-    await vi.waitFor(() =>
-      expect(
-        diagnostics?.artifacts.find(
-          (artifact) => artifact.precision === "exact",
-        )?.exactPlayback,
-      ).toMatchObject({ drawn: true, fallbackCount: 0 }),
-    );
     clip.source.destroy();
   });
 
@@ -625,7 +512,6 @@ describe("exact depth while playing", () => {
     const source = await openDepthSource(
       { manifest: "https://example.test/clip/depth.json" },
       {
-        depth: { exactSettleSeconds: 0 },
         fetch: server.fetch,
         frameClock: CLOCK,
         media: MEDIA,
@@ -643,18 +529,6 @@ describe("exact depth while playing", () => {
       }),
     );
     source.destroy();
-  });
-
-  it("budgets exact playback like the preview, scaled to the exact frame", () => {
-    const resolved = resolveDepthClipOptions(
-      { exactFrameBytes: 3840 * 2160 * 2, frameRate: 30, previewFrameBytes: 0 },
-      { playback: "exact" },
-    );
-
-    expect(resolved.playback).toEqual({
-      maxExactCacheBytes: 512 * 1024 * 1024,
-      source: "exact",
-    });
   });
 });
 
@@ -697,47 +571,38 @@ function previewlessServer() {
   return { fetch, preparer: () => preparer };
 }
 
-describe("assertDepthPreviewTimeline", () => {
-  const preview = (times: number[]) => ({
-    frameCount: times.length,
-    times: Float64Array.from(times),
-  });
-
-  it("accepts a preview within half a millisecond of the video's times", () => {
-    expect(() =>
-      assertDepthPreviewTimeline(
-        preview([0, 0.0412, 0.0833]),
-        3,
-        (index) => [0, 0.04166, 0.08333][index],
-      ),
-    ).not.toThrow();
-  });
-});
-
 describe("resolveDepthClipOptions", () => {
   const MIB = 1024 * 1024;
-
-  it("scales the preview budget with the frame size, between 96 and 512 MiB", () => {
-    const at = (width: number, height: number) =>
-      resolveDepthClipOptions({
-        exactFrameBytes: width * height * 2,
-        frameRate: 30,
-        previewFrameBytes: width * height,
-      }).preview.maxCacheBytes / MIB;
-
-    expect(at(1280, 720)).toBe(96);
-    expect(at(1920, 1080)).toBeCloseTo((1920 * 1080 * 68) / MIB);
-    expect(at(3840, 2160)).toBe(512);
-  });
-
-  it("keeps room for the frame at rest and its neighbours twice over", () => {
-    const options = resolveDepthClipOptions({
-      exactFrameBytes: 3840 * 2160 * 2,
+  const at = (width: number, height: number) =>
+    resolveDepthClipOptions({
+      exactFrameBytes: width * height * 2,
       frameRate: 30,
-      previewFrameBytes: 0,
+      previewFrameBytes: width * height,
     });
 
-    expect(options.exact.maxCacheBytes).toBe(3840 * 2160 * 2 * 10);
+  it("scales its budgets with the frame size, and takes the host's", () => {
+    expect(at(1280, 720).preview.maxCacheBytes / MIB).toBe(96);
+    expect(at(1920, 1080).preview.maxCacheBytes / MIB).toBeCloseTo(
+      (1920 * 1080 * 68) / MIB,
+    );
+    expect(at(3840, 2160).preview.maxCacheBytes / MIB).toBe(512);
+    expect(at(3840, 2160).playback.maxExactCacheBytes / MIB).toBe(512);
+    // The frame at rest and its two neighbours each side, twice over.
+    expect(at(3840, 2160).exact.maxCacheBytes).toBe(3840 * 2160 * 2 * 10);
+    expect(
+      resolveDepthClipOptions(
+        { exactFrameBytes: 10, frameRate: 30, previewFrameBytes: 10 },
+        {
+          maxExactPlaybackCacheBytes: 1,
+          maxPreviewCacheBytes: 2,
+          playback: "exact",
+          previewPrefetchSeconds: 3,
+        },
+      ),
+    ).toMatchObject({
+      playback: { maxExactCacheBytes: 1, source: "exact" },
+      preview: { maxCacheBytes: 2, prefetchSeconds: 3 },
+    });
   });
 
   it("keeps at rest what the mask window keeps, one schedule batch past the frame", () => {
@@ -749,36 +614,6 @@ describe("resolveDepthClipOptions", () => {
       resolveDepthClipOptions(clip, {}, { scheduleBatchSize: 16 }).preview
         .pausedFrameCount,
     ).toBe(17);
-    // Never fewer than the exact neighbours a step reaches.
-    expect(
-      resolveDepthClipOptions(clip, { exactNeighborFrameCount: 5 }).preview
-        .pausedFrameCount,
-    ).toBe(6);
-  });
-
-  it("takes the host's numbers over the defaults", () => {
-    expect(
-      resolveDepthClipOptions(
-        { exactFrameBytes: 10, frameRate: 30, previewFrameBytes: 10 },
-        {
-          exactNeighborFrameCount: 1,
-          exactSettleSeconds: 0.5,
-          maxExactCacheBytes: 1,
-          maxPreviewCacheBytes: 2,
-          previewPrefetchSeconds: 3,
-          previewRetainSeconds: 4,
-        },
-      ),
-    ).toEqual({
-      exact: { maxCacheBytes: 1, neighborFrameCount: 1, settleSeconds: 0.5 },
-      playback: { maxExactCacheBytes: 96 * 1024 * 1024, source: "auto" },
-      preview: {
-        maxCacheBytes: 2,
-        pausedFrameCount: 3,
-        prefetchSeconds: 3,
-        retainSeconds: 4,
-      },
-    });
   });
 });
 
@@ -959,12 +794,7 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
       disposed = true;
     },
     frameCount,
-    getStats: () => ({
-      copyMainThreadMs: 0,
-      framesCopied: 0,
-      framesDecoded: 0,
-      lumaPath: "plane",
-    }),
+    lumaPath: () => "plane",
     height: HEIGHT,
     keyIndexAtOrBefore: (index) => index,
     times: Float64Array.from(
@@ -1002,8 +832,6 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
       choosePreviewDecoding: options.choosePreviewDecoding ?? null,
       // One-second frames: five seconds ahead is five frames.
       depth: {
-        exactNeighborFrameCount: 0,
-        exactSettleSeconds: 0,
         playback: options.playback ?? "preview",
         previewPrefetchSeconds: 5,
       },

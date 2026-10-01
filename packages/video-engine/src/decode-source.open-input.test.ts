@@ -269,74 +269,69 @@ describe("openInput frame timeline", () => {
     expect(firstTimestampS).toBe(timeline.timeAt(0));
   });
 
-  it("a last frame its packet gives no duration ends where the container says the track ends", async () => {
-    trackConfig = {
-      canDecode: true,
-      firstTimestamp: 0,
-      lastPacketDuration: 0,
-      packetCount: 3,
-      statedDurationS: 0.2,
-    };
-    const { durationS, timeline } = (await openDecodeSource({ source: SOURCE }))
-      .track;
-
-    expect(timeline.endTicksAt(2)).toBe(120);
-    expect(durationS).toBe(0.2);
-  });
-
-  it("a lone frame its packet gives no duration lasts until the container's stated end", async () => {
-    trackConfig = {
-      canDecode: true,
-      firstTimestamp: 0,
-      lastPacketDuration: 0,
-      packetCount: 1,
-      statedDurationS: 1,
-    };
-    const { durationS, timeline } = (await openDecodeSource({ source: SOURCE }))
-      .track;
-
-    expect(timeline.endTicksAt(0)).toBe(TICK_RATE);
-    expect(durationS).toBe(1);
-  });
-
   it.each([
-    { stated: "no end", statedDurationS: null },
     {
-      stated: "an end no later than the frame's start",
+      last: "a last frame without a duration",
+      packetCount: 3,
+      lastPacketDuration: 0,
+      statedDurationS: 0.2,
+      endTicks: 120,
+      durationS: 0.2,
+    },
+    {
+      last: "a lone frame without a duration",
+      packetCount: 1,
+      lastPacketDuration: 0,
+      statedDurationS: 1,
+      endTicks: TICK_RATE,
+      durationS: 1,
+    },
+    {
+      last: "a last frame without a duration, and no stated end,",
+      packetCount: 3,
+      lastPacketDuration: 0,
+      statedDurationS: null,
+      endTicks: 60,
+      durationS: 0.1,
+    },
+    {
+      last: "a last frame without a duration, and a stated end no later than its start,",
+      packetCount: 3,
+      lastPacketDuration: 0,
       statedDurationS: 2 / 30,
+      endTicks: 60,
+      durationS: 0.1,
+    },
+    {
+      last: "a last frame with its own duration",
+      packetCount: 3,
+      lastPacketDuration: undefined,
+      statedDurationS: 0.5,
+      endTicks: 60,
+      durationS: 0.1,
     },
   ])(
-    "with $stated stated, a last frame without a duration lasts as long as the one before it",
-    async ({ statedDurationS }) => {
+    "$last ends at its own end, else the container's stated end, else one frame on",
+    async ({
+      packetCount,
+      lastPacketDuration,
+      statedDurationS,
+      endTicks,
+      durationS,
+    }) => {
       trackConfig = {
         canDecode: true,
         firstTimestamp: 0,
-        lastPacketDuration: 0,
-        packetCount: 3,
+        lastPacketDuration,
+        packetCount,
         statedDurationS,
       };
-      const { durationS, timeline } = (
-        await openDecodeSource({ source: SOURCE })
-      ).track;
+      const { track } = await openDecodeSource({ source: SOURCE });
 
-      expect(timeline.endTicksAt(2)).toBe(60);
-      expect(durationS).toBe(0.1);
+      expect(track.timeline.endTicksAt(packetCount - 1)).toBe(endTicks);
+      expect(track.durationS).toBe(durationS);
     },
   );
-
-  it("a last frame's own packet duration outranks the container's stated end", async () => {
-    trackConfig = {
-      canDecode: true,
-      firstTimestamp: 0,
-      packetCount: 3,
-      statedDurationS: 0.5,
-    };
-    const { durationS, timeline } = (await openDecodeSource({ source: SOURCE }))
-      .track;
-
-    expect(timeline.endTicksAt(2)).toBe(60);
-    expect(durationS).toBe(0.1);
-  });
 });
 
 describe("openInput rotation", () => {

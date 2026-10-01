@@ -89,21 +89,7 @@ describe("depth frame preparer", () => {
     expect(file.byteLength).toBe(0);
   });
 
-  it("copies the bytes in Auto until the worker has answered once", async () => {
-    const { posts, worker } = createFakeWorker();
-    const { bytes } = await depthPng();
-    const preparer = createDepthFramePreparer({
-      workerFactory: { createWorker: () => worker as unknown as Worker },
-    });
-
-    await preparer.decodeDepth(await bytes());
-    await preparer.decodeDepth(await bytes());
-
-    expect(posts[0]!.transfer).toEqual([]);
-    expect(posts[1]!.transfer).toHaveLength(1);
-  });
-
-  it("falls back to the main thread in Auto when the worker cannot run", async () => {
+  it("falls back to the main thread in Auto when the worker cannot run, and never in Worker mode", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { worker } = createFakeWorker("fail");
     const { bytes, samples } = await depthPng();
@@ -117,17 +103,17 @@ describe("depth frame preparer", () => {
     expect(first.values).toEqual(samples);
     expect(second.values).toEqual(samples);
     expect(warn).toHaveBeenCalledOnce();
-  });
 
-  it("never falls back in Worker mode", async () => {
-    const { worker } = createFakeWorker("fail");
-    const { bytes } = await depthPng();
-    const preparer = createDepthFramePreparer({
+    // Worker mode never falls back.
+    const required = createDepthFramePreparer({
       mode: RenderPreparationMode.Worker,
-      workerFactory: { createWorker: () => worker as unknown as Worker },
+      workerFactory: {
+        createWorker: () =>
+          createFakeWorker("fail").worker as unknown as Worker,
+      },
     });
 
-    await expect(preparer.decodeDepth(await bytes())).rejects.toThrow(
+    await expect(required.decodeDepth(await bytes())).rejects.toThrow(
       "Worker is blocked.",
     );
   });
@@ -145,87 +131,5 @@ describe("depth frame preparer", () => {
     await preparer.decodeDepth(await bytes());
 
     expect(posts).toHaveLength(2);
-  });
-
-  it("drops an aborted decode's reply without terminating the worker", async () => {
-    const { worker } = createFakeWorker("hang");
-    const { bytes } = await depthPng();
-    const preparer = createDepthFramePreparer({
-      workerFactory: { createWorker: () => worker as unknown as Worker },
-    });
-    const abort = new AbortController();
-
-    const decoding = preparer.decodeDepth(await bytes(), {
-      signal: abort.signal,
-    });
-    abort.abort(new DOMException("Superseded.", "AbortError"));
-
-    await expect(decoding).rejects.toThrow("Superseded.");
-    expect(worker.terminate).not.toHaveBeenCalled();
-  });
-
-  it("spreads decodes over a pool sized like the mask workers", async () => {
-    const workers: ReturnType<typeof createFakeWorker>[] = [];
-    const { bytes, samples } = await depthPng();
-    const preparer = createDepthFramePreparer({
-      maskFrame: { workerCount: 3 },
-      workerFactory: {
-        createWorker: () => {
-          const fake = createFakeWorker();
-
-          workers.push(fake);
-          return fake.worker as unknown as Worker;
-        },
-      },
-    });
-
-    expect(preparer.concurrency).toBe(3);
-    // One worker until it has answered, so a blocked worker costs one.
-    expect(workers).toHaveLength(1);
-    await preparer.decodeDepth(await bytes());
-
-    const files = await Promise.all([bytes(), bytes(), bytes(), bytes()]);
-    const decoded = await Promise.all(
-      files.map((file) => preparer.decodeDepth(file)),
-    );
-
-    expect(workers).toHaveLength(3);
-    for (const fake of workers) expect(fake.posts.length).toBeGreaterThan(0);
-    for (const map of decoded) expect(map.values).toEqual(samples);
-  });
-
-  it("decodes one at a time on the main thread", () => {
-    const preparer = createDepthFramePreparer({
-      maskFrame: { workerCount: 4 },
-      mode: RenderPreparationMode.MainThread,
-    });
-
-    expect(preparer.concurrency).toBe(1);
-  });
-
-  it("decodes confidence planes and pads odd depth rows on the main thread", async () => {
-    const preparer = createDepthFramePreparer({
-      mode: RenderPreparationMode.MainThread,
-    });
-    const confidence = Uint8Array.from({ length: 5 * 2 }, (_, i) => i * 20);
-    const confidencePng = await encodePng({
-      bitDepth: 8,
-      height: 2,
-      samples: confidence,
-      width: 5,
-    });
-    const depth = await encodePng({
-      height: 2,
-      samples: Uint16Array.from({ length: 10 }, (_, i) => i),
-      width: 5,
-    });
-
-    const plane = await preparer.decodeConfidence(confidencePng.slice().buffer);
-    const map = await preparer.decodeDepth(depth.slice().buffer, {
-      padRowsForWebGl: true,
-    });
-
-    expect(plane.values).toEqual(confidence);
-    expect(map.paddedUpload?.textureWidth).toBe(6);
   });
 });

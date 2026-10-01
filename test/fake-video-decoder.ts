@@ -13,12 +13,14 @@ import type { TrackFrameIndex } from "../packages/web/src/media/track-frame-inde
  *   which decoders that wait for more input do at the end of a short clip.
  * - `silent` returns nothing, and its `flush()` never settles.
  * - `refusesConfig` throws from `configure()`.
+ * - `failsOnce` is `outputs`, except that the first decoder made reports an
+ *   error in place of its second frame, as one lost to a GPU reset does.
  *
  * Each takes only a key frame after `configure()` or `flush()`, as WebCodecs
- * requires.
+ * requires, and drops the frames it still owed on `reset()`.
  */
 export type FakeDecoderBehaviour =
-  "outputs" | "holdsUntilFlush" | "silent" | "refusesConfig";
+  "outputs" | "holdsUntilFlush" | "silent" | "refusesConfig" | "failsOnce";
 
 /** A clip of `frameCount` frames, each decoding to `luma(index)`. */
 export interface FakeDecoderClip {
@@ -28,6 +30,8 @@ export interface FakeDecoderClip {
   readonly height: number;
   readonly frameRate: number;
   readonly luma: (index: number) => Uint8Array;
+  /** Packet reads wait on this, as reads over a slow network do. */
+  readonly packetsReady?: Promise<void>;
 }
 
 /**
@@ -115,7 +119,7 @@ export function openFakeDepthPreviewTrack(
     copier: options.copier,
     correction: options.correction,
     height: clip.height,
-    packetSink: createFakePacketSink(timeline) as never,
+    packetSink: createFakePacketSink(timeline, clip.packetsReady) as never,
     timeline,
     width: clip.width,
   });
@@ -130,7 +134,10 @@ interface FakeChunk {
   readonly type: "key" | "delta";
 }
 
-function createFakePacketSink(timeline: TrackFrameIndex) {
+function createFakePacketSink(
+  timeline: TrackFrameIndex,
+  packetsReady?: Promise<void>,
+) {
   const keys = new Set(timeline.keyIndices);
   const packet = (index: number) => ({
     index,
@@ -160,6 +167,7 @@ function createFakePacketSink(timeline: TrackFrameIndex) {
         index < timeline.times.length;
         index += 1
       ) {
+        await packetsReady;
         yield packet(index);
       }
     },
@@ -175,6 +183,9 @@ function createFakeDecoderClass(
   class FakeVideoDecoder {
     state: CodecState = "unconfigured";
     decodeQueueSize = 0;
+    private readonly serial = (log.created += 1);
+    /** Bumped by `reset()`, so frames owed before it never come out. */
+    private generation = 0;
     private needsKey = true;
     private held: number[] = [];
 
@@ -183,9 +194,7 @@ function createFakeDecoderClass(
         output: (frame: VideoFrame) => void;
         error: (error: DOMException) => void;
       },
-    ) {
-      log.created += 1;
-    }
+    ) {}
 
     configure(config: VideoDecoderConfig) {
       if (behaviour === "refusesConfig") {
@@ -216,7 +225,11 @@ function createFakeDecoderClass(
         this.held.push(chunk.timestamp);
         return;
       }
-      queueMicrotask(() => this.emit(chunk.timestamp));
+      const { generation } = this;
+
+      queueMicrotask(() => {
+        if (generation === this.generation) this.emit(chunk.timestamp);
+      });
     }
 
     flush(): Promise<void> {
@@ -229,6 +242,7 @@ function createFakeDecoderClass(
     }
 
     reset() {
+      this.generation += 1;
       this.held = [];
       this.state = "unconfigured";
     }
@@ -240,6 +254,11 @@ function createFakeDecoderClass(
 
     private emit(timestamp: number) {
       if (this.state !== "configured") return;
+      if (behaviour === "failsOnce" && this.serial === 1 && log.outputs > 0) {
+        this.state = "closed";
+        this.init.error(new DOMException("Decoder lost.", "EncodingError"));
+        return;
+      }
 
       const index = timeline.sourceTimes.findIndex(
         (time) => Math.abs(time - timestamp / 1_000_000) < 1e-6,

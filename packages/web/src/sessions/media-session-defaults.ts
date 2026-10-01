@@ -1,7 +1,3 @@
-import {
-  DEFAULT_DEPTH_TIMING_OPTIONS,
-  STREAM_DEPTH_TIMING_OPTIONS,
-} from "#render-preparation/depth/options";
 import type {
   DetectionBufferOptions,
   DetectionFrameRetentionOptions,
@@ -157,12 +153,6 @@ export function resolveMediaSessionDefaults(
         };
   const renderPreparation = {
     ...userRenderPreparation,
-    depth: {
-      ...(mode === SessionMode.Stream
-        ? STREAM_DEPTH_TIMING_OPTIONS
-        : DEFAULT_DEPTH_TIMING_OPTIONS),
-      ...userRenderPreparation?.depth,
-    },
     maskFrame: {
       ...MASK_FRAME_DEFAULTS,
       maxCacheFrameCount: secondsToFrameCount(

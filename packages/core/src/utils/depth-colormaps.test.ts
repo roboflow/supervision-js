@@ -25,7 +25,7 @@ function lightness([r, g, b]: number[]): number {
 }
 
 describe("depth colour tables", () => {
-  it("builds 256 opaque RGBA entries for every colormap", () => {
+  it("builds 256 opaque RGBA entries for every colormap, and no others", () => {
     for (const name of Object.values(DepthColormap)) {
       const lut = createDepthColormapLut(name);
 
@@ -34,34 +34,25 @@ describe("depth colour tables", () => {
         expect(lut[index * 4 + 3]).toBe(255);
       }
     }
+    expect(isDepthColormap("jet")).toBe(false);
+    expect(() => createDepthColormapLut("jet" as DepthColormap)).toThrow(
+      RangeError,
+    );
   });
 
-  it("uses Google's published Turbo table, not a polynomial fit", () => {
-    const lut = createDepthColormapLut("turbo");
-
-    expect(entry(lut, 0)).toEqual([48, 18, 59, 255]);
-    expect(entry(lut, 255)).toEqual([122, 4, 3, 255]);
-  });
-
-  it("matches matplotlib's tables at their ends", () => {
-    expect(entry(createDepthColormapLut("viridis"), 0)).toEqual([
-      68, 1, 84, 255,
-    ]);
-    expect(entry(createDepthColormapLut("viridis"), 255)).toEqual([
-      253, 231, 37, 255,
-    ]);
-    expect(entry(createDepthColormapLut("cividis"), 0)).toEqual([
-      0, 34, 78, 255,
-    ]);
-    expect(entry(createDepthColormapLut("inferno"), 255)).toEqual([
-      252, 255, 164, 255,
-    ]);
-    expect(entry(createDepthColormapLut("magma"), 255)).toEqual([
-      252, 253, 191, 255,
-    ]);
-    expect(entry(createDepthColormapLut("grayscale"), 128)).toEqual([
-      128, 128, 128, 255,
-    ]);
+  it("uses Google's published Turbo table and matplotlib's tables", () => {
+    for (const [name, index, rgba] of [
+      ["turbo", 0, [48, 18, 59, 255]],
+      ["turbo", 255, [122, 4, 3, 255]],
+      ["viridis", 0, [68, 1, 84, 255]],
+      ["viridis", 255, [253, 231, 37, 255]],
+      ["cividis", 0, [0, 34, 78, 255]],
+      ["inferno", 255, [252, 255, 164, 255]],
+      ["magma", 255, [252, 253, 191, 255]],
+      ["grayscale", 128, [128, 128, 128, 255]],
+    ] as const) {
+      expect(entry(createDepthColormapLut(name), index), name).toEqual(rgba);
+    }
   });
 
   it("rises in lightness wherever the map is meant to", () => {
@@ -86,31 +77,22 @@ describe("depth colour tables", () => {
       }
     }
   });
-
-  it("rejects unknown names", () => {
-    expect(isDepthColormap("jet")).toBe(false);
-    expect(() => createDepthColormapLut("jet" as DepthColormap)).toThrow(
-      RangeError,
-    );
-  });
 });
 
 describe("depth colormap colours", () => {
-  it("reads the renderer's table far end first, near end last", () => {
-    const colors = depthColormapColors("turbo", 3);
+  it("samples the renderer's table far end first, near end last", () => {
+    const [r, g, b] = entry(createDepthColormapLut("magma"), 128);
 
-    expect(colors).toEqual(["#30123b", expect.any(String), "#7a0403"]);
-    expect(depthColormapColors("grayscale", 2)).toEqual(["#000000", "#ffffff"]);
-    expect(depthColormapColors("viridis")).toHaveLength(16);
-  });
-
-  it("matches the table entry it samples", () => {
-    const lut = createDepthColormapLut("magma");
-    const [r, g, b] = entry(lut, 128);
-
+    expect(depthColormapColors("turbo", 3)).toEqual([
+      "#30123b",
+      expect.any(String),
+      "#7a0403",
+    ]);
     expect(depthColormapColors("magma", 3)[1]).toBe(
       `#${[r, g, b].map((channel) => channel!.toString(16).padStart(2, "0")).join("")}`,
     );
+    expect(depthColormapColors("grayscale", 2)).toEqual(["#000000", "#ffffff"]);
+    expect(depthColormapColors("viridis")).toHaveLength(16);
   });
 
   it("rejects an unknown colormap and a stop count outside 2 to 256", () => {

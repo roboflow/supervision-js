@@ -142,7 +142,9 @@ export async function openDepthClip(
               },
             ]
           : []),
-        ...(exactPlayback ? [exactPlayback.diagnostics()] : []),
+        ...(exactWindow
+          ? [{ ...exactWindow.getDiagnostics(), precision: "exact" as const }]
+          : []),
         atRest.diagnostics(),
       ],
       // The decoder runs where the browser puts it; copying its codes out

@@ -55,27 +55,22 @@ export function rememberPreparedDepthUpload(
   preparedUploads.set(map, upload);
 }
 
-const HOST_IS_LITTLE_ENDIAN =
-  new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
-
 /**
  * Exact samples go up as two unorm bytes per texel, low byte in red, and the
  * shader rebuilds `red + 256 * green`. Pixi cannot upload a 16-bit integer
  * texture on WebGL, and a half float cannot hold every 1/256 step.
- *
- * On a little-endian host a `Uint16Array` already is those bytes, so aligned
- * rows go up without a copy.
+ * Every supported browser runs little-endian, where a `Uint16Array` already
+ * is those bytes, so aligned rows go up without a copy.
  */
 export function createPackedDepthUpload(
   values: Uint16Array,
   width: number,
   height: number,
   acceptsUnalignedRows: boolean,
-  littleEndian = HOST_IS_LITTLE_ENDIAN,
 ): DepthTextureUpload {
   const textureWidth = alignedWidth(width, 2, acceptsUnalignedRows);
 
-  if (littleEndian && textureWidth === width) {
+  if (textureWidth === width) {
     return {
       bytes: new Uint8Array(
         values.buffer,
@@ -88,27 +83,10 @@ export function createPackedDepthUpload(
   }
 
   const bytes = new Uint8Array(textureWidth * height * 2);
-
-  if (littleEndian) {
-    const texels = new Uint16Array(bytes.buffer);
-
-    for (let y = 0; y < height; y += 1) {
-      texels.set(values.subarray(y * width, (y + 1) * width), y * textureWidth);
-    }
-
-    return { bytes, format: "rg8unorm", textureWidth };
-  }
+  const texels = new Uint16Array(bytes.buffer);
 
   for (let y = 0; y < height; y += 1) {
-    const source = y * width;
-    const target = y * textureWidth * 2;
-
-    for (let x = 0; x < width; x += 1) {
-      const value = values[source + x];
-
-      bytes[target + x * 2] = value & 0xff;
-      bytes[target + x * 2 + 1] = value >> 8;
-    }
+    texels.set(values.subarray(y * width, (y + 1) * width), y * textureWidth);
   }
 
   return { bytes, format: "rg8unorm", textureWidth };

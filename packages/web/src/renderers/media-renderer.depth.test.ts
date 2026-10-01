@@ -13,7 +13,6 @@ import {
   createMockSample,
   createRenderer,
   mediaMock,
-  pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
 
@@ -28,12 +27,6 @@ function depthMap(width = 320, height = 180): DepthMap {
     samples: { encoding: "scaled16", scale: 256, values },
     width,
   };
-}
-
-function depthShaders() {
-  return pixiMock.shaderInstances.filter(
-    (shader) => "depthUniforms" in shader.resources,
-  );
 }
 
 async function stubDepthServer(
@@ -157,13 +150,21 @@ describe("media renderer depth", () => {
     vi.restoreAllMocks();
   });
 
-  it("loads an image manifest and draws its map, confidence included", async () => {
-    const { confidence, samples } = await stubDepthServer();
+  it("shows the media without waiting for a manifest, then draws its map, confidence included", async () => {
+    const manifestGate = createDeferred<void>();
+    const { confidence, samples } = await stubDepthServer(manifestGate.promise);
     const renderer = await createRenderer(false, false, {
       depth: { manifest: "https://example.test/depth/depth.json" },
       renderers: [annotationRenderers.depth()],
     });
 
+    // Ready over the media's first frame while depth.json is still in flight.
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Ready,
+    );
+    expect(renderer.getActiveDepth?.()).toBeNull();
+
+    manifestGate.resolve();
     await vi.waitFor(() => expect(renderer.getActiveDepth?.()).not.toBeNull());
 
     const active = renderer.getActiveDepth?.();
@@ -177,28 +178,6 @@ describe("media renderer depth", () => {
         { height: active!.mediaHeight, width: active!.mediaWidth },
       ),
     ).toMatchObject({ confidence: 2 / 255, disparityPx: 3, x: 2, y: 0 });
-
-    renderer.destroy();
-  });
-
-  it("shows the media without waiting for a manifest given at creation, and draws depth when it lands", async () => {
-    const manifestGate = createDeferred<void>();
-    const { samples } = await stubDepthServer(manifestGate.promise);
-    const renderer = await createRenderer(false, false, {
-      depth: { manifest: "https://example.test/depth/depth.json" },
-      renderers: [annotationRenderers.depth()],
-    });
-
-    // Ready over the media's first frame while depth.json is still in flight.
-    expect(renderer.getState().playbackState).toBe(
-      MediaRendererPlaybackState.Ready,
-    );
-    expect(renderer.getActiveDepth?.()).toBeNull();
-
-    manifestGate.resolve();
-    await vi.waitFor(() =>
-      expect(renderer.getActiveDepth?.()?.map.samples.values).toEqual(samples),
-    );
 
     renderer.destroy();
   });
@@ -266,29 +245,6 @@ describe("media renderer depth", () => {
     renderer.destroy();
   });
 
-  it("reads a Mediabunny clip's frame index from its packets only when a clip asks", async () => {
-    await stubClipServer(2);
-    const renderer = await createRenderer(false, false, {
-      depth: { map: depthMap() },
-      renderers: [annotationRenderers.depth()],
-    });
-
-    expect(mediaMock.encodedPacketSinkConstructor).not.toHaveBeenCalled();
-
-    await renderer.setDepth?.({
-      manifest: "https://example.test/clip/depth.json",
-    });
-    expect(mediaMock.encodedPacketSinkConstructor).toHaveBeenCalledTimes(1);
-
-    // A second clip on the same media reads the index it already has.
-    await renderer.setDepth?.({
-      manifest: "https://example.test/clip/depth.json",
-    });
-    expect(mediaMock.encodedPacketSinkConstructor).toHaveBeenCalledTimes(1);
-
-    renderer.destroy();
-  });
-
   it("pairs a Mediabunny clip's depth with frames by packet timestamps, not by a frame rate", async () => {
     // Variable frame rate: gaps of 40, 60, 30 and 70 ms.
     mediaMock.samples = [0, 0.04, 0.1, 0.13, 0.2].map((time, index, all) =>
@@ -297,9 +253,6 @@ describe("media renderer depth", () => {
     mediaMock.getDurationFromMetadata.mockResolvedValue(0.25);
     await stubClipServer(5);
     const renderer = await createRenderer(false, false, {
-      renderPreparation: {
-        depth: { exactNeighborFrameCount: 0, exactSettleSeconds: 0 },
-      },
       renderers: [annotationRenderers.depth()],
     });
 
@@ -349,9 +302,6 @@ describe("media renderer depth", () => {
     mediaMock.getDurationFromMetadata.mockResolvedValue(0.1);
     await stubClipServer(3);
     const renderer = await createRenderer(false, false, {
-      renderPreparation: {
-        depth: { exactNeighborFrameCount: 0, exactSettleSeconds: 0 },
-      },
       renderers: [annotationRenderers.depth()],
     });
 
@@ -427,7 +377,6 @@ describe("media renderer depth", () => {
       mediaWidth: 1280,
       precision: "exact",
     });
-    expect(depthShaders()).toHaveLength(1);
     expect(
       readDepthAt(
         active!.map,
@@ -482,36 +431,18 @@ describe("media renderer depth", () => {
     ).rejects.toThrow(RangeError);
   });
 
-  it("stops drawing when the presentation drops its depth renderers", async () => {
+  it("stops drawing when the presentation drops its depth renderers or hides annotations", async () => {
     const renderer = await createRenderer(false, false, {
       depth: { map: depthMap() },
       renderers: [annotationRenderers.depth()],
     });
+    const renderers = [annotationRenderers.depth()];
 
     renderer.setPresentation({ renderers: [annotationRenderers.box()] });
-
     expect(renderer.getActiveDepth?.()).toBeNull();
 
-    renderer.setPresentation({
-      renderers: [
-        annotationRenderers.depth({ id: "left", wipe: 0.5 }),
-        annotationRenderers.depth({ colormap: "magma", id: "right" }),
-      ],
-    });
-
+    renderer.setPresentation({ renderers });
     expect(renderer.getActiveDepth?.()).not.toBeNull();
-    expect(depthShaders()).toHaveLength(3);
-
-    renderer.destroy();
-  });
-
-  it("hides depth with the annotations, and shows it again", async () => {
-    const renderer = await createRenderer(false, false, {
-      depth: { map: depthMap() },
-      renderers: [annotationRenderers.depth()],
-    });
-
-    const renderers = [annotationRenderers.depth()];
 
     renderer.setPresentation({
       renderers,

@@ -137,7 +137,6 @@ const mockState = vi.hoisted(() => {
     canRead: vi.fn(async () => true),
     computePacketStats: vi.fn(async () => ({ averagePacketRate: 25 })),
     dispose: vi.fn(),
-    encodedPacketSinkConstructor: vi.fn(),
     format: { mimeType: "video/mp4", name: "MP4" },
     getAudioTracks: vi.fn(async () => mediaMock.audioTracks),
     getDisplayHeight: vi.fn(async () => 720),
@@ -155,10 +154,6 @@ const mockState = vi.hoisted(() => {
       done: true as const,
       value: undefined,
     })),
-    /** The track's packet table; unset, one key packet per mock sample. */
-    packets: undefined as
-      | Array<{ duration: number; timestamp: number; type: "key" | "delta" }>
-      | undefined,
     primaryVideoTrack: {} as Record<string, unknown>,
     sampleNextCalls: [] as number[],
     samples: [] as MockVideoSample[],
@@ -577,21 +572,14 @@ vi.mock("mediabunny", () => {
     }
   }
 
+  /** One key packet per mock sample. */
   class EncodedPacketSink {
-    constructor(track: unknown) {
-      mediaMock.encodedPacketSinkConstructor(track);
-    }
-
     async *packets() {
-      const packets =
-        mediaMock.packets ??
-        mediaMock.samples.map((sample) => ({
-          duration: sample.duration,
-          timestamp: sample.timestamp,
-          type: "key" as const,
-        }));
-
-      yield* packets;
+      yield* mediaMock.samples.map((sample) => ({
+        duration: sample.duration,
+        timestamp: sample.timestamp,
+        type: "key" as const,
+      }));
     }
   }
 
@@ -690,8 +678,6 @@ export function resetMocks() {
   mediaMock.getMimeType.mockClear();
   mediaMock.getMimeType.mockResolvedValue('video/mp4; codecs="avc1.42e01e"');
   mediaMock.getPrimaryVideoTrack.mockClear();
-  mediaMock.encodedPacketSinkConstructor.mockClear();
-  mediaMock.packets = undefined;
   mediaMock.getSample.mockClear();
   mediaMock.getSample.mockImplementation(async (timestamp: number) => {
     return (

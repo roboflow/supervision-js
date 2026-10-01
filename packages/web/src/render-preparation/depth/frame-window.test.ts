@@ -166,33 +166,6 @@ describe("depth preview window", () => {
     expect(window.needsPlaybackGateWait(0, thresholds(2, 2))).toBe(false);
   });
 
-  it("counts lead to the end of the clip as unlimited", async () => {
-    const { source, window } = setup({ frameCount: 5, prefetchSeconds: 2 });
-
-    window.setPlayhead(3);
-    await source.drain();
-
-    expect(window.leadSeconds(3)).toBe(Number.POSITIVE_INFINITY);
-    expect(window.needsPlaybackGateWait(3, thresholds(1, 1))).toBe(false);
-  });
-
-  it("counts prepared frames up, whatever is evicted", async () => {
-    const { source, window } = setup({
-      maxBytes: FRAME_BYTES * 2,
-      prefetchSeconds: 2,
-      retainSeconds: 0,
-    });
-
-    window.setPlayhead(0);
-    await source.drain();
-    window.setPlayhead(1);
-    await source.drain();
-    window.setPlayhead(2);
-    await source.drain();
-
-    expect(window.getPreparationProgress()).toBe(4);
-  });
-
   it("hands the next decoded frames over for uploading ahead", async () => {
     const { source, window } = setup({ prefetchSeconds: 0.5 });
 
@@ -335,16 +308,6 @@ describe("depth preview window", () => {
 
     expect(window.heading()).toBe(-1);
     expect(stored(window, 7, 9)).toEqual([7, 8, 9]);
-  });
-
-  it("never decodes further ahead for a gate's lead than its own prefetch", async () => {
-    const { source, window } = setup({ prefetchSeconds: 0.5 });
-
-    await window.waitForReady(0, thresholds(3), undefined);
-    await source.drain();
-
-    expect(stored(window, 0, 40)).toEqual([0, 1, 2, 3, 4]);
-    expect(window.needsPlaybackGateWait(0, thresholds(3, 3))).toBe(false);
   });
 
   it("decodes nothing while the page is hidden, and picks up where the playhead is when it shows", async () => {

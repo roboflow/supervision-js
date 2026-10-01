@@ -14,19 +14,13 @@ import {
   resetMocks,
 } from "../../../../test/media-renderer-harness";
 
-const depth = vi.hoisted(() => ({
-  contexts: [] as unknown[],
-  provider: null as unknown,
-}));
+const depth = vi.hoisted(() => ({ provider: null as unknown }));
 
 vi.mock("#render-preparation/depth/source", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("#render-preparation/depth/source")
   >()),
-  openDepthSource: vi.fn(async (_input: unknown, context: unknown) => {
-    depth.contexts.push(context);
-    return depth.provider;
-  }),
+  openDepthSource: vi.fn(async () => depth.provider),
 }));
 
 const FRAME_TIMES = [0, 0.04, 0.08, 0.12, 0.16];
@@ -63,7 +57,6 @@ function createPreviewProvider() {
     drawn: [] as Array<{ mediaTime: number; frameIndex: number | null }>,
     prefetched: [] as number[],
     release: () => {},
-    upcomingAsked: [] as number[],
     waits: [] as number[],
   };
   const entry = (index: number): DepthFrameEntry | null =>
@@ -77,10 +70,6 @@ function createPreviewProvider() {
 
       state.drawn.push({ frameIndex: found?.frameIndex ?? null, mediaTime });
       return found;
-    },
-    getUpcomingEntries(mediaTime) {
-      state.upcomingAsked.push(mediaTime);
-      return [];
     },
     needsPlaybackGateWait: (mediaTime) =>
       indexAt(mediaTime) > state.decodedThrough,
@@ -107,7 +96,6 @@ function createPreviewProvider() {
 describe("media renderer depth on the Mediabunny pull path", () => {
   beforeEach(() => {
     resetMocks();
-    depth.contexts.length = 0;
     mediaMock.samples = FRAME_TIMES.map((time) => createMockSample(time));
     mediaMock.getDurationFromMetadata.mockResolvedValue(0.2);
   });
@@ -116,40 +104,8 @@ describe("media renderer depth on the Mediabunny pull path", () => {
     vi.restoreAllMocks();
   });
 
-  it("hands a clip the media's frame index reader", async () => {
-    const { provider } = createPreviewProvider();
-
-    depth.provider = provider;
-    const renderer = await createRenderer(false, false, {
-      renderers: [annotationRenderers.depth()],
-    });
-
-    await renderer.setDepth?.({ manifest: "https://example.test/depth.json" });
-
-    const context = depth.contexts[0] as {
-      frameClock: unknown;
-      readFrameClock: () => Promise<{
-        frameCount: number;
-        timeAt(index: number): number;
-      }>;
-    };
-    // Nothing published up front: the index is read when a clip asks.
-    expect(context.frameClock).toBeNull();
-    expect(mediaMock.encodedPacketSinkConstructor).not.toHaveBeenCalled();
-
-    const clock = await context.readFrameClock();
-
-    expect(clock.frameCount).toBe(5);
-    expect(FRAME_TIMES.map((_, index) => clock.timeAt(index))).toEqual(
-      FRAME_TIMES,
-    );
-
-    renderer.destroy();
-  });
-
-  it("draws each frame's own preview while playing and decodes ahead of it", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { maps, provider, state } = createPreviewProvider();
+  it("draws each frame's own preview while playing", async () => {
+    const { maps, provider } = createPreviewProvider();
 
     depth.provider = provider;
     const renderer = await createRenderer(false, false, {
@@ -173,16 +129,7 @@ describe("media renderer depth on the Mediabunny pull path", () => {
       expect(active?.map).toBe(maps[index]);
     }
 
-    // Decoding follows each frame drawn, and the next textures go up in a
-    // task of their own after the present.
-    expect(state.prefetched).toEqual(
-      expect.arrayContaining([0.04, 0.08, 0.12]),
-    );
-    await vi.advanceTimersByTimeAsync(0);
-    expect(state.upcomingAsked.at(-1)).toBe(0.12);
-
     renderer.destroy();
-    vi.useRealTimers();
   });
 
   it("holds the next frame until its depth is decoded, then shows it with its own depth", async () => {

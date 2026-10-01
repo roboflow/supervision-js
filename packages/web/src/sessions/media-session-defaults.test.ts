@@ -33,13 +33,6 @@ describe("media session defaults", () => {
       selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
     });
     expect(defaults.renderPreparation).toMatchObject({
-      depth: {
-        exactNeighborFrameCount: 2,
-        exactSettleSeconds: 0.15,
-        playback: "auto",
-        previewPrefetchSeconds: 1,
-        previewRetainSeconds: 0.25,
-      },
       maskFrame: {
         maxCacheFrameCount: 240,
         maxPendingFrameCount: 24,
@@ -55,26 +48,6 @@ describe("media session defaults", () => {
         stopBelowWallSeconds: 0.1,
       },
     });
-  });
-
-  it("decodes depth half as far ahead in a stream session, as masks cook less ahead", () => {
-    const stream = resolveMediaSessionDefaults({
-      mode: MediaSessionMode.Stream,
-      renderer: {},
-    });
-    const host = resolveMediaSessionDefaults({
-      mode: MediaSessionMode.Stream,
-      renderer: { renderPreparation: { depth: { previewPrefetchSeconds: 2 } } },
-    });
-
-    expect(stream.renderPreparation.depth).toEqual({
-      exactNeighborFrameCount: 2,
-      exactSettleSeconds: 0.15,
-      playback: "auto",
-      previewPrefetchSeconds: 0.5,
-      previewRetainSeconds: 0.25,
-    });
-    expect(host.renderPreparation.depth?.previewPrefetchSeconds).toBe(2);
   });
 
   it("applies session-level detection sync before explicit buffer overrides", () => {

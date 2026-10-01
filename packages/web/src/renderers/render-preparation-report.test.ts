@@ -40,16 +40,10 @@ const depth: RenderPreparationDiagnostics = {
 };
 
 describe("render preparation report", () => {
-  it("hands a single family's report on as it is", () => {
-    const report = createRenderPreparationReport();
-
-    expect(report.update("maskFrame", masks)).toBe(masks);
-  });
-
   it("keeps masks and depth side by side instead of one replacing the other", () => {
     const report = createRenderPreparationReport();
 
-    report.update("maskFrame", masks);
+    expect(report.update("maskFrame", masks)).toBe(masks);
 
     const both = report.update("depth", depth);
 

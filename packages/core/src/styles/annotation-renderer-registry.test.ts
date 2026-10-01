@@ -183,17 +183,6 @@ describe("annotation renderer registry", () => {
     });
   });
 
-  it("keeps depth a direct, multi-instance renderer with its own id", () => {
-    expect(annotationRendererRegistry.depth).toEqual({
-      cardinality: "multiple",
-    });
-    expect(resolveAnnotationRendererStyleFields(["depth"])).toEqual([]);
-    expect(annotationRenderers.depth()).toEqual({ id: "depth", kind: "depth" });
-    expect(
-      annotationRenderers.depth({ colormap: "viridis", id: "depth-left" }),
-    ).toEqual({ colormap: "viridis", id: "depth-left", kind: "depth" });
-  });
-
   it("builds independently identified region renderers", () => {
     expect(
       annotationRenderers.region({

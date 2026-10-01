@@ -107,7 +107,9 @@ export interface RenderPreparationMaskFrameOptions {
    * The box the host paints prepared masks into, in CSS pixels, with the pixel
    * ratio it paints them at. A mask frame's id raster is then capped to the
    * size that box can show; absent, it is cooked at the detections' own
-   * resolution.
+   * resolution. Exact depth frames the box cannot show at least twice over
+   * go up to the GPU decimated by that whole factor; readouts still read every
+   * sample.
    */
   readonly display?: {
     readonly boxHeight: number;
@@ -267,18 +269,6 @@ export interface RenderPreparationArtifactDiagnostics {
    * `"exact"` for exact frames loaded ahead for playback.
    */
   readonly precision?: "exact" | "preview";
-  /**
-   * Exact frames loaded ahead for playback: `drawn` when they are what plays
-   * now, `loadRate` in frames a second while loading (fetch and decode
-   * included), `meanLoadMs` the wall time one load takes.
-   */
-  readonly exactPlayback?: {
-    readonly drawn: boolean;
-    readonly loadRate: number | null;
-    readonly meanLoadMs: number | null;
-    /** Times playback handed exact depth back to the preview. */
-    readonly fallbackCount: number;
-  };
   readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
@@ -345,50 +335,29 @@ export type DepthPlaybackSource = "auto" | "exact" | "preview";
  * as a 720p one, within a ceiling.
  */
 export interface RenderPreparationDepthOptions {
-  /**
-   * The box the host shows the picture in, in CSS pixels, with its pixel
-   * ratio: exact depth that box cannot show whole, at least twice its size,
-   * goes up to the GPU decimated by a whole factor. Readouts still read every
-   * sample. Defaults to
-   * `maskFrame.display`; absent, depth goes up at its own size.
-   */
-  readonly display?: RenderPreparationMaskFrameOptions["display"];
   /** Defaults to `"auto"`. See {@link DepthPlaybackSource}. */
   readonly playback?: DepthPlaybackSource;
   /**
    * Exact frames loaded ahead for playback, in bytes. Defaults to room for
-   * twice `previewPrefetchSeconds` plus `previewRetainSeconds` of exact
-   * frames, at least 96 MiB and at most 512 MiB; a shorter budget lowers the
-   * lead exact playback reaches.
+   * twice `previewPrefetchSeconds` plus a quarter second of exact frames, at
+   * least 96 MiB and at most 512 MiB; a shorter budget lowers the lead exact
+   * playback reaches.
    */
   readonly maxExactPlaybackCacheBytes?: number;
   /**
-   * Decoded exact frames kept, in bytes. Defaults to 128 MiB, or room for
-   * twice the frame on screen and its neighbours when that is more.
-   */
-  readonly maxExactCacheBytes?: number;
-  /**
    * Decoded preview frames kept, in bytes. Defaults to room for twice
-   * `previewPrefetchSeconds` plus `previewRetainSeconds` of the clip, at least
+   * `previewPrefetchSeconds` plus a quarter second of the clip, at least
    * 96 MiB and at most 512 MiB. A budget shorter than the playback gate's lead
    * lowers the lead the gate waits for.
    */
   readonly maxPreviewCacheBytes?: number;
   /**
    * How far ahead of the playhead the preview, and exact frames when they
-   * play, are decoded while playing, in seconds of media. Defaults to 1, or
-   * 0.5 in a stream session. Above 1x it stretches by how many frames each
-   * present moves; a drag spends the same span both ways, most of it the way
-   * the hand heads. At rest the preview decodes one
-   * `maskFrame.scheduleBatchSize` past the frame on screen.
+   * play, are decoded while playing, in seconds of media. Defaults to 1.
+   * Above 1x it stretches by how many frames each present moves; a drag
+   * spends the same span both ways, most of it the way the hand heads.
    */
   readonly previewPrefetchSeconds?: number;
-  /** Preview kept behind the playhead, in seconds of media. Defaults to 0.25. */
-  readonly previewRetainSeconds?: number;
-  /** Exact frames fetched on each side of the frame at rest. Defaults to 2. */
-  readonly exactNeighborFrameCount?: number;
-  /** Rest before the exact frame is fetched, in seconds. Defaults to 0.15. */
-  readonly exactSettleSeconds?: number;
 }
 
 /**

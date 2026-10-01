@@ -273,7 +273,7 @@ async function runProbes(
   return resolveDepthPreviewDecoding(verdicts, levels);
 }
 
-export async function probeDepthPreviewDecoder(
+async function probeDepthPreviewDecoder(
   hardwareAcceleration: HardwareAcceleration,
   levels: DepthPreviewLevels = "full",
   open: OpenTrack = openDepthPreviewTrack,
@@ -306,7 +306,7 @@ export async function probeDepthPreviewDecoder(
  * a correction table when one makes them closer still; the first of equals
  * wins, so the order probes ran in is the order of preference.
  */
-export function resolveDepthPreviewDecoding(
+function resolveDepthPreviewDecoding(
   verdicts: readonly DepthPreviewDecoderVerdict[],
   levels: DepthPreviewLevels = "full",
 ): DepthPreviewDecoding {
@@ -437,7 +437,7 @@ async function runProbe(
 
     return {
       ...readProbeFrame(frame.luma, frame.width, levels),
-      lumaPath: track.getStats().lumaPath,
+      lumaPath: track.lumaPath(),
     };
   } finally {
     // Closing the decoder ends a decode still waiting past its deadline.
@@ -445,7 +445,7 @@ async function runProbe(
   }
 }
 
-export function readProbeFrame(
+function readProbeFrame(
   luma: Uint8Array,
   width: number,
   levels: DepthPreviewLevels = "full",

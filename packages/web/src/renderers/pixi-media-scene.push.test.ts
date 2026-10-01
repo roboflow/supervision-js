@@ -878,7 +878,7 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
   });
 
-  it("draws depth from the presented timestamp alone", async () => {
+  it("draws depth from the presented timestamp alone, and none where it has none", async () => {
     const map = createDepthMap();
     const asked: number[] = [];
     const channel = createChannel();
@@ -892,98 +892,17 @@ describe("push-presented Pixi scene", () => {
       destroy: vi.fn(),
       getEntry(mediaTime) {
         asked.push(mediaTime);
-        return { frameIndex: null, map, precision: "exact" };
+        return mediaTime < 2
+          ? { frameIndex: 0, map, precision: "exact" }
+          : null;
       },
     });
 
     channel.present(presentedFrame(1000));
+    expect(scene.getActiveDepth?.()).toMatchObject({ map, mediaTime: 1 });
+
     channel.present(presentedFrame(4250));
-
     expect(asked).toEqual([1, 4.25]);
-    expect(scene.getActiveDepth?.()).toMatchObject({ map, mediaTime: 4.25 });
-  });
-
-  it("says which depth frame it drew, and times depth apart from masks", async () => {
-    const map = createDepthMap();
-    const channel = createChannel();
-    const presented: PresentedMediaSample[] = [];
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-      diagnostics: { frameTimings: true },
-      onPresentationUpdate: (sample) => presented.push(sample),
-    });
-    let decoded = false;
-
-    scene.initializeMedia({ height: 240, width: 320 });
-    scene.setDepthSource?.({
-      destroy: vi.fn(),
-      getEntry: () =>
-        decoded ? { frameIndex: 7, map, precision: "preview" } : null,
-      getFrameStatus: () => ({ frameIndex: 7, prepared: decoded }),
-    });
-
-    channel.present(presentedFrame(1000));
-    expect(scene.getActiveDepth?.()).toBeNull();
-
-    decoded = true;
-    channel.present(presentedFrame(1040));
-    expect(scene.getActiveDepth?.()).toMatchObject({
-      frameIndex: 7,
-      precision: "preview",
-    });
-    expect(presented.at(-1)).toMatchObject({
-      renderTimings: { depthMs: expect.any(Number) },
-    });
-  });
-
-  it("never leaves the previous frame's depth on the next one", async () => {
-    const map = createDepthMap();
-    const channel = createChannel();
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-    });
-    scene.initializeMedia({ height: 240, width: 320 });
-    scene.setDepthSource?.({
-      destroy: vi.fn(),
-      getEntry: (mediaTime) =>
-        mediaTime < 2 ? { frameIndex: 0, map, precision: "exact" } : null,
-    });
-
-    channel.present(presentedFrame(1000));
-    expect(scene.getActiveDepth?.()?.map).toBe(map);
-
-    channel.present(presentedFrame(2000));
-    expect(scene.getActiveDepth?.()).toBeNull();
-  });
-
-  it("renders a depth swap once, and a repeat of it never", async () => {
-    const map = createDepthMap();
-    const source = {
-      destroy: vi.fn(),
-      getEntry: () => ({ frameIndex: null, map, precision: "exact" as const }),
-    };
-    const channel = createChannel();
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-    });
-    scene.initializeMedia({ height: 240, width: 320 });
-    channel.present(presentedFrame(2000));
-    const settled = scene.getRenderCount?.() ?? 0;
-
-    scene.setDepthSource?.(source);
-    expect(scene.getRenderCount?.()).toBe(settled + 1);
-
-    scene.setDepthSource?.(source);
-    expect(scene.getRenderCount?.()).toBe(settled + 1);
-
-    scene.setDepthSource?.(null);
-    expect(scene.getRenderCount?.()).toBe(settled + 2);
     expect(scene.getActiveDepth?.()).toBeNull();
   });
 
@@ -1016,7 +935,6 @@ describe("push-presented Pixi scene", () => {
         baseUrl: "https://example.test/clip/",
       },
       {
-        depth: { exactNeighborFrameCount: 0, exactSettleSeconds: 0.15 },
         fetch: (async () =>
           new Response(new Uint8Array(4))) as unknown as typeof fetch,
         frameClock: {
@@ -1056,7 +974,6 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getRenderCount?.()).toBe(presented + 1);
 
     await vi.advanceTimersByTimeAsync(1000);
-    expect(decodeDepth).toHaveBeenCalledTimes(1);
     expect(scene.getRenderCount?.()).toBe(presented + 1);
 
     // Playing hides it at once; it is never drawn over the next frames.
@@ -1068,128 +985,6 @@ describe("push-presented Pixi scene", () => {
 
     source.destroy();
     vi.useRealTimers();
-  });
-
-  it("tells its depth source whether playback runs, and stops listening to a replaced one", async () => {
-    const channel = createChannel();
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-    });
-    const listeners = new Set<() => void>();
-    const first = {
-      destroy: vi.fn(),
-      getEntry: vi.fn(() => null),
-      setPlaybackActive: vi.fn(),
-      subscribe: (listener: () => void) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-    };
-
-    scene.initializeMedia({ height: 240, width: 320 });
-    scene.setPlaybackActive?.(false);
-    scene.setDepthSource?.(first);
-    expect(first.setPlaybackActive).toHaveBeenLastCalledWith(false);
-
-    scene.setPlaybackActive?.(true);
-    expect(first.setPlaybackActive).toHaveBeenLastCalledWith(true);
-
-    scene.setDepthSource?.(null);
-    expect(listeners.size).toBe(0);
-    scene.setPlaybackActive?.(false);
-    expect(first.setPlaybackActive).toHaveBeenCalledTimes(2);
-  });
-
-  it("holds the producer when the depth lead is short, and releases it at the resume lead", async () => {
-    const channel = createChannel();
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-    });
-    let lead = 0;
-    let release: () => void = () => undefined;
-    const thresholds = { resumeAtSeconds: 0.3, stopBelowSeconds: 0.1 };
-
-    scene.initializeMedia({ height: 240, width: 320 });
-    scene.setDepthSource?.({
-      destroy: vi.fn(),
-      getEntry: () => null,
-      getPreparationProgress: () => Math.round(lead * 10),
-      needsPlaybackGateWait: (_time, gate) => lead < gate.stopBelowSeconds,
-      waitForReady: () =>
-        new Promise<void>((resolve) => {
-          release = resolve;
-        }),
-    });
-
-    expect(scene.needsRenderPreparationWait?.(1, thresholds)).toBe(true);
-
-    let released = false;
-    const wait = scene
-      .waitForRenderPreparation?.(1, thresholds)
-      ?.then(() => (released = true));
-
-    lead = 0.3;
-    await Promise.resolve();
-    expect(released).toBe(false);
-    release();
-    await wait;
-    expect(released).toBe(true);
-    expect(scene.needsRenderPreparationWait?.(1, thresholds)).toBe(false);
-    expect(scene.getRenderPreparationProgress?.()).toBe(3);
-  });
-
-  it("uploads the next depth frames after a present, never inside it", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const map = createDepthMap();
-    const asked: number[] = [];
-    const channel = createChannel();
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-    });
-
-    scene.initializeMedia({ height: 240, width: 320 });
-    scene.setDepthSource?.({
-      destroy: vi.fn(),
-      getEntry: () => ({ frameIndex: 0, map, precision: "preview" }),
-      getUpcomingEntries: (mediaTime) => {
-        asked.push(mediaTime);
-        return [];
-      },
-    });
-
-    channel.present(presentedFrame(1000));
-    channel.present(presentedFrame(2000));
-    expect(asked).toEqual([]);
-
-    await vi.advanceTimersByTimeAsync(0);
-    expect(asked).toEqual([2]);
-    vi.useRealTimers();
-  });
-
-  it("points depth decoding at the producer's playhead", async () => {
-    const channel = createChannel();
-    const { createPixiMediaScene } = await import("./pixi-media-scene");
-    const scene = await createPixiMediaScene({
-      ...createSceneOptions(channel.channel),
-      depthRenderers: [annotationRenderers.depth()],
-    });
-    const prefetch = vi.fn();
-
-    scene.initializeMedia({ height: 240, width: 320 });
-    scene.setDepthSource?.({
-      destroy: vi.fn(),
-      getEntry: () => null,
-      prefetch,
-    });
-    scene.prefetchDepth?.(4.5);
-
-    expect(prefetch).toHaveBeenCalledWith(4.5);
   });
 
   it("renders a display adjustment once, and a repeat of it never", async () => {
@@ -1502,8 +1297,6 @@ function stubAnimationFrames() {
   };
 }
 
-/** A timeline whose answer for a media time is whatever the test says it is
- *  at the moment it is asked. */
 function createDepthMap(): DepthMap {
   return {
     height: 24,
@@ -1517,6 +1310,8 @@ function createDepthMap(): DepthMap {
   };
 }
 
+/** A timeline whose answer for a media time is whatever the test says it is
+ *  at the moment it is asked. */
 function stubDetectionTimeline(
   answer: () => DetectionFrame | undefined,
 ): MediaRendererSceneOptions["detectionTimeline"] {

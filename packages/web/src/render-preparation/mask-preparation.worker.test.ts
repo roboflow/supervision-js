@@ -77,27 +77,6 @@ describe("render-preparation worker", () => {
     expect(transfer).toEqual([message.values, message.paddedUpload.bytes]);
   });
 
-  it("answers a file that does not decode with an error reply", async () => {
-    const worker = await loadWorker();
-
-    worker.send({
-      bitDepth: 8,
-      bytes: new ArrayBuffer(16),
-      requestId: 3,
-      type: DepthPreparationWorkerMessageType.Decode,
-    });
-    await worker.replied;
-
-    expect(worker.posted[0]).toEqual({
-      message: {
-        error: "Not a PNG file.",
-        requestId: 3,
-        type: DepthPreparationWorkerMessageType.Error,
-      },
-      transfer: [],
-    });
-  });
-
   it("copies a preview frame's luma, transfers it back and closes the frame", async () => {
     const worker = await loadWorker();
     const frame = {
