@@ -1,6 +1,8 @@
 import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
+import { readMediabunnyFrameClock } from "#media/mediabunny-frame-clock";
 import { normalizeMediaSourcePresentationTimeline } from "#media/presentation-timeline-media-source";
 import type { DecodedMediaSource } from "./media-source";
+import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaRendererSource } from "#types/media-renderer";
 import { MediaErrorKind } from "supervision-js-core";
 import type { InputFormat, Source } from "mediabunny";
@@ -11,6 +13,11 @@ export interface MediabunnyMediaSourceInput {
     readonly duration?: number | null;
   };
   readonly source: Source;
+  /**
+   * Set where the source cannot be indexed yet, such as a file still being
+   * written: what a depth clip is told when it asks for the frame index.
+   */
+  readonly frameClockUnavailableReason?: string;
 }
 
 const FRAME_RATE_SAMPLE_PACKET_COUNT = 120;
@@ -102,7 +109,25 @@ export async function openMediabunnyMediaSource(
         ? Math.max(1, Math.round(duration * estimatedFrameRate))
         : null;
 
+    const frameClockUnavailableReason = isUrlSourceInput(sourceInput)
+      ? undefined
+      : sourceInput.frameClockUnavailableReason;
+    let frameClock: Promise<MediaFrameClock> | undefined;
+
     return normalizeMediaSourcePresentationTimeline({
+      ...(frameClockUnavailableReason === undefined
+        ? {
+            readFrameClock() {
+              frameClock ??= readMediabunnyFrameClock(primaryVideoTrack);
+              // A walk that failed, say on a dropped connection, is tried
+              // again by the next caller rather than remembered.
+              frameClock.catch(() => {
+                frameClock = undefined;
+              });
+              return frameClock;
+            },
+          }
+        : { frameClockUnavailableReason }),
       input,
       metadata: {
         audioTrackCount: audioTracks.length,

@@ -388,6 +388,8 @@ async function openMediaStreamMediaSource(
       );
 
     return {
+      frameClockUnavailableReason:
+        "a live stream has no end and no frames ahead of the one on screen. Give it a still map: a map or an image manifest.",
       input: { dispose },
       metadata: {
         audioTrackCount: audioTracks.length,

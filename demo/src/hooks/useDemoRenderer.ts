@@ -79,7 +79,7 @@ import {
 } from "../session/upload-session";
 import {
   applyDemoMediaPath,
-  DemoMediaPath,
+  buildDemoNormalization,
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
@@ -920,7 +920,10 @@ export function useDemoRenderer(
 
   const depthPlays =
     sourceMode === DemoSourceMode.Fixture &&
-    applyDemoMediaPath(sessionOptions) === DemoMediaPath.Engine;
+    buildDemoNormalization(
+      applyDemoMediaPath(sessionOptions),
+      sessionOptions,
+    ) === undefined;
 
   const setDepthLayer = useCallback(
     (layerId: string) => {
@@ -936,8 +939,8 @@ export function useDemoRenderer(
       const session = sessionRef.current;
       const request = ++depthRequestRef.current;
 
-      // Off the engine path the layer only waits for the session that can
-      // play it: a clip manifest needs the engine's frame index.
+      // While the clip is converted the layer only waits for the session
+      // that can play it: a clip pairs with the clip's own frames.
       if (!depthPlays || !session?.setDepth) {
         setDepthLayerLoad({ status: "idle" });
         return;

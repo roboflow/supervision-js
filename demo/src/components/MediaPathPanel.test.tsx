@@ -119,19 +119,16 @@ describe("MediaPathPanel", () => {
     ).toBe(false);
   });
 
-  /* The Depth switch is greyed out on Mediabunny, and this card is where a
-   * reader choosing a path learns why before they pick one. */
-  it("says on each card what depth it draws, and why Mediabunny plays no depth video", () => {
+  /* Both paths play depth video; this card is where a reader choosing a path
+   * learns what it costs on Mediabunny before they pick one. */
+  it("says on each card what depth it draws, and what depth video costs on Mediabunny", () => {
     const text = prose(render());
     const mediabunny = demoMediaPathCopy[DemoMediaPath.Mediabunny].depth;
 
     expect(text).toContain(mediabunny);
     expect(text).toContain(demoMediaPathCopy[DemoMediaPath.Engine].depth);
-    expect(mediabunny).toContain(
-      "Depth video plays only on the Web video engine path",
-    );
-    expect(mediabunny).toContain("second video decoder running in the page");
-    expect(mediabunny).toContain("not supported");
-    expect(mediabunny).toContain("A still depth picture");
+    expect(mediabunny).toContain("Depth video in step with the clip");
+    expect(mediabunny).toContain("decodes in the page beside the clip");
+    expect(mediabunny).toContain("Depth stays off while the clip is converted");
   });
 });

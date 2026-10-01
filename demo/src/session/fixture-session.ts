@@ -185,7 +185,7 @@ export async function createFixtureSession(
       container: options.container,
       depth: resolveFixtureDepth(
         options.definition,
-        mediaPath,
+        normalize !== undefined,
         options.depthLayerId,
       ),
       detections,
@@ -216,12 +216,12 @@ export async function createFixtureSession(
 
 /**
  * The depth layer picked, or the sample's default. Clip depth pairs one PNG
- * with each frame of the video, which only the web video engine's frame index
- * can do, so the Mediabunny path opens the sample without it.
+ * with each of the clip's own frames, and converting the clip first can
+ * change them, so a converted sample opens without it.
  */
 export function resolveFixtureDepth(
   definition: DemoFixtureDefinition,
-  mediaPath: DemoMediaPath,
+  converting: boolean,
   layerId?: string | null,
 ): MediaRendererDepthInput | undefined {
   const layers = definition.depth?.layers ?? [];
@@ -229,9 +229,7 @@ export function resolveFixtureDepth(
     layers.find(({ id }) => id === layerId) ??
     layers.find(({ id }) => id === definition.depth?.defaultLayer);
 
-  return layer && mediaPath === DemoMediaPath.Engine
-    ? { manifest: layer.manifestSrc }
-    : undefined;
+  return layer && !converting ? { manifest: layer.manifestSrc } : undefined;
 }
 
 /**

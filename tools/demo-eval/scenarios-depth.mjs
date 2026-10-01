@@ -171,8 +171,8 @@ export async function runDepthBackDrag(session, info, attempts = 1) {
 
 /**
  * Opens the depth clip for the measurement and puts the clip the run met back
- * afterwards. Depth plays only on the web video engine path, so a run on
- * Mediabunny has nothing to measure and says so.
+ * afterwards. The probe names frames by the renderer's frame clock, which only
+ * the web video engine path publishes, so a run on Mediabunny says so.
  */
 async function withDepthFixture(session, measure) {
   await session.send("Page.bringToFront");
@@ -213,7 +213,7 @@ async function measureDepthDrag(session, fixture, direction) {
     throw new Invalid(
       `exact depth never drew over the frame at ${start}s within ` +
         `${DEPTH_READY_DEADLINE_MS}ms on the ${mediaPath ?? "unnamed"} path; ` +
-        "depth clips play on the web video engine, so pass ?mediaPath=engine",
+        "this measurement reads the web video engine's frame clock, so pass ?mediaPath=engine",
     );
   }
   await delay(300);

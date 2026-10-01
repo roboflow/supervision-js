@@ -70,12 +70,12 @@ Start here for normal application code:
   every child is projected from its own space before composition
 - depth maps: `MediaSessionOptions.depth` (a `DepthMap`, or a `depth.json`
   manifest the session fetches and decodes: a still image, or a clip drawn
-  over engine-backed media, its 8-bit preview video while playing and exact
-  frames once playback rests), and the `depth`
+  over video media, its 8-bit preview video while playing and exact frames
+  once playback rests), and the `depth`
   annotation renderer. Depth is its own channel beside detections, never a
   `DetectionFrame` field, and a map is stretched over the media rectangle
-  rather than projected by `coordinateSpace`. Depth video plays only over the
-  web video engine source; which media draws which depth is in
+  rather than projected by `coordinateSpace`. Depth video plays over a URL or
+  file and over the web video engine source; which media draws which depth is in
   [Depth maps](../annotation-renderers/depth.md#where-depth-works)
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor

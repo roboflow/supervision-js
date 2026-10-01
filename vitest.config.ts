@@ -27,6 +27,13 @@ export default defineConfig({
         ),
       },
       {
+        find: /^#web-video-engine\/frame-index$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/frame-index.ts",
+        ),
+      },
+      {
         find: /^supervision\/web-video-engine$/,
         replacement: path.resolve(
           rootDir,
