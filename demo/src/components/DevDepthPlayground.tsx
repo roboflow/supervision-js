@@ -1,17 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   computeDepthPercentileRange,
   createMediaSession,
   createStaticImageMediaSource,
   createWebVideoEngineMediaRendererSource,
-  readDepthAt,
-  type DepthColormap,
   type DepthMap,
-  type DepthMapKind,
   type DepthQuantity,
-  type DepthRange,
-  type DepthReadout,
-  type DepthSampling,
   type MediaRendererDepthInput,
   type MediaRendererSource,
   type MediaSession,
@@ -29,12 +23,19 @@ import {
 import {
   DocsDepthRangeMode,
   createDocsDepthRenderer,
-  createDocsDepthSnippet,
+  describeDepthColourRange,
   initialDocsDepthSettings,
+  roundRange,
   type DocsDepthSettings,
 } from "../docs-depth";
+import { useDepthPointerReadout } from "../hooks/useDepthPointerReadout";
 import { DepthReadoutPanel } from "./DepthReadoutPanel";
-import "./dev-depth-playground.css";
+import {
+  DepthLiveCode,
+  DepthRendererControls,
+  PlaygroundSelect,
+} from "./DepthRendererControls";
+import "./depth-playground.css";
 
 const MEDIA_WIDTH = 1280;
 const MEDIA_HEIGHT = 720;
@@ -44,16 +45,6 @@ const SCENE_TIME_SECONDS = 1.25;
 const NEAREST_M = 2;
 const FARTHEST_M = 40;
 const CLIP_FRAME_RATE = 30;
-
-const colormaps: readonly DepthColormap[] = [
-  "turbo",
-  "viridis",
-  "cividis",
-  "inferno",
-  "magma",
-  "grayscale",
-];
-const samplings: readonly DepthSampling[] = ["auto", "nearest", "edge-aware"];
 
 const MapResolution = { Full: "full", Half: "half" } as const;
 type MapResolution = (typeof MapResolution)[keyof typeof MapResolution];
@@ -94,9 +85,10 @@ export function DevDepthPlayground() {
   const [depthNote, setDepthNote] = useState("");
   const [status, setStatus] = useState("Generating the synthetic scene…");
   const [rendererBackend, setRendererBackend] = useState<string | null>(null);
-  const [readout, setReadout] = useState<DepthReadout | null>(null);
-  const [readoutKind, setReadoutKind] = useState<DepthMapKind>("disparity_px");
-  const [noDepthHex, setNoDepthHex] = useState("#202020");
+  const pointer = useDepthPointerReadout(
+    useCallback(() => sessionRef.current?.renderer ?? null, []),
+  );
+  const refreshPointer = pointer.refresh;
   const settingsRef = useRef(settings);
   const resolutionRef = useRef(resolution);
   const depthInputRef = useRef(depthInput);
@@ -193,6 +185,8 @@ export function DevDepthPlayground() {
           return;
         }
         sessionRef.current = session;
+        session.subscribe(refreshPointer);
+        refreshPointer();
         setRendererBackend(
           session.getState().renderer?.rendererBackend ?? null,
         );
@@ -207,7 +201,7 @@ export function DevDepthPlayground() {
       sessionRef.current = null;
       session?.destroy();
     };
-  }, [backend]);
+  }, [backend, refreshPointer]);
 
   useEffect(() => {
     sessionRef.current?.setPresentation({
@@ -227,63 +221,39 @@ export function DevDepthPlayground() {
   const update = (patch: Partial<DocsDepthSettings>) =>
     setSettings((current) => ({ ...current, ...patch }));
 
-  const lockRange = (quantity: DepthQuantity = settings.quantity) => {
+  const lockRange = (quantity: DepthQuantity) => {
     const active = sessionRef.current?.renderer.getActiveDepth?.();
     const range = active
       ? computeDepthPercentileRange(active.map, { quantity })
       : null;
 
-    if (!range) return;
+    if (!range) return false;
     update({
-      manualRange: { max: round(range.max), min: round(range.min) },
+      manualRange: { max: roundRange(range.max), min: roundRange(range.min) },
       quantity,
       rangeMode: DocsDepthRangeMode.Manual,
     });
+    return true;
   };
 
-  const readPointer = (event: PointerEvent<HTMLDivElement>) => {
-    const session = sessionRef.current;
-    const active = session?.renderer.getActiveDepth?.();
-
-    if (!session || !active) {
-      setReadout(null);
-      return;
-    }
-
-    const box = event.currentTarget.getBoundingClientRect();
-    const point = session.renderer.screenToMedia({
-      x: event.clientX - box.left,
-      y: event.clientY - box.top,
-    });
-
-    setReadoutKind(active.map.kind);
-    setReadout(
-      readDepthAt(active.map, point, {
-        height: active.mediaHeight,
-        width: active.mediaWidth,
-      }),
-    );
-  };
-
-  const unit = settings.quantity === "depth" ? "m" : "px";
   const colourRange = useMemo(
-    () => describeColourRange(depthMapFor(resolution), settings),
+    () => describeDepthColourRange(depthMapFor(resolution), settings),
     [resolution, settings],
   );
 
   return (
     <main
-      className="docs-layer-playground dev-depth-playground"
+      className="docs-layer-playground depth-playground"
       aria-label="Depth annotation renderer development playground"
     >
       <section className="docs-layer-playground__stage">
         <div
           ref={mountRef}
-          className="dev-depth-playground__mount"
-          onPointerLeave={() => setReadout(null)}
-          onPointerMove={readPointer}
+          className="depth-playground__mount"
+          onPointerLeave={pointer.onPointerLeave}
+          onPointerMove={pointer.onPointerMove}
         />
-        <p className="dev-depth-playground__badge">
+        <p className="depth-playground__badge">
           Synthetic scene, not model output
         </p>
       </section>
@@ -298,8 +268,14 @@ export function DevDepthPlayground() {
             </span>
           </div>
         </header>
-        <div className="docs-layer-playground__controls">
-          <Select
+        <DepthRendererControls
+          canLock={pointer.active !== null}
+          colourRange={colourRange}
+          onChange={update}
+          onLock={lockRange}
+          settings={settings}
+        >
+          <PlaygroundSelect
             label="Media path"
             onChange={(value) => setBackend(value as Backend)}
             options={[
@@ -308,7 +284,7 @@ export function DevDepthPlayground() {
             ]}
             value={backend}
           />
-          <Select
+          <PlaygroundSelect
             label="Depth input"
             onChange={(value) => setDepthInput(value as DepthInput)}
             options={[
@@ -318,9 +294,9 @@ export function DevDepthPlayground() {
             value={depthInput}
           />
           {depthNote ? (
-            <p className="dev-depth-playground__note">{depthNote}</p>
+            <p className="depth-playground__note">{depthNote}</p>
           ) : null}
-          <Select
+          <PlaygroundSelect
             label="Map size"
             onChange={(value) => setResolution(value as MapResolution)}
             options={[
@@ -335,199 +311,15 @@ export function DevDepthPlayground() {
             ]}
             value={resolution}
           />
-          <Select
-            label="Colormap"
-            onChange={(value) => update({ colormap: value as DepthColormap })}
-            options={colormaps.map((name) => [name, name])}
-            value={settings.colormap}
-          />
-          <Select
-            label="Quantity"
-            onChange={(value) => {
-              const quantity = value as DepthQuantity;
-              if (settings.rangeMode === DocsDepthRangeMode.Manual) {
-                lockRange(quantity);
-              } else {
-                update({ quantity });
-              }
-            }}
-            options={[
-              ["disparity", "Disparity (px)"],
-              ["depth", "Depth (m)"],
-            ]}
-            value={settings.quantity}
-          />
-          <Select
-            label="Range"
-            onChange={(value) => {
-              if (value === DocsDepthRangeMode.Manual) {
-                lockRange();
-              } else {
-                update({ rangeMode: value as DocsDepthRangeMode });
-              }
-            }}
-            options={[
-              [DocsDepthRangeMode.Clip, "Clip (map's display range)"],
-              [DocsDepthRangeMode.Auto, "Auto (2nd–98th percentile)"],
-              [DocsDepthRangeMode.Manual, "Manual"],
-            ]}
-            value={settings.rangeMode}
-          />
-          {settings.rangeMode === DocsDepthRangeMode.Manual ? (
-            <div className="dev-depth-playground__range-inputs">
-              <NumberField
-                label={`Min (${unit})`}
-                onChange={(min) =>
-                  update({ manualRange: { ...settings.manualRange, min } })
-                }
-                value={settings.manualRange.min}
-              />
-              <NumberField
-                label={`Max (${unit})`}
-                onChange={(max) =>
-                  update({ manualRange: { ...settings.manualRange, max } })
-                }
-                value={settings.manualRange.max}
-              />
-              <button onClick={() => lockRange()} type="button">
-                Lock to this frame
-              </button>
-            </div>
-          ) : null}
-          <p className="dev-depth-playground__note">{colourRange}</p>
-          <Slider
-            label="Opacity"
-            onChange={(opacity) => update({ opacity })}
-            value={settings.opacity}
-          />
-          <Slider
-            label="Wipe"
-            onChange={(wipe) => update({ wipe })}
-            value={settings.wipe}
-          />
-          <Select
-            label="Sampling"
-            onChange={(value) => update({ sampling: value as DepthSampling })}
-            options={samplings.map((name) => [name, name])}
-            value={settings.sampling}
-          />
-          <label className="docs-layer-playground__toggle">
-            <span>
-              <strong>Paint pixels without depth</strong>
-              <small>Off leaves them unpainted</small>
-            </span>
-            <span className="dev-depth-playground__no-depth">
-              <input
-                aria-label="No-depth colour"
-                disabled={settings.noDepthColor === null}
-                onChange={(event) => {
-                  setNoDepthHex(event.currentTarget.value);
-                  update({
-                    noDepthColor: Number.parseInt(
-                      event.currentTarget.value.slice(1),
-                      16,
-                    ),
-                  });
-                }}
-                type="color"
-                value={noDepthHex}
-              />
-              <input
-                checked={settings.noDepthColor !== null}
-                onChange={(event) =>
-                  update({
-                    noDepthColor: event.currentTarget.checked
-                      ? Number.parseInt(noDepthHex.slice(1), 16)
-                      : null,
-                  })
-                }
-                type="checkbox"
-              />
-            </span>
-          </label>
-        </div>
-        <DepthReadoutPanel kind={readoutKind} readout={readout} />
-        <section
-          className="docs-layer-playground__code"
-          aria-label="Live presentation code"
-        >
-          <div>
-            <span>Live code</span>
-            <small>Values update with the controls</small>
-          </div>
-          <pre>
-            <code>{createDocsDepthSnippet(settings)}</code>
-          </pre>
-        </section>
+        </DepthRendererControls>
+        <DepthReadoutPanel
+          frameIndex={pointer.active?.frameIndex ?? null}
+          kind={pointer.active?.map.kind}
+          readout={pointer.readout}
+        />
+        <DepthLiveCode settings={settings} />
       </section>
     </main>
-  );
-}
-
-function Select(props: {
-  readonly label: string;
-  readonly onChange: (value: string) => void;
-  readonly options: readonly (readonly [string, string])[];
-  readonly value: string;
-}) {
-  return (
-    <label className="docs-layer-playground__select">
-      <strong>{props.label}</strong>
-      <select
-        onChange={(event) => props.onChange(event.currentTarget.value)}
-        value={props.value}
-      >
-        {props.options.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function Slider(props: {
-  readonly label: string;
-  readonly onChange: (value: number) => void;
-  readonly value: number;
-}) {
-  return (
-    <label className="docs-layer-playground__range">
-      <span>
-        <strong>{props.label}</strong>
-        <output>{Math.round(props.value * 100)}%</output>
-      </span>
-      <input
-        max="1"
-        min="0"
-        onChange={(event) => props.onChange(Number(event.currentTarget.value))}
-        step="0.05"
-        type="range"
-        value={props.value}
-      />
-    </label>
-  );
-}
-
-function NumberField(props: {
-  readonly label: string;
-  readonly onChange: (value: number) => void;
-  readonly value: number;
-}) {
-  return (
-    <label>
-      <strong>{props.label}</strong>
-      <input
-        onChange={(event) => {
-          const value = Number(event.currentTarget.value);
-          if (Number.isFinite(value)) props.onChange(value);
-        }}
-        step="any"
-        type="number"
-        value={props.value}
-      />
-    </label>
   );
 }
 
@@ -631,8 +423,8 @@ function createSyntheticDepthMap(width: number, height: number): DepthMap {
   return {
     camera: { baselineM: disparity.baselineM, fxPx: disparity.fxPx },
     displayRange: {
-      max: round(focalBaseline / NEAREST_M),
-      min: round(focalBaseline / FARTHEST_M),
+      max: roundRange(focalBaseline / NEAREST_M),
+      min: roundRange(focalBaseline / FARTHEST_M),
     },
     height,
     kind: "disparity_px",
@@ -696,37 +488,4 @@ async function createSyntheticMedia(
       kind: SourceKind.Blob,
     },
   });
-}
-
-function describeColourRange(map: DepthMap, settings: DocsDepthSettings) {
-  const unit = settings.quantity === "depth" ? "m" : "px";
-  const focalBaseline = map.camera ? map.camera.fxPx * map.camera.baselineM : 1;
-  let range: DepthRange | null;
-
-  switch (settings.rangeMode) {
-    case DocsDepthRangeMode.Manual:
-      range = settings.manualRange;
-      break;
-    case DocsDepthRangeMode.Auto:
-      range = computeDepthPercentileRange(map, { quantity: settings.quantity });
-      break;
-    default:
-      range =
-        map.displayRange && settings.quantity === "depth"
-          ? {
-              max: focalBaseline / map.displayRange.min,
-              min: focalBaseline / map.displayRange.max,
-            }
-          : (map.displayRange ?? null);
-  }
-
-  if (!range) return "Colour range: not enough valid samples";
-  const near = settings.quantity === "depth" ? range.min : range.max;
-  const far = settings.quantity === "depth" ? range.max : range.min;
-
-  return `Colour range: near ${round(near)} ${unit} (warm) to far ${round(far)} ${unit}`;
-}
-
-function round(value: number) {
-  return Number(value.toFixed(3));
 }

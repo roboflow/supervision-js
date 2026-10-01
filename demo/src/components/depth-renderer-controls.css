@@ -1,0 +1,41 @@
+/* The depth renderer's controls, shared by the depth playgrounds. */
+
+.depth-renderer-controls__range-inputs {
+  align-items: end;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr 1fr;
+}
+
+.depth-renderer-controls__range-inputs label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.depth-renderer-controls__range-inputs strong {
+  color: var(--muted-strong);
+  font-size: 0.7rem;
+}
+
+.depth-renderer-controls__range-inputs input {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  inline-size: 100%;
+}
+
+.depth-renderer-controls__range-inputs button {
+  grid-column: 1 / -1;
+}
+
+.depth-renderer-controls__note {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.depth-renderer-controls__no-depth {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}

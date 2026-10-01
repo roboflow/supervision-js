@@ -15,6 +15,7 @@ import { DemoShell } from "./components/DemoShell";
 import { EngineDiagnostics } from "./components/EngineDiagnostics";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
+import { DocsDepthPlayground } from "./components/DocsDepthPlayground";
 import { DocsHeatmapPlayground } from "./components/DocsHeatmapPlayground";
 import { DocsTrackingPostProcessorPlayground } from "./components/DocsTrackingPostProcessorPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
@@ -90,6 +91,14 @@ export function App() {
     return (
       <EmbeddedPlaygroundFrame>
         <DocsHeatmapPlayground />
+      </EmbeddedPlaygroundFrame>
+    );
+  }
+
+  if (embeddedView === "depth") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsDepthPlayground />
       </EmbeddedPlaygroundFrame>
     );
   }

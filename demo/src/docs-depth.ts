@@ -1,7 +1,9 @@
 import {
   annotationRenderers,
+  computeDepthPercentileRange,
   type DepthAnnotationRenderer,
   type DepthColormap,
+  type DepthMap,
   type DepthMapKind,
   type DepthQuantity,
   type DepthRange,
@@ -97,6 +99,15 @@ export interface DocsDepthReadoutView {
   readonly rows: readonly DocsDepthReadoutRow[];
 }
 
+/** What the readout knows beside the pixel under the pointer. */
+export interface DocsDepthReadoutContext {
+  readonly kind?: DepthMapKind;
+  /** The clip frame the depth on screen belongs to; null when none is. */
+  readonly frameIndex?: number | null;
+  /** The status while there is no readout: the pointer is away, or no depth is drawn. */
+  readonly idleStatus?: string;
+}
+
 const NOT_AVAILABLE = "—";
 
 /**
@@ -107,7 +118,11 @@ const NOT_AVAILABLE = "—";
  */
 export function describeDepthReadout(
   readout: DepthReadout | null,
-  kind: DepthMapKind = "disparity_px",
+  {
+    frameIndex = null,
+    idleStatus = "Point at the picture",
+    kind = "disparity_px",
+  }: DocsDepthReadoutContext = {},
 ): DocsDepthReadoutView {
   const unit = kind === "depth_m" ? "m" : kind === "disparity_px" ? "px" : "";
   const valid = readout?.valid === true;
@@ -118,6 +133,10 @@ export function describeDepthReadout(
 
   return {
     rows: [
+      {
+        label: "Depth frame",
+        value: frameIndex === null ? NOT_AVAILABLE : String(frameIndex),
+      },
       {
         label: "Map pixel",
         value: readout ? `${readout.x}, ${readout.y}` : NOT_AVAILABLE,
@@ -146,11 +165,58 @@ export function describeDepthReadout(
       },
     ],
     status: !readout
-      ? "Point at the picture"
+      ? idleStatus
       : !readout.valid
         ? "No depth at this pixel"
         : readout.precision === "preview"
           ? "≈ 8-bit preview value"
           : "Exact value",
   };
+}
+
+/**
+ * The span the colours cover, near end first, for the note under the range
+ * control. `"clip"` reads the map's display range, converted to metres
+ * through its camera when the quantity is depth; `"auto"` is the map's own
+ * 2nd to 98th percentile.
+ */
+export function describeDepthColourRange(
+  map: DepthMap | null,
+  settings: DocsDepthSettings,
+): string {
+  const unit = settings.quantity === "depth" ? "m" : "px";
+  let range: DepthRange | null;
+
+  if (settings.rangeMode === DocsDepthRangeMode.Manual) {
+    range = settings.manualRange;
+  } else if (!map) {
+    return "Colour range: shown once depth is on screen";
+  } else if (
+    settings.rangeMode === DocsDepthRangeMode.Auto ||
+    !map.displayRange
+  ) {
+    range = computeDepthPercentileRange(map, { quantity: settings.quantity });
+  } else if (settings.quantity === "depth" && map.camera) {
+    const focalBaseline = map.camera.fxPx * map.camera.baselineM;
+    const doffs = map.camera.doffsPx ?? 0;
+
+    range = {
+      max: focalBaseline / (map.displayRange.min + doffs),
+      min: focalBaseline / (map.displayRange.max + doffs),
+    };
+  } else {
+    range = map.displayRange;
+  }
+
+  if (!range) return "Colour range: not enough valid samples";
+
+  const near = settings.quantity === "depth" ? range.min : range.max;
+  const far = settings.quantity === "depth" ? range.max : range.min;
+
+  return `Colour range: near ${roundRange(near)} ${unit} (warm) to far ${roundRange(far)} ${unit}`;
+}
+
+/** Three decimals at most, as the range inputs and the snippet show them. */
+export function roundRange(value: number) {
+  return Number(value.toFixed(3));
 }

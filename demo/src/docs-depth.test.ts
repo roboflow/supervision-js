@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import type { DepthMap } from "supervision";
+
 import {
   DocsDepthRangeMode,
   createDocsDepthRenderer,
   createDocsDepthSnippet,
+  describeDepthColourRange,
   describeDepthReadout,
   initialDocsDepthSettings,
   type DocsDepthSettings,
@@ -110,7 +113,8 @@ describe("depth pointer readout", () => {
   });
 
   it("formats values with fixed decimals and units", () => {
-    expect(describeDepthReadout(exact).rows).toEqual([
+    expect(describeDepthReadout(exact, { frameIndex: 42 }).rows).toEqual([
+      { label: "Depth frame", value: "42" },
       { label: "Map pixel", value: "640, 12" },
       { label: "Stored", value: "24896" },
       { label: "Disparity", value: "97.250 px" },
@@ -121,6 +125,18 @@ describe("depth pointer readout", () => {
     expect(
       describeDepthReadout({ ...exact, precision: "preview" }).status,
     ).toBe("≈ 8-bit preview value");
+  });
+
+  it("says why nothing is read when no depth is drawn", () => {
+    expect(
+      describeDepthReadout(null, {
+        frameIndex: null,
+        idleStatus: "No depth while playing",
+      }),
+    ).toMatchObject({
+      rows: expect.arrayContaining([{ label: "Depth frame", value: "—" }]),
+      status: "No depth while playing",
+    });
   });
 
   it("names the relative quantity for monocular maps", () => {
@@ -134,10 +150,60 @@ describe("depth pointer readout", () => {
         x: 0,
         y: 0,
       },
-      "relative_inverse",
+      { kind: "relative_inverse" },
     );
 
-    expect(view.rows[2]).toEqual({ label: "Inverse depth", value: "0.2500" });
-    expect(view.rows[4]).toEqual({ label: "Step", value: "0.00100" });
+    expect(view.rows[3]).toEqual({ label: "Inverse depth", value: "0.2500" });
+    expect(view.rows[5]).toEqual({ label: "Step", value: "0.00100" });
+  });
+});
+
+describe("depth colour range note", () => {
+  /** Disparity 2 to 32 px of a 1346.8 px, 6.5 cm stereo rig, like Spring's. */
+  const map: DepthMap = {
+    camera: { baselineM: 0.065, fxPx: 1346.8013 },
+    displayRange: { max: 32, min: 2 },
+    height: 1,
+    kind: "disparity_px",
+    samples: {
+      encoding: "scaled16",
+      scale: 1,
+      values: Uint16Array.from({ length: 100 }, (_, i) => i + 1),
+    },
+    width: 100,
+  };
+
+  it("reads the clip range, near end first, in the quantity's unit", () => {
+    expect(describeDepthColourRange(map, initialDocsDepthSettings)).toBe(
+      "Colour range: near 32 px (warm) to far 2 px",
+    );
+    expect(
+      describeDepthColourRange(map, {
+        ...initialDocsDepthSettings,
+        quantity: "depth",
+      }),
+    ).toBe("Colour range: near 2.736 m (warm) to far 43.771 m");
+  });
+
+  it("reads this frame's percentiles in auto, and the inputs in manual", () => {
+    expect(
+      describeDepthColourRange(map, {
+        ...initialDocsDepthSettings,
+        rangeMode: DocsDepthRangeMode.Auto,
+      }),
+    ).toBe("Colour range: near 97 px (warm) to far 3 px");
+    expect(
+      describeDepthColourRange(null, {
+        ...initialDocsDepthSettings,
+        manualRange: { max: 20, min: 4 },
+        rangeMode: DocsDepthRangeMode.Manual,
+      }),
+    ).toBe("Colour range: near 20 px (warm) to far 4 px");
+  });
+
+  it("waits for depth on screen before describing a map's range", () => {
+    expect(describeDepthColourRange(null, initialDocsDepthSettings)).toBe(
+      "Colour range: shown once depth is on screen",
+    );
   });
 });
