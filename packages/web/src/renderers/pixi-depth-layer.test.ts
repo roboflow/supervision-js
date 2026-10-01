@@ -53,9 +53,9 @@ function previewSource(
   return {
     destroy: vi.fn(),
     getEntry: (mediaTime) => entry(Math.floor(mediaTime)),
-    getUpcomingEntries: (mediaTime, count) =>
+    getUpcomingEntries: (mediaTime, count, skip = 1) =>
       Array.from({ length: count }, (_, step) =>
-        entry(Math.floor(mediaTime) + step + 1),
+        entry(Math.floor(mediaTime) + skip + step),
       ).filter((found): found is DepthFrameEntry => found !== null),
     ...extra,
   };
@@ -343,12 +343,12 @@ describe("pixi depth layer", () => {
     const maps = Array.from({ length: 12 }, (_, index) =>
       previewMap(20 + index),
     );
-    const strides: (number | undefined)[] = [];
+    const skips: (number | undefined)[] = [];
     const source = previewSource(maps);
     const upcoming = source.getUpcomingEntries!;
 
-    source.getUpcomingEntries = (mediaTime, count, stride) => {
-      strides.push(stride);
+    source.getUpcomingEntries = (mediaTime, count, skip) => {
+      skips.push(skip);
       return upcoming(mediaTime, count);
     };
 
@@ -360,7 +360,23 @@ describe("pixi depth layer", () => {
     layer.drawFrame(3.5);
     layer.uploadAhead(3.5);
 
-    expect(strides).toEqual([3, 3]);
+    expect(skips).toEqual([3, 3]);
+  });
+
+  it("uploads both frames an 8x present can land on", () => {
+    const maps = Array.from({ length: 40 }, (_, index) =>
+      previewMap(20 + index),
+    );
+    const { layer } = createLayer({ source: previewSource(maps) });
+
+    // A 24 fps clip at 8x on 60 Hz moves 3.2 frames a present.
+    for (const frame of [0, 3, 6, 10, 13, 16, 19, 22, 26, 29, 32]) {
+      layer.drawFrame(frame);
+      layer.uploadAhead(frame);
+    }
+
+    // The first frame, and the first jump before the layer knows the pace.
+    expect(layer.getUploadCounts().inPresent).toBe(2);
   });
 
   it("keeps frames uploaded ahead through a present that repeats the frame on screen", () => {

@@ -203,7 +203,7 @@ describe("depth preview window", () => {
     await source.drain();
 
     expect(window.upcoming(1, 2).map(({ index }) => index)).toEqual([2, 3]);
-    expect(window.upcoming(0, 2, 2).map(({ index }) => index)).toEqual([2, 4]);
+    expect(window.upcoming(0, 2, 2).map(({ index }) => index)).toEqual([2, 3]);
     expect(window.upcoming(4, 2)).toEqual([]);
   });
 

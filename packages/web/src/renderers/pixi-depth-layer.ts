@@ -48,6 +48,8 @@ const TEXTURE_RING_SIZE = 3;
  * 24 fps clip.
  */
 const MAX_UPLOAD_STRIDE = 8;
+/** Presents the pace is averaged over. */
+const PACE_STEPS = 4;
 type DepthShaderOptions = Parameters<typeof createPixiDepthShaderRenderer>[0];
 
 interface DrawnDepth {
@@ -110,9 +112,14 @@ export function createPixiDepthLayer(options: {
   let destroyed = false;
   let uploadsInPresent = 0;
   let uploadsAhead = 0;
-  /** The clip frame last drawn, and how many frames the draw before it skipped. */
+  /**
+   * The clip frame last drawn, and how far presents move. At a rate that is
+   * not a whole number of frames a present, a present moves the whole part
+   * or one more, and those two frames are what go up ahead.
+   */
   let lastFrameIndex: number | null = null;
-  let frameStride = 1;
+  /** How far the last few presents that moved went, in frames. */
+  const recentSteps: number[] = [];
 
   const ringFor = (map: DepthMap) => {
     const encoding = map.samples.encoding;
@@ -342,9 +349,13 @@ export function createPixiDepthLayer(options: {
 
       if (entry.frameIndex !== null && entry.frameIndex !== lastFrameIndex) {
         const step =
-          lastFrameIndex === null ? 1 : entry.frameIndex - lastFrameIndex;
+          lastFrameIndex === null ? 0 : entry.frameIndex - lastFrameIndex;
 
-        frameStride = step > 0 ? Math.min(MAX_UPLOAD_STRIDE, step) : 1;
+        // A seek back or a far jump says nothing about the pace.
+        if (step > 0 && step <= MAX_UPLOAD_STRIDE) {
+          recentSteps.push(step);
+          if (recentSteps.length > PACE_STEPS) recentSteps.shift();
+        }
         lastFrameIndex = entry.frameIndex;
       }
 
@@ -378,7 +389,13 @@ export function createPixiDepthLayer(options: {
       const upcoming = source.getUpcomingEntries(
         mediaTime,
         TEXTURE_RING_SIZE - 1,
-        frameStride,
+        Math.max(
+          1,
+          Math.floor(
+            recentSteps.reduce((sum, step) => sum + step, 0) /
+              Math.max(1, recentSteps.length),
+          ),
+        ),
       );
       // The frame on screen and the ones about to be: a present repeating
       // the frame on screen must not make the next frames look stale.

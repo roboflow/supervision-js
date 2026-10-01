@@ -86,10 +86,10 @@ export interface DepthPreviewWindow {
   /** Frames decoded and kept, counted up across the window's life. */
   getPreparationProgress(): number;
   /**
-   * Decoded entries for the frames `stride`, `2 * stride`, ... after
+   * Decoded entries for `count` frames in a row from `skip` frames after
    * `index`, nearest first, stopping at the first one not decoded.
    */
-  upcoming(index: number, count: number, stride?: number): DepthPreviewEntry[];
+  upcoming(index: number, count: number, skip?: number): DepthPreviewEntry[];
   getDiagnostics(): RenderPreparationArtifactDiagnostics;
   /** The decoder failed; the window stops waiting and decoding. */
   readonly failure: unknown;
@@ -522,14 +522,13 @@ export function createDepthPreviewWindow(
 
     getPreparationProgress: () => progress,
 
-    upcoming(index, count, stride = 1) {
+    upcoming(index, count, skip = 1) {
       const found: DepthPreviewEntry[] = [];
-      const step = Math.max(1, Math.round(stride));
 
       for (
-        let cursor = index + step;
+        let cursor = index + Math.max(1, Math.round(skip));
         cursor <= lastIndex && found.length < count;
-        cursor += step
+        cursor += 1
       ) {
         const entry = entries.get(cursor);
 
