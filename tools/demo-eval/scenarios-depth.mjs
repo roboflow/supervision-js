@@ -16,7 +16,8 @@ import { stable } from "./scenarios-guards.mjs";
 import { percentile, round } from "./stats.mjs";
 
 export const DEPTH_FIXTURE_ID = "spring_stereo_depth";
-const DEPTH_READY_DEADLINE_MS = 30_000;
+/* Under the 30 s a single page evaluation is given. */
+const DEPTH_READY_DEADLINE_MS = 20_000;
 const DEPTH_DRAG_FORWARD = { from: 0.15, to: 0.85 };
 const DEPTH_DRAG_BACKWARD = { from: 0.85, to: 0.15 };
 const DEPTH_DRAG_STEPS = 90;
@@ -90,6 +91,7 @@ const INSTALL_DEPTH_PROBE = `(() => {
       depthFrame: active ? frameAt(active.mediaTime) : null,
       depthIndex: active ? active.frameIndex : null,
       precision: active ? active.precision : null,
+      playbackState: snapshot.playbackState,
     });
     requestAnimationFrame(tick);
   };
@@ -120,6 +122,13 @@ const SETTLE_DEPTH_AT = `(async (time, deadlineMs) => {
   await renderer.seek(time);
   while (performance.now() - started < deadlineMs) {
     const state = renderer.getState();
+    // The demo can start playing again after a drag or a source switch; a
+    // frame that never rests never draws its exact depth.
+    if (state.playbackState === "playing") {
+      renderer.pause();
+      await renderer.seek(time);
+      continue;
+    }
     const active = renderer.getActiveDepth();
     const frame = state.presentedTime === null ? null : clock.indexAtOrBefore(state.presentedTime + 0.0005);
     if (active && active.precision === "exact" && active.frameIndex === frame) {
@@ -302,7 +311,17 @@ export function summariseDepthDrag(probe) {
     (sample) => sample.depthFrame !== sample.frame,
   ).length;
 
-  const after = probe.samples.filter((sample) => sample.at > probe.upAt);
+  /* The release lands, and then the demo may start playing again on its own,
+   * which is the transport's doing and not depth's: only the samples before
+   * that say how long depth took to arrive over the frame it landed on. */
+  const resumedAt = probe.samples.find(
+    (sample) => sample.at > probe.upAt && sample.playbackState === "playing",
+  )?.at;
+  const after = probe.samples.filter(
+    (sample) =>
+      sample.at > probe.upAt &&
+      (resumedAt === undefined || sample.at < resumedAt),
+  );
   const landedFrame = after.at(-1)?.frame ?? null;
   const firstDepth = after.find(
     (sample) =>
@@ -362,6 +381,8 @@ export function summariseDepthDrag(probe) {
     wrongFrameSamples,
     decoderRestarts: probe.configures,
     releaseFrame: landedFrame,
+    playedAfterReleaseMs:
+      resumedAt === undefined ? null : Math.round(resumedAt - probe.upAt),
     releaseToDepthMs:
       firstDepth === undefined ? null : Math.round(firstDepth.at - probe.upAt),
     releaseToExactMs:
@@ -481,7 +502,10 @@ export function depthDetail(scenario, field) {
     field(
       "release to depth / exact",
       `${scenario.releaseToDepthMs ?? "never"} / ${scenario.releaseToExactMs ?? "never"} ms` +
-        `  (limit ${scenario.limits.releaseToDepthMs})`,
+        `  (limit ${scenario.limits.releaseToDepthMs})` +
+        (scenario.playedAfterReleaseMs === null
+          ? ""
+          : `; the demo played again ${scenario.playedAfterReleaseMs}ms after the release`),
     ),
   ];
 }
