@@ -32,6 +32,34 @@ export interface FakeDecoderClip {
   readonly luma: (index: number) => Uint8Array;
 }
 
+/**
+ * The depth preview probe as a fake clip: two 256x256 frames holding every
+ * code `c` as a 16x16 block, decoded through `decode`.
+ */
+export function fakeProbeClip(
+  decode: (code: number) => number = (code) => code,
+): FakeDecoderClip {
+  const luma = new Uint8Array(256 * 256);
+
+  for (let code = 0; code < 256; code += 1) {
+    const top = (code >> 4) * 16;
+    const left = (code & 15) * 16;
+
+    for (let y = top; y < top + 16; y += 1) {
+      luma.fill(decode(code), y * 256 + left, y * 256 + left + 16);
+    }
+  }
+
+  return {
+    frameCount: 2,
+    frameRate: 24,
+    height: 256,
+    keyEvery: 24,
+    luma: () => luma,
+    width: 256,
+  };
+}
+
 export interface FakeDecoderLog {
   readonly configured: (HardwareAcceleration | undefined)[];
   created: number;

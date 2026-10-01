@@ -7,7 +7,10 @@ import {
   type DepthManifest,
   type DepthMap,
 } from "supervision-js-core";
-import type { DepthPreviewDecoding } from "#media/depth-preview-probe";
+import type {
+  DepthPreviewDecoderVerdict,
+  DepthPreviewDecoding,
+} from "#media/depth-preview-probe";
 import type {
   DepthPreviewTrackOptions,
   DepthPreviewTrackReader,
@@ -22,7 +25,7 @@ import {
   type RenderPreparationDiagnostics,
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
-import type { DepthFramePreparer } from "./depth-frame-preparer";
+import { abortable, type DepthFramePreparer } from "./depth-frame-preparer";
 import type { DepthPreviewLumaCopier } from "./depth-preview-luma";
 import { createDepthPreviewWindow } from "./depth-preview-window";
 
@@ -378,10 +381,13 @@ async function openDepthClip(
         ? timeAt(index + 1)
         : clock.endTimestamp
       : clock.timeAt(index) + clock.durationAt(index);
-  const preview = await openClipPreview(manifest, frames, base, context, {
-    endAt,
-    timeAt,
-  });
+  const { preview, unavailable } = await openClipPreview(
+    manifest,
+    frames,
+    base,
+    context,
+    { endAt, timeAt },
+  );
   const budgets = resolveDepthClipOptions(
     {
       exactFrameBytes:
@@ -432,18 +438,23 @@ async function openDepthClip(
     for (const listener of listeners) listener();
   };
 
+  let previewStopped: string | null = null;
+
   const reportDiagnostics = () => {
     diagnosticsTimer = undefined;
-    if (destroyed || !previewWindow) return;
+    if (destroyed || (!previewWindow && !unavailable)) return;
+
+    const offMainThread = preview?.copier?.offMainThread === true;
+
     context.onDiagnostics?.({
-      artifacts: [previewWindow.getDiagnostics()],
+      artifacts: previewWindow ? [previewWindow.getDiagnostics()] : [],
       // The decoder runs where the browser puts it; the work this page
       // does per frame, copying its codes out, runs in the worker or here.
-      executionMode: preview?.copier?.offMainThread
+      executionMode: offMainThread
         ? RenderPreparationExecutionMode.Worker
         : RenderPreparationExecutionMode.MainThread,
-      message: preview?.message() ?? null,
-      workerStatus: preview?.copier?.offMainThread
+      message: previewStopped ?? unavailable ?? preview?.message() ?? null,
+      workerStatus: offMainThread
         ? RenderPreparationWorkerStatus.Ready
         : RenderPreparationWorkerStatus.Disabled,
     });
@@ -456,6 +467,20 @@ async function openDepthClip(
       reportDiagnostics,
       PREVIEW_DIAGNOSTICS_INTERVAL_MS,
     );
+  };
+
+  /** A decoder that stopped is closed, not left holding its frames. */
+  const closeStoppedPreview = () => {
+    if (
+      !preview ||
+      !previewWindow ||
+      previewWindow.failure === null ||
+      previewStopped !== null
+    ) {
+      return;
+    }
+    previewStopped = `The depth preview stopped decoding, so depth is drawn only while playback rests: ${String(previewWindow.failure)}`;
+    preview.reader.dispose();
   };
 
   const previewWindow = preview
@@ -478,7 +503,10 @@ async function openDepthClip(
         frameBytes: preview.reader.width * preview.reader.height,
         frames: preview.reader,
         maxBytes: budgets.preview.maxCacheBytes,
-        onChange: scheduleDiagnostics,
+        onChange: () => {
+          closeStoppedPreview();
+          scheduleDiagnostics();
+        },
         onFrame: (index) => {
           // Only a landing for the frame on screen changes the picture.
           if (index === onScreen) notify();
@@ -488,6 +516,8 @@ async function openDepthClip(
         timeAt,
       })
     : null;
+
+  if (unavailable) scheduleDiagnostics();
 
   /**
    * The present asks for the frame on screen; decoding moves there right
@@ -718,11 +748,21 @@ interface OpenedClipPreview {
   message(): string | null;
 }
 
+interface ClipPreview {
+  readonly preview: OpenedClipPreview | null;
+  /** Why a clip with a preview draws none, for diagnostics; else null. */
+  readonly unavailable: string | null;
+}
+
 /**
  * Opens the clip's preview video and checks it against the media it is
  * drawn over: one preview frame per depth frame, each at its video frame's
- * time. A preview that disagrees is refused with a `RangeError`; one this
- * browser cannot open leaves the clip with exact depth at rest only.
+ * time. A preview that disagrees is refused with a `RangeError`. One this
+ * browser cannot open or decode leaves the clip with exact depth at rest
+ * only, and says why once in the console and in diagnostics.
+ *
+ * The probe's decoder steps carry their own deadlines; the preview's file is
+ * never given one, since a slow link is no reason to drop it.
  */
 async function openClipPreview(
   manifest: DepthManifest,
@@ -733,23 +773,44 @@ async function openClipPreview(
     readonly timeAt: (index: number) => number;
     readonly endAt: (index: number) => number;
   },
-): Promise<OpenedClipPreview | null> {
+): Promise<ClipPreview> {
   const track = manifest.preview;
   const open =
     context.openPreviewTrack === undefined
       ? openDefaultPreviewTrack
       : context.openPreviewTrack;
 
-  if (!track || !open) return null;
+  if (!track || !open) return { preview: null, unavailable: null };
 
   const url = resolveUrl(track.file, base);
   const choose =
     context.choosePreviewDecoding === undefined
       ? chooseDefaultPreviewDecoding
       : context.choosePreviewDecoding;
+  const unavailable = (reason: string): ClipPreview => {
+    const message = `The depth preview ${url} is off, so depth is drawn only while playback rests: ${reason}`;
+
+    console.warn(message);
+    return { preview: null, unavailable: message };
+  };
+  let decoding: DepthPreviewDecoding | null = null;
+
   // The probe decodes before the preview opens, so the page never holds two
   // of their decoders at once.
-  const decoding = choose ? await choose().catch(() => null) : null;
+  if (choose) {
+    try {
+      decoding = await abortable(choose(), context.signal);
+    } catch (error) {
+      if (context.signal?.aborted) throw error;
+      return unavailable(`its decoder probe failed: ${String(error)}`);
+    }
+    if (!decoding.probe) {
+      return unavailable(
+        `no decoder in this browser returned a frame of the probe clip (${describeVerdicts(decoding.verdicts)}).`,
+      );
+    }
+  }
+
   const copier = context.previewLumaCopier?.();
   let reader: DepthPreviewTrackReader;
 
@@ -758,13 +819,11 @@ async function openClipPreview(
       copier,
       correction: decoding?.correction ?? null,
       hardwareAcceleration: decoding?.hardwareAcceleration,
+      signal: context.signal,
     });
   } catch (error) {
     if (error instanceof RangeError || context.signal?.aborted) throw error;
-    console.warn(
-      `The depth preview ${url} did not open, so depth is drawn only while playback rests: ${String(error)}`,
-    );
-    return null;
+    return unavailable(`it did not open: ${String(error)}`);
   }
 
   try {
@@ -784,7 +843,20 @@ async function openClipPreview(
 
   if (message) console.warn(message);
 
-  return { copier, message: () => message, reader, track };
+  return {
+    preview: { copier, message: () => message, reader, track },
+    unavailable: null,
+  };
+}
+
+function describeVerdicts(verdicts: readonly DepthPreviewDecoderVerdict[]) {
+  return verdicts
+    .map(({ error, hardwareAcceleration, supported }) =>
+      supported
+        ? `${hardwareAcceleration}: ${error ?? "no frame"}`
+        : `${hardwareAcceleration}: not offered`,
+    )
+    .join("; ");
 }
 
 /**

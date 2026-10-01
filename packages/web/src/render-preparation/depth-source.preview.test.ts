@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  fakeProbeClip,
+  openFakeDepthPreviewTrack,
+  type FakeDecoderBehaviour,
+} from "../../../../test/fake-video-decoder";
 import type { DepthPreviewDecoding } from "#media/depth-preview-probe";
 import type {
   DepthPreviewDecodeOptions,
@@ -203,6 +208,143 @@ describe("depth source from a clip with a preview", () => {
     clip.source.destroy();
   });
 
+  describe("on decoders that misbehave", () => {
+    const fakeTimers = () =>
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "performance"],
+      });
+
+    /** Draws no depth while playing, holds nothing, and the exact frame at rest. */
+    async function expectExactAtRestOnly(
+      clip: Awaited<ReturnType<typeof openPreviewClip>>,
+      advance: (milliseconds: number) => Promise<unknown>,
+    ) {
+      clip.source.setPlaybackActive?.(true);
+      expect(clip.source.getEntry(CLOCK.timeAt(1))).toBeNull();
+      expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(1), OPEN)).toBe(
+        false,
+      );
+
+      clip.source.setPlaybackActive?.(false);
+      await advance(50);
+      expect(clip.source.getEntry(CLOCK.timeAt(1))).toMatchObject({
+        frameIndex: 1,
+        precision: "exact",
+      });
+    }
+
+    it("draws exact depth at rest when no decoder returns a frame of the probe", async () => {
+      const choosePreviewDecoding = await probeThrough(() => "silent");
+
+      fakeTimers();
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
+      const onOpen = vi.fn();
+      const opening = openPreviewClip({
+        choosePreviewDecoding,
+        decoder: () => "silent",
+        onDiagnostics,
+        onOpen,
+      });
+
+      const clip = await advanceUntilSettled(opening);
+      const stall =
+        "Error: The depth preview decoder returned no frame for 3 s of a flush.";
+
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]?.[0]).toBe(
+        `The depth preview https://example.test/clip/preview.mp4 is off, so depth is drawn only while playback rests: no decoder in this browser returned a frame of the probe clip (prefer-software: ${stall}; prefer-hardware: ${stall}).`,
+      );
+      await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [],
+          message: warn.mock.calls[0]?.[0],
+        }),
+      );
+      clip.source.destroy();
+    });
+
+    it("draws exact depth at rest when every decoder refuses its configuration", async () => {
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const clip = await openPreviewClip({
+        choosePreviewDecoding: await probeThrough(() => "refusesConfig"),
+        decoder: () => "refusesConfig",
+      });
+
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0]?.[0]).toContain(
+        "prefer-software: NotSupportedError: No decoder takes this configuration.",
+      );
+      await expectExactAtRestOnly(clip, settle);
+      clip.source.destroy();
+    });
+
+    it("plays the preview through a decoder that returns frames only when flushed", async () => {
+      const clip = await openPreviewClip({
+        choosePreviewDecoding: await probeThrough(() => "holdsUntilFlush"),
+        decoder: () => "holdsUntilFlush",
+      });
+
+      clip.source.setPlaybackActive?.(true);
+      clip.source.prefetch?.(CLOCK.timeAt(0));
+      await vi.waitFor(() =>
+        expect(clip.source.getEntry(CLOCK.timeAt(3))).toMatchObject({
+          frameIndex: 3,
+          precision: "preview",
+        }),
+      );
+      expect(previewCode(clip.source.getEntry(CLOCK.timeAt(3)))).toBe(code(3));
+
+      clip.source.setPlaybackActive?.(false);
+      await vi.waitFor(() =>
+        expect(clip.source.getEntry(CLOCK.timeAt(3))).toMatchObject({
+          frameIndex: 3,
+          precision: "exact",
+        }),
+      );
+      clip.source.destroy();
+    });
+
+    it("closes a preview decoder that stops returning frames, and stops holding playback for it", async () => {
+      fakeTimers();
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
+      const clip = await openPreviewClip({
+        decoder: () => "silent",
+        onDiagnostics,
+      });
+
+      clip.source.setPlaybackActive?.(true);
+      clip.source.prefetch?.(CLOCK.timeAt(0));
+      expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(0), OPEN)).toBe(
+        true,
+      );
+
+      await vi.advanceTimersByTimeAsync(3500);
+
+      expect(clip.disposed()).toBe(true);
+      expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(0), OPEN)).toBe(
+        false,
+      );
+      expect(warn).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
+        "The depth preview stopped decoding, so depth is drawn only while playback rests: Error: The depth preview decoder returned no frame for 3 s of a flush.",
+      );
+      await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
+      clip.source.destroy();
+    });
+  });
+
   it("hands over the next decoded frames for uploading ahead while playing", async () => {
     const clip = await openPreviewClip();
 
@@ -315,6 +457,21 @@ function settle() {
   return new Promise((resolve) => setTimeout(resolve, 20));
 }
 
+/** Runs fake timers on until `work` settles. */
+async function advanceUntilSettled<T>(work: Promise<T>): Promise<T> {
+  let settled = false;
+
+  void work.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  for (let step = 0; step < 100 && !settled; step += 1) {
+    await vi.advanceTimersByTimeAsync(250);
+  }
+
+  return work;
+}
+
 interface PreviewClipOptions {
   readonly gated?: boolean;
   readonly frameCount?: number;
@@ -324,6 +481,35 @@ interface PreviewClipOptions {
   readonly onOpen?: (options: DepthPreviewTrackOptions | undefined) => void;
   readonly choosePreviewDecoding?: () => Promise<DepthPreviewDecoding>;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
+  /** Decodes the preview through fake decoders that behave this way. */
+  readonly decoder?: FakeDecoders;
+}
+
+type FakeDecoders = (
+  preference: HardwareAcceleration | undefined,
+) => FakeDecoderBehaviour;
+
+/**
+ * The page's probe, run through fake decoders. Its module is loaded fresh,
+ * since the probe answers once per page, and before any fake timers start:
+ * loading a module takes real time.
+ */
+async function probeThrough(decoder: FakeDecoders) {
+  vi.resetModules();
+
+  const { chooseDepthPreviewDecoding } =
+    await import("#media/depth-preview-probe");
+
+  return () =>
+    chooseDepthPreviewDecoding(
+      async (_input, trackOptions) =>
+        openFakeDepthPreviewTrack(
+          ({ hardwareAcceleration }) => decoder(hardwareAcceleration),
+          fakeProbeClip(),
+          trackOptions,
+        ),
+      async () => true,
+    );
 }
 
 async function openPreviewClip(options: PreviewClipOptions = {}) {
@@ -426,6 +612,29 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     ),
     width,
   };
+  const decoder = options.decoder;
+  const openFake = (trackOptions: DepthPreviewTrackOptions = {}) => {
+    const fake = openFakeDepthPreviewTrack(
+      ({ hardwareAcceleration }) => decoder!(hardwareAcceleration),
+      {
+        frameCount,
+        frameRate: 1,
+        height: HEIGHT,
+        keyEvery: 5,
+        luma: (index) => new Uint8Array(width * HEIGHT).fill(code(index)),
+        width,
+      },
+      trackOptions,
+    );
+
+    return {
+      ...fake,
+      dispose() {
+        disposed = true;
+        fake.dispose();
+      },
+    };
+  };
   const source = await openDepthSource(
     { manifest: "https://example.test/clip/depth.json" },
     {
@@ -446,7 +655,7 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
         expect(url).toBe("https://example.test/clip/preview.mp4");
         options.onOpen?.(trackOptions);
         if (options.openError) throw options.openError;
-        return reader;
+        return decoder ? openFake(trackOptions) : reader;
       },
       preparer: () => preparer,
     },

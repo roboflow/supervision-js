@@ -199,7 +199,10 @@ export function createDepthFramePreparer(
 }
 
 /** Rejects when the signal aborts; the work itself carries on unobserved. */
-function abortable<T>(work: Promise<T>, signal: AbortSignal | undefined) {
+export function abortable<T>(
+  work: Promise<T>,
+  signal: AbortSignal | undefined,
+) {
   if (!signal) return work;
 
   return new Promise<T>((resolve, reject) => {

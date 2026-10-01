@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  fakeProbeClip,
   openFakeDepthPreviewTrack,
   type FakeDecoderBehaviour,
 } from "../../../../test/fake-video-decoder";
@@ -288,14 +289,7 @@ function probeThrough(
   ) =>
     openFakeDepthPreviewTrack(
       ({ hardwareAcceleration }) => behaviour(hardwareAcceleration),
-      {
-        frameCount: 2,
-        frameRate: 24,
-        height: 256,
-        keyEvery: 24,
-        luma: () => probeLuma((code) => code),
-        width: 256,
-      },
+      fakeProbeClip(),
       options,
     );
 }
