@@ -51,11 +51,7 @@ export interface DepthControlKit {
   ) => ReactElement;
 }
 
-/**
- * The depth renderer's options, the same everywhere they are offered.
- * `probe` supplies the depth on screen, which the legend's ends and the range
- * lock read.
- */
+/** `probe` supplies the depth on screen, which the legend and the range lock read. */
 export function DepthControls({
   disabled = false,
   kit,
@@ -71,7 +67,7 @@ export function DepthControls({
 }) {
   const { Choice, Color, Number: NumberField, Slider, Toggle } = kit;
   const shown = useShownDepthMap(probe);
-  /** The colour painting is turned back on with, the last one picked. */
+  /** The colour painting turns back on with: the last one picked. */
   const noDepthColorRef = useRef(
     settings.noDepthColor ?? DEFAULT_NO_DEPTH_COLOR,
   );
@@ -195,10 +191,6 @@ export function DepthControls({
   );
 }
 
-/**
- * The colormap as the renderer draws it, far end on the left, with the value
- * at each end.
- */
 function DepthColourLegend(props: {
   readonly colormap: DepthColormap;
   readonly range: DepthColourRange;

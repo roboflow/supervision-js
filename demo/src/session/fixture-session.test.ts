@@ -30,8 +30,6 @@ describe("the depth a sample opens with", () => {
   const manifestOf = (id: string) =>
     spring.depth!.layers.find((layer) => layer.id === id)!.manifestSrc;
 
-  /* A reopen, such as a media path or option change, keeps the layer the
-   * Style panel picked rather than snapping back to the sample's default. */
   it("opens with the layer picked, and the sample's default otherwise", () => {
     expect(resolveFixtureDepth(spring, false, "ground-truth")).toEqual({
       manifest: manifestOf("ground-truth"),

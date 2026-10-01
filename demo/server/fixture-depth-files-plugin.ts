@@ -24,12 +24,9 @@ interface DepthManifestFiles {
 }
 
 /**
- * Copies every fixture depth layer into the build under its own name.
- *
- * A depth.json names its frames by pattern, relative to itself, so the files
- * cannot become hashed assets the way fixture media and detection chunks do.
- * The dev server already serves them from `fixtures/` as they are; this puts
- * the same tree at the same place in `dist/`.
+ * A depth.json names its frames by pattern, relative to itself, so its files
+ * cannot become hashed assets. This copies them to the place in `dist/` the
+ * dev server serves them from.
  */
 export function fixtureDepthFilesPlugin(fixturesDirectory: string): Plugin {
   return {
@@ -50,7 +47,6 @@ export function fixtureDepthFilesPlugin(fixturesDirectory: string): Plugin {
   };
 }
 
-/** Every file each fixture's depth manifests name, the manifests included. */
 export async function listFixtureDepthFiles(
   fixturesDirectory: string,
 ): Promise<string[]> {

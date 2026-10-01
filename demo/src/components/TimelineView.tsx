@@ -317,11 +317,9 @@ export function TimelineView({
       // The range rounds to 10 ms, so its native value may sit half a step
       // from the coordinate-authoritative target already committed on release.
       (Math.abs(releasedTime - nextTime) <= 0.005 ||
-        // The change the browser fires for the release itself is the same
-        // gesture, whatever value its own thumb geometry gives it: near the
-        // ends of the track that is several frames from the pointer. Taken
-        // as a new change, it would open a scrub nothing ever ends, holding
-        // the player as dragged.
+        // The release's own change event carries the thumb's value, several
+        // frames from the pointer near the track's ends. Taken as a new
+        // change, it would open a scrub nothing ends.
         isReleaseEcho(releasedAt, event.timeStamp))
     ) {
       return;
@@ -907,14 +905,8 @@ interface PendingTimelineSeek {
 }
 
 /**
- * A completion belongs only to the seek that created it. An older request may
- * finish after a newer one, and must not release the newer target's playhead
- * latch.
- */
-/**
- * How soon after a pointer lets go the browser's own change event for that
- * release arrives. It follows within the same input dispatch, a few
- * milliseconds; an assistive change is a separate act seconds later.
+ * The release's own change event follows within the same input dispatch, a
+ * few milliseconds later; an assistive change comes seconds later.
  */
 const RELEASE_ECHO_MILLISECONDS = 100;
 
@@ -930,6 +922,11 @@ function isReleaseEcho(
   );
 }
 
+/**
+ * A completion belongs only to the seek that created it. An older request may
+ * finish after a newer one, and must not release the newer target's playhead
+ * latch.
+ */
 export function settlePendingTimelineSeek(
   pending: PendingTimelineSeek | null,
   completedRunId: number,

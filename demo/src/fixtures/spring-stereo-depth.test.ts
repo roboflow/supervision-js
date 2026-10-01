@@ -24,7 +24,6 @@ const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
 const FRAME_COUNT = 192;
-/** Both manifests name their frames `exact/{index:06}.png`, checked below. */
 const exactFile = (index: number) =>
   `exact/${String(index).padStart(6, "0")}.png`;
 
@@ -36,7 +35,6 @@ const manifests = depth.layers.map((layer) => ({
   ),
   folder: join(fixtureRoot, layer.manifest, ".."),
 }));
-/** Each layer's manifest, its preview and one PNG per frame, by fixture path. */
 const layerFiles = manifests.flatMap(({ layer, manifest }) => {
   const folder = layer.manifest.replace(/depth\.json$/, "");
 

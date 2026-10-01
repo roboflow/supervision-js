@@ -1,5 +1,3 @@
-/* The depth playgrounds' stage and transport; loaded with their components. */
-
 /*
  * The panel holds more controls than the stage is tall, so it scrolls inside a
  * playground of one fixed height, and the media keeps its letterbox.
@@ -111,7 +109,6 @@
   white-space: nowrap;
 }
 
-/* Why depth looks the way it does, from the session's diagnostics. */
 .depth-playground__notice {
   border-left: 2px solid var(--amber);
   color: var(--muted-strong);

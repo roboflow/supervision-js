@@ -68,7 +68,6 @@ export async function createFixtureSession(
     readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
-  // A sample that ships only depth has no detection manifest to read.
   const manifest =
     options.definition.detectionsManifestSrc === null
       ? null

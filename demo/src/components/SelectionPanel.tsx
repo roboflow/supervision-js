@@ -13,10 +13,7 @@ export const SelectionPanel = memo(function SelectionPanel({
   playbackState,
   selectedDetectionPick,
 }: {
-  /**
-   * What the depth map holds under the pointer, when depth is drawn. It sits
-   * above the detection details, which change height as picks come and go.
-   */
+  /** Sits above the detection details, which change height as picks come and go. */
   readonly depthReadout?: ReactNode;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly onClearSelection: () => void;

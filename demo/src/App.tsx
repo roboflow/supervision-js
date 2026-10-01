@@ -268,8 +268,8 @@ function DemoApp() {
     [depthProbe, depthShown],
   );
 
-  // A step, a seek, a frame played or depth landing behind a resting frame
-  // can each change the depth on screen without the pointer moving.
+  // Steps, seeks, playback and depth landing late each change the depth on
+  // screen without the pointer moving.
   useEffect(() => {
     depthProbe.refresh();
   }, [depthProbe, demo.rendererState, demo.sessionState]);

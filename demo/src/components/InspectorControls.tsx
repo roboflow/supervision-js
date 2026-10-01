@@ -410,7 +410,6 @@ export function ColorControl({
   );
 }
 
-/** A `0xRRGGBB` number as the `#rrggbb` a colour input takes. */
 export function toHexColor(color: number) {
   return `#${color.toString(16).padStart(6, "0").slice(-6)}`;
 }

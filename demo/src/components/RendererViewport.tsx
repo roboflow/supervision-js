@@ -13,7 +13,6 @@ interface RendererViewportProps {
   /** Detail is withheld until the wait has lasted long enough to need naming. */
   readonly explained: boolean;
   readonly overlay: ViewportOverlay | null;
-  /** Where the pointer is over the picture, for readouts such as depth. */
   readonly onPointerLeave?: PointerEventHandler<HTMLDivElement>;
   readonly onPointerMove?: PointerEventHandler<HTMLDivElement>;
 }

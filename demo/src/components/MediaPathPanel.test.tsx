@@ -119,8 +119,6 @@ describe("MediaPathPanel", () => {
     ).toBe(false);
   });
 
-  /* Both paths play depth video; this card is where a reader choosing a path
-   * learns what it costs on Mediabunny before they pick one. */
   it("says on each card what depth it draws, and what depth video costs on Mediabunny", () => {
     const text = prose(render());
     const mediabunny = demoMediaPathCopy[DemoMediaPath.Mediabunny].depth;

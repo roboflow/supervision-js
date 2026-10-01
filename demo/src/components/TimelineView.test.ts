@@ -121,7 +121,6 @@ describe("TimelineView range input gestures", () => {
     // The native range puts its thumb two frames short near the track's end.
     input.onChange(changeEvent(83, 2202));
 
-    // A scrub here would hold the player as dragged with nothing to end it.
     expect(onScrub.mock.calls).toEqual([[85]]);
     expect(onSeek).toHaveBeenCalledOnce();
     expect(onSeek).toHaveBeenCalledWith(85);

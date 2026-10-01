@@ -99,7 +99,6 @@ export interface DemoRendererState {
   readonly containerRef: RefCallback<HTMLDivElement>;
   /** The open sample's depth layer, or null when it ships no depth. */
   readonly depthLayerId: string | null;
-  /** Whether the layer picked since the session opened has loaded. */
   readonly depthLayerLoad: DepthLayerLoad;
   /** The renderer on screen, read at the moment of asking. */
   readonly getRenderer: () => MediaRenderer | null;
@@ -933,8 +932,7 @@ export function useDemoRenderer(
       depthLayerRef.current = layerId;
       setDepthLayerIdState(layerId);
 
-      // While the clip is converted the layer only waits for the session
-      // that can play it: a clip pairs with the clip's own frames.
+      // A converted clip plays no depth; the layer waits for a session that can.
       if (!depthPlays || !session?.setDepth) {
         depthLayerLoader.reset();
         return;

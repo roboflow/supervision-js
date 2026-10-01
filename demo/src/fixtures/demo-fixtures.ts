@@ -89,7 +89,6 @@ interface DemoFixtureMeta {
   readonly depth?: unknown;
 }
 
-/** Where a depth layer's values come from. */
 export const DemoFixtureDepthSource = {
   GroundTruth: "ground_truth",
   Prediction: "prediction",
@@ -131,10 +130,6 @@ export interface DemoFixtureDefinition {
   readonly datasetId: string;
   /** Null for a fixture that ships depth and no detections. */
   readonly detectionsManifestSrc: string | null;
-  /**
-   * The fixture's depth layers, each with the URL of its depth.json. The
-   * files a manifest names sit next to it, so they resolve against that URL.
-   */
   readonly depth: DemoFixtureDepthDefinition | null;
   readonly displayName: string;
   readonly inferenceLabel: string;
@@ -172,11 +167,6 @@ const depthLayerSources: readonly string[] = Object.values(
   DemoFixtureDepthSource,
 );
 
-/**
- * Checks a fixture.meta.json `depth` block: at least one layer, each with a
- * unique id, a label, a depth.json inside the fixture folder and where its
- * values come from, and a default layer that is one of them.
- */
 export function parseDemoFixtureDepth(value: unknown): DemoFixtureDepth {
   const fail = (message: string): never => {
     throw new Error(`fixture.meta.json depth: ${message}`);
@@ -233,11 +223,7 @@ export function parseDemoFixtureDepth(value: unknown): DemoFixtureDepth {
   return { defaultLayer: block.defaultLayer as string, layers };
 }
 
-/**
- * Fixture depth folders are served as they are, not as hashed assets: a
- * depth.json names its frame files by pattern, relative to itself, so they
- * must keep their names and places. The demo build copies them the same way.
- */
+/** A depth.json names its frames relative to itself, so its folder is served unhashed. */
 function resolveFixtureDepth(
   depth: DemoFixtureDepth,
   basePath: string,
@@ -296,10 +282,6 @@ export function resolveDemoFixtureAvailability(
   return availability;
 }
 
-/**
- * Narrows a fixture's layers to the data it ships: depth only with a depth
- * block, and no detection layer at all without detections.
- */
 export function resolveDemoFixtureDataLayers(
   availability: DemoPresentationAvailability | undefined,
   data: { readonly depth: boolean; readonly detections: boolean },
@@ -316,11 +298,7 @@ export function resolveDemoFixtureDataLayers(
   return narrowed;
 }
 
-/**
- * The layers a session can draw right now. A depth clip pairs one PNG with
- * each of the clip's own frames, so depth reaches the screen only from a
- * fixture played as it is, not converted first.
- */
+/** Depth video pairs with the clip's own frames, so a converted clip draws none. */
 export function resolveDemoDepthReach(
   availability: DemoPresentationAvailability | undefined,
   depthPlays: boolean,

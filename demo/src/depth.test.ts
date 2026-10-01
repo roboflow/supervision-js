@@ -226,7 +226,6 @@ describe("depth range controls", () => {
     });
   });
 
-  /* A range in pixels means nothing in metres. */
   it("locks a manual range again in the new unit, or falls back to the clip's", () => {
     expect(changeDepthQuantity(manual, "depth", lockTo)).toEqual({
       manualRange: locked,

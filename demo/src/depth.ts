@@ -20,7 +20,6 @@ export const DepthRangeMode = {
 export type DepthRangeMode =
   (typeof DepthRangeMode)[keyof typeof DepthRangeMode];
 
-/** Every depth renderer option the demo offers, in descriptor units. */
 export interface DepthSettings {
   readonly colormap: DepthColormap;
   readonly quantity: DepthQuantity;
@@ -54,7 +53,6 @@ export const depthSamplingOptions: readonly {
   { label: "Edge-aware", value: "edge-aware" },
 ];
 
-/** The colour pixels without depth take when painting them is first turned on. */
 export const DEFAULT_NO_DEPTH_COLOR = 0x202020;
 
 export const initialDepthSettings: DepthSettings = {
@@ -160,7 +158,6 @@ export function changeDepthRangeMode(
   return manualRange ? { manualRange, rangeMode } : { rangeMode };
 }
 
-/** What the colours span, or why that is not known yet. */
 export type DepthColourRange =
   | {
       readonly near: number;

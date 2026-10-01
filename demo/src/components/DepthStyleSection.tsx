@@ -12,7 +12,6 @@ import {
 } from "./InspectorControls";
 
 export interface WorkbenchDepth {
-  /** Why the sample's depth cannot be drawn on this path, or null when it can. */
   readonly blockedReason: string | null;
   readonly layerId: string | null;
   readonly layerLoad: DepthLayerLoad;

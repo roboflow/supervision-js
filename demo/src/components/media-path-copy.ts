@@ -1,9 +1,5 @@
 import { DemoMediaPath } from "../session/session-options";
 
-/**
- * Why the Depth switch is off while Mediabunny converts the clip first, as the
- * Depth section says it. The Mediabunny card says the same in its own facts.
- */
 export const DEPTH_VIDEO_OFF_WHILE_CONVERTING =
   "Depth video pairs a depth frame with each of the clip's own frames, and converting the clip first can change those frames, so depth stays off while conversion is on. Turn conversion off to see depth.";
 
