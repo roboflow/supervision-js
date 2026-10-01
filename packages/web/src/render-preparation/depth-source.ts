@@ -200,8 +200,6 @@ export interface DepthSourceContext {
   readonly signal?: AbortSignal;
   /** The host's budgets and timing for clips. */
   readonly depth?: RenderPreparationDepthOptions;
-  /** Overrides for the exact frames, over `depth`. */
-  readonly exactFrames?: Partial<ExactDepthFrameOptions>;
   /**
    * The mask window's schedule batch, which also sizes what the preview keeps
    * at rest: masks and depth keep the same margin ahead of a paused frame.
@@ -526,7 +524,7 @@ async function openDepthClip(
     context.depth,
     { scheduleBatchSize: context.scheduleBatchSize },
   );
-  const options = { ...budgets.exact, ...context.exactFrames };
+  const options = budgets.exact;
   const exactFrameBytes =
     manifest.width *
     manifest.height *

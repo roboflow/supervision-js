@@ -623,7 +623,7 @@ describe("exact depth while playing", () => {
     const source = await openDepthSource(
       { manifest: "https://example.test/clip/depth.json" },
       {
-        exactFrames: { settleSeconds: 0 },
+        depth: { exactSettleSeconds: 0 },
         fetch: server.fetch,
         frameClock: CLOCK,
         media: MEDIA,
@@ -1016,10 +1016,11 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
       choosePreviewDecoding: options.choosePreviewDecoding ?? null,
       // One-second frames: five seconds ahead is five frames.
       depth: {
+        exactNeighborFrameCount: 0,
+        exactSettleSeconds: 0,
         playback: options.playback ?? "preview",
         previewPrefetchSeconds: 5,
       },
-      exactFrames: { neighborFrameCount: 0, settleSeconds: 0 },
       fetch,
       frameClock: CLOCK,
       media: MEDIA,

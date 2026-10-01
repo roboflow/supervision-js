@@ -10,7 +10,6 @@ import {
 import {
   openDepthSource,
   type DepthFrameProvider,
-  type ExactDepthFrameOptions,
   resolveUrl,
   validateDepthInput,
 } from "#render-preparation/depth-source";
@@ -367,14 +366,12 @@ function clipServer(
 
 async function openClip(
   server: ReturnType<typeof clipServer>,
-  exactFrames: Partial<ExactDepthFrameOptions> = {},
   depth: RenderPreparationDepthOptions = {},
 ) {
   return openDepthSource(
     { manifest: "https://example.test/clip/depth.json" },
     {
-      depth,
-      exactFrames: { settleSeconds: 0, ...exactFrames },
+      depth: { exactSettleSeconds: 0, ...depth },
       fetch: server.fetch,
       frameClock: CLOCK,
       media: MEDIA,
@@ -449,7 +446,7 @@ describe("depth source from a clip manifest", () => {
   it("fetches the frame on screen once playback has rested, then asks for one redraw", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const server = clipServer();
-    const source = await openClip(server, { settleSeconds: 0.15 });
+    const source = await openClip(server, { exactSettleSeconds: 0.15 });
     const redraw = vi.fn();
 
     source.subscribe?.(redraw);
@@ -522,7 +519,7 @@ describe("depth source from a clip manifest", () => {
           boxWidth: MEDIA.width / 4,
           devicePixelRatio: 1,
         },
-        exactFrames: { settleSeconds: 0 },
+        depth: { exactSettleSeconds: 0 },
         fetch: server.fetch,
         frameClock: CLOCK,
         // A box that shows the picture larger than the 16x9 map asks for none.
@@ -545,7 +542,7 @@ describe("depth source from a clip manifest", () => {
       {
         // At half a pixel a CSS pixel, a 16x9 box shows 8x4.5 of the map.
         display: { boxHeight: 9, boxWidth: 16, devicePixelRatio: 0.5 },
-        exactFrames: { settleSeconds: 0 },
+        depth: { exactSettleSeconds: 0 },
         fetch: server.fetch,
         frameClock: CLOCK,
         media: { height: 9, width: 16 },
@@ -575,7 +572,7 @@ describe("depth source from a clip manifest", () => {
 
   it("draws nothing while the preview plays and there is none, even a frame it holds", async () => {
     const server = clipServer();
-    const source = await openClip(server, {}, { playback: "preview" });
+    const source = await openClip(server, { playback: "preview" });
     const redraw = vi.fn();
 
     source.subscribe?.(redraw);
@@ -597,11 +594,10 @@ describe("depth source from a clip manifest", () => {
   it("fetches nothing while the preview plays", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const server = clipServer();
-    const source = await openClip(
-      server,
-      { settleSeconds: 0.15 },
-      { playback: "preview" },
-    );
+    const source = await openClip(server, {
+      exactSettleSeconds: 0.15,
+      playback: "preview",
+    });
 
     source.setPlaybackActive?.(true);
     for (let time = 0; time < 5; time += 1) source.getEntry(time);
@@ -653,8 +649,8 @@ describe("depth source from a clip manifest", () => {
   it("keeps frames up to its byte budget, dropping the farthest first", async () => {
     const server = clipServer();
     const source = await openClip(server, {
-      maxCacheBytes: 3 * CLIP_FRAME_BYTES,
-      neighborFrameCount: 1,
+      exactNeighborFrameCount: 1,
+      maxExactCacheBytes: 3 * CLIP_FRAME_BYTES,
     });
 
     source.getEntry(2);
@@ -675,7 +671,7 @@ describe("depth source from a clip manifest", () => {
 
   it("pairs depth frames with media times through times_s", async () => {
     const server = clipServer({ times_s: [0.5, 2, 6] }, 3);
-    const source = await openClip(server, { neighborFrameCount: 0 });
+    const source = await openClip(server, { exactNeighborFrameCount: 0 });
 
     expect(source.getEntry(0.25)).toBeNull();
 

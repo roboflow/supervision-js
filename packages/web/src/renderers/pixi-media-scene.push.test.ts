@@ -1017,7 +1017,7 @@ describe("push-presented Pixi scene", () => {
         baseUrl: "https://example.test/clip/",
       },
       {
-        exactFrames: { neighborFrameCount: 0, settleSeconds: 0.15 },
+        depth: { exactNeighborFrameCount: 0, exactSettleSeconds: 0.15 },
         fetch: (async () =>
           new Response(new Uint8Array(4))) as unknown as typeof fetch,
         frameClock: {
