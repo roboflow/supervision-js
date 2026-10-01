@@ -36,6 +36,9 @@ const { values: flags } = parseArgs({
     browser: { default: "chrome", type: "string" },
     layers: { default: "sgbm,ground-truth", type: "string" },
     playback: { default: "auto", type: "string" },
+    // Chrome only: caps the page's downloads at this many megabits a second,
+    // with 40 ms latency, once the playground is open.
+    "throttle-mbps": { type: "string" },
     out: {
       default: path.join(rootDir, "benchmark/depth/results"),
       type: "string",
@@ -216,6 +219,10 @@ async function main() {
     await browser.navigate(pageUrl);
     report.userAgent = await browser.evaluate("navigator.userAgent");
     await prepare(browser);
+    if (flags["throttle-mbps"]) {
+      report.throttleMbps = Number(flags["throttle-mbps"]);
+      await browser.throttle?.(report.throttleMbps);
+    }
 
     for (const layer of flags.layers.split(",")) {
       await selectLayer(browser, layer);
@@ -341,7 +348,8 @@ async function playThrough(browser, layer, rate) {
       playingReadout = await pageState(browser);
       await browser.evaluate(`(() => {
         const active = __depthE2E.findSession().renderer.getActiveDepth();
-        if (active) __depthE2E.kept.set(active.frameIndex, active.map);
+        // The alignment check below judges a preview frame's codes.
+        if (active?.precision === "preview") __depthE2E.kept.set(active.frameIndex, active.map);
       })()`);
       await screenshot(browser, `playback-${name}-playing.png`);
       screenshotTaken = true;
@@ -401,7 +409,7 @@ async function playThrough(browser, layer, rate) {
   if (
     playingReadout &&
     readoutPrecision &&
-    !new RegExp(readoutPrecision).test(playingReadout.readoutStatus ?? "")
+    !new RegExp(readoutPrecision, "i").test(playingReadout.readoutStatus ?? "")
   ) {
     failures.push(
       `${name}: readout while playing ${readoutPrecision} depth says "${playingReadout.readoutStatus}"`,
@@ -528,6 +536,23 @@ async function playThrough(browser, layer, rate) {
     alignment,
     exactAfterPauseMs: exactAfterMs,
     exactPlayingSamples: exactWhilePlaying.length,
+    // One letter per playing sample: E exact, P preview, - none, with the
+    // frame on screen wherever the depth drawn changes.
+    precisionTrace: playing
+      .map((sample, index) => {
+        const letter =
+          sample.active?.precision === "exact"
+            ? "E"
+            : sample.active
+              ? "P"
+              : "-";
+        const previous = playing[index - 1]?.active?.precision ?? null;
+
+        return (sample.active?.precision ?? null) === previous
+          ? letter
+          : `${letter}${sample.presentedFrame}`;
+      })
+      .join(""),
     previewPlayingSamples: previewWhilePlaying.length,
     presentedFps: presentedFrames / elapsedSeconds,
     targetFps: 24 * rate,
@@ -643,7 +668,7 @@ async function screenshot(browser, name) {
 
 function renderSummary(report) {
   const lines = [
-    `Depth playback (${report.browser}, ${report.playback}): ${report.userAgent}`,
+    `Depth playback (${report.browser}, ${report.playback}${report.throttleMbps ? `, ${report.throttleMbps} Mbit/s` : ""}): ${report.userAgent}`,
   ];
 
   for (const run of report.runs) {
@@ -753,6 +778,16 @@ async function openChrome(profile) {
     async close() {
       cdp.close();
       await stopProcess(chrome);
+    },
+    async throttle(megabitsPerSecond) {
+      await cdp.send("Network.enable");
+      await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+      await cdp.send("Network.emulateNetworkConditions", {
+        downloadThroughput: (megabitsPerSecond * 1e6) / 8,
+        latency: 40,
+        offline: false,
+        uploadThroughput: (megabitsPerSecond * 1e6) / 8,
+      });
     },
     /** CPU seconds Chrome and every process it started have used so far. */
     cpuSeconds: () => processTreeCpuSeconds(chrome.pid),

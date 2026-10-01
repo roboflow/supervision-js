@@ -159,6 +159,8 @@ async function main() {
     await browser.evaluate("globalThis.__mbDepth.start()");
     await browser.evaluate("globalThis.__demoRenderer.pause()");
     const pausedExactMs = await waitForExact(browser, frameAt);
+    // Exact depth that played is there at once; sample a few frames of it.
+    await sleep(150);
     await screenshot(browser, "mediabunny-depth-paused-exact.png");
     summarize("pause", await stopSamples(browser), {
       exactAfterMs: pausedExactMs,
