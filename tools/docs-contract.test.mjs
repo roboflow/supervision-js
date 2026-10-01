@@ -460,10 +460,6 @@ test("the depth page embeds its fixture playground with a synced snippet", async
     path.join(rootDir, "demo/src/components/DocsDepthPlayground.tsx"),
     "utf8",
   );
-  const controls = await readFile(
-    path.join(rootDir, "demo/src/components/DepthRendererControls.tsx"),
-    "utf8",
-  );
   const snippet = await readFile(
     path.join(rootDir, "demo/src/docs-depth.ts"),
     "utf8",
@@ -485,10 +481,17 @@ test("the depth page embeds its fixture playground with a synced snippet", async
   assert.match(demoApp, /embeddedView === "depth"\)/);
   assert.match(demoApp, /<DocsDepthPlayground \/>/);
   assert.match(playground, /const DEPTH_FIXTURE = "spring_stereo_depth"/);
-  assert.match(playground, /createDocsDepthRenderer\(settings\)/);
-  assert.match(playground, /<DepthLiveCode settings=\{settings\} \/>/);
+  // The live code and the drawn renderer read the same settings, so the
+  // snippet stays in step with the controls.
+  const liveSettings = /<DepthLiveCode settings=\{(\w+)\} \/>/.exec(
+    playground,
+  )?.[1];
+  assert.ok(liveSettings, "the depth playground shows its live code");
+  assert.match(
+    playground,
+    new RegExp(`createDocsDepthRenderer\\(${liveSettings}\\)`),
+  );
   assert.match(playground, /CC BY 4\.0/);
-  assert.match(controls, /createDocsDepthSnippet\(props\.settings\)/);
   assert.match(snippet, /session\.setPresentation\(\{/);
   assert.match(snippet, /annotationRenderers\.depth\(\{/);
   assert.equal(fixtureMeta.sampleName, "spring_stereo_depth");

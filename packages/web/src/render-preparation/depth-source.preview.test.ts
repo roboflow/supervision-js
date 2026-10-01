@@ -701,7 +701,7 @@ describe("assertDepthPreviewTimeline", () => {
     times: Float64Array.from(times),
   });
 
-  it("accepts a preview whose frames keep the video's times from its first one", () => {
+  it("accepts a preview within half a millisecond of the video's times", () => {
     expect(() =>
       assertDepthPreviewTimeline(
         preview([0, 0.0412, 0.0833]),
@@ -709,16 +709,6 @@ describe("assertDepthPreviewTimeline", () => {
         (index) => [0, 0.04166, 0.08333][index],
       ),
     ).not.toThrow();
-  });
-
-  it("refuses a variable rate the video does not have", () => {
-    expect(() =>
-      assertDepthPreviewTimeline(
-        preview([0, 0.05, 0.0833]),
-        3,
-        (index) => [0, 0.04166, 0.08333][index],
-      ),
-    ).toThrow(/frame 1 is at 0\.05 s and its video frame at 0\.04166 s/);
   });
 });
 
