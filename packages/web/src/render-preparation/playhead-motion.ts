@@ -135,6 +135,8 @@ export interface PresentedFrameStride {
   observe(step: number): void;
   /** The narrowest of the repeated strides, 1 until there are enough. */
   narrowest(): number;
+  /** How far presents move on average, 1 until there are enough. */
+  average(): number;
   /**
    * The stride every recent present moved, or 1 when they differ: a cadence
    * that alternates lands on frames no single stride names.
@@ -143,19 +145,29 @@ export interface PresentedFrameStride {
   reset(): void;
 }
 
-export function createPresentedFrameStride(): PresentedFrameStride {
+/**
+ * `sampleCount` is how many moves a cadence has to repeat over. A cadence
+ * that is not a whole number of frames, 3.2 at 8x of 24 fps on 60 Hz, moves
+ * 3, 3, 3, 3 and then 4, so a reading that skips frames on it needs more
+ * than four moves to see that.
+ */
+export function createPresentedFrameStride(
+  sampleCount = PRESENTED_FRAME_STRIDE_SAMPLE_COUNT,
+): PresentedFrameStride {
   const samples: number[] = [];
-  const full = () => samples.length >= PRESENTED_FRAME_STRIDE_SAMPLE_COUNT;
+  const full = () => samples.length >= sampleCount;
 
   return {
     observe(step) {
       if (step <= 0 || step > MAX_PRESENTED_FRAME_STRIDE) return;
       samples.push(step);
-      if (samples.length > PRESENTED_FRAME_STRIDE_SAMPLE_COUNT) {
-        samples.shift();
-      }
+      if (samples.length > sampleCount) samples.shift();
     },
     narrowest: () => (full() ? Math.min(...samples) : 1),
+    average: () =>
+      full()
+        ? samples.reduce((sum, step) => sum + step, 0) / samples.length
+        : 1,
     uniform: () =>
       full() && samples.every((step) => step === samples[0]) ? samples[0] : 1,
     reset() {

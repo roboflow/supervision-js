@@ -90,6 +90,7 @@ describe("presented frame stride", () => {
 
     for (const step of [3, 3, 4, 3]) stride.observe(step);
     expect(stride.narrowest()).toBe(3);
+    expect(stride.average()).toBeCloseTo(3.25);
     expect(stride.uniform()).toBe(1);
   });
 

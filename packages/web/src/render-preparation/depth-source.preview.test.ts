@@ -513,6 +513,22 @@ describe("resolveDepthClipOptions", () => {
     expect(options.exact.maxCacheBytes).toBe(3840 * 2160 * 2 * 10);
   });
 
+  it("keeps at rest what the mask window keeps, one schedule batch past the frame", () => {
+    const clip = { exactFrameBytes: 10, frameRate: 30, previewFrameBytes: 10 };
+
+    expect(resolveDepthClipOptions(clip).preview.pausedFrameCount).toBe(3);
+    // A session schedules sixteen at a time, so both keep seventeen frames.
+    expect(
+      resolveDepthClipOptions(clip, {}, { scheduleBatchSize: 16 }).preview
+        .pausedFrameCount,
+    ).toBe(17);
+    // Never fewer than the exact neighbours a step reaches.
+    expect(
+      resolveDepthClipOptions(clip, { exactNeighborFrameCount: 5 }).preview
+        .pausedFrameCount,
+    ).toBe(6);
+  });
+
   it("takes the host's numbers over the defaults", () => {
     expect(
       resolveDepthClipOptions(
@@ -530,7 +546,7 @@ describe("resolveDepthClipOptions", () => {
       exact: { maxCacheBytes: 1, neighborFrameCount: 1, settleSeconds: 0.5 },
       preview: {
         maxCacheBytes: 2,
-        pausedFrameCount: 2,
+        pausedFrameCount: 3,
         prefetchSeconds: 3,
         retainSeconds: 4,
       },

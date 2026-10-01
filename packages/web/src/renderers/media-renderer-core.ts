@@ -200,6 +200,8 @@ export async function createMediaRendererCore(
       try {
         next = await openDepthSource(input, {
           depth: options.renderPreparation?.depth,
+          scheduleBatchSize:
+            options.renderPreparation?.maskFrame?.scheduleBatchSize,
           frameClock,
           media: mediaSize,
           onDiagnostics: handleRenderPreparationDiagnostics,

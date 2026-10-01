@@ -262,15 +262,32 @@ describe("depth preview window", () => {
   it("copies only the frames presents land on once playback moves a steady stride", async () => {
     const { source, window } = setup({ prefetchSeconds: 0.5 });
 
-    for (const index of [0, 2, 4, 6, 8]) {
+    for (let index = 0; index <= 16; index += 2) {
       window.setPlayhead(index);
       await source.drain();
     }
 
-    // As many frames as 0.5 s holds, spread over a second: 8 to 16.
-    expect(stored(window, 9, 30)).toEqual([10, 12, 14, 16]);
-    expect(window.leadSeconds(8)).toBeCloseTo(1);
+    // As many frames as 0.5 s holds, spread over a second: 16 to 24.
+    expect(stored(window, 17, 40)).toEqual([18, 20, 22, 24]);
+    expect(window.leadSeconds(16)).toBeCloseTo(1);
     expect(window.getDiagnostics()).toMatchObject({ prefetchCount: 5 });
+  });
+
+  it("copies every frame while presents move an uneven stride, and leads by how far they move", async () => {
+    const { source, window } = setup({ prefetchSeconds: 0.5 });
+    let index = 0;
+
+    // 3.2 frames a present: 3, 3, 3, 3, 4, as 8x of 24 fps on 60 Hz moves.
+    for (const step of [3, 3, 3, 3, 4, 3, 3, 3, 3, 4]) {
+      index += step;
+      window.setPlayhead(index);
+      await source.drain();
+    }
+
+    // The last eight moved 3.25 frames on average, so 0.5 s of lead
+    // stretches past 1.6 s: seventeen frames, every one copied.
+    expect(stored(window, index, index + 16)).toEqual(range(index, index + 16));
+    expect(window.getDiagnostics()).toMatchObject({ prefetchCount: 17 });
   });
 
   it("decodes past the last frame into the first when the clip loops", async () => {

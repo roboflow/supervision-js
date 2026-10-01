@@ -35,7 +35,8 @@ import { canReuseMaskStyleArtifacts } from "supervision-js-core";
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
 const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
-const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
+/** Also what a depth clip's preview keeps at rest, one batch past its frame. */
+export const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 const PREPARED_WINDOW_REFILL_RATIO = 5 / 7;
 

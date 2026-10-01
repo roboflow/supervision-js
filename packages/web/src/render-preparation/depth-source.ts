@@ -31,7 +31,11 @@ import {
 import { abortable, type DepthFramePreparer } from "./depth-frame-preparer";
 import type { DepthPreviewLumaCopier } from "./depth-preview-luma";
 import { createDepthPreviewWindow } from "./depth-preview-window";
-import { WINDOW_LEAD_FRACTION } from "./playhead-motion";
+import {
+  getPausedPreparedWindowFrameCount,
+  WINDOW_LEAD_FRACTION,
+} from "./playhead-motion";
+import { DEFAULT_MASK_SCHEDULE_BATCH_SIZE } from "./prepared-render-window";
 
 /** How far a map's aspect ratio may stray from the media's. */
 const DEPTH_ASPECT_TOLERANCE = 0.01;
@@ -143,6 +147,11 @@ export interface DepthSourceContext {
   readonly depth?: RenderPreparationDepthOptions;
   /** Overrides for the exact frames, over `depth`. */
   readonly exactFrames?: Partial<ExactDepthFrameOptions>;
+  /**
+   * The mask window's schedule batch, which also sizes what the preview keeps
+   * at rest: masks and depth keep the same margin ahead of a paused frame.
+   */
+  readonly scheduleBatchSize?: number;
   /**
    * Opens a clip's preview video; null leaves the preview out. Defaults to
    * the WebCodecs decoder, loaded on first use.
@@ -416,6 +425,7 @@ async function openDepthClip(
         : 0,
     },
     context.depth,
+    { scheduleBatchSize: context.scheduleBatchSize },
   );
   const options = { ...budgets.exact, ...context.exactFrames };
   const listeners = new Set<() => void>();
@@ -1125,6 +1135,7 @@ export function resolveDepthClipOptions(
     readonly frameRate: number;
   },
   options: RenderPreparationDepthOptions = {},
+  shared: { readonly scheduleBatchSize?: number } = {},
 ): {
   readonly exact: ExactDepthFrameOptions;
   readonly preview: {
@@ -1181,9 +1192,18 @@ export function resolveDepthClipOptions(
             clip.previewFrameBytes * previewSpanFrames,
           ),
         ),
-      // The frame on screen and the neighbours a step reaches: what the mask
-      // window keeps at rest, one batch past its own frame.
-      pausedFrameCount: neighborFrameCount + 1,
+      // What the mask window keeps at rest, one schedule batch past the
+      // frame on screen, and never fewer than the neighbours a step reaches.
+      pausedFrameCount: Math.max(
+        neighborFrameCount + 1,
+        getPausedPreparedWindowFrameCount({
+          prefetchFrameCount: Math.ceil(prefetchSeconds * frameRate),
+          scheduleBatchSize: Math.max(
+            1,
+            shared.scheduleBatchSize ?? DEFAULT_MASK_SCHEDULE_BATCH_SIZE,
+          ),
+        }),
+      ),
       prefetchSeconds,
       retainSeconds,
     },

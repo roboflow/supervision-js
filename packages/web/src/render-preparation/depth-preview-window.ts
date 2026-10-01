@@ -33,6 +33,11 @@ const REACHABLE_LEAD_SHARE = 0.9;
 const MAX_RESTARTS_FOR_ONE_FRAME = 3;
 /** Frames a resting playhead keeps decoded ahead, its own included. */
 const DEFAULT_PAUSED_FRAME_COUNT = 3;
+/**
+ * Presents a stride has to repeat over before frames off it are skipped:
+ * more than one lap of a cadence that is not a whole number of frames.
+ */
+const STEADY_STRIDE_SAMPLE_COUNT = 8;
 
 /** What the window decodes from: a depth preview track, or a test double. */
 export interface DepthPreviewFrameSource {
@@ -165,12 +170,12 @@ interface Span {
  *
  * One decode run is active at a time; it runs from the key frame before the
  * frame it was started for. What the window wants decoded follows how the
- * playhead moves, read the way the mask window reads it:
+ * playhead moves, read with the mask window's cadence and heading readings:
  *
- * - Playing, it leads the playhead by `prefetchSeconds`, wrapping at the last
- *   frame when the clip loops. Above 1x, once every recent present has moved
- *   the same number of frames, it copies out only the frames presents land
- *   on, and its lead stretches by that stride for the same bytes.
+ * - Playing, it leads the playhead by `prefetchSeconds` times how many frames
+ *   presents move, wrapping at the last frame when the clip loops. Once every
+ *   recent present has moved the same number of frames, it copies out only
+ *   the frames presents land on.
  * - Dragged, it spends `prefetchSeconds` both ways, most of it the way the
  *   playhead heads. Dragged backwards, a run from a key frame keeps every
  *   frame up to the playhead, so the frames the hand reaches next are there.
@@ -189,7 +194,7 @@ export function createDepthPreviewWindow(
   const entries = new Map<number, DepthPreviewEntry>();
   const waiters = new Set<Waiter>();
   const motion = createPlayheadMotion();
-  const stride = createPresentedFrameStride();
+  const stride = createPresentedFrameStride(STEADY_STRIDE_SAMPLE_COUNT);
   const capacityFrames = Math.max(
     1,
     Math.floor(options.maxBytes / Math.max(1, options.frameBytes)),
@@ -273,8 +278,10 @@ export function createDepthPreviewWindow(
     return playhead - cursor;
   };
 
-  const playing = () => playbackActive && !scrubbing && motion.settled;
-  const dragging = () => scrubbing || (playbackActive && !motion.settled);
+  // The renderer says when a hand holds the playhead. Jumps alone cannot:
+  // the playhead reported at 8x can move two presents at once.
+  const playing = () => playbackActive && !scrubbing;
+  const dragging = () => scrubbing;
 
   /**
    * What the window wants decoded. The budget goes first to the side the
@@ -284,11 +291,18 @@ export function createDepthPreviewWindow(
     const heading = motion.heading();
 
     if (playing()) {
+      // The lead stretches with how far presents move, as the mask
+      // window's cooks spread over the frames presents land on; frames are
+      // skipped only when every present moves the same stride, since an
+      // uneven cadence lands on any of them.
       const step = stride.uniform();
       const aheadFrames = Math.min(
         capacityFrames,
         Math.floor(
-          offsetForSeconds(playhead, options.prefetchSeconds * step) / step,
+          offsetForSeconds(
+            playhead,
+            options.prefetchSeconds * stride.average(),
+          ) / step,
         ) + 1,
       );
 
