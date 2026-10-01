@@ -1,5 +1,3 @@
-import { readFrameIndex } from "#web-video-engine/frame-index";
-
 export interface TrackFrameIndex {
   /** Seconds from the first presented frame. */
   readonly times: Float64Array;
@@ -16,6 +14,7 @@ export interface TrackFrameIndex {
 export async function readTrackFrameIndex(
   track: unknown,
 ): Promise<TrackFrameIndex> {
+  const { readFrameIndex } = await import("#web-video-engine/frame-index");
   const { timeline, keyIndices } = await readFrameIndex(track);
   const first = timeline.timeAt(0);
 
