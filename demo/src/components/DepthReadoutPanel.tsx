@@ -1,18 +1,10 @@
-import type { DepthReadout } from "supervision";
-import {
-  describeDepthReadout,
-  type DocsDepthReadoutContext,
-} from "../docs-depth";
+import { describeDepthReadout } from "../depth";
+import { useDepthProbe, type DepthProbe } from "../hooks/depth-probe";
 import "./depth-readout-panel.css";
 
-/**
- * What the depth map holds under the pointer. The block keeps one height and
- * one set of rows in every state, so hovering never moves what sits below it.
- */
-export function DepthReadoutPanel(
-  props: DocsDepthReadoutContext & { readonly readout: DepthReadout | null },
-) {
-  const view = describeDepthReadout(props.readout, props);
+export function DepthReadoutPanel({ probe }: { readonly probe: DepthProbe }) {
+  const { active, readout } = useDepthProbe(probe);
+  const view = describeDepthReadout(active, readout);
 
   return (
     <section className="depth-readout" aria-label="Depth under the pointer">

@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import type { DepthMap } from "supervision";
+import type { ActiveDepthMap, DepthMap } from "supervision";
 
 import {
-  DocsDepthRangeMode,
+  DepthRangeMode,
   changeDepthQuantity,
   changeDepthRangeMode,
-  createDocsDepthRenderer,
-  lockDepthRange,
-  createDocsDepthSnippet,
-  resolveDepthColourRange,
+  createDepthLayerLoader,
+  createDepthRenderer,
+  createDepthSnippet,
   describeDepthReadout,
-  initialDocsDepthSettings,
-  type DocsDepthSettings,
-} from "./docs-depth";
+  initialDepthSettings,
+  lockDepthRange,
+  resolveDepthColourRange,
+  type DepthLayerLoad,
+  type DepthSettings,
+} from "./depth";
 
 /** Evaluates the object literal the snippet passes to `annotationRenderers.depth`. */
 function snippetOptions(snippet: string): unknown {
@@ -23,43 +25,41 @@ function snippetOptions(snippet: string): unknown {
   return new Function(`return (${snippet.slice(start, end)});`)();
 }
 
-const variations: readonly DocsDepthSettings[] = [
-  initialDocsDepthSettings,
+const variations: readonly DepthSettings[] = [
+  initialDepthSettings,
   {
     colormap: "cividis",
     manualRange: { max: 12.5, min: 0.75 },
     noDepthColor: 0x202020,
     opacity: 0.65,
     quantity: "depth",
-    rangeMode: DocsDepthRangeMode.Manual,
+    rangeMode: DepthRangeMode.Manual,
     sampling: "edge-aware",
     wipe: 0.4,
   },
   {
-    ...initialDocsDepthSettings,
+    ...initialDepthSettings,
     colormap: "magma",
     noDepthColor: 0x00ff00,
-    rangeMode: DocsDepthRangeMode.Auto,
+    rangeMode: DepthRangeMode.Auto,
     sampling: "nearest",
   },
 ];
 
-describe("depth playground settings", () => {
+describe("depth settings", () => {
   it.each(variations)(
     "builds the renderer its snippet describes (%#)",
     (settings) => {
-      const { id, kind, ...renderer } = createDocsDepthRenderer(settings);
+      const { id, kind, ...renderer } = createDepthRenderer(settings);
 
       expect([id, kind]).toEqual(["depth", "depth"]);
-      expect(snippetOptions(createDocsDepthSnippet(settings))).toEqual(
-        renderer,
-      );
+      expect(snippetOptions(createDepthSnippet(settings))).toEqual(renderer);
     },
   );
 
   it("shows every control value verbatim", () => {
     const settings = variations[1]!;
-    const snippet = createDocsDepthSnippet(settings);
+    const snippet = createDepthSnippet(settings);
 
     for (const text of [
       'colormap: "cividis"',
@@ -72,13 +72,24 @@ describe("depth playground settings", () => {
     ]) {
       expect(snippet).toContain(text);
     }
-    expect(createDocsDepthSnippet(initialDocsDepthSettings)).toContain(
-      'range: "clip"',
-    );
+    expect(createDepthSnippet(initialDepthSettings)).toContain('range: "clip"');
   });
 });
 
 describe("depth pointer readout", () => {
+  const active = (kind: DepthMap["kind"]): ActiveDepthMap => ({
+    frameIndex: 42,
+    map: {
+      height: 1,
+      kind,
+      samples: { encoding: "scaled16", scale: 1, values: new Uint16Array(1) },
+      width: 1,
+    },
+    mediaHeight: 1,
+    mediaTime: 0,
+    mediaWidth: 1,
+    precision: "exact",
+  });
   const exact = {
     confidence: 0.5,
     depthM: 1.2345,
@@ -90,33 +101,37 @@ describe("depth pointer readout", () => {
     x: 640,
     y: 12,
   };
+  const disparity = active("disparity_px");
 
-  it("keeps the same rows off the picture, over a hole and over depth", () => {
+  it("keeps the same rows with no depth, off the picture, over a hole and over depth", () => {
     const states = [
-      describeDepthReadout(null),
-      describeDepthReadout({
+      describeDepthReadout(null, null),
+      describeDepthReadout(disparity, null),
+      describeDepthReadout(disparity, {
         precision: "exact",
         stored: 0,
         valid: false,
         x: 3,
         y: 4,
       }),
-      describeDepthReadout(exact),
+      describeDepthReadout(disparity, exact),
+      describeDepthReadout(disparity, { ...exact, precision: "preview" }),
     ];
     const labels = states.map(({ rows }) => rows.map(({ label }) => label));
 
-    expect(labels[1]).toEqual(labels[0]);
-    expect(labels[2]).toEqual(labels[0]);
+    for (const state of labels) expect(state).toEqual(labels[0]);
     expect(states.map(({ status }) => status)).toEqual([
+      "No depth on screen yet",
       "Point at the picture",
       "No depth at this pixel",
       "Exact value",
+      "≈ 8-bit preview value",
     ]);
     expect(states[0]!.rows.every(({ value }) => value === "—")).toBe(true);
   });
 
   it("formats values with fixed decimals and units", () => {
-    expect(describeDepthReadout(exact, { frameIndex: 42 }).rows).toEqual([
+    expect(describeDepthReadout(disparity, exact).rows).toEqual([
       { label: "Depth frame", value: "42" },
       { label: "Map pixel", value: "640, 12" },
       { label: "Stored", value: "24896" },
@@ -125,36 +140,18 @@ describe("depth pointer readout", () => {
       { label: "Step", value: "0.00391 px" },
       { label: "Confidence", value: "50.0 %" },
     ]);
-    expect(
-      describeDepthReadout({ ...exact, precision: "preview" }).status,
-    ).toBe("≈ 8-bit preview value");
-  });
-
-  it("says why nothing is read when no depth is drawn", () => {
-    expect(
-      describeDepthReadout(null, {
-        frameIndex: null,
-        idleStatus: "No depth while playing",
-      }),
-    ).toMatchObject({
-      rows: expect.arrayContaining([{ label: "Depth frame", value: "—" }]),
-      status: "No depth while playing",
-    });
   });
 
   it("names the relative quantity for monocular maps", () => {
-    const view = describeDepthReadout(
-      {
-        precision: "exact",
-        relativeInverse: 0.25,
-        step: 1 / 1000,
-        stored: 250,
-        valid: true,
-        x: 0,
-        y: 0,
-      },
-      { kind: "relative_inverse" },
-    );
+    const view = describeDepthReadout(active("relative_inverse"), {
+      precision: "exact",
+      relativeInverse: 0.25,
+      step: 1 / 1000,
+      stored: 250,
+      valid: true,
+      x: 0,
+      y: 0,
+    });
 
     expect(view.rows[3]).toEqual({ label: "Inverse depth", value: "0.2500" });
     expect(view.rows[5]).toEqual({ label: "Step", value: "0.00100" });
@@ -177,14 +174,14 @@ describe("depth colour legend", () => {
   };
 
   it("reads the clip range, near end warm, in the quantity's unit", () => {
-    expect(resolveDepthColourRange(map, initialDocsDepthSettings)).toEqual({
+    expect(resolveDepthColourRange(map, initialDepthSettings)).toEqual({
       far: 2,
       near: 32,
       unit: "px",
     });
     expect(
       resolveDepthColourRange(map, {
-        ...initialDocsDepthSettings,
+        ...initialDepthSettings,
         quantity: "depth",
       }),
     ).toEqual({ far: 43.771, near: 2.736, unit: "m" });
@@ -193,40 +190,40 @@ describe("depth colour legend", () => {
   it("reads this frame's percentiles in auto, and the inputs in manual", () => {
     expect(
       resolveDepthColourRange(map, {
-        ...initialDocsDepthSettings,
-        rangeMode: DocsDepthRangeMode.Auto,
+        ...initialDepthSettings,
+        rangeMode: DepthRangeMode.Auto,
       }),
     ).toEqual({ far: 3, near: 97, unit: "px" });
     expect(
       resolveDepthColourRange(null, {
-        ...initialDocsDepthSettings,
+        ...initialDepthSettings,
         manualRange: { max: 20, min: 4 },
-        rangeMode: DocsDepthRangeMode.Manual,
+        rangeMode: DepthRangeMode.Manual,
       }),
     ).toEqual({ far: 4, near: 20, unit: "px" });
   });
 
   it("waits for depth on screen before describing a map's range", () => {
-    expect(resolveDepthColourRange(null, initialDocsDepthSettings)).toEqual({
+    expect(resolveDepthColourRange(null, initialDepthSettings)).toEqual({
       message: "Shown once depth is on screen",
     });
   });
 });
 
 describe("depth range controls", () => {
-  const manual: DocsDepthSettings = {
-    ...initialDocsDepthSettings,
+  const manual: DepthSettings = {
+    ...initialDepthSettings,
     manualRange: { max: 150, min: 3 },
-    rangeMode: DocsDepthRangeMode.Manual,
+    rangeMode: DepthRangeMode.Manual,
   };
   const locked = { max: 9.5, min: 1.25 };
   const lockTo = () => locked;
   const noDepth = () => null;
 
   it("keeps a clip or auto range when the quantity changes", () => {
-    expect(
-      changeDepthQuantity(initialDocsDepthSettings, "depth", lockTo),
-    ).toEqual({ quantity: "depth" });
+    expect(changeDepthQuantity(initialDepthSettings, "depth", lockTo)).toEqual({
+      quantity: "depth",
+    });
   });
 
   /* A range in pixels means nothing in metres. */
@@ -237,32 +234,53 @@ describe("depth range controls", () => {
     });
     expect(changeDepthQuantity(manual, "depth", noDepth)).toEqual({
       quantity: "depth",
-      rangeMode: DocsDepthRangeMode.Clip,
+      rangeMode: DepthRangeMode.Clip,
     });
   });
 
   it("starts a manual range from the depth on screen when there is some", () => {
     expect(
-      changeDepthRangeMode(
-        initialDocsDepthSettings,
-        DocsDepthRangeMode.Manual,
-        lockTo,
-      ),
-    ).toEqual({ manualRange: locked, rangeMode: DocsDepthRangeMode.Manual });
+      changeDepthRangeMode(initialDepthSettings, DepthRangeMode.Manual, lockTo),
+    ).toEqual({ manualRange: locked, rangeMode: DepthRangeMode.Manual });
     expect(
       changeDepthRangeMode(
-        initialDocsDepthSettings,
-        DocsDepthRangeMode.Manual,
+        initialDepthSettings,
+        DepthRangeMode.Manual,
         noDepth,
       ),
-    ).toEqual({ rangeMode: DocsDepthRangeMode.Manual });
-    expect(
-      changeDepthRangeMode(manual, DocsDepthRangeMode.Auto, lockTo),
-    ).toEqual({ rangeMode: DocsDepthRangeMode.Auto });
+    ).toEqual({ rangeMode: DepthRangeMode.Manual });
+    expect(changeDepthRangeMode(manual, DepthRangeMode.Auto, lockTo)).toEqual({
+      rangeMode: DepthRangeMode.Auto,
+    });
   });
 
   it("locks to nothing without a map", () => {
     expect(lockDepthRange(null, "disparity")).toBeNull();
     expect(lockDepthRange(undefined, "depth")).toBeNull();
+  });
+});
+
+describe("depth layer loads", () => {
+  it("report only the latest swap, and why it failed", async () => {
+    const reports: DepthLayerLoad[] = [];
+    const loader = createDepthLayerLoader((load) => reports.push(load));
+    let finishFirst!: () => void;
+    const first = loader.load(
+      () => new Promise<void>((resolve) => (finishFirst = resolve)),
+    );
+    const second = loader.load(() => Promise.reject(new Error("404")));
+
+    await second;
+    finishFirst();
+    await first;
+
+    expect(reports).toEqual([
+      { status: "loading" },
+      { status: "loading" },
+      { message: "404", status: "failed" },
+    ]);
+
+    loader.reset();
+    expect(reports.at(-1)).toEqual({ status: "idle" });
   });
 });

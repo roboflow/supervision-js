@@ -23,10 +23,8 @@ import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
-import {
-  WorkbenchDepthReadout,
-  type WorkbenchDepth,
-} from "./components/DepthStyleSection";
+import { DepthReadoutPanel } from "./components/DepthReadoutPanel";
+import type { WorkbenchDepth } from "./components/DepthStyleSection";
 import { DEPTH_VIDEO_OFF_WHILE_CONVERTING } from "./components/media-path-copy";
 import { createDepthProbe } from "./hooks/depth-probe";
 import { useViewportOverlay } from "./hooks/useViewportOverlay";
@@ -266,7 +264,7 @@ function DemoApp() {
     ],
   );
   const depthReadout = useMemo(
-    () => (depthShown ? <WorkbenchDepthReadout probe={depthProbe} /> : null),
+    () => (depthShown ? <DepthReadoutPanel probe={depthProbe} /> : null),
     [depthProbe, depthShown],
   );
 

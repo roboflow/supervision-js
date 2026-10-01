@@ -21,7 +21,7 @@ import {
   demoPresentationDrawsAnnotations,
 } from "./demo-presentation";
 import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
-import { createDocsDepthRenderer } from "../docs-depth";
+import { createDepthRenderer } from "../depth";
 import {
   createRegionPlaygroundRenderers,
   initialRegionPlaygroundSettings,
@@ -214,8 +214,6 @@ describe("demo presentation", () => {
     expect(presentation.boxStyle).toBeNull();
   });
 
-  /* The Style panel's Depth section and the docs playground build the same
-   * descriptor from the same settings, so neither drifts from the other. */
   it("draws depth with the Style panel's depth options", () => {
     const depthStyle = {
       ...defaultDemoPresentationSettings.depthStyle,
@@ -230,7 +228,7 @@ describe("demo presentation", () => {
       depthStyle,
     }).renderers?.find(({ kind }) => kind === "depth");
 
-    expect(depth).toEqual(createDocsDepthRenderer(depthStyle));
+    expect(depth).toEqual(createDepthRenderer(depthStyle));
     expect(
       createDemoPresentation({
         ...defaultDemoPresentationSettings,

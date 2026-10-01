@@ -36,8 +36,7 @@ export const RenderControls = memo(function RenderControls({
 }: {
   readonly availability?: DemoPresentationAvailability;
   readonly classNames: readonly string[];
-  /** The sample's depth layers and what is on screen, for the Depth section. */
-  readonly depth?: WorkbenchDepth;
+  readonly depth: WorkbenchDepth;
   readonly onChange: (settings: DemoPresentationSettings) => void;
   readonly settings: DemoPresentationSettings;
 }) {
@@ -135,7 +134,7 @@ function GlobalRenderControls({
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
-  readonly depth?: WorkbenchDepth;
+  readonly depth: WorkbenchDepth;
   readonly onChange: <Key extends keyof DemoPresentationSettings>(
     key: Key,
     value: DemoPresentationSettings[Key],

@@ -122,3 +122,33 @@
   overflow-wrap: anywhere;
   padding-left: 0.5rem;
 }
+
+.depth-playground__number {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.depth-playground__number strong {
+  color: var(--muted-strong);
+  font-size: 0.7rem;
+}
+
+.depth-playground__number input {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  inline-size: 100%;
+}
+
+.depth-playground__swatch {
+  block-size: 2rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  cursor: pointer;
+  inline-size: 100%;
+  padding: 0.15rem;
+}
+
+.depth-playground__swatch:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}

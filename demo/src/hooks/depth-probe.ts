@@ -1,12 +1,12 @@
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import {
   readDepthAt,
   type ActiveDepthMap,
+  type DepthMap,
   type DepthReadout,
   type MediaRenderer,
 } from "supervision";
 
-/** The depth on screen and what it holds under the pointer. */
 export interface DepthProbeSnapshot {
   readonly active: ActiveDepthMap | null;
   readonly readout: DepthReadout | null;
@@ -28,9 +28,9 @@ export interface DepthProbe {
 const EMPTY: DepthProbeSnapshot = { active: null, readout: null };
 
 /**
- * The workbench's depth readout, kept outside React state so that a pointer
- * moving over the picture re-renders only what shows depth, never the whole
- * workbench. It reads nothing while nothing listens.
+ * Kept outside React state so that a pointer moving over the picture
+ * re-renders only what shows depth, never the page around it. It reads
+ * nothing while nothing listens.
  */
 export function createDepthProbe(
   getRenderer: () => MediaRenderer | null,
@@ -95,6 +95,19 @@ export function useDepthProbe(probe: DepthProbe): DepthProbeSnapshot {
   );
 }
 
+/**
+ * Also the last map that was on screen, so a legend keeps its ends while
+ * playback passes frames whose depth is not drawn yet.
+ */
+export function useShownDepthMap(probe: DepthProbe) {
+  const snapshot = useDepthProbe(probe);
+  const lastMapRef = useRef<DepthMap | null>(null);
+
+  if (snapshot.active) lastMapRef.current = snapshot.active.map;
+
+  return { active: snapshot.active, lastMap: lastMapRef.current };
+}
+
 function sameActiveDepth(
   previous: ActiveDepthMap | null,
   next: ActiveDepthMap | null,
@@ -111,7 +124,7 @@ function sameActiveDepth(
   );
 }
 
-/** A readout is everything it says about one stored sample of one map. */
+/** Every other field of a readout derives from the stored sample. */
 function sameReadout(previous: DepthReadout | null, next: DepthReadout | null) {
   return (
     previous === next ||

@@ -157,6 +157,17 @@ export interface DemoFixtureDepthDefinition {
   })[];
 }
 
+/** The layer with that id, or the fixture's default layer. */
+export function findDepthLayer(
+  depth: DemoFixtureDepthDefinition,
+  id: string | null | undefined,
+) {
+  return (
+    depth.layers.find((layer) => layer.id === id) ??
+    depth.layers.find((layer) => layer.id === depth.defaultLayer)!
+  );
+}
+
 const depthLayerSources: readonly string[] = Object.values(
   DemoFixtureDepthSource,
 );

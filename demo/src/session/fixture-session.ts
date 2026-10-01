@@ -17,6 +17,7 @@ import type {
 import {
   createDemoFixtureDetectionSource,
   createDemoFixtureMedia,
+  findDepthLayer,
   loadDemoFixtureDetectionManifest,
   resolveDemoFixturePlaybackSrc,
 } from "../fixtures/demo-fixtures";
@@ -224,12 +225,9 @@ export function resolveFixtureDepth(
   converting: boolean,
   layerId?: string | null,
 ): MediaRendererDepthInput | undefined {
-  const layers = definition.depth?.layers ?? [];
-  const layer =
-    layers.find(({ id }) => id === layerId) ??
-    layers.find(({ id }) => id === definition.depth?.defaultLayer);
-
-  return layer && !converting ? { manifest: layer.manifestSrc } : undefined;
+  return definition.depth && !converting
+    ? { manifest: findDepthLayer(definition.depth, layerId).manifestSrc }
+    : undefined;
 }
 
 /**

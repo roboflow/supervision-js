@@ -452,17 +452,17 @@ test("the depth page embeds its fixture playground with a synced snippet", async
     path.join(publicDocsDir, "annotation-renderers/depth.md"),
     "utf8",
   );
-  const demoApp = await readFile(
-    path.join(rootDir, "demo/src/App.tsx"),
-    "utf8",
-  );
-  const playground = await readFile(
-    path.join(rootDir, "demo/src/components/DocsDepthPlayground.tsx"),
-    "utf8",
-  );
-  const snippet = await readFile(
-    path.join(rootDir, "demo/src/docs-depth.ts"),
-    "utf8",
+  const appFile = path.join(rootDir, "demo/src/App.tsx");
+  const routed = /embeddedView === "depth"\)\s*\{[^}]*<(\w+) \/>/.exec(
+    await readFile(appFile, "utf8"),
+  )?.[1];
+  assert.ok(routed, "the demo routes ?embed=depth to a playground");
+  const playground = await readImportedModule(appFile, routed);
+  const snippetBuilder = /\b(\w+Snippet)\(/.exec(playground.source)?.[1];
+  assert.ok(snippetBuilder, "the depth playground builds a code snippet");
+  const { source: snippet } = await readImportedModule(
+    playground.file,
+    snippetBuilder,
   );
   const fixtureMeta = JSON.parse(
     await readFile(
@@ -478,20 +478,19 @@ test("the depth page embeds its fixture playground with a synced snippet", async
   assert.match(page, /data-supervision-playground-src="demo\/\?embed=depth"/);
   assert.match(page, /annotationRenderers\.depth\(/);
   assert.match(page, /CC BY 4\.0/);
-  assert.match(demoApp, /embeddedView === "depth"\)/);
-  assert.match(demoApp, /<DocsDepthPlayground \/>/);
-  assert.match(playground, /const DEPTH_FIXTURE = "spring_stereo_depth"/);
-  // The live code and the drawn renderer read the same settings, so the
-  // snippet stays in step with the controls.
-  const liveSettings = /<DepthLiveCode settings=\{(\w+)\} \/>/.exec(
-    playground,
+  assert.match(playground.source, /"spring_stereo_depth"/);
+  assert.match(playground.source, /CC BY 4\.0/);
+  // The code shown and the renderer drawn read the same settings.
+  const liveSettings = /<\w*LiveCode settings=\{(\w+)\} \/>/.exec(
+    playground.source,
   )?.[1];
   assert.ok(liveSettings, "the depth playground shows its live code");
   assert.match(
-    playground,
-    new RegExp(`createDocsDepthRenderer\\(${liveSettings}\\)`),
+    playground.source,
+    new RegExp(
+      `setPresentation\\(\\{\\s*renderers: \\[\\w+\\(${liveSettings}\\)\\]`,
+    ),
   );
-  assert.match(playground, /CC BY 4\.0/);
   assert.match(snippet, /session\.setPresentation\(\{/);
   assert.match(snippet, /annotationRenderers\.depth\(\{/);
   assert.equal(fixtureMeta.sampleName, "spring_stereo_depth");
@@ -501,6 +500,22 @@ test("the depth page embeds its fixture playground with a synced snippet", async
     /\| Depth maps +\| Implemented \(`depth`\) +\| `spring_stereo_depth`[^|]*\| Live playground +\|/,
   );
 });
+
+/** The source of the module the file at `importer` imports `name` from. */
+async function readImportedModule(importer, name) {
+  const source = await readFile(importer, "utf8");
+  const specifier = [
+    ...source.matchAll(/import \{([^}]*)\} from "(\.[^"]+)";/g),
+  ].find(([, names]) => new RegExp(`\\b${name}\\b`).test(names))?.[2];
+  assert.ok(specifier, `${path.relative(rootDir, importer)} imports ${name}`);
+
+  for (const extension of [".tsx", ".ts"]) {
+    const file = path.resolve(path.dirname(importer), specifier + extension);
+    const module = await readFile(file, "utf8").catch(() => null);
+    if (module !== null) return { file, source: module };
+  }
+  return assert.fail(`${specifier} is not a TypeScript module`);
+}
 
 test("every fixture-backed annotation renderer has a focused live playground", async () => {
   const renderers = [

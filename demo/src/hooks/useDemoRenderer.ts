@@ -47,6 +47,7 @@ import {
   demoFixtures,
   defaultDemoFixture,
   resolveDemoFixture,
+  findDepthLayer,
   resolveDemoDepthReach,
   type DemoFixtureDefinition,
 } from "../fixtures/demo-fixtures";
@@ -61,6 +62,7 @@ import {
 import { defaultPlaybackRate } from "../session/playback-rate";
 import { tapFrameTimeline } from "../session/frame-timeline-source";
 import { createFixtureSession } from "../session/fixture-session";
+import { createDepthLayerLoader, type DepthLayerLoad } from "../depth";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
   defaultDemoRenderQuality,
@@ -88,12 +90,6 @@ import { demoInitialSessionOptions } from "../session/workbench-defaults";
 export { DemoSourceMode };
 export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
 
-/** Where a depth layer picked after the session opened stands. */
-export type DemoDepthLayerLoad =
-  | { readonly status: "idle" }
-  | { readonly status: "loading" }
-  | { readonly status: "failed"; readonly message: string };
-
 export interface DemoRendererState {
   readonly canUseRenderer: boolean;
   readonly sessionConfiguration: DemoSessionConfiguration | null;
@@ -104,7 +100,7 @@ export interface DemoRendererState {
   /** The open sample's depth layer, or null when it ships no depth. */
   readonly depthLayerId: string | null;
   /** Whether the layer picked since the session opened has loaded. */
-  readonly depthLayerLoad: DemoDepthLayerLoad;
+  readonly depthLayerLoad: DepthLayerLoad;
   /** The renderer on screen, read at the moment of asking. */
   readonly getRenderer: () => MediaRenderer | null;
   readonly duration: number | null;
@@ -331,10 +327,12 @@ export function useDemoRenderer(
   );
   /** The layer the next session opens with, read when it opens. */
   const depthLayerRef = useRef(depthLayerId);
-  const depthRequestRef = useRef(0);
-  const [depthLayerLoad, setDepthLayerLoad] = useState<DemoDepthLayerLoad>({
+  const [depthLayerLoad, setDepthLayerLoad] = useState<DepthLayerLoad>({
     status: "idle",
   });
+  const [depthLayerLoader] = useState(() =>
+    createDepthLayerLoader(setDepthLayerLoad),
+  );
   const [uploadApiKey, setUploadApiKey] = useState("");
   const [uploadClassNames, setUploadClassNames] = useState(
     DEFAULT_UPLOAD_CLASS_NAMES,
@@ -927,43 +925,26 @@ export function useDemoRenderer(
 
   const setDepthLayer = useCallback(
     (layerId: string) => {
-      const layer = activeFixture.depth?.layers.find(
-        ({ id }) => id === layerId,
-      );
+      const depth = activeFixture.depth;
+      const session = sessionRef.current;
 
-      if (!layer || depthLayerRef.current === layerId) return;
+      if (!depth || depthLayerRef.current === layerId) return;
 
       depthLayerRef.current = layerId;
       setDepthLayerIdState(layerId);
 
-      const session = sessionRef.current;
-      const request = ++depthRequestRef.current;
-
       // While the clip is converted the layer only waits for the session
       // that can play it: a clip pairs with the clip's own frames.
       if (!depthPlays || !session?.setDepth) {
-        setDepthLayerLoad({ status: "idle" });
+        depthLayerLoader.reset();
         return;
       }
 
-      setDepthLayerLoad({ status: "loading" });
-      session.setDepth({ manifest: layer.manifestSrc }).then(
-        () => {
-          if (request === depthRequestRef.current) {
-            setDepthLayerLoad({ status: "idle" });
-          }
-        },
-        (error: unknown) => {
-          if (request === depthRequestRef.current) {
-            setDepthLayerLoad({
-              message: getErrorMessage(error, String(error)),
-              status: "failed",
-            });
-          }
-        },
-      );
+      const manifest = findDepthLayer(depth, layerId).manifestSrc;
+
+      void depthLayerLoader.load(() => session.setDepth!({ manifest }));
     },
-    [activeFixture.depth, depthPlays],
+    [activeFixture.depth, depthLayerLoader, depthPlays],
   );
 
   const getRenderer = useCallback(() => rendererRef.current, []);
@@ -1030,8 +1011,7 @@ export function useDemoRenderer(
     rendererRef.current = null;
     // The new session opens with the layer picked, so a load still running
     // for the old one says nothing about it.
-    depthRequestRef.current += 1;
-    setDepthLayerLoad({ status: "idle" });
+    depthLayerLoader.reset();
     setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
     setFixtureSummary(null);

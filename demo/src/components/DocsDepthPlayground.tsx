@@ -1,49 +1,37 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createMediaSession,
   MediaRendererPlaybackState,
-  type DepthMap,
   type DepthPlaybackSource,
-  type DepthQuantity,
   type MediaRendererState,
   type MediaSession,
 } from "supervision";
 import {
-  createDocsDepthRenderer,
-  lockDepthRange,
-  resolveDepthColourRange,
-  initialDocsDepthSettings,
-  type DocsDepthSettings,
-} from "../docs-depth";
+  createDepthLayerLoader,
+  createDepthRenderer,
+  createDepthSnippet,
+  initialDepthSettings,
+  type DepthLayerLoad,
+  type DepthSettings,
+} from "../depth";
 import {
   createDemoFixtureMedia,
   demoFixtureCatalog,
+  findDepthLayer,
   type DemoFixtureDefinition,
   type DemoFixtureDepthDefinition,
 } from "../fixtures/demo-fixtures";
-import { useDepthPointerReadout } from "../hooks/useDepthPointerReadout";
+import { createDepthProbe, useDepthProbe } from "../hooks/depth-probe";
+import { DepthControls, type DepthControlKit } from "./DepthControls";
 import { DepthReadoutPanel } from "./DepthReadoutPanel";
-import { DepthLiveCode, DepthRendererControls } from "./DepthRendererControls";
+import { toHexColor } from "./InspectorControls";
 import "./depth-playground.css";
 
 const DEPTH_FIXTURE = "spring_stereo_depth";
 
-/** Where the depth for the layer picked stands. */
-type DepthLoad =
-  | { readonly status: "loading" }
-  | { readonly status: "ready" }
-  | { readonly status: "failed"; readonly message: string };
-
 /**
- * The depth renderer over the Spring stereo fixture: the left view of a
- * rendered shot, with the dataset's ground-truth disparity and a stereo
- * matcher's disparity as two layers. While the clip plays, each frame's
- * exact 16-bit depth is drawn when it loads fast enough, its 8-bit preview
- * otherwise; once it rests, the exact frame is drawn. `?depthPlayback=`
- * `preview`, `exact` or `auto` picks what plays, for comparing them.
- *
  * The clip opens without depth and plays at once; each layer's depth loads
- * through `setDepth()`, which says when it is up or why it is not.
+ * through `setDepth()`, whose promise says when it is up or why it is not.
  */
 export function DocsDepthPlayground() {
   const fixture = useMemo(requireDepthFixture, []);
@@ -51,25 +39,25 @@ export function DocsDepthPlayground() {
   const mountRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<MediaSession | null>(null);
   const [layerId, setLayerId] = useState(depth.defaultLayer);
-  const [settings, setSettings] = useState(initialDocsDepthSettings);
+  const [settings, setSettings] = useState(initialDepthSettings);
   const [failure, setFailure] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const [depthLoad, setDepthLoad] = useState<DepthLoad>({ status: "loading" });
-  /** What the depth diagnostics say, such as why the preview is off. */
+  const [depthLoad, setDepthLoad] = useState<DepthLayerLoad>({
+    status: "loading",
+  });
+  const [depthLoader] = useState(() => createDepthLayerLoader(setDepthLoad));
   const [depthNotice, setDepthNotice] = useState<string | null>(null);
   /** The preview is off: nothing is prepared ahead, and the reason is given. */
   const [previewOff, setPreviewOff] = useState(false);
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
   );
-  const [shownMap, setShownMap] = useState<DepthMap | null>(null);
-  const pointer = useDepthPointerReadout(
-    useCallback(() => sessionRef.current?.renderer ?? null, []),
+  const [probe] = useState(() =>
+    createDepthProbe(() => sessionRef.current?.renderer ?? null),
   );
-  const refreshPointer = pointer.refresh;
+  const { active } = useDepthProbe(probe);
   const settingsRef = useRef(settings);
   const sessionLayerRef = useRef<string | null>(null);
-  const depthRequestRef = useRef(0);
 
   settingsRef.current = settings;
 
@@ -86,7 +74,7 @@ export function DocsDepthPlayground() {
           container,
           media: createDemoFixtureMedia(fixture),
           presentation: {
-            renderers: [createDocsDepthRenderer(settingsRef.current)],
+            renderers: [createDepthRenderer(settingsRef.current)],
           },
           renderer: {
             autoPlay: false,
@@ -106,10 +94,10 @@ export function DocsDepthPlayground() {
             Boolean(state.renderPreparation?.message) &&
               state.renderPreparation?.artifacts.length === 0,
           );
-          refreshPointer();
+          probe.refresh();
         });
         setRendererState(session.getState().renderer);
-        refreshPointer();
+        probe.refresh();
         setReady(true);
       } catch (error) {
         if (!cancelled) setFailure(String(error));
@@ -123,52 +111,28 @@ export function DocsDepthPlayground() {
       setReady(false);
       session?.destroy();
     };
-  }, [depth, fixture, refreshPointer]);
+  }, [fixture, probe]);
 
   useEffect(() => {
     sessionRef.current?.setPresentation({
-      renderers: [createDocsDepthRenderer(settings)],
+      renderers: [createDepthRenderer(settings)],
     });
   }, [settings]);
 
   useEffect(() => {
     const session = sessionRef.current;
 
-    setShownMap(null);
     if (!ready || !session?.setDepth || sessionLayerRef.current === layerId) {
       return;
     }
 
-    const request = ++depthRequestRef.current;
-    const settled = (next: DepthLoad) => {
-      if (request === depthRequestRef.current) setDepthLoad(next);
-    };
+    const manifest = findDepthLayer(depth, layerId).manifestSrc;
 
     sessionLayerRef.current = layerId;
-    setDepthLoad({ status: "loading" });
-    session
-      .setDepth({ manifest: layerFor(depth, layerId).manifestSrc })
-      .then(() => {
-        settled({ status: "ready" });
-        refreshPointer();
-      })
-      .catch((error: unknown) =>
-        settled({ message: String(error), status: "failed" }),
-      );
-  }, [depth, layerId, ready, refreshPointer]);
-
-  useEffect(() => {
-    if (pointer.active) setShownMap(pointer.active.map);
-  }, [pointer.active]);
-
-  const update = (patch: Partial<DocsDepthSettings>) =>
-    setSettings((current) => ({ ...current, ...patch }));
-
-  const lockRange = (quantity: DepthQuantity) =>
-    lockDepthRange(
-      sessionRef.current?.renderer.getActiveDepth?.()?.map,
-      quantity,
-    );
+    void depthLoader
+      .load(() => session.setDepth!({ manifest }))
+      .then(probe.refresh);
+  }, [depth, depthLoader, layerId, probe, ready]);
 
   const session = sessionRef.current;
   const frameClock = session?.frameClock ?? null;
@@ -182,7 +146,7 @@ export function DocsDepthPlayground() {
   const isPlaying =
     rendererState?.playbackState === MediaRendererPlaybackState.Playing ||
     rendererState?.playbackState === MediaRendererPlaybackState.Buffering;
-  const depthFrame = pointer.active?.frameIndex ?? null;
+  const depthFrame = active?.frameIndex ?? null;
   const onScreen = depthFrame !== null && depthFrame === frame;
   const depthStatus = failure
     ? `Failed: ${failure}`
@@ -196,18 +160,18 @@ export function DocsDepthPlayground() {
             : "Loading depth…"
           : isPlaying
             ? onScreen
-              ? pointer.active?.precision === "exact"
+              ? active?.precision === "exact"
                 ? `Playing: exact depth for frame ${frame}`
                 : `Playing: 8-bit preview depth for frame ${frame}`
               : previewOff
                 ? "Playing: depth shows once paused"
                 : "Playing: decoding depth…"
-            : onScreen && pointer.active?.precision === "exact"
+            : onScreen && active?.precision === "exact"
               ? `Exact depth for frame ${frame}`
               : onScreen
                 ? `Preview depth for frame ${frame}; loading exact…`
                 : `Loading depth for frame ${frame ?? "…"}`;
-  const layer = layerFor(depth, layerId);
+  const layer = findDepthLayer(depth, layerId);
 
   return (
     <main
@@ -218,8 +182,8 @@ export function DocsDepthPlayground() {
         <div
           ref={mountRef}
           className="depth-playground__mount"
-          onPointerLeave={pointer.onPointerLeave}
-          onPointerMove={pointer.onPointerMove}
+          onPointerLeave={probe.onPointerLeave}
+          onPointerMove={probe.onPointerMove}
         />
         <p className="depth-playground__badge">{layer.label}</p>
       </section>
@@ -283,13 +247,7 @@ export function DocsDepthPlayground() {
             {depthNotice}
           </p>
         ) : null}
-        <DepthRendererControls
-          canLock={pointer.active !== null}
-          colourRange={resolveDepthColourRange(shownMap, settings)}
-          onChange={update}
-          lockRange={lockRange}
-          settings={settings}
-        >
+        <div className="docs-layer-playground__controls">
           <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--single">
             <legend>Depth layer</legend>
             <div>
@@ -307,15 +265,16 @@ export function DocsDepthPlayground() {
               ))}
             </div>
           </fieldset>
-        </DepthRendererControls>
-        <DepthReadoutPanel
-          frameIndex={depthFrame}
-          idleStatus={
-            depthFrame === null ? "Loading depth…" : "Point at the picture"
-          }
-          kind={pointer.active?.map.kind}
-          readout={pointer.readout}
-        />
+          <DepthControls
+            kit={playgroundKit}
+            onChange={(patch) =>
+              setSettings((current) => ({ ...current, ...patch }))
+            }
+            probe={probe}
+            settings={settings}
+          />
+        </div>
+        <DepthReadoutPanel probe={probe} />
         <DepthLiveCode settings={settings} />
         <p className="depth-playground__note">
           Clip:{" "}
@@ -357,10 +316,6 @@ function requireDepthFixture(): DemoFixtureDefinition & {
   return { ...fixture, depth: fixture.depth };
 }
 
-function layerFor(depth: DemoFixtureDepthDefinition, id: string) {
-  return depth.layers.find((layer) => layer.id === id) ?? depth.layers[0]!;
-}
-
 /** What plays, from `?depthPlayback=`; the library's default otherwise. */
 function depthPlaybackFromUrl(): DepthPlaybackSource | undefined {
   const value =
@@ -372,3 +327,104 @@ function depthPlaybackFromUrl(): DepthPlaybackSource | undefined {
     ? value
     : undefined;
 }
+
+function DepthLiveCode({ settings }: { readonly settings: DepthSettings }) {
+  return (
+    <section
+      className="docs-layer-playground__code"
+      aria-label="Live presentation code"
+    >
+      <div>
+        <span>Live code</span>
+        <small>Values update with the controls</small>
+      </div>
+      <pre>
+        <code>{createDepthSnippet(settings)}</code>
+      </pre>
+    </section>
+  );
+}
+
+const playgroundKit: DepthControlKit = {
+  Choice: ({ disabled, label, onChange, options, tooltip, value }) => (
+    <label className="docs-layer-playground__select" title={tooltip}>
+      <strong>{label}</strong>
+      <select
+        disabled={disabled}
+        onChange={(event) => {
+          const picked = options.find(
+            (option) => option.value === event.currentTarget.value,
+          );
+          if (picked) onChange(picked.value);
+        }}
+        value={value}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  ),
+  Color: ({ disabled, label, onChange, value }) => (
+    <label className="docs-layer-playground__select">
+      <strong>{label}</strong>
+      <input
+        className="depth-playground__swatch"
+        disabled={disabled}
+        onChange={(event) =>
+          onChange(Number.parseInt(event.currentTarget.value.slice(1), 16))
+        }
+        type="color"
+        value={toHexColor(value)}
+      />
+    </label>
+  ),
+  Number: ({ disabled, label, onChange, value }) => (
+    <label className="depth-playground__number">
+      <strong>{label}</strong>
+      <input
+        disabled={disabled}
+        onChange={(event) => {
+          const raw = event.currentTarget.value.trim();
+          if (raw !== "" && Number.isFinite(Number(raw))) onChange(Number(raw));
+        }}
+        step="any"
+        type="number"
+        value={value}
+      />
+    </label>
+  ),
+  Slider: ({ disabled, label, onChange, tooltip, value }) => (
+    <label className="docs-layer-playground__range" title={tooltip}>
+      <span>
+        <strong>{label}</strong>
+        <output>{Math.round(value * 100)}%</output>
+      </span>
+      <input
+        disabled={disabled}
+        max="1"
+        min="0"
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+        step="0.05"
+        type="range"
+        value={value}
+      />
+    </label>
+  ),
+  Toggle: ({ checked, disabled, label, onChange, tooltip }) => (
+    <label className="docs-layer-playground__toggle">
+      <span>
+        <strong>{label}</strong>
+        {tooltip ? <small>{tooltip}</small> : null}
+      </span>
+      <input
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        type="checkbox"
+      />
+    </label>
+  ),
+};
