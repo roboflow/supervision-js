@@ -20,13 +20,20 @@ import {
   DepthPreparationWorkerMessageType,
   type DepthPreparationWorkerRequest,
   type DepthPreparationWorkerResponse,
+  type DepthPreviewLumaWorkerRequest,
+  type DepthPreviewLumaWorkerResponse,
 } from "#render-preparation/depth-preparation-worker-protocol";
 import { decodeDepthPreparationRequest } from "#render-preparation/depth-frame-decode";
+import {
+  readVideoFrameLuma,
+  type DepthPreviewLumaScratch,
+} from "#render-preparation/depth-preview-luma";
 
 type PreparationWorkerResponse =
   | MaskPreparationWorkerResponse
   | HeatmapPreparationWorkerResponse
-  | DepthPreparationWorkerResponse;
+  | DepthPreparationWorkerResponse
+  | DepthPreviewLumaWorkerResponse;
 
 type MaskPreparationWorkerScope = {
   addEventListener(
@@ -36,6 +43,7 @@ type MaskPreparationWorkerScope = {
         | MaskPreparationWorkerRequest
         | HeatmapPreparationWorkerRequest
         | DepthPreparationWorkerRequest
+        | DepthPreviewLumaWorkerRequest
       >,
     ) => void,
   ): void;
@@ -58,6 +66,11 @@ workerScope.addEventListener("message", (event) => {
 
   if (message.type === DepthPreparationWorkerMessageType.Decode) {
     void decodeDepthFrame(message);
+    return;
+  }
+
+  if (message.type === DepthPreparationWorkerMessageType.PreviewLuma) {
+    void copyPreviewLuma(message);
     return;
   }
 
@@ -113,6 +126,49 @@ async function decodeDepthFrame(message: DepthPreparationWorkerRequest) {
   const { response, transfer } = await decodeDepthPreparationRequest(message);
 
   workerScope.postMessage(response, transfer);
+}
+
+const previewLumaScratch: DepthPreviewLumaScratch = {
+  buffer: new ArrayBuffer(0),
+};
+/** Frames arrive in order and are copied in order, through one scratch. */
+let previewLumaQueue: Promise<void> = Promise.resolve();
+
+function copyPreviewLuma(message: DepthPreviewLumaWorkerRequest) {
+  previewLumaQueue = previewLumaQueue.then(async () => {
+    try {
+      const copied = await readVideoFrameLuma(
+        message.frame,
+        previewLumaScratch,
+        message.correction,
+      );
+
+      workerScope.postMessage(
+        {
+          height: copied.height,
+          luma: copied.luma.buffer as ArrayBuffer,
+          path: copied.path,
+          requestId: message.requestId,
+          type: DepthPreparationWorkerMessageType.PreviewLumaComplete,
+          width: copied.width,
+        },
+        [copied.luma.buffer as ArrayBuffer],
+      );
+    } catch (error) {
+      workerScope.postMessage({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to copy the depth preview frame.",
+        requestId: message.requestId,
+        type: DepthPreparationWorkerMessageType.Error,
+      });
+    } finally {
+      message.frame.close();
+    }
+  });
+
+  return previewLumaQueue;
 }
 
 function prepareMaskFrame(message: MaskPreparationWorkerRequest) {

@@ -23,6 +23,7 @@ import {
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type { DepthFramePreparer } from "./depth-frame-preparer";
+import type { DepthPreviewLumaCopier } from "./depth-preview-luma";
 import { createDepthPreviewWindow } from "./depth-preview-window";
 
 /** How far a map's aspect ratio may stray from the media's. */
@@ -134,6 +135,12 @@ export interface DepthSourceContext {
         options?: DepthPreviewTrackOptions,
       ) => Promise<DepthPreviewTrackReader>)
     | null;
+  /**
+   * Copies decoded preview frames' luma out, made when a preview first opens:
+   * the session's render-preparation worker keeps those copies off the page.
+   * Without one, they run on the page.
+   */
+  readonly previewLumaCopier?: () => DepthPreviewLumaCopier;
   /**
    * Picks, once per page, the decoder that returns preview codes as written;
    * null skips the probe and leaves the choice to the browser.
@@ -739,6 +746,7 @@ async function openClipPreview(
 
   try {
     reader = await open(url, {
+      copier: context.previewLumaCopier?.(),
       correction: decoding?.correction ?? null,
       hardwareAcceleration: decoding?.hardwareAcceleration,
     });

@@ -55,6 +55,10 @@ import {
   createDepthFramePreparer,
   type DepthFramePreparer,
 } from "#render-preparation/depth-frame-preparer";
+import {
+  createDepthPreviewLumaCopier,
+  type DepthPreviewLumaCopier,
+} from "#render-preparation/depth-preview-luma-copier";
 import type { MediaRendererDepthInput } from "#types/media-depth";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import { createMediaFrameNavigation } from "./media-frame-navigation";
@@ -167,6 +171,7 @@ export async function createMediaRendererCore(
   let mediaSize = { height: 0, width: 0 };
   let depthSource: DepthFrameProvider | null = null;
   let depthPreparer: DepthFramePreparer | undefined;
+  let depthLumaCopier: DepthPreviewLumaCopier | undefined;
   let depthGeneration = 0;
   let depthLoad: AbortController | undefined;
   /**
@@ -200,6 +205,10 @@ export async function createMediaRendererCore(
           padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
           preparer: () =>
             (depthPreparer ??= createDepthFramePreparer(
+              options.renderPreparation,
+            )),
+          previewLumaCopier: () =>
+            (depthLumaCopier ??= createDepthPreviewLumaCopier(
               options.renderPreparation,
             )),
           signal: load.signal,
@@ -1123,6 +1132,7 @@ export async function createMediaRendererCore(
       depthSource?.destroy();
       depthSource = null;
       depthPreparer?.destroy();
+      depthLumaCopier?.destroy();
       detectionTimeline?.destroy();
     },
   };

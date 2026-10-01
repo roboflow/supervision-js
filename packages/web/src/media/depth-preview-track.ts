@@ -1,5 +1,10 @@
 import type { EncodedPacket, InputVideoTrack } from "mediabunny";
 import { MediaErrorKind } from "supervision-js-core";
+import {
+  createMainThreadLumaCopier,
+  type DepthPreviewLumaCopier,
+  type DepthPreviewLumaPath,
+} from "#render-preparation/depth-preview-luma";
 import { MediaSourceError } from "./media-errors";
 
 /**
@@ -20,19 +25,6 @@ const DECODER_IDLE_POLL_MILLISECONDS = 25;
 const TIMESTAMP_MATCH_TOLERANCE_SECONDS = 0.0005;
 const MICROSECONDS_PER_SECOND = 1_000_000;
 
-/** Formats whose first plane is 8-bit luma, which is the code as written. */
-const PLANAR_8_BIT_FORMATS = new Set<string>([
-  "I420",
-  "I420A",
-  "I422",
-  "I422A",
-  "I444",
-  "I444A",
-  "NV12",
-]);
-/** Formats a browser may hand a decoded frame over in, already in RGB. */
-const RGB_FORMATS = new Set<string>(["RGBA", "RGBX", "BGRA", "BGRX"]);
-
 export type DepthPreviewTrackInput = string | URL | ArrayBuffer | Uint8Array;
 
 export interface DepthPreviewTrackOptions {
@@ -43,17 +35,14 @@ export interface DepthPreviewTrackOptions {
    * known to change them.
    */
   readonly correction?: Uint8Array | null;
+  /**
+   * Copies decoded frames' luma out: the render-preparation worker's, to
+   * keep the copies off the page. Defaults to copying on the page.
+   */
+  readonly copier?: DepthPreviewLumaCopier;
 }
 
-/** How the decoded pixels reached the luma codes. */
-export type DepthPreviewLumaPath =
-  /** The decoder's own luma plane: the codes exactly as decoded. */
-  | "plane"
-  /**
-   * The browser converted the frame to RGB first, and the green channel
-   * stands in for luma. A range or matrix conversion can move codes.
-   */
-  | "rgb";
+export type { DepthPreviewLumaPath };
 
 /** One decoded preview frame's luma, one byte per map pixel. */
 export interface DepthPreviewLumaFrame {
@@ -260,6 +249,7 @@ export async function openDepthPreviewTrack(
       config: options.hardwareAcceleration
         ? { ...config, hardwareAcceleration: options.hardwareAcceleration }
         : config,
+      copier: options.copier,
       correction: options.correction ?? null,
       dispose: () => media.dispose(),
       height,
@@ -326,6 +316,7 @@ interface PacketReader {
 /** The decoding half, apart from the container so it can be driven directly. */
 export function createDepthPreviewTrackReader(options: {
   readonly config: VideoDecoderConfig;
+  readonly copier?: DepthPreviewLumaCopier;
   readonly correction?: Uint8Array | null;
   readonly packetSink: PacketReader;
   readonly timeline: DepthPreviewTimeline;
@@ -343,8 +334,7 @@ export function createDepthPreviewTrackReader(options: {
   let hearsDequeue = false;
   let current: RunState | null = null;
   let disposed = false;
-  let scratch = new ArrayBuffer(0);
-  let copyChain: Promise<unknown> = Promise.resolve();
+  const pageCopier = createMainThreadLumaCopier();
   const stats = {
     copyMainThreadMs: 0,
     decodersCreated: 0,
@@ -410,95 +400,38 @@ export function createDepthPreviewTrackReader(options: {
   };
 
   /**
-   * Copies one frame's luma out and closes the frame. Copies run one at a
-   * time, into one scratch buffer, so a run holds at most one copy's worth of
-   * pixels beyond the luma it keeps.
+   * Hands one frame to the copier, which closes it, and keeps the time the
+   * page spent on it. Null for a frame the copier lost.
    */
-  const copyLuma = (frame: VideoFrame, index: number) => {
-    const copy = copyChain.then(async (): Promise<DepthPreviewLumaFrame> => {
-      try {
-        const rect = frame.visibleRect ?? {
-          height: frame.codedHeight,
-          width: frame.codedWidth,
-          x: 0,
-          y: 0,
-        };
-        const { width, height } = rect;
-        const format = frame.format;
-        const planar = format !== null && PLANAR_8_BIT_FORMATS.has(format);
-        let started = performance.now();
-        let pixels: { bytes: Uint8Array; plane: PlaneLayout | undefined };
+  const copyLuma = (
+    frame: VideoFrame,
+    index: number,
+  ): Promise<DepthPreviewLumaFrame | null> => {
+    const started = performance.now();
+    const correction = options.correction ?? null;
+    const copied =
+      options.copier?.copy(frame, correction) ??
+      pageCopier.copy(frame, correction);
 
-        if (planar || (format !== null && RGB_FORMATS.has(format))) {
-          const size = frame.allocationSize({ rect });
+    stats.copyMainThreadMs += performance.now() - started;
 
-          if (scratch.byteLength < size) scratch = new ArrayBuffer(size);
-
-          const copied = frame.copyTo(scratch, { rect });
-
-          stats.copyMainThreadMs += performance.now() - started;
-
-          const [plane] = await copied;
-
-          started = performance.now();
-          pixels = { bytes: new Uint8Array(scratch), plane };
-        } else {
-          // A frame in a layout the page cannot read is drawn to a canvas,
-          // which converts it to RGB as the browser sees fit.
-          pixels = {
-            bytes: drawFrameRgba(frame, width, height),
-            plane: undefined,
-          };
-        }
-
-        const luma = new Uint8Array(width * height);
-        const { bytes, plane } = pixels;
-        const stride = plane?.stride ?? (planar ? width : width * 4);
-        const offset = plane?.offset ?? 0;
-
-        if (!planar) {
-          // Every RGB layout keeps green second, and luma with neutral chroma
-          // converts to three equal channels.
-          for (let y = 0; y < height; y += 1) {
-            const row = offset + y * stride + 1;
-            const target = y * width;
-
-            for (let x = 0; x < width; x += 1) {
-              luma[target + x] = bytes[row + x * 4];
-            }
-          }
-          stats.lumaPath = "rgb";
-        } else if (stride === width) {
-          luma.set(bytes.subarray(offset, offset + width * height));
-          stats.lumaPath ??= "plane";
-        } else {
-          for (let y = 0; y < height; y += 1) {
-            luma.set(
-              bytes.subarray(offset + y * stride, offset + y * stride + width),
-              y * width,
-            );
-          }
-          stats.lumaPath ??= "plane";
-        }
-        if (options.correction) {
-          const table = options.correction;
-
-          for (let index = 0; index < luma.length; index += 1) {
-            luma[index] = table[luma[index]];
-          }
-        }
-        stats.framesCopied += 1;
-        stats.copyMainThreadMs += performance.now() - started;
-
-        return { height, index, luma, width };
-      } finally {
-        frame.close();
+    return copied.then((result) => {
+      if (!result) {
+        stats.framesSkipped += 1;
+        return null;
       }
+      stats.copyMainThreadMs += result.busyMs;
+      stats.framesCopied += 1;
+      stats.lumaPath =
+        result.path === "rgb" ? "rgb" : (stats.lumaPath ?? "plane");
+
+      return {
+        height: result.height,
+        index,
+        luma: result.luma,
+        width: result.width,
+      };
     });
-
-    copyChain = copy.catch(() => undefined);
-
-    return copy;
   };
 
   interface RunState {
@@ -514,7 +447,7 @@ export function createDepthPreviewTrackReader(options: {
     runOptions: DepthPreviewDecodeOptions,
   ): DepthPreviewDecodeRun => {
     const keep = runOptions.keep ?? (() => true);
-    const ready: Promise<DepthPreviewLumaFrame>[] = [];
+    const ready: Promise<DepthPreviewLumaFrame | null>[] = [];
     const runDecoder = ensureDecoder();
     let cancelled = false;
     let failure: { error: unknown } | null = null;
@@ -625,7 +558,9 @@ export function createDepthPreviewTrackReader(options: {
             const frame = await Promise.race([head, cancellation]);
 
             if (cancelled || disposed) return null;
-            return frame;
+            // A frame the copier lost is a frame the window asks for again.
+            if (frame) return frame;
+            continue;
           }
           if (flushed) return null;
 
@@ -718,24 +653,6 @@ export function createDepthPreviewTrackReader(options: {
       options.dispose?.();
     },
   };
-}
-
-function drawFrameRgba(
-  frame: VideoFrame,
-  width: number,
-  height: number,
-): Uint8Array {
-  const canvas = new OffscreenCanvas(width, height);
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-
-  if (!context) {
-    throw new Error("The depth preview needs a 2D canvas to read this frame.");
-  }
-  context.drawImage(frame, 0, 0, width, height);
-
-  const { data } = context.getImageData(0, 0, width, height);
-
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
 function isAbortError(error: unknown) {

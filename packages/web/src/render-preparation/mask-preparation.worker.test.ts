@@ -98,4 +98,45 @@ describe("render-preparation worker", () => {
       transfer: [],
     });
   });
+
+  it("copies a preview frame's luma, transfers it back and closes the frame", async () => {
+    const worker = await loadWorker();
+    const frame = {
+      allocationSize: () => 4 * 2 * 2,
+      close: vi.fn(),
+      codedHeight: 2,
+      codedWidth: 4,
+      async copyTo(destination: ArrayBuffer) {
+        new Uint8Array(destination).set([20, 21, 22, 23, 24, 25, 26, 27]);
+        return [{ offset: 0, stride: 4 }];
+      },
+      format: "I420",
+      visibleRect: { height: 2, width: 4, x: 0, y: 0 },
+    };
+
+    worker.send({
+      correction: null,
+      frame,
+      requestId: 5,
+      type: DepthPreparationWorkerMessageType.PreviewLuma,
+    });
+    await worker.replied;
+
+    const [{ message, transfer }] = worker.posted as [
+      {
+        message: { luma: ArrayBuffer; path: string; type: string };
+        transfer: Transferable[];
+      },
+    ];
+
+    expect(message.type).toBe(
+      DepthPreparationWorkerMessageType.PreviewLumaComplete,
+    );
+    expect([...new Uint8Array(message.luma)]).toEqual([
+      20, 21, 22, 23, 24, 25, 26, 27,
+    ]);
+    expect(message.path).toBe("plane");
+    expect(transfer).toEqual([message.luma]);
+    await vi.waitFor(() => expect(frame.close).toHaveBeenCalledOnce());
+  });
 });

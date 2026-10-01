@@ -103,6 +103,37 @@ describe("depth preview track reader", () => {
     reader.dispose();
   });
 
+  it("hands frames to a copier that takes them, and copies on the page those it declines", async () => {
+    let declined = 0;
+    const copier = {
+      copy: (frame: VideoFrame) => {
+        if ((frame as unknown as FakeFrame).timestamp === 0) {
+          declined += 1;
+          return null;
+        }
+        frame.close();
+        return Promise.resolve({
+          busyMs: 0,
+          height: HEIGHT,
+          luma: new Uint8Array(WIDTH * HEIGHT).fill(99),
+          path: "plane" as const,
+          width: WIDTH,
+        });
+      },
+      destroy: () => undefined,
+      offMainThread: true,
+    };
+    const { reader } = createReader({ copier, frameCount: 4 });
+    const run = reader.decode(0);
+    const first = await run.next();
+    const second = await run.next();
+
+    expect(declined).toBe(1);
+    expect([...first!.luma]).toEqual(expectedLuma(0));
+    expect(second!.luma[0]).toBe(99);
+    reader.dispose();
+  });
+
   it("closes frames it is told not to keep without copying them", async () => {
     const { reader } = createReader({ frameCount: 8 });
     const run = reader.decode(0, { keep: (index) => index >= 3 });
@@ -228,6 +259,9 @@ interface ReaderOptions {
   readonly format?: string;
   readonly stride?: number;
   readonly correction?: Uint8Array;
+  readonly copier?: Parameters<
+    typeof createDepthPreviewTrackReader
+  >[0]["copier"];
   /** Frames the decoder holds before it outputs the first one. */
   readonly holdOutputs?: number;
 }
@@ -249,6 +283,7 @@ function createReader(options: ReaderOptions) {
   const reader = createDepthPreviewTrackReader({
     VideoDecoder: FakeDecoder as unknown as typeof VideoDecoder,
     config: { codec: "avc1.64001f" },
+    copier: options.copier,
     correction: options.correction,
     height: HEIGHT,
     packetSink: sink as unknown as Parameters<

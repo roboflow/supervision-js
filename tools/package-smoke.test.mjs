@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import test from "node:test";
@@ -364,6 +364,34 @@ test("the render-preparation worker decodes depth PNGs, embedded or deployed", (
   assert.match(worker, /DecompressionStream/);
   // The Blob-worker default runs the copy embedded in the entry.
   assert.match(entrypoint, /depth-decode-complete/);
+  // Decoded depth preview frames are copied in the same worker.
+  assert.match(worker, /depth-preview-luma/);
+  assert.match(entrypoint, /depth-preview-luma-complete/);
+});
+
+test("the depth preview decoder loads with Mediabunny only when a preview opens", () => {
+  const entrypoint = readFileSync(
+    new URL("../packages/web/dist/index.js", import.meta.url),
+    "utf8",
+  );
+  const chunks = readdirSync(
+    new URL("../packages/web/dist/", import.meta.url),
+  ).filter((name) => /^depth-preview-(track|probe)-.+\.js$/.test(name));
+
+  assert.ok(
+    chunks.some((name) => name.startsWith("depth-preview-track-")),
+    "the preview decoder is a chunk of its own",
+  );
+  assert.doesNotMatch(entrypoint, /^import[^;]*["']mediabunny["']/m);
+  for (const chunk of chunks) {
+    const code = readFileSync(
+      new URL(`../packages/web/dist/${chunk}`, import.meta.url),
+      "utf8",
+    );
+
+    assert.doesNotMatch(code, /^import[^;]*["']mediabunny["']/m, chunk);
+    assert.match(code, /import\(["']mediabunny["']\)/, chunk);
+  }
 });
 
 test("packages that ship the depth colour tables carry their notices", () => {
