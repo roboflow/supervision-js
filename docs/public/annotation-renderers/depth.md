@@ -250,8 +250,8 @@ one report: the preview window as a `depthFrame` artifact (frames held, the
 lead in seconds, the hold in force and `gateHoldCount`) and the exact frames
 as an `exactDepthFrame` artifact (frames kept and loading). A session's
 activity text says "Waiting for depth" or "Catching depth up" when depth is
-what holds playback. `onFrame` and the renderer state carry
-`activeDepthFrameIndex` and `activeDepthPrecision`, and the frame timings
+what holds playback. `renderer.getActiveDepth()` says which clip frame is
+drawn and whether it is the preview or the exact map, and the frame timings
 report depth's draw as `depthMs`.
 
 When playback rests for 0.15 s, the exact PNG for the frame on screen is

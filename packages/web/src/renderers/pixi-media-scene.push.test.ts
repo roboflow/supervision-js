@@ -925,16 +925,15 @@ describe("push-presented Pixi scene", () => {
     });
 
     channel.present(presentedFrame(1000));
-    expect(presented.at(-1)).toMatchObject({
-      activeDepthFrameIndex: null,
-      activeDepthPrecision: null,
-    });
+    expect(scene.getActiveDepth?.()).toBeNull();
 
     decoded = true;
     channel.present(presentedFrame(1040));
+    expect(scene.getActiveDepth?.()).toMatchObject({
+      frameIndex: 7,
+      precision: "preview",
+    });
     expect(presented.at(-1)).toMatchObject({
-      activeDepthFrameIndex: 7,
-      activeDepthPrecision: "preview",
       renderTimings: { depthMs: expect.any(Number) },
     });
   });

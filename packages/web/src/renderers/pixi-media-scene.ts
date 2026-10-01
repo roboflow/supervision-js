@@ -1770,11 +1770,8 @@ export async function createPixiMediaScene(
     const detectionFrame = boxState.activeDetectionFrame;
     const maskState = maskLayer?.getDrawnState();
     const drawnMaskFrameTime = maskState?.drawnFrameTime ?? null;
-    const depth = depthLayer?.getActiveDepth() ?? null;
 
     return {
-      activeDepthFrameIndex: depth?.frameIndex ?? null,
-      activeDepthPrecision: depth?.precision ?? null,
       activeDetectionCount: countPresentedDetections(
         detectionFrame,
         mediaTime,

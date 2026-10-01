@@ -121,13 +121,6 @@ export interface MediaFrameDiagnostics {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
-  /**
-   * Which frame of a depth clip is drawn over this frame, null when no depth
-   * is drawn or the depth is a still map.
-   */
-  readonly activeDepthFrameIndex?: number | null;
-  /** Whether that depth is the 8-bit preview or the exact map. */
-  readonly activeDepthPrecision?: "exact" | "preview" | null;
   readonly detectionBuffer: DetectionBufferState;
   readonly renderTimings: MediaFrameRenderTimings | null;
 }
@@ -226,13 +219,6 @@ export interface MediaRendererState {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
-  /**
-   * Which frame of a depth clip is drawn over the picture, null when no depth
-   * is drawn or the depth is a still map.
-   */
-  readonly activeDepthFrameIndex?: number | null;
-  /** Whether that depth is the 8-bit preview or the exact map. */
-  readonly activeDepthPrecision?: "exact" | "preview" | null;
   /**
    * Detection frame the mask raster on screen belongs to, null when no mask is
    * up. A renderer should either name `activeDetectionFrameTime` or draw no

@@ -96,8 +96,6 @@ export function createMediaRendererRuntimeState(
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
-  let activeDepthFrameIndex: number | null = null;
-  let activeDepthPrecision: "exact" | "preview" | null = null;
   let drawnMaskFrameTime: number | null = null;
   let maskHeldStale = false;
   let renderPreparationGateAbandoned = false;
@@ -120,8 +118,6 @@ export function createMediaRendererRuntimeState(
   };
 
   const createStateSnapshot = (): MediaRendererState => ({
-    activeDepthFrameIndex,
-    activeDepthPrecision,
     activeDetectionCount,
     activeDetectionFrameIndex,
     activeDetectionFrameTime,
@@ -149,8 +145,6 @@ export function createMediaRendererRuntimeState(
   const createFrameDiagnostics = (
     sample: PresentedMediaSample,
   ): MediaFrameDiagnostics => ({
-    activeDepthFrameIndex,
-    activeDepthPrecision,
     activeDetectionCount,
     activeDetectionFrameIndex,
     activeDetectionFrameTime,
@@ -189,8 +183,6 @@ export function createMediaRendererRuntimeState(
     activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
     activeDetectionFrameTime = sample.activeDetectionFrameTime;
     activeDetectionCount = sample.activeDetectionCount;
-    activeDepthFrameIndex = sample.activeDepthFrameIndex ?? null;
-    activeDepthPrecision = sample.activeDepthPrecision ?? null;
     drawnMaskFrameTime = sample.drawnMaskFrameTime;
     maskHeldStale = sample.maskHeldStale;
   };

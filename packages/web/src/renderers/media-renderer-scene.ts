@@ -112,9 +112,6 @@ export interface PresentedMediaSample {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
-  /** Which depth clip frame is drawn, and how precisely; null without one. */
-  readonly activeDepthFrameIndex?: number | null;
-  readonly activeDepthPrecision?: "exact" | "preview" | null;
   /** Detection frame the mask raster on screen belongs to, null when no mask is
    *  up. Apart from `activeDetectionFrameTime` it names a desync in seconds. */
   readonly drawnMaskFrameTime: number | null;
