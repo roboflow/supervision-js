@@ -6,6 +6,7 @@ import {
   type DepthClipFrames,
   type DepthManifest,
   type DepthMap,
+  type DepthPreviewLevels,
 } from "supervision-js-core";
 import type {
   DepthPreviewDecoderVerdict,
@@ -180,10 +181,11 @@ export interface DepthSourceContext {
    */
   readonly previewLumaCopier?: () => DepthPreviewLumaCopier;
   /**
-   * Picks, once per page, the decoder that returns preview codes as written;
-   * null skips the probe and leaves the choice to the browser.
+   * Picks, once per page and level, the decoder that returns preview codes
+   * as written; null skips the probe and leaves the choice to the browser.
    */
-  readonly choosePreviewDecoding?: (() => Promise<DepthPreviewDecoding>) | null;
+  readonly choosePreviewDecoding?:
+    ((levels: DepthPreviewLevels) => Promise<DepthPreviewDecoding>) | null;
   /** Hears the preview window's state: its lead, frames held and gate holds. */
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
 }
@@ -572,6 +574,7 @@ async function openDepthClip(
           kind: manifest.kind,
           samples: {
             encoding: "preview8",
+            levels: preview.track.levels,
             range: preview.track.range,
             reservedMax: preview.track.reservedMax,
             values: frame.luma,
@@ -1003,7 +1006,7 @@ async function openClipPreview(
   // of their decoders at once.
   if (choose) {
     try {
-      decoding = await abortable(choose(), context.signal);
+      decoding = await abortable(choose(track.levels), context.signal);
     } catch (error) {
       if (context.signal?.aborted) throw error;
       return unavailable(`its decoder probe failed: ${String(error)}`);
@@ -1065,20 +1068,20 @@ function describeVerdicts(verdicts: readonly DepthPreviewDecoderVerdict[]) {
 
 /**
  * Says what diagnostics should about the page's preview decoder: nothing
- * when it returns codes as written.
+ * when its codes come back as written, directly or through the probe's table.
  */
 export function describePreviewDecoding(
   decoding: DepthPreviewDecoding | null,
 ): string | null {
   const probe = decoding?.probe;
 
-  if (!decoding || !probe || probe.exact) return null;
+  if (!decoding || !probe || decoding.residualError === 0) return null;
 
   const corrected = decoding.correction
     ? `; corrected through the probe's table to within ${decoding.residualError}`
     : "";
 
-  return `This browser's ${decoding.hardwareAcceleration} decoder changes depth preview codes: ${probe.mismatchedCodes} of 256 come back different, by up to ${probe.maxError} (${probe.lumaPath ?? "unknown"} path)${corrected}. Preview depth during playback is off by up to ${decoding.correction ? decoding.residualError : probe.maxError} preview steps; exact depth at rest is not affected.`;
+  return `This browser's ${decoding.hardwareAcceleration} decoder changes depth preview codes: ${probe.mismatchedCodes} of ${probe.judgedCodes} come back different, by up to ${probe.maxError} (${probe.lumaPath ?? "unknown"} path)${corrected}. Preview depth during playback is off by up to ${decoding.correction ? decoding.residualError : probe.maxError} preview steps; exact depth at rest is not affected.`;
 }
 
 async function openDefaultPreviewTrack(
@@ -1090,11 +1093,11 @@ async function openDefaultPreviewTrack(
   return openDepthPreviewTrack(url, options);
 }
 
-async function chooseDefaultPreviewDecoding() {
+async function chooseDefaultPreviewDecoding(levels: DepthPreviewLevels) {
   const { chooseDepthPreviewDecoding } =
     await import("#media/depth-preview-probe");
 
-  return chooseDepthPreviewDecoding();
+  return chooseDepthPreviewDecoding(levels);
 }
 
 /**

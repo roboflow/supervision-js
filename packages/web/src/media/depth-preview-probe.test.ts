@@ -28,6 +28,9 @@ function probeLuma(decode: (code: number) => number) {
 }
 
 const squeeze = (code: number) => Math.round(16 + (code * 219) / 255);
+/** TV range converted to full-range RGB, as Firefox hands frames over. */
+const expand = (code: number) =>
+  Math.min(255, Math.max(0, Math.round(((code - 16) * 255) / 219)));
 
 describe("depth preview probe", () => {
   beforeEach(() => {
@@ -158,8 +161,16 @@ describe("depth preview probe", () => {
       },
     );
     const supported = vi.fn(async () => true);
-    const first = await chooseDepthPreviewDecoding(openTrack, supported);
-    const second = await chooseDepthPreviewDecoding(openTrack, supported);
+    const first = await chooseDepthPreviewDecoding(
+      "full",
+      openTrack,
+      supported,
+    );
+    const second = await chooseDepthPreviewDecoding(
+      "full",
+      openTrack,
+      supported,
+    );
 
     expect(first).toBe(second);
     expect(first.hardwareAcceleration).toBe("prefer-software");
@@ -174,6 +185,7 @@ describe("depth preview probe", () => {
       fakeReader(probeLuma(squeeze), () => undefined),
     );
     const decoding = await chooseDepthPreviewDecoding(
+      "full",
       openTrack,
       async (preference) => preference === "prefer-hardware",
     );
@@ -191,6 +203,7 @@ describe("depth preview probe", () => {
     const { chooseDepthPreviewDecoding } =
       await import("./depth-preview-probe");
     const decoding = await chooseDepthPreviewDecoding(
+      "full",
       probeThrough(() => "holdsUntilFlush"),
       async () => true,
     );
@@ -206,6 +219,7 @@ describe("depth preview probe", () => {
     const { chooseDepthPreviewDecoding } =
       await import("./depth-preview-probe");
     const decoding = await chooseDepthPreviewDecoding(
+      "full",
       probeThrough((preference) =>
         preference === "prefer-software" ? "refusesConfig" : "outputs",
       ),
@@ -230,6 +244,7 @@ describe("depth preview probe", () => {
         await import("./depth-preview-probe");
       let settled = false;
       const choosing = chooseDepthPreviewDecoding(
+        "full",
         probeThrough(() => "silent"),
         async () => true,
       ).finally(() => {
@@ -250,6 +265,141 @@ describe("depth preview probe", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("judges a TV-range probe on codes 16 to 235 alone", async () => {
+    const { readProbeFrame } = await import("./depth-preview-probe");
+    // Footroom and headroom clamp to black and white, as an RGB path does.
+    const result = readProbeFrame(
+      probeLuma((code) => Math.min(235, Math.max(16, code))),
+      256,
+      "tv",
+    );
+
+    expect(result).toMatchObject({
+      exact: true,
+      judgedCodes: 220,
+      maxError: 0,
+      mismatchedCodes: 0,
+    });
+  });
+
+  it("undoes a TV-range decoder's RGB conversion exactly", async () => {
+    const { resolveDepthPreviewDecoding } =
+      await import("./depth-preview-probe");
+    const { readProbeFrame } = await import("./depth-preview-probe");
+    const rgb = {
+      ...readProbeFrame(probeLuma(expand), 256, "tv"),
+      lumaPath: "rgb" as const,
+    };
+    const decoding = resolveDepthPreviewDecoding(
+      [
+        {
+          hardwareAcceleration: "prefer-hardware",
+          probe: rgb,
+          supported: true,
+        },
+      ],
+      "tv",
+    );
+
+    expect(rgb.exact).toBe(false);
+    expect(decoding.residualError).toBe(0);
+    for (let code = 16; code <= 235; code += 1) {
+      expect(decoding.correction?.[expand(code)]).toBe(code);
+    }
+    // Black and below stay at the lowest TV code, which is no depth.
+    expect(decoding.correction?.[0]).toBe(16);
+  });
+
+  it("asks a TV-range preview's hardware decoder first, and stops when it is exact", async () => {
+    const { chooseDepthPreviewDecoding } =
+      await import("./depth-preview-probe");
+    const opened: (HardwareAcceleration | undefined)[] = [];
+    const decoding = await chooseDepthPreviewDecoding(
+      "tv",
+      async (_input, options) => {
+        opened.push(options?.hardwareAcceleration);
+        return fakeReader(
+          probeLuma((code) => code),
+          () => undefined,
+        );
+      },
+      async () => true,
+    );
+
+    expect(opened).toEqual(["prefer-hardware"]);
+    expect(decoding).toMatchObject({
+      correction: null,
+      hardwareAcceleration: "prefer-hardware",
+      residualError: 0,
+    });
+  });
+
+  it("keeps a TV-range decoder whose RGB conversion the table undoes, without asking another", async () => {
+    const { chooseDepthPreviewDecoding } =
+      await import("./depth-preview-probe");
+    const openTrack = vi.fn(async () =>
+      fakeReader(probeLuma(expand), () => undefined),
+    );
+    const decoding = await chooseDepthPreviewDecoding(
+      "tv",
+      openTrack,
+      async () => true,
+    );
+
+    expect(openTrack).toHaveBeenCalledTimes(1);
+    expect(decoding.hardwareAcceleration).toBe("prefer-hardware");
+    expect(decoding.correction).not.toBeNull();
+    expect(decoding.residualError).toBe(0);
+  });
+
+  it("probes each level once per page, apart", async () => {
+    const { chooseDepthPreviewDecoding } =
+      await import("./depth-preview-probe");
+    const probed: number[] = [];
+    const openTrack = vi.fn(async (input: DepthPreviewTrackInput) => {
+      probed.push((input as Uint8Array).length);
+      return fakeReader(
+        probeLuma((code) => code),
+        () => undefined,
+      );
+    });
+    const supported = async () => true;
+
+    await chooseDepthPreviewDecoding("tv", openTrack, supported);
+    await chooseDepthPreviewDecoding("full", openTrack, supported);
+    await chooseDepthPreviewDecoding("tv", openTrack, supported);
+
+    expect(openTrack).toHaveBeenCalledTimes(2);
+    expect(probed[0]).not.toBe(probed[1]);
+  });
+
+  it("ships a TV-range probe clip Mediabunny reads as two limited-range 256x256 H.264 frames", async () => {
+    const { depthPreviewProbeBytes } = await import("./depth-preview-probe");
+    const { BufferSource, EncodedPacketSink, Input, MP4 } =
+      await vi.importActual<typeof import("mediabunny")>("mediabunny");
+    const input = new Input({
+      formats: [MP4],
+      source: new BufferSource(depthPreviewProbeBytes("tv")),
+    });
+    const track = (await input.getPrimaryVideoTrack())!;
+    const packets = [];
+
+    for await (const packet of new EncodedPacketSink(track).packets()) {
+      packets.push(packet);
+    }
+
+    expect(await track.getCodecParameterString()).toBe("avc1.64000d");
+    expect([await track.getCodedWidth(), await track.getCodedHeight()]).toEqual(
+      [256, 256],
+    );
+    expect(await track.getColorSpace()).toMatchObject({
+      fullRange: false,
+      matrix: "bt709",
+    });
+    expect(packets).toHaveLength(2);
+    input.dispose();
   });
 
   it("ships a probe clip Mediabunny reads as two full-range 256x256 H.264 frames", async () => {
@@ -307,6 +457,7 @@ function probe(decode: (code: number) => number) {
   return {
     decoded,
     exact: mismatchedCodes === 0,
+    judgedCodes: 256,
     lumaPath: "plane" as const,
     maxError,
     mismatchedCodes,

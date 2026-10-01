@@ -21,6 +21,7 @@ import {
   demoPresentationDrawsAnnotations,
 } from "./demo-presentation";
 import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
+import { createDocsDepthRenderer } from "../docs-depth";
 import {
   createRegionPlaygroundRenderers,
   initialRegionPlaygroundSettings,
@@ -211,6 +212,32 @@ describe("demo presentation", () => {
     });
 
     expect(presentation.boxStyle).toBeNull();
+  });
+
+  /* The Style panel's Depth section and the docs playground build the same
+   * descriptor from the same settings, so neither drifts from the other. */
+  it("draws depth with the Style panel's depth options", () => {
+    const depthStyle = {
+      ...defaultDemoPresentationSettings.depthStyle,
+      colormap: "viridis" as const,
+      noDepthColor: 0x202020,
+      opacity: 0.6,
+      wipe: 0.5,
+    };
+    const depth = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      depthEnabled: true,
+      depthStyle,
+    }).renderers?.find(({ kind }) => kind === "depth");
+
+    expect(depth).toEqual(createDocsDepthRenderer(depthStyle));
+    expect(
+      createDemoPresentation({
+        ...defaultDemoPresentationSettings,
+        depthEnabled: false,
+        depthStyle,
+      }).renderers?.some(({ kind }) => kind === "depth"),
+    ).toBe(false);
   });
 
   it("treats mask opacity as a cheap presentation knob", () => {

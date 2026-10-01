@@ -25,6 +25,12 @@ import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
+import {
+  WorkbenchDepthReadout,
+  type WorkbenchDepth,
+} from "./components/DepthStyleSection";
+import { DEPTH_VIDEO_ENGINE_ONLY } from "./components/media-path-copy";
+import { createDepthProbe } from "./hooks/depth-probe";
 import { useViewportOverlay } from "./hooks/useViewportOverlay";
 import { selectViewportSessionState } from "./components/viewport-overlay";
 import { SelectionPanel } from "./components/SelectionPanel";
@@ -250,6 +256,48 @@ function DemoApp() {
     const fixture = resolveDemoFixture(demo.sampleFixtureId);
     return { id: fixture.sampleName, label: fixture.displayName };
   }, [demo.sampleFixtureId, demo.sourceMode]);
+  const [depthProbe] = useState(() => createDepthProbe(demo.getRenderer));
+  const depthLayers = useMemo(
+    () =>
+      demo.sourceMode === DemoSourceMode.Fixture
+        ? (resolveDemoFixture(demo.sampleFixtureId).depth?.layers ?? [])
+        : [],
+    [demo.sampleFixtureId, demo.sourceMode],
+  );
+  const depthBlocked =
+    depthLayers.length > 0 &&
+    demo.presentationAvailability?.depthEnabled === false;
+  const depthShown =
+    demo.presentationSettings.depthEnabled &&
+    demo.presentationAvailability?.depthEnabled !== false;
+  const workbenchDepth = useMemo<WorkbenchDepth>(
+    () => ({
+      blockedReason: depthBlocked ? DEPTH_VIDEO_ENGINE_ONLY : null,
+      layerId: demo.depthLayerId,
+      layerLoad: demo.depthLayerLoad,
+      layers: depthLayers,
+      onLayerChange: demo.setDepthLayer,
+      probe: depthProbe,
+    }),
+    [
+      demo.depthLayerId,
+      demo.depthLayerLoad,
+      demo.setDepthLayer,
+      depthBlocked,
+      depthLayers,
+      depthProbe,
+    ],
+  );
+  const depthReadout = useMemo(
+    () => (depthShown ? <WorkbenchDepthReadout probe={depthProbe} /> : null),
+    [depthProbe, depthShown],
+  );
+
+  // A step, a seek, a frame played or depth landing behind a resting frame
+  // can each change the depth on screen without the pointer moving.
+  useEffect(() => {
+    depthProbe.refresh();
+  }, [depthProbe, demo.rendererState, demo.sessionState]);
   const styleClassNames = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Upload
@@ -304,6 +352,8 @@ function DemoApp() {
           <RendererViewport
             containerRef={demo.containerRef}
             explained={viewportOverlay.explained}
+            onPointerLeave={depthProbe.onPointerLeave}
+            onPointerMove={depthProbe.onPointerMove}
             overlay={viewportOverlay.overlay}
           />
         }
@@ -354,6 +404,7 @@ function DemoApp() {
         slowWorkPanel={<SlowWorkPanel onReopenSession={demo.reopenSession} />}
         selectionPanel={
           <SelectionPanel
+            depthReadout={depthReadout}
             hoveredDetectionPick={demo.hoveredDetectionPick}
             onClearSelection={demo.onClearSelectedDetection}
             playbackState={demo.playbackState}
@@ -383,6 +434,7 @@ function DemoApp() {
           <RenderControls
             availability={demo.presentationAvailability}
             classNames={styleClassNames}
+            depth={workbenchDepth}
             onChange={demo.setPresentationSettings}
             settings={demo.presentationSettings}
           />

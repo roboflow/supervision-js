@@ -375,6 +375,7 @@ export {
 export {
   DepthColormap,
   DepthMapKind,
+  DepthPreviewLevels,
   DepthQuantity,
   DepthSampling,
   type DepthCamera,
@@ -389,6 +390,7 @@ export {
   type ScaledDepthSamples,
 } from "#types/depth-map";
 export {
+  depthPreviewTopCode,
   parseDepthManifest,
   resolveDepthFrameFile,
   validateDepthMap,

@@ -3,44 +3,42 @@ import {
   depthColormapColors,
   type DepthColormap,
   type DepthQuantity,
+  type DepthRange,
   type DepthSampling,
 } from "supervision";
 import {
+  DEFAULT_NO_DEPTH_COLOR,
   DocsDepthRangeMode,
+  changeDepthQuantity,
+  changeDepthRangeMode,
   createDocsDepthSnippet,
+  depthColormapOptions,
+  depthSamplingOptions,
   type DocsDepthColourRange,
   type DocsDepthSettings,
 } from "../docs-depth";
+import { toHexColor } from "./InspectorControls";
 import "./depth-renderer-controls.css";
-
-const colormaps: readonly DepthColormap[] = [
-  "turbo",
-  "viridis",
-  "cividis",
-  "inferno",
-  "magma",
-  "grayscale",
-];
-const samplings: readonly DepthSampling[] = ["auto", "nearest", "edge-aware"];
-const DEFAULT_NO_DEPTH_HEX = "#202020";
 
 /**
  * The depth renderer's options as controls, the same in every depth
- * playground. `onLock` fixes a manual range to the percentiles of the depth
- * on screen, in the quantity given, and returns false when there is none.
+ * playground. `lockRange` reads the percentiles of the depth on screen, in the
+ * quantity given, and returns null when there is none.
  */
 export function DepthRendererControls(props: {
   readonly settings: DocsDepthSettings;
   readonly onChange: (patch: Partial<DocsDepthSettings>) => void;
-  readonly onLock: (quantity: DepthQuantity) => boolean;
+  readonly lockRange: (quantity: DepthQuantity) => DepthRange | null;
   readonly canLock: boolean;
   /** What the legend under the range control labels its ends with. */
   readonly colourRange: DocsDepthColourRange;
   /** Controls that choose what is shown, placed before the renderer's own. */
   readonly children?: ReactNode;
 }) {
-  const { onChange, onLock, settings } = props;
-  const [noDepthHex, setNoDepthHex] = useState(DEFAULT_NO_DEPTH_HEX);
+  const { lockRange, onChange, settings } = props;
+  const [noDepthHex, setNoDepthHex] = useState(
+    toHexColor(DEFAULT_NO_DEPTH_COLOR),
+  );
   const unit = settings.quantity === "depth" ? "m" : "px";
 
   return (
@@ -49,22 +47,16 @@ export function DepthRendererControls(props: {
       <PlaygroundSelect
         label="Colormap"
         onChange={(value) => onChange({ colormap: value as DepthColormap })}
-        options={colormaps.map((name) => [name, name])}
+        options={depthColormapOptions.map((name) => [name, name])}
         value={settings.colormap}
       />
       <PlaygroundSelect
         label="Quantity"
-        onChange={(value) => {
-          const quantity = value as DepthQuantity;
-
-          // A manual range in pixels means nothing in metres, so it is
-          // locked again in the new unit.
-          if (settings.rangeMode !== DocsDepthRangeMode.Manual) {
-            onChange({ quantity });
-          } else if (!onLock(quantity)) {
-            onChange({ quantity, rangeMode: DocsDepthRangeMode.Clip });
-          }
-        }}
+        onChange={(value) =>
+          onChange(
+            changeDepthQuantity(settings, value as DepthQuantity, lockRange),
+          )
+        }
         options={[
           ["disparity", "Disparity (px)"],
           ["depth", "Depth (m)"],
@@ -73,13 +65,15 @@ export function DepthRendererControls(props: {
       />
       <PlaygroundSelect
         label="Range"
-        onChange={(value) => {
-          if (value !== DocsDepthRangeMode.Manual) {
-            onChange({ rangeMode: value as DocsDepthRangeMode });
-          } else if (!onLock(settings.quantity)) {
-            onChange({ rangeMode: DocsDepthRangeMode.Manual });
-          }
-        }}
+        onChange={(value) =>
+          onChange(
+            changeDepthRangeMode(
+              settings,
+              value as DocsDepthRangeMode,
+              lockRange,
+            ),
+          )
+        }
         options={[
           [DocsDepthRangeMode.Clip, "Clip (manifest)"],
           [DocsDepthRangeMode.Auto, "Auto (this frame)"],
@@ -105,7 +99,10 @@ export function DepthRendererControls(props: {
           />
           <button
             disabled={!props.canLock}
-            onClick={() => onLock(settings.quantity)}
+            onClick={() => {
+              const manualRange = lockRange(settings.quantity);
+              if (manualRange) onChange({ manualRange });
+            }}
             type="button"
           >
             Lock to this frame
@@ -129,7 +126,7 @@ export function DepthRendererControls(props: {
       <PlaygroundSelect
         label="Sampling"
         onChange={(value) => onChange({ sampling: value as DepthSampling })}
-        options={samplings.map((name) => [name, name])}
+        options={depthSamplingOptions.map((name) => [name, name])}
         value={settings.sampling}
       />
       <label className="docs-layer-playground__toggle">
@@ -174,7 +171,7 @@ export function DepthRendererControls(props: {
  * The colormap as the renderer draws it, far end on the left, with the value
  * at each end. It keeps one height whatever the range says.
  */
-function DepthColourLegend(props: {
+export function DepthColourLegend(props: {
   readonly colormap: DepthColormap;
   readonly range: DocsDepthColourRange;
 }) {

@@ -1,7 +1,8 @@
-import type {
-  DepthAnnotationRenderer,
-  DepthColorMapping,
-  DepthMap,
+import {
+  depthPreviewTopCode,
+  type DepthAnnotationRenderer,
+  type DepthColorMapping,
+  type DepthMap,
 } from "supervision-js-core";
 import type {
   InjectedMeshConstructor,
@@ -63,6 +64,8 @@ export interface DepthShaderUniforms {
   readonly uOuterOffset: number;
   readonly uPreviewHi: number;
   readonly uPreviewLo: number;
+  /** The preview code that stands for `uPreviewHi`: 255, or 235 in TV range. */
+  readonly uPreviewTop: number;
   readonly uRangeHi: number;
   readonly uRangeLo: number;
   readonly uReciprocal: number;
@@ -125,6 +128,8 @@ export function resolveDepthShaderUniforms(
     uOuterOffset: mapping.outerOffset,
     uPreviewHi: samples.encoding === "preview8" ? samples.range.max : 0,
     uPreviewLo: samples.encoding === "preview8" ? samples.range.min : 0,
+    uPreviewTop:
+      samples.encoding === "preview8" ? depthPreviewTopCode(samples.levels) : 0,
     uRangeHi: mapping.hi,
     uRangeLo: mapping.lo,
     uReciprocal: mapping.reciprocal ? 1 : 0,
@@ -160,6 +165,7 @@ export function createPixiDepthShaderRenderer(options: {
     uOuterOffset: { type: "f32", value: 0 },
     uPreviewHi: { type: "f32", value: 0 },
     uPreviewLo: { type: "f32", value: 0 },
+    uPreviewTop: { type: "f32", value: 255 },
     uRangeHi: { type: "f32", value: 1 },
     uRangeLo: { type: "f32", value: 0 },
     uReciprocal: { type: "f32", value: 0 },
@@ -310,6 +316,7 @@ uniform float uNumerator;
 uniform float uOuterOffset;
 uniform float uPreviewHi;
 uniform float uPreviewLo;
+uniform float uPreviewTop;
 uniform float uRangeHi;
 uniform float uRangeLo;
 uniform float uReciprocal;
@@ -337,10 +344,11 @@ vec2 loadValue(ivec2 position) {
     return vec2(0.0);
   }
 
+  float span = uPreviewTop - uReservedMax - 1.0;
+
   return vec2(
     uPreviewLo +
-      (code - uReservedMax - 1.0) / (254.0 - uReservedMax) *
-      (uPreviewHi - uPreviewLo),
+      min(code - uReservedMax - 1.0, span) / span * (uPreviewHi - uPreviewLo),
     1.0
   );
 }
@@ -451,6 +459,7 @@ struct DepthUniforms {
   uOuterOffset: f32,
   uPreviewHi: f32,
   uPreviewLo: f32,
+  uPreviewTop: f32,
   uRangeHi: f32,
   uRangeLo: f32,
   uReciprocal: f32,
@@ -489,10 +498,11 @@ fn loadValue(position: vec2<i32>) -> vec2<f32> {
     return vec2<f32>(0.0);
   }
 
+  let span = depthUniforms.uPreviewTop - depthUniforms.uReservedMax - 1.0;
+
   return vec2<f32>(
     depthUniforms.uPreviewLo +
-      (code - depthUniforms.uReservedMax - 1.0) /
-      (254.0 - depthUniforms.uReservedMax) *
+      min(code - depthUniforms.uReservedMax - 1.0, span) / span *
       (depthUniforms.uPreviewHi - depthUniforms.uPreviewLo),
     1.0
   );

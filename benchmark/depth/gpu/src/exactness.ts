@@ -1,9 +1,12 @@
-import type { DepthMap } from "supervision-js-core";
+import type { DepthMap, DepthPreviewLevels } from "supervision-js-core";
 import { createDepthDraw, createLut } from "./depth-draw";
 import type { BenchBackend } from "./pixi-backend";
 
-/** A reserved-code count typical of a preview track. */
-const PREVIEW_RESERVED_MAX = 15;
+/** Reserved codes typical of a preview track, and its top code, per level. */
+const PREVIEW_CODES = {
+  full: { reservedMax: 15, top: 255 },
+  tv: { reservedMax: 31, top: 235 },
+} as const;
 const NO_DEPTH_COLOR = 0x0000ff;
 
 export interface ExactnessCase {
@@ -64,6 +67,12 @@ export async function runExactnessProbe(
         "r8 preview codes, odd width 1279x3",
         previewMap(1279, 3),
       ),
+      await probe(
+        backend,
+        lut,
+        "r8 TV-range preview codes, 256x4",
+        previewMap(256, 4, "tv"),
+      ),
     );
   } finally {
     lut.destroy();
@@ -83,13 +92,20 @@ async function probe(
     { height: map.height, width: map.width },
     1,
   );
-  const preview = map.samples.encoding === "preview8";
-  const values = map.samples.values;
+  const samples = map.samples;
+  const values = samples.values;
   const texelCount = map.width * map.height;
+  // Codes above the top code read as the top of the range.
   const expectedValue = (index: number) =>
-    preview ? values[index] - PREVIEW_RESERVED_MAX - 1 : values[index];
+    samples.encoding === "preview8"
+      ? Math.min(values[index], samples.range.max + samples.reservedMax + 1) -
+        samples.reservedMax -
+        1
+      : values[index];
   const isValid = (index: number) =>
-    preview ? values[index] > PREVIEW_RESERVED_MAX : values[index] > 0;
+    samples.encoding === "preview8"
+      ? values[index] > samples.reservedMax
+      : values[index] > 0;
   let maxValue = 0;
 
   for (let i = 0; i < texelCount; i += 1) {
@@ -185,17 +201,23 @@ function scaledMap(
   };
 }
 
-function previewMap(width: number, height: number): DepthMap {
-  const span = 254 - PREVIEW_RESERVED_MAX;
+function previewMap(
+  width: number,
+  height: number,
+  levels: DepthPreviewLevels = "full",
+): DepthMap {
+  const { reservedMax, top } = PREVIEW_CODES[levels];
+  const span = top - reservedMax - 1;
 
   return {
     height,
     kind: "disparity_px",
     samples: {
       encoding: "preview8",
-      // Code c stands for c - T - 1, so valid codes colour as 0..239.
+      levels,
+      // Code c stands for c - T - 1, so valid codes colour as 0..span.
       range: { max: span, min: 0 },
-      reservedMax: PREVIEW_RESERVED_MAX,
+      reservedMax,
       values: Uint8Array.from({ length: width * height }, (_, i) => i & 0xff),
     },
     width,

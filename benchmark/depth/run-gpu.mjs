@@ -122,28 +122,75 @@ async function stopProcess(child) {
 
 /**
  * The preview cases decode the Spring fixture's 720p preview and two resizes
- * of it, written here with the producer's encoder settings so they decode
- * like a real preview at that size. Without ffmpeg those rows are skipped.
+ * of it, written here with the producer's encoder settings (TV range) so they
+ * decode like a real preview at that size, and the codes case compares the
+ * 720p preview's first second with ffmpeg's own decode of it. Without ffmpeg
+ * those rows are skipped. A file older than the fixture's preview is
+ * written again.
  */
 async function writePreviewClips() {
   const source = path.join(
     rootDir,
     "demo/fixtures/spring_stereo_depth/sgbm/preview.mp4",
   );
+  const sourceTime = (await fs.stat(source)).mtimeMs;
+  const isCurrent = async (target) => {
+    try {
+      return (await fs.stat(target)).mtimeMs >= sourceTime;
+    } catch {
+      return false;
+    }
+  };
+  const reference = path.join(outputDir, "preview-720p-luma.gray");
+
+  if (!(await isCurrent(reference))) {
+    // The luma plane exactly as decoded: no range or format conversion.
+    const result = spawnSync(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        source,
+        "-frames:v",
+        "24",
+        "-vf",
+        "extractplanes=y",
+        "-f",
+        "rawvideo",
+        reference,
+      ],
+      { stdio: "inherit" },
+    );
+
+    if (result.status !== 0) {
+      console.warn(
+        "Could not decode the preview with ffmpeg; the codes case is skipped.",
+      );
+    }
+  }
+
   const sizes = [
     ["preview-1080p.mp4", 1920, 1080],
     ["preview-4k.mp4", 3840, 2160],
+  ];
+  const tv = [
+    "-color_range",
+    "tv",
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
   ];
 
   for (const [name, width, height] of sizes) {
     const target = path.join(outputDir, name);
 
-    try {
-      await fs.access(target);
-      continue;
-    } catch {
-      // Not written yet.
-    }
+    if (await isCurrent(target)) continue;
 
     const result = spawnSync(
       "ffmpeg",
@@ -170,8 +217,9 @@ async function writePreviewClips() {
         "24",
         "-sc_threshold",
         "0",
+        ...tv,
         "-bsf:v",
-        "h264_metadata=video_full_range_flag=1",
+        "h264_metadata=video_full_range_flag=0",
         "-movflags",
         "+faststart",
         target,
@@ -510,15 +558,17 @@ function renderConsoleSummary(report) {
         `Upload/render ${row.backend} ${row.resolution} ${row.encoding}: upload+render ${formatMs(row.uploadAndRenderMs.median)}, render ${formatMs(row.renderOnlyMs.median)}, upload share ${formatMs(row.uploadShareMs)}`,
     ),
     "",
-    ...(report.previewCodes
-      ? [
-          `Preview codes: chose ${report.previewCodes.chosen}, residual error ${report.previewCodes.residualError}${report.previewCodes.correction ? " (corrected)" : ""}`,
-          ...report.previewCodes.verdicts.map(
-            (row) =>
-              `  ${row.hardwareAcceleration}: ${row.supported ? (row.exact ? "exact" : `${row.mismatchedCodes} codes off by up to ${row.maxError}, 0->${row.codeZeroReadsAs}, 255->${row.code255ReadsAs}`) : "not offered"}${row.lumaPath ? ` (${row.lumaPath})` : ""}${row.error ? ` ${row.error}` : ""}`,
-          ),
-        ]
-      : []),
+    ...(report.previewCodes ?? []).flatMap((codes) => [
+      `Preview codes at ${codes.levels} levels: chose ${codes.chosen}, residual error ${codes.residualError}${codes.correction ? " (corrected)" : ""}`,
+      ...codes.verdicts.map(
+        (row) =>
+          `  ${row.hardwareAcceleration}: ${row.supported ? (row.exact ? `exact over ${row.judgedCodes}` : `${row.mismatchedCodes} of ${row.judgedCodes} codes off by up to ${row.maxError} (corrected: ${row.correctedError}), ${row.lowCode}->${row.lowReadsAs}, ${row.highCode}->${row.highReadsAs}`) : "not offered"}${row.lumaPath ? ` (${row.lumaPath})` : ""}${row.error ? ` ${row.error}` : ""}`,
+      ),
+    ]),
+    ...(report.previewClipCodes ?? []).map(
+      (row) =>
+        `Preview clip codes vs ffmpeg, ${row.decoder}${row.corrected ? " (corrected)" : ""}: ${row.error ?? `${row.frames} frames, ${row.mismatchedPixels} of ${row.pixels} pixels differ, max ${row.maxError}, mean ${row.meanError.toFixed(4)}; ${row.outsideRangePixels} outside TV range (${row.lumaPath})`}`,
+    ),
     ...(report.previewDecode ?? []).map(
       (row) =>
         `Preview decode ${row.clip} ${row.decoder} (${row.copy} copy): ${row.framesPerSecond.toFixed(0)} fps, copy ${formatMs(row.copyMs.median)} (p95 ${formatMs(row.copyMs.p95)}), longest block ${formatMs(row.longestBlockMs)}`,
@@ -560,10 +610,18 @@ function renderReport(report) {
     )
     .join("\n");
 
-  const codesRows = (report.previewCodes?.verdicts ?? [])
+  const codesRows = (report.previewCodes ?? [])
+    .flatMap((codes) =>
+      codes.verdicts.map(
+        (row) =>
+          `| ${codes.levels} | ${row.hardwareAcceleration}${row.hardwareAcceleration === codes.chosen ? " (chosen)" : ""} | ${row.supported ? "yes" : "no"} | ${row.exact === null ? "-" : row.exact ? "yes" : "no"} | ${row.mismatchedCodes ?? "-"} of ${row.judgedCodes ?? "-"} | ${row.maxError ?? "-"} | ${row.correctedError ?? "-"} | ${row.lowCode} -> ${row.lowReadsAs ?? "-"} | ${row.highCode} -> ${row.highReadsAs ?? "-"} | ${row.lumaPath ?? "-"} |`,
+      ),
+    )
+    .join("\n");
+  const clipCodesRows = (report.previewClipCodes ?? [])
     .map(
       (row) =>
-        `| ${row.hardwareAcceleration} | ${row.supported ? "yes" : "no"} | ${row.exact === null ? "-" : row.exact ? "yes" : "no"} | ${row.mismatchedCodes ?? "-"} | ${row.maxError ?? "-"} | ${row.codeZeroReadsAs ?? "-"} | ${row.code255ReadsAs ?? "-"} | ${row.lumaPath ?? "-"} |`,
+        `| ${row.decoder} | ${row.corrected ? "yes" : "no"} | ${row.frames} | ${row.error ? row.error : `${row.mismatchedPixels} of ${row.pixels}`} | ${Number.isFinite(row.maxError) ? row.maxError : "-"} | ${Number.isFinite(row.meanError) ? row.meanError.toFixed(4) : "-"} | ${row.outsideRangePixels} | ${row.lumaPath ?? "-"} |`,
     )
     .join("\n");
   const previewDecodeRows = (report.previewDecode ?? [])
@@ -629,9 +687,18 @@ longest block is the longest the main thread was busy at a stretch while
 decoding. \`no-preference\` is probed at the probe's 256x256, where Chrome
 picks its software decoder; at 720p and up it picks its hardware one.
 
-| Decoder | Offered | Exact | Codes changed | Max error | 0 reads as | 255 reads as | Luma path |
-| --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| Levels | Decoder | Offered | Exact | Codes changed | Max error | After the table | Lowest code reads as | Highest code reads as | Luma path |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
 ${codesRows}
+
+The fixture's TV-range preview, its first second, through each decoder with
+its own probe's table, against ffmpeg's luma of the same frames, both
+clamped to TV range (16 to 235): a decoder that converts to RGB returns codes
+the codec pushed past either end as 16 or 235, which decode to the same depth.
+
+| Decoder | Table | Frames | Pixels that differ | Max error | Mean error | Outside TV range in ffmpeg's | Luma path |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+${clipCodesRows}
 
 | Clip | Size | Decoder | Copied in | Frames | fps | Main-thread copy median | P95 | Longest block | Luma path |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |

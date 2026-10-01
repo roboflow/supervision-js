@@ -188,10 +188,33 @@ describe("pixi depth shader", () => {
       uEncoding: 1,
       uPreviewHi: 192,
       uPreviewLo: 0,
+      uPreviewTop: 255,
       uReservedMax: 15,
       uWipe: 1,
     });
     expect(Array.from(uniforms.uNoDepthColor)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("tops TV-range preview codes at 235", () => {
+    const preview: DepthMap = {
+      ...disparityMap,
+      samples: {
+        encoding: "preview8",
+        levels: "tv",
+        range: { max: 192, min: 0 },
+        reservedMax: 31,
+        values: new Uint8Array(8),
+      },
+    };
+
+    expect(
+      resolveDepthShaderUniforms(
+        preview,
+        resolveDepthColorMapping(preview),
+        annotationRenderers.depth(),
+        { height: 2, width: 4 },
+      ),
+    ).toMatchObject({ uPreviewTop: 235, uReservedMax: 31 });
   });
 
   it("carries opacity on the mesh instead of a uniform", () => {

@@ -135,7 +135,8 @@ const pageHelpers = `(() => {
       if (s.encoding === "scaled16") return s.values[i] === 0 ? NaN : s.values[i] / s.scale;
       const code = s.values[i];
       if (code <= s.reservedMax) return NaN;
-      return s.range.min + (code - s.reservedMax - 1) / (254 - s.reservedMax) * (s.range.max - s.range.min);
+      const span = (s.levels === "tv" ? 235 : 255) - s.reservedMax - 1;
+      return s.range.min + Math.min(code - s.reservedMax - 1, span) / span * (s.range.max - s.range.min);
     };
     let sum = 0, count = 0;
     for (let i = 0; i < a.width * a.height; i += 7) {
@@ -152,12 +153,13 @@ const pageHelpers = `(() => {
    */
   const codeFit = (preview, exact) => {
     const s = preview.samples, T = s.reservedMax, lo = s.range.min, hi = s.range.max;
+    const top = s.levels === "tv" ? 235 : 255;
     let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0, error = 0;
     for (let i = 0; i < preview.width * preview.height; i += 3) {
       const stored = exact.samples.values[i];
       if (stored === 0 || s.values[i] <= T) continue;
       const d = stored / exact.samples.scale;
-      const written = Math.min(255, Math.max(T + 1, T + 1 + Math.round((d - lo) / (hi - lo) * (254 - T))));
+      const written = Math.min(top, Math.max(T + 1, T + 1 + Math.round((d - lo) / (hi - lo) * (top - T - 1))));
       const decoded = s.values[i];
       n += 1; sx += written; sy += decoded; sxx += written * written; sxy += written * decoded; error += Math.abs(decoded - written);
     }

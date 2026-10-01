@@ -104,10 +104,27 @@ describe("depth manifests", () => {
     expect(manifest.preview).toEqual({
       codec: "avc1.640028",
       file: "preview.mp4",
+      levels: "full",
       range: { max: 192, min: 0 },
       reservedMax: 15,
     });
     expect(manifest.image).toBeUndefined();
+  });
+
+  it("reads a TV-range preview, and a preview without levels as full range", () => {
+    const tv = parseDepthManifest(
+      withField(
+        withField(clipManifest, "preview.levels", "tv"),
+        "preview.reserved_max",
+        31,
+      ),
+    );
+
+    expect(tv.preview).toMatchObject({ levels: "tv", reservedMax: 31 });
+    expect(
+      parseDepthManifest(withField(clipManifest, "preview.levels", "full"))
+        .preview?.levels,
+    ).toBe("full");
   });
 
   it("keeps per-frame times when depth covers a sampled subset", () => {
@@ -216,6 +233,11 @@ describe("depth manifests", () => {
       "depth.json: preview.reserved_max must be an integer from 0 to 253",
     ],
     [
+      "preview.levels",
+      "pc",
+      "depth.json: preview.levels must be one of full, tv",
+    ],
+    [
       "preview.range_px",
       [192, 0],
       "depth.json: preview.range_px must have low < high",
@@ -228,6 +250,24 @@ describe("depth manifests", () => {
     expect(parse).toThrow(RangeError);
     expect(parse).toThrow(message);
   });
+
+  it.each([15, 234])(
+    "rejects a TV-range preview reserving up to %i",
+    (reservedMax) => {
+      const parse = () =>
+        parseDepthManifest(
+          withField(
+            withField(clipManifest, "preview.levels", "tv"),
+            "preview.reserved_max",
+            reservedMax,
+          ),
+        );
+
+      expect(parse).toThrow(
+        "depth.json: preview.reserved_max must be an integer from 16 to 233 at tv levels",
+      );
+    },
+  );
 
   it("rejects frame times that do not strictly increase", () => {
     const manifest = withField(
@@ -364,6 +404,30 @@ describe("in-memory depth maps", () => {
         },
       },
       "samples.range must have finite bounds with min < max",
+    ],
+    [
+      {
+        samples: {
+          encoding: "preview8",
+          levels: "tv",
+          range: { max: 192, min: 0 },
+          reservedMax: 15,
+          values: new Uint8Array(6),
+        },
+      },
+      "samples.reservedMax must be an integer from 16 to 233 at tv levels",
+    ],
+    [
+      {
+        samples: {
+          encoding: "preview8",
+          levels: "studio",
+          range: { max: 192, min: 0 },
+          reservedMax: 31,
+          values: new Uint8Array(6),
+        },
+      },
+      "samples.levels must be one of full, tv",
     ],
     [
       { confidence: new Uint8Array(2) },

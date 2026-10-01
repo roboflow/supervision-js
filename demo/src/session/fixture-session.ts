@@ -61,6 +61,8 @@ export async function createFixtureSession(
   options: {
     readonly container: HTMLDivElement;
     readonly definition: DemoFixtureDefinition;
+    /** The depth layer to open with; the sample's default when absent. */
+    readonly depthLayerId?: string | null;
     readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
     readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   } & DemoSessionCallbacks,
@@ -181,7 +183,11 @@ export async function createFixtureSession(
   try {
     const session = await createMediaSession({
       container: options.container,
-      depth: resolveFixtureDepth(options.definition, mediaPath),
+      depth: resolveFixtureDepth(
+        options.definition,
+        mediaPath,
+        options.depthLayerId,
+      ),
       detections,
       media: await createFixtureSessionMedia({
         container: options.container,
@@ -209,17 +215,19 @@ export async function createFixtureSession(
 }
 
 /**
- * The sample's default depth layer. Clip depth pairs one PNG with each frame
- * of the video, which only the web video engine's frame index can do, so the
- * Mediabunny path opens the sample without it.
+ * The depth layer picked, or the sample's default. Clip depth pairs one PNG
+ * with each frame of the video, which only the web video engine's frame index
+ * can do, so the Mediabunny path opens the sample without it.
  */
-function resolveFixtureDepth(
+export function resolveFixtureDepth(
   definition: DemoFixtureDefinition,
   mediaPath: DemoMediaPath,
+  layerId?: string | null,
 ): MediaRendererDepthInput | undefined {
-  const layer = definition.depth?.layers.find(
-    ({ id }) => id === definition.depth?.defaultLayer,
-  );
+  const layers = definition.depth?.layers ?? [];
+  const layer =
+    layers.find(({ id }) => id === layerId) ??
+    layers.find(({ id }) => id === definition.depth?.defaultLayer);
 
   return layer && mediaPath === DemoMediaPath.Engine
     ? { manifest: layer.manifestSrc }

@@ -57,11 +57,16 @@ JSON the page prints.
   uploaded ahead, and a half-size map drawn edge-aware. The GPU is waited on
   after every present.
 - **Case 4, preview decode.** The library's once-per-page probe of every
-  decoder the browser offers: does each return the 256 preview codes as
-  written? Then every frame of a 192-frame preview at 720p, 1080p and 4K
-  decoded back to back through the library's reader, with frames copied in
+  decoder the browser offers, at TV and full levels: does each return the
+  preview codes as written, directly or through the probe's table? Then
+  every frame of a 192-frame preview at 720p, 1080p and 4K decoded back to
+  back through the library's reader, with frames copied in
   the render-preparation worker (the session's way) or on the page, timing
   decode speed and the main thread's share per frame.
+- **Codes (`cases=codes`).** The same probe, then the first second of the
+  Spring SGBM preview through each decoder with its own probe's table,
+  compared pixel for pixel with ffmpeg's luma of the same frames, which the
+  runner writes to `results/preview-720p-luma.gray`.
 - **Case 5, memory** at the library's default budgets, which scale with the
   clip's resolution, computed from the formats.
 - **Case 6, playback with the gate, and seeking.** Each preview played at 1x,

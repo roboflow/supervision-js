@@ -8,6 +8,7 @@ import {
 } from "#types/depth-map";
 import {
   computeDepthPercentileRange,
+  decodeDepthSample,
   depthColorCoordinate,
   resolveDepthColorMapping,
   resolveDepthQuantity,
@@ -198,6 +199,23 @@ describe("depth colour mapping", () => {
     expect(depthColorCoordinate(15, map.samples, mapping)).toBeNull();
     expect(depthColorCoordinate(16, map.samples, mapping)).toBe(0);
     expect(depthColorCoordinate(255, map.samples, mapping)).toBe(1);
+  });
+
+  it("decodes TV-range preview codes up to 235, and reads headroom as the top", () => {
+    const samples = {
+      encoding: "preview8",
+      levels: "tv",
+      range: { max: 203, min: 0 },
+      reservedMax: 31,
+      values: new Uint8Array(1),
+    } as const;
+
+    expect(decodeDepthSample(16, samples)).toBeNull();
+    expect(decodeDepthSample(31, samples)).toBeNull();
+    expect(decodeDepthSample(32, samples)).toBe(0);
+    expect(decodeDepthSample(132, samples)).toBe(100);
+    expect(decodeDepthSample(235, samples)).toBe(203);
+    expect(decodeDepthSample(250, samples)).toBe(203);
   });
 });
 

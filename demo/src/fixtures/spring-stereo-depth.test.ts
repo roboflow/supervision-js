@@ -114,7 +114,8 @@ describe("Spring stereo depth fixture", () => {
       expect(manifest.preview).toMatchObject({
         codec: "avc1.64001f",
         file: "preview.mp4",
-        reservedMax: 15,
+        levels: "tv",
+        reservedMax: 31,
       });
     }
   });

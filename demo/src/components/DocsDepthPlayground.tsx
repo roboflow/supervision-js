@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  computeDepthPercentileRange,
   createMediaSession,
   MediaRendererPlaybackState,
   type DepthMap,
@@ -9,11 +8,10 @@ import {
   type MediaSession,
 } from "supervision";
 import {
-  DocsDepthRangeMode,
   createDocsDepthRenderer,
+  lockDepthRange,
   resolveDepthColourRange,
   initialDocsDepthSettings,
-  roundRange,
   type DocsDepthSettings,
 } from "../docs-depth";
 import {
@@ -159,20 +157,11 @@ export function DocsDepthPlayground() {
   const update = (patch: Partial<DocsDepthSettings>) =>
     setSettings((current) => ({ ...current, ...patch }));
 
-  const lockRange = (quantity: DepthQuantity) => {
-    const active = sessionRef.current?.renderer.getActiveDepth?.();
-    const range = active
-      ? computeDepthPercentileRange(active.map, { quantity })
-      : null;
-
-    if (!range) return false;
-    update({
-      manualRange: { max: roundRange(range.max), min: roundRange(range.min) },
+  const lockRange = (quantity: DepthQuantity) =>
+    lockDepthRange(
+      sessionRef.current?.renderer.getActiveDepth?.()?.map,
       quantity,
-      rangeMode: DocsDepthRangeMode.Manual,
-    });
-    return true;
-  };
+    );
 
   const session = sessionRef.current;
   const frameClock = session?.frameClock ?? null;
@@ -289,7 +278,7 @@ export function DocsDepthPlayground() {
           canLock={pointer.active !== null}
           colourRange={resolveDepthColourRange(shownMap, settings)}
           onChange={update}
-          onLock={lockRange}
+          lockRange={lockRange}
           settings={settings}
         >
           <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--single">

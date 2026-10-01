@@ -20,6 +20,7 @@ export {
   projectDetectionFrames,
   readDepthAt,
   DepthMapKind,
+  DepthPreviewLevels,
   DetectionBufferStatus,
   DetectionFrameRetentionMode,
   DetectionFrameSelectionMode,

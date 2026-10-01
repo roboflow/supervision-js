@@ -160,6 +160,19 @@ colormaps split by `wipe`. `session.setDepth()` swaps or removes the map without
 reopening the media; it takes a map or a manifest, and a call made while a
 manifest is still loading wins over it.
 
+## Where depth works
+
+A depth picture is one map drawn under every frame: `depth: { map }`, or a
+manifest with `image`. Depth video is a clip manifest (`frames`), one map per
+video frame.
+
+| Media                                                         | Depth picture                                            | Depth video                                                                                           |
+| ------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| A URL or file: the default path, through Mediabunny           | Yes                                                      | No, by design: playing depth decodes a second video beside the clip, which this path does not support |
+| Web video engine: `createWebVideoEngineMediaRendererSource()` | Yes                                                      | Yes                                                                                                   |
+| Still image                                                   | Yes                                                      | No video to pair it with                                                                              |
+| `MediaStream` (camera): `createMediaStreamRendererSource()`   | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                                                         |
+
 ## Depth during playback
 
 A clip's `preview` is decoded beside the video, by one WebCodecs decoder in
@@ -201,14 +214,20 @@ const session = await createMediaSession({
 });
 ```
 
-Browsers decode the same H.264 differently. Once per page, before the first
-preview opens, the session decodes a small clip of all 256 codes with each
-decoder the browser offers and keeps the one that returns them as written.
-Chrome's hardware decoder on macOS returns full-range luma squeezed into video
-range (code 0 comes back as 16, 255 as 235), so Chrome decodes previews in
-software, where every code is exact. Firefox hands decoded frames over in RGB,
-which leaves 36 of the 256 codes one off; the session says so in the depth
-diagnostics `message` and in a console warning.
+A preview written in TV range (see [Writing the preview video](#writing-the-preview-video))
+decodes exactly in Chrome, on its hardware decoder, and in Firefox. Safari
+has not been measured. Once per page, before the first preview opens, the session still decodes a
+small clip of every code through the browser's decoders, hardware first, and
+keeps the first that returns the codes as written. Firefox hands decoded
+frames over in RGB; the clip shows how it converted them, and the session
+converts back, so every TV-range code arrives exact there too.
+
+An older full-range preview (no `levels` in its manifest) still plays.
+Chrome's hardware decoder on macOS squeezes full range into TV range (code 0
+comes back as 16, 255 as 235), so for such a preview the session asks Chrome
+for its software decoder. Firefox's RGB conversion leaves 36 of its 256 codes
+one off, and the session says so in the depth diagnostics `message` and in a
+console warning.
 
 Some decoders hand frames back only once more input arrives or a flush asks
 for them. The session flushes a decoder that sits on every frame it was
@@ -294,22 +313,53 @@ its name for disparity. `image.confidence_file` names an optional 8-bit
 grayscale PNG of the same size, 0 to 255 per pixel, which readouts report as
 `confidence` from 0 to 1. A clip manifest replaces `image` with `frames` (a
 frame count and an `exact/{index:06}.png` pattern) and may add an 8-bit
-`preview` video. Preview code `c` above the reserved codes `T` stands for
-`lo + (c - T - 1) / (254 - T) * (hi - lo)` of its `range_px`.
+`preview` video. Its `levels` is `"tv"` (codes 16 to 235) or `"full"` (0 to
+255, the default when `levels` is missing). Preview code `c` above the
+reserved codes `T` stands for `lo + (c - T - 1) / (top - T - 1) * (hi - lo)`
+of its `range_px`, where `top` is 235 in TV range and 255 in full range; a
+code above `top` reads as `hi`. In TV range `T` is at least 16, the code
+written for no depth.
 
 ### Writing the preview video
 
 The preview is H.264 with the codes in luma: one frame per depth frame, at the
-video's frame times, `yuv420p` with every chroma sample 128, and the full-range
-flag set so the codes keep their values. Monochrome (`gray`, High 4:0:0)
-streams do not decode reliably in browsers. From raw `yuv420p` frames whose
-luma holds the codes:
+video's frame times, `yuv420p` with every chroma sample 128, in TV (limited)
+range. TV range is what every browser's hardware decoder returns as written.
+Monochrome (`gray`, High 4:0:0) streams do not decode reliably in browsers.
+
+Write no depth as 16 and reserve the codes above it as a guard band, so the
+codec's error around holes stays no depth: with `"reserved_max": 31`, depth
+runs from 32 (`range_px[0]`) to 235 (`range_px[1]`), 203 steps apart:
+
+```text
+code = 16                                                   no depth
+code = clamp(32 + round((d - lo) / (hi - lo) * 203), 32, 235)   depth d
+```
+
+From raw `yuv420p` frames whose luma holds the codes, flag the range on the
+input, so ffmpeg does not convert it, and on the stream:
 
 ```sh
-ffmpeg -f rawvideo -pix_fmt yuv420p -s 1280x720 -r 24 -i preview.yuv \
-  -c:v libx264 -crf 18 -tune psnr -g 24 -keyint_min 24 -sc_threshold 0 \
-  -bsf:v h264_metadata=video_full_range_flag=1 -movflags +faststart preview.mp4
+TV="-color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709"
+ffmpeg -f rawvideo -pix_fmt yuv420p $TV -s 1280x720 -r 24 -i preview.yuv \
+  -c:v libx264 -crf 18 -tune psnr -g 24 -keyint_min 24 -sc_threshold 0 $TV \
+  -bsf:v h264_metadata=video_full_range_flag=0 -movflags +faststart preview.mp4
 ```
+
+and describe it in `depth.json`:
+
+```json
+"preview": {
+  "file": "preview.mp4",
+  "levels": "tv",
+  "reserved_max": 31,
+  "range_px": [0, 63]
+}
+```
+
+On the Spring clip at CRF 18, a 16-code guard lets 0.04 % of hole pixels
+read as depth, fewer than the earlier full-range previews did; a guard of 8
+lets 0.16 % through. Each code of guard costs one step of depth precision.
 
 Opening the clip checks the preview against the video: a different frame
 count, or a frame whose time differs from its video frame's by more than half
@@ -341,7 +391,8 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
   differs from the video's without `frames.times_s`.
 - A clip without a `preview`, or on a browser that cannot decode it, draws
   no depth while it plays. With one, the preview's precision is what plays:
-  one 8-bit step of `range_px`, plus the codec's error. Exact depth needs
+  one step of `range_px` (a 203rd of it in TV range with 31 reserved codes,
+  0.31 px on the Spring SGBM clip), plus the codec's error. Exact depth needs
   playback to rest for 0.15 s.
 - A preview decodes at the browser's pace. Where that is slower than the
   rate asks for (in a benchmark, Firefox decoded a 4K preview at about 51

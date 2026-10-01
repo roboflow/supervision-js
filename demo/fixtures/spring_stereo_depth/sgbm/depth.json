@@ -29,7 +29,8 @@
   "preview": {
     "file": "preview.mp4",
     "codec": "avc1.64001f",
-    "reserved_max": 15,
+    "levels": "tv",
+    "reserved_max": 31,
     "range_px": [
       0,
       63.0

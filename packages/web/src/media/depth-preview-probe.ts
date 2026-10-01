@@ -1,3 +1,5 @@
+import type { DepthPreviewLevels } from "supervision-js-core";
+
 import { withinDecoderDeadline } from "./decoder-deadline";
 import {
   DECODER_SUPPORT_MILLISECONDS,
@@ -10,8 +12,8 @@ import {
 /**
  * Every 8-bit code from 0 to 255 as a flat 16x16 block of one 256x256 frame
  * (code c at block row c >> 4, column c & 15), with neutral chroma, two
- * frames. It is encoded the way a depth producer writes a preview, only at a
- * quantiser low enough that a flat block decodes exactly:
+ * frames. It is encoded the way a depth producer writes a full-range
+ * preview, only at a quantiser low enough that a flat block decodes exactly:
  *
  * ```sh
  * ffmpeg -f rawvideo -pix_fmt yuv420p -s 256x256 -r 24 -i ramp.yuv \
@@ -49,6 +51,85 @@ const PROBE_MP4_BASE64 = [
   "T20tl0IjjBWuESWoyQVxmFsSnfcTf3Fx2W9TNM4MTyyPXbznu4EAAAAMQZohbGv+1qVQAAXE",
 ].join("");
 
+/**
+ * The same 256 blocks written as a TV-range preview is: flagged limited
+ * range with BT.709 colour, from the same `ramp.yuv`:
+ *
+ * ```sh
+ * TV="-color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709"
+ * ffmpeg -f rawvideo -pix_fmt yuv420p $TV -s 256x256 -r 24 -i ramp.yuv \
+ *   -c:v libx264 -preset medium -tune psnr -qp 2 -g 24 -keyint_min 24 \
+ *   -sc_threshold 0 $TV \
+ *   -bsf:v "h264_metadata=video_full_range_flag=0,filter_units=remove_types=6" \
+ *   -movflags +faststart -map_metadata -1 -fflags +bitexact \
+ *   -flags:v +bitexact probe-tv.mp4
+ * ```
+ *
+ * ffmpeg's own decoder returns every block exactly, footroom and headroom
+ * included.
+ */
+const TV_PROBE_MP4_BASE64 = [
+  "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMSbW9vdgAAAGxtdmhkAAAAAAAA",
+  "AAAAAAAAAAAD6AAAAFQAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAA",
+  "AAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmF0cmFrAAAAXHRr",
+  "aGQAAAADAAAAAAAAAAAAAAABAAAAAAAAAFQAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAA",
+  "AAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAQAAAAEAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAA",
+  "AAEAAABUAAAAAAABAAAAAAHZbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAwAAAABABVxAAA",
+  "AAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABhG1pbmYA",
+  "AAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAA",
+  "AQAAAURzdGJsAAAAxHN0c2QAAAAAAAAAAQAAALRhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAA",
+  "AAAAAQABAABIAAAASAAAAAAAAAABDExhdmMgbGlieDI2NAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "GP//AAAAN2F2Y0MBZAAN/+EAG2dkAA2s2UEAhpqAgICgAAADACAAAAYB4oUywAEABWjr4GPL",
+  "/fj4AAAAABNjb2xybmNseAABAAEAAQAAAAAUYnRydAAAAAAAAI0AAAAAAAAAABhzdHRzAAAA",
+  "AAAAAAEAAAACAAACAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEA",
+  "AAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAABaAAAABAAAAAUc3RjbwAAAAAAAAABAAAD",
+  "QgAAAD11ZHRhAAAANW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAA",
+  "AAAACGlsc3QAAAAIZnJlZQAAAYBtZGF0AAABZGWIhACr/vfUt8yy8ER+tVF1TKDlHydiKMs2",
+  "YZCtDNmgm6vkZTR5DfB22RLM8K9QaBEGm6SaIhCxIvw1CSGUfFRXSwMJ8yT5np6Rc5wCxcDg",
+  "GtwlJqN1pvKK5HV/+UvN8vi+MEdlj5vE6fTf43J/JCmh7Vt8dazTB+xnNxjAucPCGUmXRt5z",
+  "cE0tzi9m/+aMfcNU7ucO5fVO4cE7Scwzun8axw06jQIcAe4Y5QHMvbN5Ufe802p33E32gDAz",
+  "7MurhJ2cduo2Iy6AoPBtIkjRap1irqVOELnP96jw9ISG42g06tc10WK9mWyFvjzr9zKCOGnt",
+  "pbLoRHGCtcIktRkgrjMLWFO+4m/uLjst6maZwYnlkeu3nPAZEEAA9wxygOZe2byo+95nlF2A",
+  "3CQ3G0GnVrmuixXsy2Qt8edfuZYxw09tLZdCI4wVrhElqMkFcZhbEp33E39xcdlvUzTODE8s",
+  "j12857uBAAAADEGaIWxr/talUAAFxA==",
+].join("");
+
+/** How a probe at one level is written, judged and decoded. */
+interface ProbeSpec {
+  readonly base64: string;
+  /**
+   * The written codes a decoder is judged on: those a preview at this level
+   * writes. A TV-range decoder that converts to RGB flattens the footroom and
+   * headroom, which no preview uses.
+   */
+  readonly firstCode: number;
+  readonly lastCode: number;
+  /**
+   * Decoders to try, best first. Browsers decode the same H.264 differently
+   * by path, and their own choice switches between paths by frame size, so
+   * each is asked for by name to keep the probe and the preview on the same
+   * one. Chrome's hardware decoder on macOS returns TV range as written but
+   * hands full-range luma back squeezed into TV range (0 becomes 16, 255
+   * becomes 235), where its software decoder returns it as written.
+   */
+  readonly preferences: readonly HardwareAcceleration[];
+}
+
+const PROBE_SPECS: Readonly<Record<DepthPreviewLevels, ProbeSpec>> = {
+  full: {
+    base64: PROBE_MP4_BASE64,
+    firstCode: 0,
+    lastCode: 255,
+    preferences: ["prefer-software", "prefer-hardware"],
+  },
+  tv: {
+    base64: TV_PROBE_MP4_BASE64,
+    firstCode: 16,
+    lastCode: 235,
+    preferences: ["prefer-hardware", "prefer-software"],
+  },
+};
+
 const PROBE_CODEC = "avc1.64000d";
 const PROBE_SIZE = 256;
 const PROBE_BLOCK_SIZE = 16;
@@ -64,11 +145,13 @@ export const PROBE_DECODE_MILLISECONDS = 5000;
 
 /** What a browser's decoder did to the codes a producer wrote. */
 export interface DepthPreviewCodeProbe {
-  /** Every code came back exactly as written. */
+  /** Every judged code came back exactly as written. */
   readonly exact: boolean;
-  /** Written codes that came back as another code, of 256. */
+  /** Codes judged: 256 at full levels, the 220 from 16 to 235 at TV levels. */
+  readonly judgedCodes: number;
+  /** Judged codes that came back as another code. */
   readonly mismatchedCodes: number;
-  /** The largest difference between a written code and the code read back. */
+  /** The largest difference between a judged code and the code read back. */
   readonly maxError: number;
   /** The code read back for each written code, indexed by the written one. */
   readonly decoded: Uint8Array;
@@ -101,51 +184,50 @@ export interface DepthPreviewDecoding {
   readonly verdicts: readonly DepthPreviewDecoderVerdict[];
 }
 
-/**
- * Decoders to try, best first. Browsers decode the same H.264 differently by
- * path: Chrome's hardware decoder on macOS hands luma back squeezed into
- * video range (0 becomes 16, 255 becomes 235) while its software decoder
- * returns the codes as written, and its own choice switches between the two
- * by frame size. Asking for each by name keeps the probe and the preview on
- * the same path.
- */
-const DECODER_PREFERENCES: readonly HardwareAcceleration[] = [
-  "prefer-software",
-  "prefer-hardware",
-];
-
 type OpenTrack = (
   input: DepthPreviewTrackInput,
   options?: { readonly hardwareAcceleration?: HardwareAcceleration },
 ) => Promise<DepthPreviewTrackReader>;
 
-let pageDecoding: Promise<DepthPreviewDecoding> | undefined;
+const pageDecodings = new Map<
+  DepthPreviewLevels,
+  Promise<DepthPreviewDecoding>
+>();
 
 /**
- * Decodes a clip of known codes through each decoder the page offers, in the
- * same path a depth preview takes, and picks the one that returns them as
- * written. Without one, it picks the closest and a table that corrects what
- * it can. Run once per page: the answer is a property of the browser, not of
- * any one preview. Probes run one after another, so the page never holds two
- * of their decoders.
+ * Decodes a clip of known codes, written at the preview's levels, through
+ * each decoder the page offers in the same path a depth preview takes, and
+ * keeps the first that returns them as written, directly or through a
+ * table that undoes a conversion it makes. Without one, it picks the
+ * closest. Run once per page and level: the answer is a property of the
+ * browser, not of any one preview. Probes run one after another, so the
+ * page never holds two of their decoders.
  */
 export function chooseDepthPreviewDecoding(
+  levels: DepthPreviewLevels = "full",
   open: OpenTrack = openDepthPreviewTrack,
   isSupported: (
     preference: HardwareAcceleration,
   ) => Promise<boolean> = isProbeConfigSupported,
 ): Promise<DepthPreviewDecoding> {
-  pageDecoding ??= runProbes(open, isSupported).catch((error: unknown) => {
-    pageDecoding = undefined;
-    throw error;
-  });
+  let decoding = pageDecodings.get(levels);
 
-  return pageDecoding;
+  if (!decoding) {
+    decoding = runProbes(levels, open, isSupported).catch((error: unknown) => {
+      pageDecodings.delete(levels);
+      throw error;
+    });
+    pageDecodings.set(levels, decoding);
+  }
+
+  return decoding;
 }
 
-/** The probe clip's bytes. */
-export function depthPreviewProbeBytes(): Uint8Array {
-  const text = atob(PROBE_MP4_BASE64);
+/** The bytes of the probe clip written at `levels`. */
+export function depthPreviewProbeBytes(
+  levels: DepthPreviewLevels = "full",
+): Uint8Array {
+  const text = atob(PROBE_SPECS[levels].base64);
   const bytes = new Uint8Array(text.length);
 
   for (let index = 0; index < text.length; index += 1) {
@@ -173,28 +255,33 @@ async function isProbeConfigSupported(preference: HardwareAcceleration) {
 }
 
 async function runProbes(
+  levels: DepthPreviewLevels,
   open: OpenTrack,
   isSupported: (preference: HardwareAcceleration) => Promise<boolean>,
 ): Promise<DepthPreviewDecoding> {
   const verdicts: DepthPreviewDecoderVerdict[] = [];
 
-  for (const hardwareAcceleration of DECODER_PREFERENCES) {
+  for (const hardwareAcceleration of PROBE_SPECS[levels].preferences) {
     const verdict = await probeDepthPreviewDecoder(
       hardwareAcceleration,
+      levels,
       open,
       isSupported,
     );
 
     verdicts.push(verdict);
-    if (verdict.probe?.exact) break;
+    if (verdict.probe && assessProbe(verdict.probe, levels).residual === 0) {
+      break;
+    }
   }
 
-  return resolveDepthPreviewDecoding(verdicts);
+  return resolveDepthPreviewDecoding(verdicts, levels);
 }
 
 /** Decodes the probe clip through one decoder, if the browser offers it. */
 export async function probeDepthPreviewDecoder(
   hardwareAcceleration: HardwareAcceleration,
+  levels: DepthPreviewLevels = "full",
   open: OpenTrack = openDepthPreviewTrack,
   isSupported: (
     preference: HardwareAcceleration,
@@ -207,7 +294,7 @@ export async function probeDepthPreviewDecoder(
   try {
     return {
       hardwareAcceleration,
-      probe: await runProbe(open, hardwareAcceleration),
+      probe: await runProbe(open, hardwareAcceleration, levels),
       supported: true,
     };
   } catch (error) {
@@ -222,10 +309,12 @@ export async function probeDepthPreviewDecoder(
 
 /**
  * Picks the decoder whose codes come back closest to the written ones, and
- * a correction table when one makes them closer still.
+ * a correction table when one makes them closer still; the first of equals
+ * wins, so the order probes ran in is the order of preference.
  */
 export function resolveDepthPreviewDecoding(
   verdicts: readonly DepthPreviewDecoderVerdict[],
+  levels: DepthPreviewLevels = "full",
 ): DepthPreviewDecoding {
   let best: {
     verdict: DepthPreviewDecoderVerdict;
@@ -236,18 +325,10 @@ export function resolveDepthPreviewDecoding(
   for (const verdict of verdicts) {
     if (!verdict.probe) continue;
 
-    const table = verdict.probe.exact
-      ? null
-      : createCodeCorrection(verdict.probe.decoded);
-    const residual = table
-      ? correctedError(verdict.probe.decoded, table)
-      : verdict.probe.maxError;
-    const correction =
-      table && residual < verdict.probe.maxError ? table : null;
-    const error = correction ? residual : verdict.probe.maxError;
+    const { correction, residual } = assessProbe(verdict.probe, levels);
 
-    if (!best || error < best.residual) {
-      best = { correction, residual: error, verdict };
+    if (!best || residual < best.residual) {
+      best = { correction, residual, verdict };
     }
   }
 
@@ -272,18 +353,41 @@ export function resolveDepthPreviewDecoding(
 }
 
 /**
- * For each code a decoder can return, the written code it most likely came
- * from: the one whose read-back value is nearest, the nearest written code on
- * a tie.
+ * The table that brings a probe's codes closest to the written ones, if one
+ * does, and the error left.
  */
-export function createCodeCorrection(decoded: Uint8Array): Uint8Array {
+function assessProbe(
+  probe: DepthPreviewCodeProbe,
+  levels: DepthPreviewLevels,
+): { correction: Uint8Array | null; residual: number } {
+  if (probe.exact) return { correction: null, residual: 0 };
+
+  const { firstCode, lastCode } = PROBE_SPECS[levels];
+  const table = createCodeCorrection(probe.decoded, firstCode, lastCode);
+  const residual = correctedError(probe.decoded, table, firstCode, lastCode);
+
+  return residual < probe.maxError
+    ? { correction: table, residual }
+    : { correction: null, residual: probe.maxError };
+}
+
+/**
+ * For each code a decoder can return, the written code from `firstCode` to
+ * `lastCode` it most likely came from: the one whose read-back value is
+ * nearest, the nearest written code on a tie.
+ */
+export function createCodeCorrection(
+  decoded: Uint8Array,
+  firstCode = 0,
+  lastCode = 255,
+): Uint8Array {
   const table = new Uint8Array(256);
 
   for (let value = 0; value < 256; value += 1) {
     let best = value;
     let bestDistance = Number.POSITIVE_INFINITY;
 
-    for (let code = 0; code < 256; code += 1) {
+    for (let code = firstCode; code <= lastCode; code += 1) {
       const distance = Math.abs(decoded[code] - value);
 
       if (
@@ -301,10 +405,15 @@ export function createCodeCorrection(decoded: Uint8Array): Uint8Array {
   return table;
 }
 
-function correctedError(decoded: Uint8Array, table: Uint8Array) {
+function correctedError(
+  decoded: Uint8Array,
+  table: Uint8Array,
+  firstCode: number,
+  lastCode: number,
+) {
   let error = 0;
 
-  for (let code = 0; code < 256; code += 1) {
+  for (let code = firstCode; code <= lastCode; code += 1) {
     error = Math.max(error, Math.abs(table[decoded[code]] - code));
   }
 
@@ -320,8 +429,11 @@ function correctedError(decoded: Uint8Array, table: Uint8Array) {
 async function runProbe(
   open: OpenTrack,
   hardwareAcceleration: HardwareAcceleration,
+  levels: DepthPreviewLevels,
 ): Promise<DepthPreviewCodeProbe> {
-  const track = await open(depthPreviewProbeBytes(), { hardwareAcceleration });
+  const track = await open(depthPreviewProbeBytes(levels), {
+    hardwareAcceleration,
+  });
 
   try {
     const frame = await withinDecoderDeadline(
@@ -337,7 +449,7 @@ async function runProbe(
     }
 
     return {
-      ...readProbeFrame(frame.luma, frame.width),
+      ...readProbeFrame(frame.luma, frame.width, levels),
       lumaPath: track.getStats().lumaPath,
     };
   } finally {
@@ -346,11 +458,16 @@ async function runProbe(
   }
 }
 
-/** Reads the probe's blocks out of a decoded frame's luma. */
+/**
+ * Reads the probe's blocks out of a decoded frame's luma, and judges the
+ * codes a preview at `levels` writes.
+ */
 export function readProbeFrame(
   luma: Uint8Array,
   width: number,
+  levels: DepthPreviewLevels = "full",
 ): Omit<DepthPreviewCodeProbe, "lumaPath"> {
+  const { firstCode, lastCode } = PROBE_SPECS[levels];
   const decoded = new Uint8Array(256);
   let mismatchedCodes = 0;
   let maxError = 0;
@@ -379,9 +496,16 @@ export function readProbeFrame(
     const value = Math.round(sum / count);
 
     decoded[code] = value;
+    if (code < firstCode || code > lastCode) continue;
     if (value !== code) mismatchedCodes += 1;
     maxError = Math.max(maxError, Math.abs(value - code));
   }
 
-  return { decoded, exact: mismatchedCodes === 0, maxError, mismatchedCodes };
+  return {
+    decoded,
+    exact: mismatchedCodes === 0,
+    judgedCodes: lastCode - firstCode + 1,
+    maxError,
+    mismatchedCodes,
+  };
 }
