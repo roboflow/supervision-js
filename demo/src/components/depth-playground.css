@@ -110,3 +110,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Why depth looks the way it does, from the session's diagnostics. */
+.depth-playground__notice {
+  border-left: 2px solid var(--amber);
+  color: var(--muted-strong);
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding-left: 0.5rem;
+}

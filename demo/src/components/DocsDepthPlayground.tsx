@@ -29,11 +29,20 @@ import "./depth-playground.css";
 
 const DEPTH_FIXTURE = "spring_stereo_depth";
 
+/** Where the depth for the layer picked stands. */
+type DepthLoad =
+  | { readonly status: "loading" }
+  | { readonly status: "ready" }
+  | { readonly status: "failed"; readonly message: string };
+
 /**
  * The depth renderer over the Spring stereo fixture: the left view of a
  * rendered shot, with the dataset's ground-truth disparity and a stereo
  * matcher's disparity as two layers. While the clip plays, each frame's
  * 8-bit preview depth is drawn; once it rests, the exact frame replaces it.
+ *
+ * The clip opens without depth and plays at once; each layer's depth loads
+ * through `setDepth()`, which says when it is up or why it is not.
  */
 export function DocsDepthPlayground() {
   const fixture = useMemo(requireDepthFixture, []);
@@ -44,6 +53,11 @@ export function DocsDepthPlayground() {
   const [settings, setSettings] = useState(initialDocsDepthSettings);
   const [failure, setFailure] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [depthLoad, setDepthLoad] = useState<DepthLoad>({ status: "loading" });
+  /** What the depth diagnostics say, such as why the preview is off. */
+  const [depthNotice, setDepthNotice] = useState<string | null>(null);
+  /** The preview is off: nothing is prepared ahead, and the reason is given. */
+  const [previewOff, setPreviewOff] = useState(false);
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
   );
@@ -53,11 +67,10 @@ export function DocsDepthPlayground() {
   );
   const refreshPointer = pointer.refresh;
   const settingsRef = useRef(settings);
-  const layerRef = useRef(layerId);
   const sessionLayerRef = useRef<string | null>(null);
+  const depthRequestRef = useRef(0);
 
   settingsRef.current = settings;
-  layerRef.current = layerId;
 
   useEffect(() => {
     const container = mountRef.current;
@@ -68,11 +81,8 @@ export function DocsDepthPlayground() {
 
     void (async () => {
       try {
-        const layer = layerFor(depth, layerRef.current);
-
         session = await createMediaSession({
           container,
-          depth: { manifest: layer.manifestSrc },
           media: createDemoFixtureMedia(fixture),
           presentation: {
             renderers: [createDocsDepthRenderer(settingsRef.current)],
@@ -84,9 +94,13 @@ export function DocsDepthPlayground() {
           return;
         }
         sessionRef.current = session;
-        sessionLayerRef.current = layer.id;
         session.subscribe((state) => {
           setRendererState(state.renderer);
+          setDepthNotice(state.renderPreparation?.message ?? null);
+          setPreviewOff(
+            Boolean(state.renderPreparation?.message) &&
+              state.renderPreparation?.artifacts.length === 0,
+          );
           refreshPointer();
         });
         setRendererState(session.getState().renderer);
@@ -101,6 +115,7 @@ export function DocsDepthPlayground() {
       cancelled = true;
       sessionRef.current = null;
       sessionLayerRef.current = null;
+      setReady(false);
       session?.destroy();
     };
   }, [depth, fixture, refreshPointer]);
@@ -118,11 +133,23 @@ export function DocsDepthPlayground() {
     if (!ready || !session?.setDepth || sessionLayerRef.current === layerId) {
       return;
     }
+
+    const request = ++depthRequestRef.current;
+    const settled = (next: DepthLoad) => {
+      if (request === depthRequestRef.current) setDepthLoad(next);
+    };
+
     sessionLayerRef.current = layerId;
+    setDepthLoad({ status: "loading" });
     session
       .setDepth({ manifest: layerFor(depth, layerId).manifestSrc })
-      .then(refreshPointer)
-      .catch((error: unknown) => setFailure(String(error)));
+      .then(() => {
+        settled({ status: "ready" });
+        refreshPointer();
+      })
+      .catch((error: unknown) =>
+        settled({ message: String(error), status: "failed" }),
+      );
   }, [depth, layerId, ready, refreshPointer]);
 
   useEffect(() => {
@@ -165,15 +192,23 @@ export function DocsDepthPlayground() {
     ? `Failed: ${failure}`
     : !ready
       ? "Opening the Spring clip…"
-      : isPlaying
-        ? onScreen
-          ? `Playing: 8-bit preview depth for frame ${frame}`
-          : "Playing: decoding preview depth…"
-        : onScreen && pointer.active?.precision === "exact"
-          ? `Exact depth for frame ${frame}`
-          : onScreen
-            ? `Preview depth for frame ${frame}; loading exact…`
-            : `Loading depth for frame ${frame ?? "…"}`;
+      : depthLoad.status === "failed"
+        ? `Depth did not load: ${depthLoad.message}`
+        : depthLoad.status === "loading"
+          ? isPlaying
+            ? "Playing: loading depth…"
+            : "Loading depth…"
+          : isPlaying
+            ? onScreen
+              ? `Playing: 8-bit preview depth for frame ${frame}`
+              : previewOff
+                ? "Playing: depth shows once paused"
+                : "Playing: decoding preview depth…"
+            : onScreen && pointer.active?.precision === "exact"
+              ? `Exact depth for frame ${frame}`
+              : onScreen
+                ? `Preview depth for frame ${frame}; loading exact…`
+                : `Loading depth for frame ${frame ?? "…"}`;
   const layer = layerFor(depth, layerId);
 
   return (
@@ -245,6 +280,11 @@ export function DocsDepthPlayground() {
         <p aria-live="polite" className="depth-playground__status">
           {depthStatus}
         </p>
+        {depthNotice ? (
+          <p className="depth-playground__notice" role="status">
+            {depthNotice}
+          </p>
+        ) : null}
         <DepthRendererControls
           canLock={pointer.active !== null}
           colourRange={resolveDepthColourRange(shownMap, settings)}
