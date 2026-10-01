@@ -1673,6 +1673,7 @@ describe("media renderer core", () => {
 
     const renderTimings = {
       boxMs: 0.2,
+      depthMs: 0.15,
       fitMs: 0.05,
       focusMs: 0.08,
       interactionMs: 0.1,

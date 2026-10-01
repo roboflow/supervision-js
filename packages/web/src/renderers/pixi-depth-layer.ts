@@ -439,6 +439,17 @@ export function createPixiDepthLayer(options: {
       return source?.getPreparationProgress?.() ?? 0;
     },
 
+    /**
+     * Whether the depth a draw of `mediaTime` would show is decoded, asking
+     * nothing to load: what the prepared annotation window reads per frame.
+     * True where there is nothing to wait for.
+     */
+    isArtifactPrepared(mediaTime: number): boolean {
+      if (!drawing() || !source?.getFrameStatus) return true;
+
+      return source.getFrameStatus(mediaTime)?.prepared !== false;
+    },
+
     /** Maps uploaded while presenting, and ahead of the presents that drew them. */
     getUploadCounts() {
       return { ahead: uploadsAhead, inPresent: uploadsInPresent };

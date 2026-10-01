@@ -105,6 +105,27 @@ function createLayer(
 }
 
 describe("pixi depth layer", () => {
+  it("reads whether a frame's depth is decoded without loading it, and owes none when it draws none", () => {
+    let prepared = false;
+    const getEntry = vi.fn(() => null);
+    const { layer } = createLayer({
+      source: {
+        destroy: vi.fn(),
+        getEntry,
+        getFrameStatus: () => ({ frameIndex: 3, prepared }),
+      },
+    });
+
+    expect(layer.isArtifactPrepared(0.1)).toBe(false);
+    prepared = true;
+    expect(layer.isArtifactPrepared(0.1)).toBe(true);
+    expect(getEntry).not.toHaveBeenCalled();
+
+    prepared = false;
+    layer.setRenderers([]);
+    expect(layer.isArtifactPrepared(0.1)).toBe(true);
+  });
+
   it("never draws the previous frame's depth over the next one", () => {
     const first = depthMap(1);
     const { layer, pixi } = createLayer({

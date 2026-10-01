@@ -702,6 +702,7 @@ describe("push-presented Pixi scene", () => {
     // path fills leave every per-layer cost unmeasured for the whole session.
     expect(presented[0].renderTimings).toEqual({
       boxMs: expect.any(Number),
+      depthMs: expect.any(Number),
       fitMs: expect.any(Number),
       focusMs: expect.any(Number),
       interactionMs: expect.any(Number),
@@ -900,6 +901,42 @@ describe("push-presented Pixi scene", () => {
 
     expect(asked).toEqual([1, 4.25]);
     expect(scene.getActiveDepth?.()).toMatchObject({ map, mediaTime: 4.25 });
+  });
+
+  it("says which depth frame it drew, and times depth apart from masks", async () => {
+    const map = createDepthMap();
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+      diagnostics: { frameTimings: true },
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    let decoded = false;
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry: () =>
+        decoded ? { frameIndex: 7, map, precision: "preview" } : null,
+      getFrameStatus: () => ({ frameIndex: 7, prepared: decoded }),
+    });
+
+    channel.present(presentedFrame(1000));
+    expect(presented.at(-1)).toMatchObject({
+      activeDepthFrameIndex: null,
+      activeDepthPrecision: null,
+    });
+
+    decoded = true;
+    channel.present(presentedFrame(1040));
+    expect(presented.at(-1)).toMatchObject({
+      activeDepthFrameIndex: 7,
+      activeDepthPrecision: "preview",
+      renderTimings: { depthMs: expect.any(Number) },
+    });
   });
 
   it("never leaves the previous frame's depth on the next one", async () => {

@@ -161,7 +161,8 @@ const _renderedPresentationFieldsAreExhaustive: [
 
 type FrameDrawTimings = {
   -readonly [
-    Key in "boxMs" | "focusMs" | "interactionMs" | "labelMs" | "maskMs"
+    Key in
+      "boxMs" | "depthMs" | "focusMs" | "interactionMs" | "labelMs" | "maskMs"
   ]: MediaFrameRenderTimings[Key];
 };
 
@@ -170,7 +171,7 @@ const FRAME_DRAW_TIMING_BUCKETS: Partial<
   Record<FramePresentStep, keyof FrameDrawTimings>
 > = {
   drawBox: "boxMs",
-  drawDepth: "maskMs",
+  drawDepth: "depthMs",
   drawFocus: "focusMs",
   drawHeatmap: "maskMs",
   drawInteraction: "interactionMs",
@@ -345,7 +346,7 @@ export async function createPixiMediaScene(
   const annotationWindow = createPreparedAnnotationWindow({
     detectionTimeline: options.detectionTimeline,
     getLayers: () =>
-      [maskLayer, polygonLayer, heatmapLayer].filter(
+      [maskLayer, polygonLayer, heatmapLayer, depthLayer].filter(
         (layer): layer is NonNullable<typeof layer> => layer !== undefined,
       ),
     getPlayheadMediaTime: () => currentMediaTime,
@@ -1762,8 +1763,11 @@ export async function createPixiMediaScene(
     const detectionFrame = boxState.activeDetectionFrame;
     const maskState = maskLayer?.getDrawnState();
     const drawnMaskFrameTime = maskState?.drawnFrameTime ?? null;
+    const depth = depthLayer?.getActiveDepth() ?? null;
 
     return {
+      activeDepthFrameIndex: depth?.frameIndex ?? null,
+      activeDepthPrecision: depth?.precision ?? null,
       activeDetectionCount: countPresentedDetections(
         detectionFrame,
         mediaTime,
@@ -3033,7 +3037,14 @@ function cancelDisplayFrame(handle: number) {
 }
 
 function createFrameDrawTimings(): FrameDrawTimings {
-  return { boxMs: 0, focusMs: 0, interactionMs: 0, labelMs: 0, maskMs: 0 };
+  return {
+    boxMs: 0,
+    depthMs: 0,
+    focusMs: 0,
+    interactionMs: 0,
+    labelMs: 0,
+    maskMs: 0,
+  };
 }
 
 function measure(work: () => void) {

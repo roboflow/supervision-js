@@ -61,6 +61,8 @@ import {
   type DepthPreviewLumaCopier,
 } from "#render-preparation/depth-preview-luma-copier";
 import type { MediaRendererDepthInput } from "#types/media-depth";
+import { createRenderPreparationReport } from "./render-preparation-report";
+
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import { createMediaFrameNavigation } from "./media-frame-navigation";
 import {
@@ -76,6 +78,9 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
+
+/** The key depth's diagnostics are kept under beside the scene's families. */
+const DEPTH_DIAGNOSTICS_FAMILY = "depth";
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -204,7 +209,7 @@ export async function createMediaRendererCore(
             options.renderPreparation?.maskFrame?.scheduleBatchSize,
           frameClock,
           media: mediaSize,
-          onDiagnostics: handleRenderPreparationDiagnostics,
+          onDiagnostics: handleDepthDiagnostics,
           padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
           preparer: () =>
             (depthPreparer ??= createDepthFramePreparer(
@@ -235,6 +240,17 @@ export async function createMediaRendererCore(
     mediaScene?.setDepthSource?.(next);
     depthSource?.destroy();
     depthSource = next;
+    if (next === null) {
+      // Depth's last report would otherwise stand for depth that is gone.
+      options.renderPreparation?.onDiagnostics?.(
+        renderPreparationReport.remove(DEPTH_DIAGNOSTICS_FAMILY) ?? {
+          artifacts: [],
+          executionMode: RenderPreparationExecutionMode.MainThread,
+          message: null,
+          workerStatus: RenderPreparationWorkerStatus.Disabled,
+        },
+      );
+    }
   };
   /**
    * A depth manifest given at creation loads once the first frame is up:
@@ -254,7 +270,7 @@ export async function createMediaRendererCore(
       const message = `Depth did not load, so the media plays without it: ${String(error)}`;
 
       console.warn(message);
-      handleRenderPreparationDiagnostics({
+      handleDepthDiagnostics({
         artifacts: [],
         executionMode: RenderPreparationExecutionMode.MainThread,
         message,
@@ -394,7 +410,13 @@ export async function createMediaRendererCore(
     }
   };
 
-  const handleRenderPreparationDiagnostics = (
+  /**
+   * Masks, polygons and depth each report on their own; the host hears every
+   * family's latest together, so one never stands in for another.
+   */
+  const renderPreparationReport = createRenderPreparationReport();
+  const reportRenderPreparation = (
+    family: string,
     diagnostics: RenderPreparationDiagnostics,
   ) => {
     if (
@@ -409,8 +431,19 @@ export async function createMediaRendererCore(
       );
     }
 
-    options.renderPreparation?.onDiagnostics?.(diagnostics);
+    options.renderPreparation?.onDiagnostics?.(
+      renderPreparationReport.update(family, diagnostics),
+    );
   };
+  const handleRenderPreparationDiagnostics = (
+    diagnostics: RenderPreparationDiagnostics,
+  ) =>
+    reportRenderPreparation(
+      diagnostics.artifacts[0]?.kind ?? "scene",
+      diagnostics,
+    );
+  const handleDepthDiagnostics = (diagnostics: RenderPreparationDiagnostics) =>
+    reportRenderPreparation(DEPTH_DIAGNOSTICS_FAMILY, diagnostics);
 
   const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
   const renderPreparationPlaybackGate = options.renderPreparation?.playbackGate;
