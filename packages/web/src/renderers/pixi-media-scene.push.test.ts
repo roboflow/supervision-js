@@ -1032,6 +1032,7 @@ describe("push-presented Pixi scene", () => {
         },
         media: { height: 240, width: 320 },
         preparer: () => ({
+          concurrency: 1,
           decodeConfidence: vi.fn(),
           decodeDepth,
           destroy: vi.fn(),
