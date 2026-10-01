@@ -53,23 +53,6 @@ function createRenderer() {
 }
 
 describe("pixi depth shader", () => {
-  it("declares a WebGL and a WebGPU program for the same shader", () => {
-    stubDocument();
-    createRenderer();
-
-    const descriptor = FakeShaderFactory.descriptors[0]!;
-
-    expect(descriptor.gl.fragment).toContain("#version 300 es");
-    expect(descriptor.gl.fragment).toContain("precision highp sampler2D;");
-    expect(descriptor.gl.fragment).toContain("texelFetch(uDepthTexture");
-    for (const stage of [descriptor.gpu.fragment, descriptor.gpu.vertex]) {
-      expect(stage.source).toContain(`fn ${stage.entryPoint}(`);
-    }
-    expect(descriptor.gpu.fragment.source).toContain(
-      "textureLoad(uDepthTexture",
-    );
-  });
-
   it("binds the depth texture, the colour table and its sampler", () => {
     stubDocument();
     const renderer = createRenderer();

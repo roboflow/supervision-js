@@ -1,5 +1,8 @@
 import type { EncodedPacket } from "mediabunny";
-import { MediaErrorKind } from "supervision-js-core";
+import {
+  MediaErrorKind,
+  PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS,
+} from "supervision-js-core";
 import {
   createMainThreadLumaCopier,
   type DepthPreviewLumaCopier,
@@ -36,8 +39,6 @@ const STALLED_DECODER_FLUSH_MILLISECONDS = 100;
 export const FLUSH_SILENCE_MILLISECONDS = 3000;
 /** How long the browser may take to say whether it decodes the preview. */
 export const DECODER_SUPPORT_MILLISECONDS = 3000;
-/** A decoded frame's timestamp is a packet's, truncated to microseconds. */
-const TIMESTAMP_MATCH_TOLERANCE_SECONDS = 0.0005;
 const MICROSECONDS_PER_SECOND = 1_000_000;
 
 export type DepthPreviewTrackInput = string | URL | ArrayBuffer | Uint8Array;
@@ -266,6 +267,7 @@ export function createDepthPreviewTrackReader(options: {
     lumaPath: null as DepthPreviewLumaPath | null,
   };
 
+  /** A decoded timestamp is its packet's, truncated to microseconds. */
   const indexOfTimestamp = (microseconds: number) => {
     const time = microseconds / MICROSECONDS_PER_SECOND;
     const times = timeline.sourceTimes;
@@ -275,9 +277,12 @@ export function createDepthPreviewTrackReader(options: {
     while (low <= high) {
       const middle = (low + high) >> 1;
 
-      if (times[middle] < time - TIMESTAMP_MATCH_TOLERANCE_SECONDS) {
+      if (times[middle] < time - PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS) {
         low = middle + 1;
-      } else if (times[middle] > time + TIMESTAMP_MATCH_TOLERANCE_SECONDS) {
+      } else if (
+        times[middle] >
+        time + PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS
+      ) {
         high = middle - 1;
       } else {
         return middle;
