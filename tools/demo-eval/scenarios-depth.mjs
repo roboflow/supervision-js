@@ -43,7 +43,12 @@ const DEPTH_LATENCY_P95_LIMIT_MS = 120;
 const DEPTH_PICTURE_BEHIND_MEAN_LIMIT_MS = 100;
 const DEPTH_PICTURE_BEHIND_P95_LIMIT_MS = 120;
 const DEPTH_HOLD_MAX_LIMIT_MS = 100;
-const DEPTH_FRAME_RATE_FLOOR = 40;
+/* New frames as a share of the page's own animation frames during the drag.
+ * The drag moves at least a frame per pointer step, so a picture keeping up
+ * changes on nearly every one: 0.97 to 1 with depth removed, at 60 Hz and at
+ * the 30 Hz a busier page runs at. Before depth followed drags, the backward
+ * drag changed on half of them. */
+const DEPTH_FRAMES_PER_SAMPLE_FLOOR = 0.75;
 /* From letting go to depth over the frame the drag landed on. */
 const DEPTH_RELEASE_LIMIT_MS = 400;
 
@@ -341,6 +346,7 @@ export function summariseDepthDrag(probe) {
     pictureBehindP95Ms: percentile(behindMs, 0.95, 1),
     holdMaxMs: round(Math.max(...holds), 1),
     framesPerSecond: round(stays.length / dragSeconds, 1),
+    framesPerSample: round(stays.length / during.length, 2),
     distinctFrames: frames.size,
     framesShown: stays.length,
     framesWithoutDepth: stays.length - withDepth.length,
@@ -364,7 +370,7 @@ export function summariseDepthDrag(probe) {
       pictureBehindMeanMs: DEPTH_PICTURE_BEHIND_MEAN_LIMIT_MS,
       pictureBehindP95Ms: DEPTH_PICTURE_BEHIND_P95_LIMIT_MS,
       holdMaxMs: DEPTH_HOLD_MAX_LIMIT_MS,
-      framesPerSecond: DEPTH_FRAME_RATE_FLOOR,
+      framesPerSample: DEPTH_FRAMES_PER_SAMPLE_FLOOR,
       framesWithoutDepthShare: DEPTH_FRAMES_WITHOUT_LIMIT,
       depthLatencyP95Ms: DEPTH_LATENCY_P95_LIMIT_MS,
       releaseToDepthMs: DEPTH_RELEASE_LIMIT_MS,
@@ -401,10 +407,11 @@ export function judgeDepthDrag(scenario) {
         `thumb kept moving (limit ${DEPTH_HOLD_MAX_LIMIT_MS}ms)`,
     );
   }
-  if (scenario.framesPerSecond < DEPTH_FRAME_RATE_FLOOR) {
+  if (scenario.framesPerSample < DEPTH_FRAMES_PER_SAMPLE_FLOOR) {
     failures.push(
-      `${name}: only ${scenario.framesPerSecond} frames a second reached the ` +
-        `screen (floor ${DEPTH_FRAME_RATE_FLOOR}/s)`,
+      `${name}: a new frame reached the screen on only ${scenario.framesPerSample} ` +
+        `of the page's animation frames, ${scenario.framesPerSecond} a second ` +
+        `(floor ${DEPTH_FRAMES_PER_SAMPLE_FLOOR})`,
     );
   }
   if (scenario.framesWithoutDepthShare > DEPTH_FRAMES_WITHOUT_LIMIT) {
@@ -447,8 +454,9 @@ export function depthDetail(scenario, field) {
     ),
     field(
       "frames reaching screen",
-      `${scenario.framesShown} = ${scenario.framesPerSecond}/s  (floor ` +
-        `${scenario.limits.framesPerSecond}/s)`,
+      `${scenario.framesShown} = ${scenario.framesPerSecond}/s, ` +
+        `${scenario.framesPerSample} per animation frame  (floor ` +
+        `${scenario.limits.framesPerSample})`,
     ),
     field(
       "longest hold",

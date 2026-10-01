@@ -688,7 +688,7 @@ describe("dragging the depth clip", () => {
     expect(failures.join("\n")).toMatch(
       /depth-backdrag: the screen held one frame/,
     );
-    expect(failures.join("\n")).toMatch(/frames a second reached the screen/);
+    expect(failures.join("\n")).toMatch(/of the page's animation frames/);
   });
 
   it("fails frames shown without their depth, and depth that arrives late", () => {
