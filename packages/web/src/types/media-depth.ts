@@ -14,13 +14,16 @@ import type { DepthManifest, DepthMap } from "supervision-js-core";
  * the map.
  *
  * A clip manifest (`frames`) pairs one PNG with each video frame, so it needs
- * media with a frame index: `createWebVideoEngineMediaRendererSource()`. Other
- * media refuse it with a `RangeError`. While playback runs, the manifest's
- * 8-bit `preview` video is drawn, decoded ahead of the playhead frame for
- * frame; without one, no depth is drawn. Once playback rests, the session
- * fetches the exact frame for the video frame on screen, then the two frames
- * on either side, so stepping shows depth at once. A preview whose frames are
- * not the video's, by count or by time, is refused with a `RangeError`.
+ * media with a frame index: a URL or file, or
+ * `createWebVideoEngineMediaRendererSource()`. Other media refuse it with a
+ * `RangeError`. While playback runs, the session draws the exact frames or the
+ * manifest's 8-bit `preview` video, loaded ahead of the playhead, as
+ * `renderPreparation.depth.playback` picks; by default the exact frames while
+ * they keep up and the preview otherwise, and a clip without a preview plays
+ * its exact frames. Once playback rests, the session fetches the exact frame
+ * for the video frame on screen, then its neighbours, so stepping shows depth
+ * at once. A preview whose frames are not the video's, by count or by time, is
+ * refused with a `RangeError`.
  */
 export type MediaRendererDepthInput =
   | {

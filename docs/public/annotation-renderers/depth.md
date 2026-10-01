@@ -313,9 +313,9 @@ has a deadline (3 s for a support check or a flush that returns nothing, 5 s
 for the probe's first frame) that runs only while the page is visible;
 downloading the preview never does, since a slow link is no fault. Where no decoder returns a frame of the probe, the
 preview is left off without being fetched, and a decoder that stops while
-playing is closed: the clip then draws exact depth while playback rests and
-none while it plays, and says why in the diagnostics `message` and once in
-the console.
+playing is closed: the clip then plays exact frames, as a clip without a
+preview does, or with `playback: "preview"` draws depth only while playback
+rests. It says why in the diagnostics `message` and once in the console.
 
 ### Exact depth while playing
 
