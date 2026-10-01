@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 
 import { demoFixtures } from "../fixtures/demo-fixtures";
 import { FIXTURE_PLAYBACK_GATE, resolveFixtureDepth } from "./fixture-session";
-import { DemoMediaPath } from "./session-options";
 
 describe("the gates a sample opens on", () => {
   const resolved = resolveMediaSessionDefaults({
@@ -34,20 +33,18 @@ describe("the depth a sample opens with", () => {
   /* A reopen, such as a media path or option change, keeps the layer the
    * Style panel picked rather than snapping back to the sample's default. */
   it("opens with the layer picked, and the sample's default otherwise", () => {
-    expect(
-      resolveFixtureDepth(spring, DemoMediaPath.Engine, "ground-truth"),
-    ).toEqual({ manifest: manifestOf("ground-truth") });
-    expect(resolveFixtureDepth(spring, DemoMediaPath.Engine, null)).toEqual({
+    expect(resolveFixtureDepth(spring, false, "ground-truth")).toEqual({
+      manifest: manifestOf("ground-truth"),
+    });
+    expect(resolveFixtureDepth(spring, false, null)).toEqual({
       manifest: manifestOf(spring.depth!.defaultLayer),
     });
-    expect(
-      resolveFixtureDepth(spring, DemoMediaPath.Engine, "no-such-layer"),
-    ).toEqual({ manifest: manifestOf(spring.depth!.defaultLayer) });
+    expect(resolveFixtureDepth(spring, false, "no-such-layer")).toEqual({
+      manifest: manifestOf(spring.depth!.defaultLayer),
+    });
   });
 
-  it("opens Mediabunny without depth video", () => {
-    expect(
-      resolveFixtureDepth(spring, DemoMediaPath.Mediabunny, "ground-truth"),
-    ).toBeUndefined();
+  it("opens a sample converted first without depth video", () => {
+    expect(resolveFixtureDepth(spring, true, "ground-truth")).toBeUndefined();
   });
 });

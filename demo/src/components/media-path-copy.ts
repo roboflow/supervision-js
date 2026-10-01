@@ -1,11 +1,11 @@
 import { DemoMediaPath } from "../session/session-options";
 
 /**
- * Why a depth clip draws on one media path only, as the Depth switch and the
- * Depth section say it. The Mediabunny card says the same in its own facts.
+ * Why the Depth switch is off while Mediabunny converts the clip first, as the
+ * Depth section says it. The Mediabunny card says the same in its own facts.
  */
-export const DEPTH_VIDEO_ENGINE_ONLY =
-  "Depth video plays only on the Web video engine path. On Mediabunny it would need a second video decoder running in the page, so it is not supported. A still depth picture works on every path.";
+export const DEPTH_VIDEO_OFF_WHILE_CONVERTING =
+  "Depth video pairs a depth frame with each of the clip's own frames, and converting the clip first can change those frames, so depth stays off while conversion is on. Turn conversion off to see depth.";
 
 /** What one media path is, in the terms someone choosing between them needs. */
 export interface DemoMediaPathCopy {
@@ -27,7 +27,7 @@ export interface DemoMediaPathCopy {
 export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
   [DemoMediaPath.Mediabunny]: {
     depth:
-      "A still depth picture, not depth video. Depth video plays only on the Web video engine path: playing it here would need a second video decoder running in the page, so it is not supported.",
+      "Depth video in step with the clip, as on the Web video engine: 8-bit preview depth while it plays, exact depth once it rests. The preview decodes in the page beside the clip, so a drag waits for both at each stop. Depth stays off while the clip is converted first.",
     costs:
       "Every jump decodes forward from the nearest keyframe and keeps nothing, so dragging the playhead waits for a decode at each stop.",
     goodAt:

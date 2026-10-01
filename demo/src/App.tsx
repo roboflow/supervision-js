@@ -29,7 +29,7 @@ import {
   WorkbenchDepthReadout,
   type WorkbenchDepth,
 } from "./components/DepthStyleSection";
-import { DEPTH_VIDEO_ENGINE_ONLY } from "./components/media-path-copy";
+import { DEPTH_VIDEO_OFF_WHILE_CONVERTING } from "./components/media-path-copy";
 import { createDepthProbe } from "./hooks/depth-probe";
 import { useViewportOverlay } from "./hooks/useViewportOverlay";
 import { selectViewportSessionState } from "./components/viewport-overlay";
@@ -272,7 +272,7 @@ function DemoApp() {
     demo.presentationAvailability?.depthEnabled !== false;
   const workbenchDepth = useMemo<WorkbenchDepth>(
     () => ({
-      blockedReason: depthBlocked ? DEPTH_VIDEO_ENGINE_ONLY : null,
+      blockedReason: depthBlocked ? DEPTH_VIDEO_OFF_WHILE_CONVERTING : null,
       layerId: demo.depthLayerId,
       layerLoad: demo.depthLayerLoad,
       layers: depthLayers,

@@ -307,8 +307,8 @@ export function resolveDemoFixtureDataLayers(
 
 /**
  * The layers a session can draw right now. A depth clip pairs one PNG with
- * each video frame, which only the web video engine's frame index does, so
- * depth reaches the screen only from a fixture opened on that path.
+ * each of the clip's own frames, so depth reaches the screen only from a
+ * fixture played as it is, not converted first.
  */
 export function resolveDemoDepthReach(
   availability: DemoPresentationAvailability | undefined,

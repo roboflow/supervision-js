@@ -15,7 +15,7 @@ import {
   shortLayerLabel,
   type WorkbenchDepth,
 } from "./DepthStyleSection";
-import { DEPTH_VIDEO_ENGINE_ONLY } from "./media-path-copy";
+import { DEPTH_VIDEO_OFF_WHILE_CONVERTING } from "./media-path-copy";
 
 const map: DepthMap = {
   displayRange: { max: 33, min: 2 },
@@ -184,7 +184,9 @@ describe("the Style panel's Depth section", () => {
     const markup = renderToStaticMarkup(
       <DepthStyleSection
         available={false}
-        depth={workbenchDepth({ blockedReason: DEPTH_VIDEO_ENGINE_ONLY })}
+        depth={workbenchDepth({
+          blockedReason: DEPTH_VIDEO_OFF_WHILE_CONVERTING,
+        })}
         enabled={false}
         onChange={() => {}}
         onToggleEnabled={() => {}}
@@ -194,7 +196,7 @@ describe("the Style panel's Depth section", () => {
 
     expect(markup).toContain(">Depth</h3>");
     expect(markup).toMatch(/aria-label="Show depth"[^>]*disabled=""/);
-    expect(markup).toContain("second video decoder");
+    expect(markup).toContain("depth stays off while conversion is on");
     expect(markup).not.toContain("Colormap");
   });
 
@@ -210,14 +212,12 @@ describe("the Style panel's Depth section", () => {
 });
 
 describe("the depth-only message", () => {
-  it("says plainly where depth video plays and why not elsewhere", () => {
-    expect(DEPTH_VIDEO_ENGINE_ONLY).toContain(
-      "Depth video plays only on the Web video engine path.",
+  it("says plainly why depth is off and how to bring it back", () => {
+    expect(DEPTH_VIDEO_OFF_WHILE_CONVERTING).toContain(
+      "converting the clip first can change those frames",
     );
-    expect(DEPTH_VIDEO_ENGINE_ONLY).toContain("second video decoder");
-    expect(DEPTH_VIDEO_ENGINE_ONLY).toContain("not supported");
-    expect(DEPTH_VIDEO_ENGINE_ONLY).toContain(
-      "A still depth picture works on every path.",
+    expect(DEPTH_VIDEO_OFF_WHILE_CONVERTING).toContain(
+      "Turn conversion off to see depth.",
     );
   });
 });

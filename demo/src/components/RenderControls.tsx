@@ -15,7 +15,6 @@ import {
 } from "supervision";
 import { DemoEvalHook } from "../eval-hooks";
 import { DepthStyleSection, type WorkbenchDepth } from "./DepthStyleSection";
-import { DEPTH_VIDEO_ENGINE_ONLY } from "./media-path-copy";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
@@ -181,7 +180,7 @@ function GlobalRenderControls({
             checked={depthDrawn}
             disabled={availability?.depthEnabled === false}
             label="Depth"
-            tooltip={`A sample's depth clip: 8-bit preview depth while playing, exact depth once playback rests. ${DEPTH_VIDEO_ENGINE_ONLY}`}
+            tooltip="A sample's depth clip: 8-bit preview depth while playing, exact depth once playback rests."
             onChange={(checked) => onChange("depthEnabled", checked)}
           />
           <ToggleControl
