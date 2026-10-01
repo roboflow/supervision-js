@@ -61,6 +61,8 @@ export type DemoMarkerPosition = keyof typeof demoMarkerPositionOffsets;
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
   readonly boxCornersEnabled: boolean;
+  /** The fixture's depth clip, under every detection layer. */
+  readonly depthEnabled: boolean;
   readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
   readonly heatmapsEnabled: boolean;
@@ -133,6 +135,7 @@ export interface DemoPresentationSettings {
 export type DemoPresentationLayerSetting =
   | "boxesEnabled"
   | "boxCornersEnabled"
+  | "depthEnabled"
   | "ellipsesEnabled"
   | "focusEnabled"
   | "heatmapsEnabled"
@@ -149,21 +152,23 @@ export type DemoPresentationAvailability = Partial<
   Record<DemoPresentationLayerSetting, boolean>
 >;
 
-const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
-  "boxesEnabled",
-  "boxCornersEnabled",
-  "ellipsesEnabled",
-  "focusEnabled",
-  "heatmapsEnabled",
-  "keypointsEnabled",
-  "labelsEnabled",
-  "masksEnabled",
-  "markersEnabled",
-  "orientedBoxEnabled",
-  "percentageBarsEnabled",
-  "polygonsEnabled",
-  "polylinesEnabled",
-];
+export const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] =
+  [
+    "boxesEnabled",
+    "boxCornersEnabled",
+    "depthEnabled",
+    "ellipsesEnabled",
+    "focusEnabled",
+    "heatmapsEnabled",
+    "keypointsEnabled",
+    "labelsEnabled",
+    "masksEnabled",
+    "markersEnabled",
+    "orientedBoxEnabled",
+    "percentageBarsEnabled",
+    "polygonsEnabled",
+    "polylinesEnabled",
+  ];
 
 /**
  * Whether anything in a presentation would draw a detection, which is what the
@@ -224,6 +229,7 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxStrokeWidth: 2,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0,
+  depthEnabled: false,
   ellipseAxisRatio: 0.35,
   ellipseColor: null,
   ellipseStrokeWidth: 2,
@@ -350,6 +356,7 @@ export function createDemoPresentation(
       ...(ellipseStyle
         ? [annotationRenderers.ellipse({ style: ellipseStyle })]
         : []),
+      ...(settings.depthEnabled ? [annotationRenderers.depth()] : []),
       ...(settings.heatmapsEnabled
         ? [
             annotationRenderers.heatmap({

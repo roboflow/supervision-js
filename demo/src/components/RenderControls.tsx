@@ -164,6 +164,13 @@ function GlobalRenderControls({
             onChange={(checked) => onChange("heatmapsEnabled", checked)}
           />
           <ToggleControl
+            checked={settings.depthEnabled}
+            disabled={availability?.depthEnabled === false}
+            label="Depth"
+            tooltip="A sample's depth clip, drawn while playback rests. It plays on the Web video engine media path."
+            onChange={(checked) => onChange("depthEnabled", checked)}
+          />
+          <ToggleControl
             checked={settings.polygonsEnabled}
             disabled={availability?.polygonsEnabled === false}
             evalHook={DemoEvalHook.PolygonsToggle}

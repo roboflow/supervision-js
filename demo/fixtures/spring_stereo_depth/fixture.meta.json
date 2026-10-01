@@ -5,7 +5,7 @@
   "displayName": "Spring 0021 stereo depth",
   "inferenceLabel": "OpenCV StereoSGBM (HH, 64 disparities)",
   "sampleName": "spring_stereo_depth",
-  "showInDemo": false,
+  "showInDemo": true,
   "media": {
     "file": "left.mp4",
     "loadingStatusLabel": "opening Spring stereo sample",
@@ -15,6 +15,7 @@
     "boxesEnabled": false,
     "heatmapsEnabled": false,
     "confidenceThreshold": 0,
+    "depthEnabled": true,
     "labelsEnabled": false,
     "masksEnabled": false,
     "polygonsEnabled": false,

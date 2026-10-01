@@ -47,6 +47,7 @@ import {
   demoFixtures,
   defaultDemoFixture,
   resolveDemoFixture,
+  resolveDemoDepthReach,
   type DemoFixtureDefinition,
 } from "../fixtures/demo-fixtures";
 import {
@@ -77,6 +78,8 @@ import {
   type UploadRunRequest,
 } from "../session/upload-session";
 import {
+  applyDemoMediaPath,
+  DemoMediaPath,
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
@@ -1026,10 +1029,13 @@ export function useDemoRenderer(
     refreshDetections,
     refreshPresentation,
     reopenSession,
-    presentationAvailability:
+    presentationAvailability: resolveDemoDepthReach(
       sourceMode === DemoSourceMode.Fixture
         ? activeFixture.presentationAvailability
         : undefined,
+      sourceMode === DemoSourceMode.Fixture &&
+        applyDemoMediaPath(sessionOptions) === DemoMediaPath.Engine,
+    ),
     renderPreparationDiagnostics,
     renderQuality,
     rendererState,

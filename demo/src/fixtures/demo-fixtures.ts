@@ -11,9 +11,10 @@ import {
 import { SourceKind } from "supervision/web-video-engine";
 import { delayDetectionFetch } from "../diagnostics/slow-work";
 import type { DisplayBoxResolutionOptions } from "supervision/web-video-engine";
-import type {
-  DemoPresentationAvailability,
-  DemoPresentationLayerSetting,
+import {
+  demoPresentationLayerSettings,
+  type DemoPresentationAvailability,
+  type DemoPresentationLayerSetting,
 } from "../presentation/demo-presentation";
 import type { DemoEngineOptions } from "../session/session-options";
 
@@ -115,6 +116,7 @@ export interface DemoFixtureDepth {
 export interface DemoFixturePresentationDefaults {
   readonly boxesEnabled?: boolean;
   readonly confidenceThreshold?: number;
+  readonly depthEnabled?: boolean;
   readonly focusEnabled?: boolean;
   readonly heatmapsEnabled?: boolean;
   readonly keypointsEnabled?: boolean;
@@ -281,6 +283,38 @@ export function resolveDemoFixtureAvailability(
   }
 
   return availability;
+}
+
+/**
+ * Narrows a fixture's layers to the data it ships: depth only with a depth
+ * block, and no detection layer at all without detections.
+ */
+export function resolveDemoFixtureDataLayers(
+  availability: DemoPresentationAvailability | undefined,
+  data: { readonly depth: boolean; readonly detections: boolean },
+): DemoPresentationAvailability {
+  const narrowed: DemoPresentationAvailability = { ...availability };
+
+  if (!data.depth) narrowed.depthEnabled = false;
+  if (!data.detections) {
+    for (const layer of demoPresentationLayerSettings) {
+      if (layer !== "depthEnabled") narrowed[layer] = false;
+    }
+  }
+
+  return narrowed;
+}
+
+/**
+ * The layers a session can draw right now. A depth clip pairs one PNG with
+ * each video frame, which only the web video engine's frame index does, so
+ * depth reaches the screen only from a fixture opened on that path.
+ */
+export function resolveDemoDepthReach(
+  availability: DemoPresentationAvailability | undefined,
+  depthPlays: boolean,
+): DemoPresentationAvailability | undefined {
+  return depthPlays ? availability : { ...availability, depthEnabled: false };
 }
 
 /** Every committed fixture that can be loaded by a focused documentation view. */
@@ -651,9 +685,15 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
           presentationDefaults: meta.presentation,
-          presentationAvailability: resolveDemoFixtureAvailability(
-            meta.presentationAvailability,
-            fixtureManifests[manifestPath]?.geometry,
+          presentationAvailability: resolveDemoFixtureDataLayers(
+            resolveDemoFixtureAvailability(
+              meta.presentationAvailability,
+              fixtureManifests[manifestPath]?.geometry,
+            ),
+            {
+              depth: depth !== null,
+              detections: detectionsManifestSrc !== null,
+            },
           ),
           proxyVideoSrc: proxyVideoSrc ?? null,
           sampleName: meta.sampleName,
