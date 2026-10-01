@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  computeDepthPercentileRange,
   createMediaSession,
   createStaticImageMediaSource,
   createWebVideoEngineMediaRendererSource,
@@ -21,8 +20,8 @@ import {
   renderSyntheticImage,
 } from "../../../benchmark/depth/gpu/src/synthetic-stereo";
 import {
-  DocsDepthRangeMode,
   createDocsDepthRenderer,
+  lockDepthRange,
   resolveDepthColourRange,
   initialDocsDepthSettings,
   roundRange,
@@ -221,20 +220,11 @@ export function DevDepthPlayground() {
   const update = (patch: Partial<DocsDepthSettings>) =>
     setSettings((current) => ({ ...current, ...patch }));
 
-  const lockRange = (quantity: DepthQuantity) => {
-    const active = sessionRef.current?.renderer.getActiveDepth?.();
-    const range = active
-      ? computeDepthPercentileRange(active.map, { quantity })
-      : null;
-
-    if (!range) return false;
-    update({
-      manualRange: { max: roundRange(range.max), min: roundRange(range.min) },
+  const lockRange = (quantity: DepthQuantity) =>
+    lockDepthRange(
+      sessionRef.current?.renderer.getActiveDepth?.()?.map,
       quantity,
-      rangeMode: DocsDepthRangeMode.Manual,
-    });
-    return true;
-  };
+    );
 
   const colourRange = useMemo(
     () => resolveDepthColourRange(depthMapFor(resolution), settings),
@@ -272,7 +262,7 @@ export function DevDepthPlayground() {
           canLock={pointer.active !== null}
           colourRange={colourRange}
           onChange={update}
-          onLock={lockRange}
+          lockRange={lockRange}
           settings={settings}
         >
           <PlaygroundSelect

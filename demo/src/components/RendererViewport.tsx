@@ -1,4 +1,9 @@
-import { memo, type CSSProperties, type RefCallback } from "react";
+import {
+  memo,
+  type CSSProperties,
+  type PointerEventHandler,
+  type RefCallback,
+} from "react";
 
 import { DemoEvalHook } from "../eval-hooks";
 import { sameViewportOverlay, type ViewportOverlay } from "./viewport-overlay";
@@ -8,11 +13,16 @@ interface RendererViewportProps {
   /** Detail is withheld until the wait has lasted long enough to need naming. */
   readonly explained: boolean;
   readonly overlay: ViewportOverlay | null;
+  /** Where the pointer is over the picture, for readouts such as depth. */
+  readonly onPointerLeave?: PointerEventHandler<HTMLDivElement>;
+  readonly onPointerMove?: PointerEventHandler<HTMLDivElement>;
 }
 
 export const RendererViewport = memo(function RendererViewport({
   containerRef,
   explained,
+  onPointerLeave,
+  onPointerMove,
   overlay,
 }: RendererViewportProps) {
   return (
@@ -21,6 +31,8 @@ export const RendererViewport = memo(function RendererViewport({
         ref={containerRef}
         className="renderer-viewport__mount"
         data-eval={DemoEvalHook.ViewportMount}
+        onPointerLeave={onPointerLeave}
+        onPointerMove={onPointerMove}
       />
       {overlay ? (
         <div
@@ -59,6 +71,8 @@ function areRendererViewportPropsEqual(
   return (
     previousProps.containerRef === nextProps.containerRef &&
     previousProps.explained === nextProps.explained &&
+    previousProps.onPointerLeave === nextProps.onPointerLeave &&
+    previousProps.onPointerMove === nextProps.onPointerMove &&
     sameViewportOverlay(previousProps.overlay, nextProps.overlay)
   );
 }

@@ -41,6 +41,11 @@ import {
   type PolylineStyle,
   resolveDetectionClassColorStyle,
 } from "supervision";
+import {
+  createDocsDepthRenderer,
+  initialDocsDepthSettings,
+  type DocsDepthSettings,
+} from "../docs-depth";
 
 export type DemoClassStyle = DetectionClassColorStyle;
 
@@ -63,6 +68,8 @@ export interface DemoPresentationSettings {
   readonly boxCornersEnabled: boolean;
   /** The fixture's depth clip, under every detection layer. */
   readonly depthEnabled: boolean;
+  /** How the depth renderer colours that clip, the docs playground's options. */
+  readonly depthStyle: DocsDepthSettings;
   readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
   readonly heatmapsEnabled: boolean;
@@ -230,6 +237,7 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0,
   depthEnabled: false,
+  depthStyle: initialDocsDepthSettings,
   ellipseAxisRatio: 0.35,
   ellipseColor: null,
   ellipseStrokeWidth: 2,
@@ -356,7 +364,9 @@ export function createDemoPresentation(
       ...(ellipseStyle
         ? [annotationRenderers.ellipse({ style: ellipseStyle })]
         : []),
-      ...(settings.depthEnabled ? [annotationRenderers.depth()] : []),
+      ...(settings.depthEnabled
+        ? [createDocsDepthRenderer(settings.depthStyle)]
+        : []),
       ...(settings.heatmapsEnabled
         ? [
             annotationRenderers.heatmap({

@@ -4,7 +4,10 @@ import type { DepthMap } from "supervision";
 
 import {
   DocsDepthRangeMode,
+  changeDepthQuantity,
+  changeDepthRangeMode,
   createDocsDepthRenderer,
+  lockDepthRange,
   createDocsDepthSnippet,
   resolveDepthColourRange,
   describeDepthReadout,
@@ -207,5 +210,59 @@ describe("depth colour legend", () => {
     expect(resolveDepthColourRange(null, initialDocsDepthSettings)).toEqual({
       message: "Shown once depth is on screen",
     });
+  });
+});
+
+describe("depth range controls", () => {
+  const manual: DocsDepthSettings = {
+    ...initialDocsDepthSettings,
+    manualRange: { max: 150, min: 3 },
+    rangeMode: DocsDepthRangeMode.Manual,
+  };
+  const locked = { max: 9.5, min: 1.25 };
+  const lockTo = () => locked;
+  const noDepth = () => null;
+
+  it("keeps a clip or auto range when the quantity changes", () => {
+    expect(
+      changeDepthQuantity(initialDocsDepthSettings, "depth", lockTo),
+    ).toEqual({ quantity: "depth" });
+  });
+
+  /* A range in pixels means nothing in metres. */
+  it("locks a manual range again in the new unit, or falls back to the clip's", () => {
+    expect(changeDepthQuantity(manual, "depth", lockTo)).toEqual({
+      manualRange: locked,
+      quantity: "depth",
+    });
+    expect(changeDepthQuantity(manual, "depth", noDepth)).toEqual({
+      quantity: "depth",
+      rangeMode: DocsDepthRangeMode.Clip,
+    });
+  });
+
+  it("starts a manual range from the depth on screen when there is some", () => {
+    expect(
+      changeDepthRangeMode(
+        initialDocsDepthSettings,
+        DocsDepthRangeMode.Manual,
+        lockTo,
+      ),
+    ).toEqual({ manualRange: locked, rangeMode: DocsDepthRangeMode.Manual });
+    expect(
+      changeDepthRangeMode(
+        initialDocsDepthSettings,
+        DocsDepthRangeMode.Manual,
+        noDepth,
+      ),
+    ).toEqual({ rangeMode: DocsDepthRangeMode.Manual });
+    expect(
+      changeDepthRangeMode(manual, DocsDepthRangeMode.Auto, lockTo),
+    ).toEqual({ rangeMode: DocsDepthRangeMode.Auto });
+  });
+
+  it("locks to nothing without a map", () => {
+    expect(lockDepthRange(null, "disparity")).toBeNull();
+    expect(lockDepthRange(undefined, "depth")).toBeNull();
   });
 });

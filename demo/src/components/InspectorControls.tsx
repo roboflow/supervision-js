@@ -383,3 +383,34 @@ export function ControlNote({ children }: { readonly children: ReactNode }) {
 type SliderControlStyle = CSSProperties & {
   readonly "--control-progress": string;
 };
+
+export function ColorControl({
+  disabled = false,
+  label,
+  onChange,
+  value,
+}: {
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onChange: (value: number) => void;
+  readonly value: number;
+}) {
+  return (
+    <label className="class-color-control">
+      <span>{label}</span>
+      <input
+        disabled={disabled}
+        onChange={(event) =>
+          onChange(Number.parseInt(event.currentTarget.value.slice(1), 16))
+        }
+        type="color"
+        value={toHexColor(value)}
+      />
+    </label>
+  );
+}
+
+/** A `0xRRGGBB` number as the `#rrggbb` a colour input takes. */
+export function toHexColor(color: number) {
+  return `#${color.toString(16).padStart(6, "0").slice(-6)}`;
+}

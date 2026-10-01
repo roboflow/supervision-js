@@ -33,6 +33,25 @@ export interface DocsDepthSettings {
   readonly noDepthColor: number | null;
 }
 
+/** The colormaps the depth renderer draws, in the order the controls offer them. */
+export const depthColormapOptions: readonly DepthColormap[] = [
+  "turbo",
+  "viridis",
+  "cividis",
+  "inferno",
+  "magma",
+  "grayscale",
+];
+
+export const depthSamplingOptions: readonly DepthSampling[] = [
+  "auto",
+  "nearest",
+  "edge-aware",
+];
+
+/** The colour pixels without depth take when painting them is first turned on. */
+export const DEFAULT_NO_DEPTH_COLOR = 0x202020;
+
 export const initialDocsDepthSettings: DocsDepthSettings = {
   colormap: "turbo",
   manualRange: { max: 150, min: 3 },
@@ -59,6 +78,57 @@ export function createDocsDepthRenderer(
     sampling: settings.sampling,
     wipe: settings.wipe,
   });
+}
+
+/**
+ * A manual range fixed to the 2nd and 98th percentile of a map, in the
+ * quantity given, or null when there is no map or too little depth in it.
+ */
+export function lockDepthRange(
+  map: DepthMap | null | undefined,
+  quantity: DepthQuantity,
+): DepthRange | null {
+  const range = map ? computeDepthPercentileRange(map, { quantity }) : null;
+
+  return range
+    ? { max: roundRange(range.max), min: roundRange(range.min) }
+    : null;
+}
+
+/**
+ * Picking a quantity. A manual range in pixels means nothing in metres, so it
+ * is locked again in the new unit, or falls back to the clip's range when
+ * there is no depth on screen to lock it to.
+ */
+export function changeDepthQuantity(
+  settings: DocsDepthSettings,
+  quantity: DepthQuantity,
+  lockRange: (quantity: DepthQuantity) => DepthRange | null,
+): Partial<DocsDepthSettings> {
+  if (settings.rangeMode !== DocsDepthRangeMode.Manual) return { quantity };
+
+  const manualRange = lockRange(quantity);
+
+  return manualRange
+    ? { manualRange, quantity }
+    : { quantity, rangeMode: DocsDepthRangeMode.Clip };
+}
+
+/**
+ * Picking a range mode. Manual starts from the depth on screen when there is
+ * some, and from the last manual range when there is not.
+ */
+export function changeDepthRangeMode(
+  settings: DocsDepthSettings,
+  rangeMode: DocsDepthRangeMode,
+  lockRange: (quantity: DepthQuantity) => DepthRange | null,
+): Partial<DocsDepthSettings> {
+  const manualRange =
+    rangeMode === DocsDepthRangeMode.Manual
+      ? lockRange(settings.quantity)
+      : null;
+
+  return manualRange ? { manualRange, rangeMode } : { rangeMode };
 }
 
 /** The `setPresentation` call that builds exactly `createDocsDepthRenderer`. */
