@@ -137,6 +137,7 @@ const mockState = vi.hoisted(() => {
     canRead: vi.fn(async () => true),
     computePacketStats: vi.fn(async () => ({ averagePacketRate: 25 })),
     dispose: vi.fn(),
+    encodedPacketSinkConstructor: vi.fn(),
     format: { mimeType: "video/mp4", name: "MP4" },
     getAudioTracks: vi.fn(async () => mediaMock.audioTracks),
     getDisplayHeight: vi.fn(async () => 720),
@@ -150,7 +151,14 @@ const mockState = vi.hoisted(() => {
     getTracks: vi.fn(async () => mediaMock.tracks),
     getVideoTracks: vi.fn(async () => mediaMock.videoTracks),
     inputConstructor: vi.fn(),
-    iteratorReturn: vi.fn(async () => undefined),
+    iteratorReturn: vi.fn(async () => ({
+      done: true as const,
+      value: undefined,
+    })),
+    /** The track's packet table; unset, one key packet per mock sample. */
+    packets: undefined as
+      | Array<{ duration: number; timestamp: number; type: "key" | "delta" }>
+      | undefined,
     primaryVideoTrack: {} as Record<string, unknown>,
     sampleNextCalls: [] as number[],
     samples: [] as MockVideoSample[],
@@ -227,6 +235,7 @@ vi.mock("pixi.js", () => {
   class BufferImageSource {
     destroy = pixiMock.imageSourceDestroy;
     style = {};
+    update = vi.fn();
 
     constructor(options: unknown) {
       pixiMock.bufferImageSourceOptions.push(options);
@@ -568,7 +577,26 @@ vi.mock("mediabunny", () => {
     }
   }
 
+  class EncodedPacketSink {
+    constructor(track: unknown) {
+      mediaMock.encodedPacketSinkConstructor(track);
+    }
+
+    async *packets() {
+      const packets =
+        mediaMock.packets ??
+        mediaMock.samples.map((sample) => ({
+          duration: sample.duration,
+          timestamp: sample.timestamp,
+          type: "key" as const,
+        }));
+
+      yield* packets;
+    }
+  }
+
   return {
+    EncodedPacketSink,
     Input,
     MATROSKA: { name: "Matroska" },
     MP4: { name: "MP4" },
@@ -580,7 +608,9 @@ vi.mock("mediabunny", () => {
 });
 
 vi.stubGlobal("document", {
+  addEventListener: vi.fn(),
   createElement: domMock.createElement,
+  removeEventListener: vi.fn(),
 });
 
 vi.stubGlobal("window", {
@@ -660,6 +690,8 @@ export function resetMocks() {
   mediaMock.getMimeType.mockClear();
   mediaMock.getMimeType.mockResolvedValue('video/mp4; codecs="avc1.42e01e"');
   mediaMock.getPrimaryVideoTrack.mockClear();
+  mediaMock.encodedPacketSinkConstructor.mockClear();
+  mediaMock.packets = undefined;
   mediaMock.getSample.mockClear();
   mediaMock.getSample.mockImplementation(async (timestamp: number) => {
     return (

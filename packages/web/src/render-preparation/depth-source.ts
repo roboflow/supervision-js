@@ -149,6 +149,13 @@ export interface DepthSourceContext {
    * the video frame it measures.
    */
   readonly frameClock?: MediaFrameClock | null;
+  /**
+   * Reads the frame index for media that does not keep one, the first time
+   * a clip asks: a Mediabunny URL or Blob.
+   */
+  readonly readFrameClock?: (() => Promise<MediaFrameClock>) | null;
+  /** Why the media has no frame index, told to a clip that needs one. */
+  readonly frameClockUnavailableReason?: string;
   /** The decoder, created only when a manifest needs one. */
   readonly preparer?: () => DepthFramePreparer;
   readonly fetch?: typeof globalThis.fetch;
@@ -396,11 +403,15 @@ async function openDepthClip(
   base: string | URL | undefined,
   context: DepthSourceContext,
 ): Promise<DepthFrameProvider> {
-  const clock = context.frameClock;
+  const clock =
+    context.frameClock ?? (await context.readFrameClock?.()) ?? null;
 
   if (!clock) {
     throw new RangeError(
-      "depth.json describes a clip (frames), which needs a media source with a frame index: pass createWebVideoEngineMediaRendererSource() as the media.",
+      `depth.json describes a clip (frames), and the media has no frame index to pair them with: ${
+        context.frameClockUnavailableReason ??
+        "open the video by URL or Blob, or pass createWebVideoEngineMediaRendererSource() as the media."
+      }`,
     );
   }
   if (!frames.timesS && frames.count !== clock.frameCount) {

@@ -15,6 +15,7 @@ const videoEngineStagedRoot = "engine";
 const videoEngineModules = {
   "#web-video-engine": `${videoEngineStagedDir}/${videoEngineStagedRoot}.js`,
   "#web-video-engine/analysis": `${videoEngineStagedDir}/analysis.js`,
+  "#web-video-engine/frame-index": `${videoEngineStagedDir}/frame-index.js`,
 };
 /**
  * The package build emits the adapter as an entry of its own, which is what

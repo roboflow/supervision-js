@@ -208,6 +208,8 @@ export async function createMediaRendererCore(
           scheduleBatchSize:
             options.renderPreparation?.maskFrame?.scheduleBatchSize,
           frameClock,
+          frameClockUnavailableReason,
+          readFrameClock,
           media: mediaSize,
           onDiagnostics: handleDepthDiagnostics,
           padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
@@ -325,6 +327,8 @@ export async function createMediaRendererCore(
     },
   });
   let frameClock: MediaRenderer["frameClock"] = null;
+  let readFrameClock: DecodedMediaSource["readFrameClock"];
+  let frameClockUnavailableReason: string | undefined;
   let frameNavigation:
     ReturnType<typeof createMediaFrameNavigation> | undefined;
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
@@ -727,6 +731,11 @@ export async function createMediaRendererCore(
     const presentedSample = mediaScene.presentSample(sample);
     runtimeState.recordPresentedSample(presentedSample);
     detectionTimeline?.prefetch(presentedSample.mediaTime);
+    // Depth decodes ahead of the frame just drawn. A drag points it at the
+    // hand's position instead, as the push transport does.
+    if (!isSeekGestureInFlight) {
+      mediaScene.prefetchDepth?.(presentedSample.mediaTime);
+    }
   };
 
   const stopActiveIterator = () => {
@@ -892,6 +901,7 @@ export async function createMediaRendererCore(
       return;
     }
     pendingPullScrubTime = targetTime;
+    mediaScene?.prefetchDepth?.(targetTime);
     if (pullScrubReadInFlight) navigationVersion += 1;
     schedulePullScrubPreview();
   };
@@ -1215,6 +1225,8 @@ export async function createMediaRendererCore(
 
     const mediaSource = await openRendererMediaSource(options, providers);
     frameClock = mediaSource.frameClock ?? null;
+    readFrameClock = mediaSource.readFrameClock;
+    frameClockUnavailableReason = mediaSource.frameClockUnavailableReason;
     mediaInput = mediaSource.input;
     sampleSink = mediaSource.sampleSink;
 

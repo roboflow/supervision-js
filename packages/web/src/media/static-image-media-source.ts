@@ -82,6 +82,8 @@ function createSingleFrameSource(
   };
 
   return {
+    frameClockUnavailableReason:
+      "a still image has no time axis. Give it a still map: a map or an image manifest.",
     input: { dispose() {} },
     metadata: {
       audioTrackCount: 0,

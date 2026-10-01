@@ -10,7 +10,9 @@ import {
 import { encodePng } from "../../../../test/depth-png";
 import {
   createDeferred,
+  createMockSample,
   createRenderer,
+  mediaMock,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -84,6 +86,69 @@ async function stubDepthServer(
   );
 
   return { confidence, samples };
+}
+
+/**
+ * A clip manifest of `count` exact frames, 32x18, where frame i reads
+ * i + 1 px of disparity everywhere: the map drawn says which frame it is.
+ */
+async function stubClipServer(count: number) {
+  const routes = new Map<string, unknown>([
+    [
+      "https://example.test/clip/depth.json",
+      {
+        frames: { count, exact: "exact/{index:06}.png" },
+        height: 18,
+        kind: "disparity_px",
+        schema: "supervision.depth-manifest",
+        storage: { format: "png16", no_depth: 0, scale: 256 },
+        version: 1,
+        width: 32,
+      },
+    ],
+  ]);
+
+  for (let index = 0; index < count; index += 1) {
+    routes.set(
+      `https://example.test/clip/exact/${String(index).padStart(6, "0")}.png`,
+      await encodePng({
+        height: 18,
+        samples: new Uint16Array(32 * 18).fill(256 * (index + 1)),
+        width: 32,
+      }),
+    );
+  }
+
+  const fetched: string[] = [];
+
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async (input: string | URL | Request) => {
+      const url = String(input);
+      const body = routes.get(url);
+
+      fetched.push(url);
+      return body === undefined
+        ? new Response(null, { status: 404 })
+        : new Response(
+            body instanceof Uint8Array
+              ? (body as BufferSource)
+              : JSON.stringify(body),
+          );
+    },
+  );
+
+  return { fetched };
+}
+
+/** The exact frame a clip drew, read back from its disparity. */
+function drawnExactFrame(renderer: Awaited<ReturnType<typeof createRenderer>>) {
+  const active = renderer.getActiveDepth?.();
+
+  if (!active || active.precision !== "exact") return null;
+  return {
+    frameIndex: active.frameIndex,
+    measured: active.map.samples.values[0] / 256 - 1,
+  };
 }
 
 describe("media renderer depth", () => {
@@ -204,21 +269,112 @@ describe("media renderer depth", () => {
     renderer.destroy();
   });
 
-  it("refuses a clip manifest on media without a frame index", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      async () =>
-        new Response(
-          JSON.stringify({
-            frames: { count: 3, exact: "exact/{index:06}.png" },
-            height: 18,
-            kind: "disparity_px",
-            schema: "supervision.depth-manifest",
-            storage: { format: "png16", no_depth: 0, scale: 256 },
-            version: 1,
-            width: 32,
-          }),
-        ),
+  it("reads a Mediabunny clip's frame index from its packets only when a clip asks", async () => {
+    await stubClipServer(2);
+    const renderer = await createRenderer(false, false, {
+      depth: { map: depthMap() },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    expect(mediaMock.encodedPacketSinkConstructor).not.toHaveBeenCalled();
+
+    await renderer.setDepth?.({
+      manifest: "https://example.test/clip/depth.json",
+    });
+    expect(mediaMock.encodedPacketSinkConstructor).toHaveBeenCalledTimes(1);
+
+    // A second clip on the same media reads the index it already has.
+    await renderer.setDepth?.({
+      manifest: "https://example.test/clip/depth.json",
+    });
+    expect(mediaMock.encodedPacketSinkConstructor).toHaveBeenCalledTimes(1);
+
+    renderer.destroy();
+  });
+
+  it("pairs a Mediabunny clip's depth with frames by packet timestamps, not by a frame rate", async () => {
+    // Variable frame rate: gaps of 40, 60, 30 and 70 ms.
+    mediaMock.samples = [0, 0.04, 0.1, 0.13, 0.2].map((time, index, all) =>
+      createMockSample(time, (all[index + 1] ?? 0.25) - time),
     );
+    mediaMock.getDurationFromMetadata.mockResolvedValue(0.25);
+    await stubClipServer(5);
+    const renderer = await createRenderer(false, false, {
+      renderPreparation: {
+        depth: { exactNeighborFrameCount: 0, exactSettleSeconds: 0 },
+      },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    await renderer.setDepth?.({
+      manifest: "https://example.test/clip/depth.json",
+    });
+    await vi.waitFor(() =>
+      expect(drawnExactFrame(renderer)).toEqual({ frameIndex: 0, measured: 0 }),
+    );
+
+    for (const [time, frame] of [
+      [0.13, 3],
+      [0.1, 2],
+      [0.2, 4],
+      [0.04, 1],
+      // Inside frame 2's 60 ms, past where a 25 fps grid would put frame 3.
+      [0.125, 2],
+    ] as const) {
+      await renderer.seek(time);
+      await vi.waitFor(() =>
+        expect(drawnExactFrame(renderer)).toEqual({
+          frameIndex: frame,
+          measured: frame,
+        }),
+      );
+    }
+
+    await renderer.stepBackward();
+    await vi.waitFor(() =>
+      expect(drawnExactFrame(renderer)).toEqual({ frameIndex: 1, measured: 1 }),
+    );
+    await renderer.stepForward();
+    await vi.waitFor(() =>
+      expect(drawnExactFrame(renderer)).toEqual({ frameIndex: 2, measured: 2 }),
+    );
+
+    renderer.destroy();
+  });
+
+  it("pairs a Mediabunny clip whose first frame straddles zero as the pull path presents it", async () => {
+    // An edit list trims 20 ms of B-frame pre-roll: the first packet starts
+    // before zero and is shown from zero; one before it is never shown.
+    mediaMock.getFirstTimestamp.mockResolvedValue(-0.06);
+    mediaMock.samples = [-0.06, -0.02, 0.02, 0.06].map((time) =>
+      createMockSample(time, 0.04),
+    );
+    mediaMock.getDurationFromMetadata.mockResolvedValue(0.1);
+    await stubClipServer(3);
+    const renderer = await createRenderer(false, false, {
+      renderPreparation: {
+        depth: { exactNeighborFrameCount: 0, exactSettleSeconds: 0 },
+      },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    await renderer.setDepth?.({
+      manifest: "https://example.test/clip/depth.json",
+    });
+    await renderer.seek(0);
+    await vi.waitFor(() =>
+      expect(drawnExactFrame(renderer)).toEqual({ frameIndex: 0, measured: 0 }),
+    );
+    await renderer.seek(0.02);
+    await vi.waitFor(() =>
+      expect(drawnExactFrame(renderer)).toEqual({ frameIndex: 1, measured: 1 }),
+    );
+
+    renderer.destroy();
+  });
+
+  it("refuses a Mediabunny clip whose frame count is not the video's", async () => {
+    await stubClipServer(3);
     const renderer = await createRenderer(false, false, {
       renderers: [annotationRenderers.depth()],
     });
@@ -226,8 +382,31 @@ describe("media renderer depth", () => {
     await expect(
       renderer.setDepth?.({ manifest: "https://example.test/clip/depth.json" }),
     ).rejects.toThrow(
+      "depth.json has 3 frames and the media has 2; give frames.times_s when depth covers only some of the video's frames.",
+    );
+
+    renderer.destroy();
+  });
+
+  it("refuses a clip on media that has no frame index, and says why", async () => {
+    await stubClipServer(1);
+    const { createStaticImageMediaSource } =
+      await import("#media/static-image-media-source");
+    const renderer = await createRenderer(false, false, {
+      renderers: [annotationRenderers.depth()],
+      source: createStaticImageMediaSource({
+        draw: vi.fn(),
+        height: 720,
+        width: 1280,
+      }),
+      src: undefined,
+    });
+
+    await expect(
+      renderer.setDepth?.({ manifest: "https://example.test/clip/depth.json" }),
+    ).rejects.toThrow(
       new RangeError(
-        "depth.json describes a clip (frames), which needs a media source with a frame index: pass createWebVideoEngineMediaRendererSource() as the media.",
+        "depth.json describes a clip (frames), and the media has no frame index to pair them with: a still image has no time axis. Give it a still map: a map or an image manifest.",
       ),
     );
     expect(renderer.getActiveDepth?.()).toBeNull();

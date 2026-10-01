@@ -1290,6 +1290,7 @@ export async function createPixiMediaScene(
         };
       } finally {
         sample.close();
+        scheduleDepthUploadAhead(currentMediaTime);
       }
     },
 

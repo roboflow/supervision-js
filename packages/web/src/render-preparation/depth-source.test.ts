@@ -392,19 +392,47 @@ describe("depth source from a clip manifest", () => {
     vi.useRealTimers();
   });
 
-  it("refuses a clip without a frame index, as on the src path", async () => {
+  it("refuses a clip on media without a frame index, saying why", async () => {
     const server = clipServer();
-
-    await expect(
+    const open = (reason?: string) =>
       openDepthSource(
         { manifest: "https://example.test/clip/depth.json" },
-        { fetch: server.fetch, media: MEDIA, preparer: server.preparer },
-      ),
-    ).rejects.toThrow(
+        {
+          fetch: server.fetch,
+          frameClockUnavailableReason: reason,
+          media: MEDIA,
+          preparer: server.preparer,
+        },
+      );
+
+    await expect(open()).rejects.toThrow(
       new RangeError(
-        "depth.json describes a clip (frames), which needs a media source with a frame index: pass createWebVideoEngineMediaRendererSource() as the media.",
+        "depth.json describes a clip (frames), and the media has no frame index to pair them with: open the video by URL or Blob, or pass createWebVideoEngineMediaRendererSource() as the media.",
       ),
     );
+    await expect(open("a live stream has no end.")).rejects.toThrow(
+      new RangeError(
+        "depth.json describes a clip (frames), and the media has no frame index to pair them with: a live stream has no end.",
+      ),
+    );
+  });
+
+  it("reads the media's frame index when a clip asks, for media that does not keep one", async () => {
+    const server = clipServer();
+    const readFrameClock = vi.fn(async () => CLOCK);
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        fetch: server.fetch,
+        media: MEDIA,
+        preparer: server.preparer,
+        readFrameClock,
+      },
+    );
+
+    expect(readFrameClock).toHaveBeenCalledOnce();
+    expect(source.getFrameStatus?.(CLOCK.timeAt(4))?.frameIndex).toBe(4);
+    source.destroy();
   });
 
   it("refuses a clip whose frame count is not the media's", async () => {
