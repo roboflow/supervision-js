@@ -1,8 +1,19 @@
+/** What a deadline reads to tell whether anyone can see the page. */
+export interface DecoderDeadlinePage {
+  readonly visibilityState: DocumentVisibilityState;
+  addEventListener(type: "visibilitychange", listener: () => void): void;
+  removeEventListener(type: "visibilitychange", listener: () => void): void;
+}
+
 /**
  * Waits for one step of a video decoder, which answers in milliseconds when
  * it works and may never answer when it does not. Rejects with a
  * `TimeoutError` naming the step once `milliseconds` pass; the step itself
  * carries on, and its owner closes the decoder.
+ *
+ * The budget runs only while the page is visible, as the web video engine's
+ * decoder deadlines do: a browser may hold a hidden page's decoder work back,
+ * and a step that waited on that is no broken decoder.
  *
  * Only decoder steps get a deadline. A wait on the network never does: a
  * slow link is no fault.
@@ -11,24 +22,55 @@ export function withinDecoderDeadline<T>(
   step: Promise<T>,
   milliseconds: number,
   what: string,
+  page: DecoderDeadlinePage | undefined = (
+    globalThis as { document?: DecoderDeadlinePage }
+  ).document,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
+    let remaining = milliseconds;
+    let startedAt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const stop = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      page?.removeEventListener("visibilitychange", onVisibility);
+    };
+    const expire = () => {
+      stop();
       reject(
         new DOMException(
           `${what} did not answer within ${formatSeconds(milliseconds)}.`,
           "TimeoutError",
         ),
       );
-    }, milliseconds);
+    };
+    const run = () => {
+      if (timer !== undefined) return;
+      startedAt = performance.now();
+      timer = setTimeout(expire, remaining);
+    };
+    const pause = () => {
+      if (timer === undefined) return;
+      remaining = Math.max(0, remaining - (performance.now() - startedAt));
+      clearTimeout(timer);
+      timer = undefined;
+    };
+    function onVisibility() {
+      if (page?.visibilityState === "hidden") pause();
+      else run();
+    }
+
+    page?.addEventListener("visibilitychange", onVisibility);
+    if (page?.visibilityState !== "hidden") run();
 
     step.then(
       (value) => {
-        clearTimeout(timer);
+        stop();
         resolve(value);
       },
       (error: unknown) => {
-        clearTimeout(timer);
+        stop();
         reject(error);
       },
     );
