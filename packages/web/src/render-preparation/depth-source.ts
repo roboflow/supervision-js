@@ -678,7 +678,7 @@ async function openDepthClip(
     ) {
       return;
     }
-    previewStopped = `The depth preview stopped decoding, so depth is drawn only while playback rests: ${String(previewWindow.failure)}`;
+    previewStopped = `The depth preview stopped decoding, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: ${String(previewWindow.failure)}`;
     preview.reader.dispose();
   };
 
@@ -1364,7 +1364,7 @@ async function openClipPreview(
       ? chooseDefaultPreviewDecoding
       : context.choosePreviewDecoding;
   const unavailable = (reason: string): ClipPreview => {
-    const message = `The depth preview ${url} is off, so depth is drawn only while playback rests: ${reason}`;
+    const message = `The depth preview ${url} is off, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: ${reason}`;
 
     console.warn(message);
     return { preview: null, unavailable: message };

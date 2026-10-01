@@ -387,7 +387,7 @@ describe("depth source from a clip with a preview", () => {
       expect(onOpen).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledOnce();
       expect(warn.mock.calls[0]?.[0]).toBe(
-        `The depth preview https://example.test/clip/preview.mp4 is off, so depth is drawn only while playback rests: no decoder in this browser returned a frame of the probe clip (prefer-software: ${stall}; prefer-hardware: ${stall}).`,
+        `The depth preview https://example.test/clip/preview.mp4 is off, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: no decoder in this browser returned a frame of the probe clip (prefer-software: ${stall}; prefer-hardware: ${stall}).`,
       );
       await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
       await vi.advanceTimersByTimeAsync(200);
@@ -473,7 +473,7 @@ describe("depth source from a clip with a preview", () => {
       expect(warn).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(200);
       expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
-        "The depth preview stopped decoding, so depth is drawn only while playback rests: Error: The depth preview decoder returned no frame for 3 s of a flush.",
+        "The depth preview stopped decoding, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: Error: The depth preview decoder returned no frame for 3 s of a flush.",
       );
       await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
       clip.source.destroy();
