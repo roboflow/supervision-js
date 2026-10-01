@@ -67,8 +67,8 @@ export default defineConfig({
     // package's private aliases, which the package manifest maps to dist.
     alias: [
       {
-        find: /^#renderers\/(.+)$/,
-        replacement: path.join(repoRoot, "packages/web/src/renderers/$1"),
+        find: /^#(constants|media|render-preparation|renderers|types|workers)\/(.+)$/,
+        replacement: path.join(repoRoot, "packages/web/src/$1/$2"),
       },
     ],
   },
@@ -82,7 +82,7 @@ export default defineConfig({
     },
     headers: isolationHeaders,
     host: "127.0.0.1",
-    port: 5187,
+    port: Number(process.env.DEPTH_BENCHMARK_PORT ?? 5187),
     strictPort: true,
   },
 });

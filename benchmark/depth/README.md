@@ -18,14 +18,20 @@ Run from the repo root:
 npm run benchmark:depth:gpu        # headless Chrome over CDP
 npm run benchmark:depth:gpu:dev    # the page, for any browser
 node benchmark/depth/run-gpu.mjs --browser=firefox   # headless Firefox
+npm run benchmark:depth:playback   # the docs playground, playing, in Chrome
 ```
 
 The Chrome runner writes `results/latest-gpu.{json,md}`; the Firefox runner
 writes `results/latest-firefox.{json,md}`. Set `CHROME_BIN` or `FIREFOX_BIN`
 when the browser is not at its default macOS path. `--query=cases=exactness`
 (or `decode`, `upload`, `memory`, comma-separated), `backends=webgl` and
-`resolutions=1080p` narrow a run. Firefox has no CDP, so its page PUTs the
-result to the benchmark's dev server (`?report=firefox`).
+`resolutions=1080p` narrow a run, and `--port` moves the benchmark server off 5187. Firefox has no CDP, so its page PUTs the result to the benchmark's dev
+server (`?report=firefox`).
+
+Cases 4 and 6 decode the Spring fixture's 720p preview video
+(`demo/fixtures/spring_stereo_depth/sgbm/preview.mp4`, from Git LFS) and two
+resizes of it that the runner writes into `results/` with ffmpeg, using the
+producer's encoder settings. Without ffmpeg those rows are skipped.
 
 Safari is a manual run: start `npm run benchmark:depth:gpu:dev`, open
 `http://127.0.0.1:5187/benchmark/depth/gpu/index.html` in Safari, and copy the
@@ -50,16 +56,37 @@ JSON the page prints.
   per sample) and preview (`r8`, 1 byte), with the upload in the present and
   uploaded ahead, and a half-size map drawn edge-aware. The GPU is waited on
   after every present.
-- **Case 5, memory** at the build plan's proposed default budgets, computed from the
-  formats.
+- **Case 4, preview decode.** The library's once-per-page probe of every
+  decoder the browser offers: does each return the 256 preview codes as
+  written? Then every frame of a 192-frame preview at 720p, 1080p and 4K
+  decoded back to back through the library's reader, with frames copied in
+  the render-preparation worker (the session's way) or on the page, timing
+  decode speed and the main thread's share per frame.
+- **Case 5, memory** at the library's default budgets, which scale with the
+  clip's resolution, computed from the formats.
+- **Case 6, playback with the gate, and seeking.** Each preview played at 1x,
+  2x and 8x against the library's preview window with the session's default
+  gate, each animation frame drawn through the texture ring and depth shader
+  with the upload in the present or done ahead: gate holds, presents
+  without depth, present time; then the time from a seek to its preview.
 
-Cases 4 (preview-track decode) and 6 (seek to exact frame) arrive with the
-preview track and clip frames.
+`run-playback.mjs` drives the real thing: the depth docs playground
+(`?embed=depth`) on the demo's dev server (port 5195 by default, `--port`),
+in headless Chrome over CDP or headless Firefox over WebDriver BiDi
+(`--browser=firefox`). It plays both layers at 1x and 2x and checks, every
+50 ms, that the depth drawn is the frame on screen's and a preview while
+playing, that the exact frame replaces it after a pause, that a seek and a
+drag never show another frame's depth, and that the page never holds two
+preview decoders. It also compares one preview frame with the exact frames
+around it, and its codes with the codes the producer wrote. `--screens=<dir>`
+saves screenshots of each step. Build the packages first: the demo runs the
+built package.
 
 Timing numbers are local-machine measurements; the report records the host's
 load average, and numbers taken on a busy machine are not comparable. The
 exactness verdicts are not timings and hold regardless.
 
-Tracked summary findings live in [`findings.md`](findings.md) and
-[`findings.csv`](findings.csv). Regenerate the local detailed report before
-updating those files.
+Tracked summary findings live in [`findings.md`](findings.md),
+[`findings.csv`](findings.csv) (cases 1 to 3) and
+[`findings-preview.csv`](findings-preview.csv) (cases 4 and 6). Regenerate the
+local detailed report before updating those files.

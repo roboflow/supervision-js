@@ -12,6 +12,16 @@ import {
   type BackendDescription,
 } from "./pixi-backend";
 import {
+  readClipSize,
+  runPreviewCodesProbe,
+  runPreviewDecode,
+  runPreviewPlayback,
+  type PreviewClip,
+  type PreviewCodesCase,
+  type PreviewDecodeCase,
+  type PreviewPlaybackCase,
+} from "./preview-playback";
+import {
   runUploadRender,
   type Resolution,
   type UploadRenderCase,
@@ -37,6 +47,9 @@ export interface DepthGpuBenchmarkReport {
   readonly decode: readonly DecodeCase[];
   readonly uploadRender: readonly UploadRenderCase[];
   readonly memory: readonly MemoryCase[];
+  readonly previewCodes: PreviewCodesCase | null;
+  readonly previewDecode: readonly PreviewDecodeCase[];
+  readonly previewPlayback: readonly PreviewPlaybackCase[];
 }
 
 declare global {
@@ -52,7 +65,27 @@ const RESOLUTIONS: readonly Resolution[] = [
 ];
 /** Frames of the synthetic scene per resolution, far enough apart to differ. */
 const FRAME_TIMES_SECONDS = [0.5, 1.5, 2.5, 3.5];
-const ALL_CASES = ["exactness", "decode", "upload", "memory"] as const;
+const ALL_CASES = [
+  "exactness",
+  "decode",
+  "upload",
+  "memory",
+  "preview",
+  "playback",
+] as const;
+/**
+ * The Spring fixture's preview, and the runner's resizes of it with the
+ * producer's encoder settings (`run-gpu.mjs` writes them with ffmpeg).
+ */
+const PREVIEW_CLIPS: readonly PreviewClip[] = [
+  {
+    label: "720p",
+    url: "/demo/fixtures/spring_stereo_depth/sgbm/preview.mp4",
+  },
+  { label: "1080p", url: "/benchmark/depth/results/preview-1080p.mp4" },
+  { label: "4K", url: "/benchmark/depth/results/preview-4k.mp4" },
+];
+const PLAYBACK_RATES = [1, 2, 8];
 
 const params = new URLSearchParams(window.location.search);
 const statusElement = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -85,6 +118,31 @@ async function run() {
   const exactness: ExactnessCase[] = [];
   const uploadRender: UploadRenderCase[] = [];
   const decode: DecodeCase[] = [];
+  const previewDecode: PreviewDecodeCase[] = [];
+  const previewPlayback: PreviewPlaybackCase[] = [];
+  let previewCodes: PreviewCodesCase | null = null;
+  const clips: PreviewClip[] = [];
+
+  if (cases.has("preview") || cases.has("playback")) {
+    setStatus("Probing the page's preview decoders...");
+    try {
+      previewCodes = await runPreviewCodesProbe();
+    } catch (error) {
+      errors.push(`preview probe: ${String(error)}`);
+    }
+    for (const clip of PREVIEW_CLIPS) {
+      if (
+        resolutions.some(({ label }) => label === clip.label) &&
+        (await readClipSize(clip))
+      ) {
+        clips.push(clip);
+      } else if (resolutions.some(({ label }) => label === clip.label)) {
+        errors.push(
+          `${clip.url} did not open; run the benchmark through run-gpu.mjs, which writes it.`,
+        );
+      }
+    }
+  }
   const framesByResolution = new Map<
     string,
     ReturnType<typeof renderSyntheticDisparity>[]
@@ -135,6 +193,20 @@ async function run() {
         setStatus(`${requested}: exactness probe...`);
         exactness.push(...(await runExactnessProbe(backend)));
       }
+      if (cases.has("playback") && previewPlayback.length === 0) {
+        for (const clip of clips) {
+          for (const rate of PLAYBACK_RATES) {
+            for (const uploadAhead of [false, true]) {
+              setStatus(
+                `${requested}: playback ${clip.label} at ${rate}x${uploadAhead ? ", uploading ahead" : ""}...`,
+              );
+              previewPlayback.push(
+                await runPreviewPlayback(backend, clip, rate, uploadAhead),
+              );
+            }
+          }
+        }
+      }
       if (cases.has("upload")) {
         for (const resolution of resolutions) {
           const frames = framesFor(resolution).map((frame) => ({
@@ -159,6 +231,35 @@ async function run() {
       );
     } finally {
       backend.destroy();
+    }
+  }
+
+  if (cases.has("preview") && previewCodes) {
+    const decoders = [
+      previewCodes.chosen,
+      ...previewCodes.verdicts
+        .filter(
+          ({ hardwareAcceleration, supported }) =>
+            supported && hardwareAcceleration !== previewCodes!.chosen,
+        )
+        .map(({ hardwareAcceleration }) => hardwareAcceleration),
+    ] as HardwareAcceleration[];
+
+    for (const clip of clips) {
+      for (const decoder of decoders) {
+        // The session copies in its worker; the page copy is the fallback.
+        for (const copy of ["worker", "page"] as const) {
+          if (copy === "page" && decoder !== previewCodes.chosen) continue;
+          setStatus(`Preview decode ${clip.label} (${decoder}, ${copy})...`);
+          try {
+            previewDecode.push(await runPreviewDecode(clip, decoder, copy));
+          } catch (error) {
+            errors.push(
+              `preview decode ${clip.label} ${decoder} ${copy}: ${String(error)}`,
+            );
+          }
+        }
+      }
     }
   }
 
@@ -191,6 +292,9 @@ async function run() {
     },
     exactness,
     memory: cases.has("memory") ? resolutions.map(computeMemoryCase) : [],
+    previewCodes,
+    previewDecode,
+    previewPlayback,
     uploadRender,
   };
 

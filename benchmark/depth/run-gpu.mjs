@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* global fetch, process, URL, WebSocket */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +19,8 @@ const { values: flags } = parseArgs({
     browser: { default: "chrome", type: "string" },
     // Page query without "?", such as cases=exactness&backends=webgl.
     query: { default: "", type: "string" },
+    // The benchmark server's port; another checkout may hold the default.
+    port: { default: "5187", type: "string" },
   },
 });
 const browser = flags.browser;
@@ -29,13 +31,14 @@ const chromePath =
 const firefoxPath =
   process.env.FIREFOX_BIN ?? "/Applications/Firefox.app/Contents/MacOS/firefox";
 const viteBin = path.join(rootDir, "node_modules/.bin/vite");
-const benchmarkPort = 5187;
+const benchmarkPort = Number(flags.port);
 const pagePath = "/benchmark/depth/gpu/index.html";
 const benchmarkUrl = `http://127.0.0.1:${benchmarkPort}${pagePath}`;
 const benchmarkTimeoutMs = 900_000;
 
 async function main() {
   await fs.mkdir(outputDir, { recursive: true });
+  await writePreviewClips();
 
   const server = startViteServer();
   let browserProcess;
@@ -117,6 +120,73 @@ async function stopProcess(child) {
   await Promise.race([exited, delay(5000)]);
 }
 
+/**
+ * The preview cases decode the Spring fixture's 720p preview and two resizes
+ * of it, written here with the producer's encoder settings so they decode
+ * like a real preview at that size. Without ffmpeg those rows are skipped.
+ */
+async function writePreviewClips() {
+  const source = path.join(
+    rootDir,
+    "demo/fixtures/spring_stereo_depth/sgbm/preview.mp4",
+  );
+  const sizes = [
+    ["preview-1080p.mp4", 1920, 1080],
+    ["preview-4k.mp4", 3840, 2160],
+  ];
+
+  for (const [name, width, height] of sizes) {
+    const target = path.join(outputDir, name);
+
+    try {
+      await fs.access(target);
+      continue;
+    } catch {
+      // Not written yet.
+    }
+
+    const result = spawnSync(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        source,
+        "-vf",
+        `scale=${width}:${height}:flags=neighbor,format=yuv420p`,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "18",
+        "-tune",
+        "psnr",
+        "-g",
+        "24",
+        "-keyint_min",
+        "24",
+        "-sc_threshold",
+        "0",
+        "-bsf:v",
+        "h264_metadata=video_full_range_flag=1",
+        "-movflags",
+        "+faststart",
+        target,
+      ],
+      { stdio: "inherit" },
+    );
+
+    if (result.status !== 0) {
+      console.warn(
+        `Could not write ${name} with ffmpeg; its rows are skipped.`,
+      );
+    }
+  }
+}
+
 function startViteServer() {
   const server = spawn(
     viteBin,
@@ -131,6 +201,7 @@ function startViteServer() {
     ],
     {
       cwd: rootDir,
+      env: { ...process.env, DEPTH_BENCHMARK_PORT: String(benchmarkPort) },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -438,6 +509,24 @@ function renderConsoleSummary(report) {
       (row) =>
         `Upload/render ${row.backend} ${row.resolution} ${row.encoding}: upload+render ${formatMs(row.uploadAndRenderMs.median)}, render ${formatMs(row.renderOnlyMs.median)}, upload share ${formatMs(row.uploadShareMs)}`,
     ),
+    "",
+    ...(report.previewCodes
+      ? [
+          `Preview codes: chose ${report.previewCodes.chosen}, residual error ${report.previewCodes.residualError}${report.previewCodes.correction ? " (corrected)" : ""}`,
+          ...report.previewCodes.verdicts.map(
+            (row) =>
+              `  ${row.hardwareAcceleration}: ${row.supported ? (row.exact ? "exact" : `${row.mismatchedCodes} codes off by up to ${row.maxError}, 0->${row.codeZeroReadsAs}, 255->${row.code255ReadsAs}`) : "not offered"}${row.lumaPath ? ` (${row.lumaPath})` : ""}${row.error ? ` ${row.error}` : ""}`,
+          ),
+        ]
+      : []),
+    ...(report.previewDecode ?? []).map(
+      (row) =>
+        `Preview decode ${row.clip} ${row.decoder} (${row.copy} copy): ${row.framesPerSecond.toFixed(0)} fps, copy ${formatMs(row.copyMs.median)} (p95 ${formatMs(row.copyMs.p95)}), longest block ${formatMs(row.longestBlockMs)}`,
+    ),
+    ...(report.previewPlayback ?? []).map(
+      (row) =>
+        `Playback ${row.clip} ${row.rate}x${row.uploadAhead ? " ahead" : ""}: ${row.presents} presents, ${row.presentsWithoutDepth} without depth, ${row.gateHolds} holds (${row.gateAbandoned} gave up, ${row.heldMs.toFixed(0)} ms), present ${formatMs(row.presentMs.median)} p95 ${formatMs(row.presentMs.p95)}, uploads in present ${row.uploadsInPresent}, copy ${formatMs(row.copyMsPerDecodedFrame)}/frame, seek ${row.seekToPreviewMs === null ? "-" : formatMs(row.seekToPreviewMs)}`,
+    ),
   ].join("\n");
 }
 
@@ -467,7 +556,26 @@ function renderReport(report) {
   const memoryRows = report.memory
     .map(
       (row) =>
-        `| ${row.resolution} | ${formatBytes(row.exactFrameBytes)} | ${formatBytes(row.previewFrameBytes)} | ${row.exactCacheFrames} (${row.exactCacheFramesWithConfidence} with confidence) | ${row.previewWindowFrames} (${row.previewLeadSeconds.toFixed(2)} s lead) | ${formatBytes(row.stillImageCpuBytes)} | ${formatBytes(row.decodeTransientBytes)} | ${formatBytes(row.gpuRingBytes)} + ${formatBytes(row.gpuLutBytes)}/colormap |`,
+        `| ${row.resolution} | ${formatBytes(row.exactFrameBytes)} | ${formatBytes(row.previewFrameBytes)} | ${formatBytes(row.maxExactCacheBytes)}: ${row.exactCacheFrames} (${row.exactCacheFramesWithConfidence} with confidence) | ${formatBytes(row.maxPreviewCacheBytes)}: ${row.previewWindowFrames} (${row.previewLeadSeconds.toFixed(2)} s lead) | ${formatBytes(row.stillImageCpuBytes)} | ${formatBytes(row.decodeTransientBytes)} | ${formatBytes(row.gpuRingBytes)} + ${formatBytes(row.gpuLutBytes)}/colormap |`,
+    )
+    .join("\n");
+
+  const codesRows = (report.previewCodes?.verdicts ?? [])
+    .map(
+      (row) =>
+        `| ${row.hardwareAcceleration} | ${row.supported ? "yes" : "no"} | ${row.exact === null ? "-" : row.exact ? "yes" : "no"} | ${row.mismatchedCodes ?? "-"} | ${row.maxError ?? "-"} | ${row.codeZeroReadsAs ?? "-"} | ${row.code255ReadsAs ?? "-"} | ${row.lumaPath ?? "-"} |`,
+    )
+    .join("\n");
+  const previewDecodeRows = (report.previewDecode ?? [])
+    .map(
+      (row) =>
+        `| ${row.clip} | ${row.width}x${row.height} | ${row.decoder} | ${row.copy} | ${row.frames} | ${row.framesPerSecond.toFixed(0)} | ${formatMs(row.copyMs.median)} | ${formatMs(row.copyMs.p95)} | ${formatMs(row.longestBlockMs)} | ${row.lumaPath ?? "-"} |`,
+    )
+    .join("\n");
+  const playbackRows = (report.previewPlayback ?? [])
+    .map(
+      (row) =>
+        `| ${row.clip} | ${row.rate}x | ${row.uploadAhead ? "ahead" : "in present"} | ${row.budgetMiB.toFixed(0)} MiB (${row.budgetLeadSeconds.toFixed(2)} s) | ${row.presents} | ${row.presentsWithoutDepth} | ${row.gateHolds} | ${row.gateAbandoned} | ${row.heldMs.toFixed(0)} ms | ${formatMs(row.presentMs.median)} | ${formatMs(row.presentMs.p95)} | ${row.uploadsInPresent} | ${formatMs(row.copyMsPerDecodedFrame)} | ${formatMs(row.longestBlockMs)} | ${row.seekToPreviewMs === null ? "-" : formatMs(row.seekToPreviewMs)} |`,
     )
     .join("\n");
 
@@ -510,9 +618,41 @@ WebGPU: \`onSubmittedWorkDone\`). The upload share is the difference of the two 
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 ${uploadRows}
 
-## 5. Memory at the proposed default budgets (computed)
+## 4. Preview decode
 
-| Resolution | Exact frame | Preview frame | Exact cache (128 MiB) | Preview window (96 MiB) | Still image CPU | Decode transient | GPU ring (3 slots) + LUT |
+Preview codes through each decoder the page offers (the library's once-per-page
+probe), then every frame of a 192-frame preview decoded back to back through
+the library's reader, its luma copied in the render-preparation worker (the
+session's way) or on the page (the fallback). The main-thread copy is the
+page's time handing a frame over and, on the page, copying its luma out; the
+longest block is the longest the main thread was busy at a stretch while
+decoding. \`no-preference\` is probed at the probe's 256x256, where Chrome
+picks its software decoder; at 720p and up it picks its hardware one.
+
+| Decoder | Offered | Exact | Codes changed | Max error | 0 reads as | 255 reads as | Luma path |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+${codesRows}
+
+| Clip | Size | Decoder | Copied in | Frames | fps | Main-thread copy median | P95 | Longest block | Luma path |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+${previewDecodeRows}
+
+## 6. Playback with the gate, and seeking
+
+The library's preview window plays each clip at a rate with the session's
+default gate (stop below 0.1 s of wall time, resume 0.2 s later, at most 1 s
+of timeline, give up after 2 s), for 4 s of wall time or the whole clip. Each
+animation frame presents the frame's preview through the texture ring and
+the depth shader, uploading it in the present or ahead of it. Seek is the
+time from a seek to the middle of the clip, at rest, to its preview decoded.
+
+| Clip | Rate | Upload | Budget (lead) | Presents | Without depth | Holds | Gave up | Held | Present median | P95 | Uploads in present | Copy / frame | Longest block | Seek to preview |
+| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+${playbackRows}
+
+## 5. Memory at the default budgets (computed)
+
+| Resolution | Exact frame | Preview frame | Exact cache | Preview window | Still image CPU | Decode transient | GPU rings (3 slots each) + LUT |
 | --- | ---: | ---: | --- | --- | ---: | ---: | --- |
 ${memoryRows}
 `;

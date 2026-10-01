@@ -5,7 +5,15 @@
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "paths": {
-      "#renderers/*": ["./../../../packages/web/src/renderers/*"]
+      "#constants/*": ["./../../../packages/web/src/constants/*"],
+      "#detections/*": ["./../../../packages/web/src/detections/*"],
+      "#media/*": ["./../../../packages/web/src/media/*"],
+      "#render-preparation/*": [
+        "./../../../packages/web/src/render-preparation/*"
+      ],
+      "#renderers/*": ["./../../../packages/web/src/renderers/*"],
+      "#types/*": ["./../../../packages/web/src/types/*"],
+      "#workers/*": ["./../../../packages/web/src/workers/*"]
     },
     "strict": true,
     "noEmit": true,

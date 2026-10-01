@@ -93,6 +93,7 @@
     "benchmark:depth:gpu": "npm run benchmark:depth:core && npm run benchmark:depth:gpu:build && node benchmark/depth/run-gpu.mjs",
     "benchmark:depth:gpu:dev": "npm run benchmark:depth:core && vite --config benchmark/depth/gpu/vite.config.ts --host 127.0.0.1 --port 5187",
     "benchmark:depth:gpu:build": "tsc --noEmit -p benchmark/depth/gpu/tsconfig.json && vite build --config benchmark/depth/gpu/vite.config.ts",
+    "benchmark:depth:playback": "npm run build && node benchmark/depth/run-playback.mjs",
     "fixture:sam3:dev": "npm run build && vite --config tools/sam3-fixture/vite.config.ts",
     "fixture:sam3:restore": "npm run build -w supervision-js-core && node tools/sam3-fixture/restore-detections.mjs",
     "fixture:sam3:build": "npm run build && tsc --noEmit -p tools/sam3-fixture/tsconfig.json && vite build --config tools/sam3-fixture/vite.config.ts",

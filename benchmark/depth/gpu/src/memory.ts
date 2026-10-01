@@ -1,20 +1,24 @@
+import { resolveDepthClipOptions } from "../../../../packages/web/src/render-preparation/depth-source";
 import type { Resolution } from "./upload-render";
 
-const MIB = 1024 * 1024;
-
-/** The render-preparation defaults the build plan proposes (P6 tunes them). */
+/**
+ * The library's depth budgets for a 30 fps clip. The byte budgets scale with
+ * the clip's resolution; `resolveDepthClipOptions` is the one place they are
+ * set.
+ */
 export const DEPTH_BUDGET_DEFAULTS = {
   exactNeighborFrameCount: 2,
   frameRate: 30,
   lutBytes: 256 * 4,
-  maxExactCacheBytes: 128 * MIB,
-  maxPreviewCacheBytes: 96 * MIB,
+  previewPrefetchSeconds: 1,
   previewRetainSeconds: 0.25,
   textureRingSlots: 3,
 } as const;
 
 export interface MemoryCase {
   readonly resolution: string;
+  readonly maxExactCacheBytes: number;
+  readonly maxPreviewCacheBytes: number;
   readonly exactFrameBytes: number;
   readonly confidenceFrameBytes: number;
   readonly previewFrameBytes: number;
@@ -44,22 +48,32 @@ export function computeMemoryCase(resolution: Resolution): MemoryCase {
   const pixels = resolution.width * resolution.height;
   const exactFrameBytes = pixels * 2;
   const previewFrameBytes = pixels;
+  const budgets = resolveDepthClipOptions({
+    exactFrameBytes,
+    frameRate: DEPTH_BUDGET_DEFAULTS.frameRate,
+    previewFrameBytes,
+  });
+  const maxExactCacheBytes = budgets.exact.maxCacheBytes;
+  const maxPreviewCacheBytes = budgets.preview.maxCacheBytes;
   const previewWindowFrames = Math.floor(
-    DEPTH_BUDGET_DEFAULTS.maxPreviewCacheBytes / previewFrameBytes,
+    maxPreviewCacheBytes / previewFrameBytes,
   );
 
   return {
     confidenceFrameBytes: pixels,
     decodeTransientBytes: (resolution.width * 2 + 1) * resolution.height,
-    exactCacheFrames: Math.floor(
-      DEPTH_BUDGET_DEFAULTS.maxExactCacheBytes / exactFrameBytes,
-    ),
+    exactCacheFrames: Math.floor(maxExactCacheBytes / exactFrameBytes),
     exactCacheFramesWithConfidence: Math.floor(
-      DEPTH_BUDGET_DEFAULTS.maxExactCacheBytes / (exactFrameBytes + pixels),
+      maxExactCacheBytes / (exactFrameBytes + pixels),
     ),
     exactFrameBytes,
+    maxExactCacheBytes,
+    maxPreviewCacheBytes,
     gpuLutBytes: DEPTH_BUDGET_DEFAULTS.lutBytes,
-    gpuRingBytes: DEPTH_BUDGET_DEFAULTS.textureRingSlots * exactFrameBytes,
+    // One ring of exact textures and one of preview textures.
+    gpuRingBytes:
+      DEPTH_BUDGET_DEFAULTS.textureRingSlots *
+      (exactFrameBytes + previewFrameBytes),
     previewFrameBytes,
     previewLeadSeconds:
       previewWindowFrames / DEPTH_BUDGET_DEFAULTS.frameRate -
