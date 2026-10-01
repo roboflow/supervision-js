@@ -445,6 +445,60 @@ test("tracking post processing has a focused live playground", async () => {
   assert.doesNotMatch(chipRule ?? "", /transform:/);
 });
 
+test("the depth page embeds its fixture playground with a synced snippet", async () => {
+  // Depth has its own embed route, outside the annotation-renderer router
+  // checked below, so this rule is what keeps page, route and fixture joined.
+  const page = await readFile(
+    path.join(publicDocsDir, "annotation-renderers/depth.md"),
+    "utf8",
+  );
+  const demoApp = await readFile(
+    path.join(rootDir, "demo/src/App.tsx"),
+    "utf8",
+  );
+  const playground = await readFile(
+    path.join(rootDir, "demo/src/components/DocsDepthPlayground.tsx"),
+    "utf8",
+  );
+  const controls = await readFile(
+    path.join(rootDir, "demo/src/components/DepthRendererControls.tsx"),
+    "utf8",
+  );
+  const snippet = await readFile(
+    path.join(rootDir, "demo/src/docs-depth.ts"),
+    "utf8",
+  );
+  const fixtureMeta = JSON.parse(
+    await readFile(
+      path.join(rootDir, "demo/fixtures/spring_stereo_depth/fixture.meta.json"),
+      "utf8",
+    ),
+  );
+  const roadmap = await readFile(
+    path.join(rootDir, "docs/internal/annotator-use-case-roadmap.md"),
+    "utf8",
+  );
+
+  assert.match(page, /data-supervision-playground-src="demo\/\?embed=depth"/);
+  assert.match(page, /annotationRenderers\.depth\(/);
+  assert.match(page, /CC BY 4\.0/);
+  assert.match(demoApp, /embeddedView === "depth"\)/);
+  assert.match(demoApp, /<DocsDepthPlayground \/>/);
+  assert.match(playground, /const DEPTH_FIXTURE = "spring_stereo_depth"/);
+  assert.match(playground, /createDocsDepthRenderer\(settings\)/);
+  assert.match(playground, /<DepthLiveCode settings=\{settings\} \/>/);
+  assert.match(playground, /CC BY 4\.0/);
+  assert.match(controls, /createDocsDepthSnippet\(props\.settings\)/);
+  assert.match(snippet, /session\.setPresentation\(\{/);
+  assert.match(snippet, /annotationRenderers\.depth\(\{/);
+  assert.equal(fixtureMeta.sampleName, "spring_stereo_depth");
+  assert.ok(fixtureMeta.depth.layers.length >= 1);
+  assert.match(
+    roadmap,
+    /\| Depth maps +\| Implemented \(`depth`\) +\| `spring_stereo_depth`[^|]*\| Live playground +\|/,
+  );
+});
+
 test("every fixture-backed annotation renderer has a focused live playground", async () => {
   const renderers = [
     "boxes",

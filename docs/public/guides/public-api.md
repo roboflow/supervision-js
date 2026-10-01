@@ -69,8 +69,9 @@ Start here for normal application code:
   composite composes children that were each inferred at a different size, and
   every child is projected from its own space before composition
 - depth maps: `MediaSessionOptions.depth` (a `DepthMap`, or a `depth.json`
-  manifest the session fetches and decodes), and the `depth` annotation
-  renderer. Depth is its own channel beside detections, never a
+  manifest the session fetches and decodes: a still image, or a clip of exact
+  frames drawn over engine-backed media while playback rests), and the `depth`
+  annotation renderer. Depth is its own channel beside detections, never a
   `DetectionFrame` field, and a map is stretched over the media rectangle
   rather than projected by `coordinateSpace`
 - `Detection`

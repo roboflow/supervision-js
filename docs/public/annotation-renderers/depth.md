@@ -13,8 +13,35 @@ session receives it through its `depth` option, and
 is stretched over the whole media rectangle, like a mask, so it may be smaller
 than the media as long as it keeps the media's aspect ratio (within 1%).
 
-This page has no live playground yet. A playground needs a committed stereo
-fixture with real model output, and that fixture is still pending.
+<div class="supervision-layer-playground">
+  <iframe
+    data-supervision-playground-src="demo/?embed=depth"
+    loading="lazy"
+    title="Interactive depth map playground"
+  ></iframe>
+</div>
+
+The playground plays eight seconds of a rendered stereo shot, Spring sequence
+0021, with two disparity layers for its left view:
+
+- **Stereo matcher (OpenCV SGBM)** is what OpenCV's semi-global block matcher
+  finds on the stereo pair: the kind of map a matcher or depth model hands the
+  renderer, with its holes (the leftmost 64 columns, occlusions, rejected
+  matches) and its errors.
+- **Ground truth (Spring)** is the disparity the dataset rendered for the same
+  frames. Only the sky has no depth.
+
+Both layers are exact 16-bit maps, one PNG per frame, loaded from a clip
+`depth.json`. Depth is drawn while the clip rests, so pause and step a frame at
+a time; the readout's depth frame is always the frame on screen. Turn on
+**Paint pixels without depth** to see where the matcher found nothing.
+
+The clip is adapted from the Spring dataset by Mehl et al. (CVPR 2023,
+[doi:10.18419/darus-3376](https://doi.org/10.18419/darus-3376)) and the Spring
+open movie by Blender Foundation, both under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The fixture's
+`demo/fixtures/spring_stereo_depth/README.md` lists the changes made and how
+each layer was computed.
 
 A producer's `depth.json` and 16-bit PNG load with `depth: { manifest }`. The
 session fetches the PNG, decodes it in its render-preparation worker, and
@@ -27,6 +54,28 @@ const session = await createMediaSession({
   container,
   media: "left.png",
   depth: { manifest: "depth/depth.json" },
+  presentation: { renderers: [annotationRenderers.depth()] },
+});
+```
+
+A clip manifest names one PNG per video frame, so its media must come with a
+frame index: the web video engine source. The session draws the exact frame
+for the video frame on screen once playback rests:
+
+```ts
+import {
+  annotationRenderers,
+  createMediaSession,
+  createWebVideoEngineMediaRendererSource,
+} from "supervision";
+import { SourceKind } from "supervision/web-video-engine";
+
+const session = await createMediaSession({
+  container,
+  media: createWebVideoEngineMediaRendererSource({
+    source: { kind: SourceKind.Url, url: "left.mp4" },
+  }),
+  depth: { manifest: "sgbm/depth.json" },
   presentation: { renderers: [annotationRenderers.depth()] },
 });
 ```
