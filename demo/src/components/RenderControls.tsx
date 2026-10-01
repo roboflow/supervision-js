@@ -167,7 +167,7 @@ function GlobalRenderControls({
             checked={settings.depthEnabled}
             disabled={availability?.depthEnabled === false}
             label="Depth"
-            tooltip="A sample's depth clip, drawn while playback rests. It plays on the Web video engine media path."
+            tooltip="A sample's depth clip: 8-bit preview depth while playing, exact depth once playback rests. It plays on the Web video engine media path."
             onChange={(checked) => onChange("depthEnabled", checked)}
           />
           <ToggleControl

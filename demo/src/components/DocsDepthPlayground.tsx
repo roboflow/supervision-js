@@ -32,8 +32,8 @@ const DEPTH_FIXTURE = "spring_stereo_depth";
 /**
  * The depth renderer over the Spring stereo fixture: the left view of a
  * rendered shot, with the dataset's ground-truth disparity and a stereo
- * matcher's disparity as two layers. Clip depth is exact and drawn while
- * playback rests, so stepping is how a reader compares frames.
+ * matcher's disparity as two layers. While the clip plays, each frame's
+ * 8-bit preview depth is drawn; once it rests, the exact frame replaces it.
  */
 export function DocsDepthPlayground() {
   const fixture = useMemo(requireDepthFixture, []);
@@ -160,15 +160,20 @@ export function DocsDepthPlayground() {
     rendererState?.playbackState === MediaRendererPlaybackState.Playing ||
     rendererState?.playbackState === MediaRendererPlaybackState.Buffering;
   const depthFrame = pointer.active?.frameIndex ?? null;
+  const onScreen = depthFrame !== null && depthFrame === frame;
   const depthStatus = failure
     ? `Failed: ${failure}`
     : !ready
       ? "Opening the Spring clip…"
       : isPlaying
-        ? "Playing: depth is drawn when paused"
-        : depthFrame !== null && depthFrame === frame
+        ? onScreen
+          ? `Playing: 8-bit preview depth for frame ${frame}`
+          : "Playing: decoding preview depth…"
+        : onScreen && pointer.active?.precision === "exact"
           ? `Exact depth for frame ${frame}`
-          : `Loading exact depth for frame ${frame ?? "…"}`;
+          : onScreen
+            ? `Preview depth for frame ${frame}; loading exact…`
+            : `Loading depth for frame ${frame ?? "…"}`;
   const layer = layerFor(depth, layerId);
 
   return (
@@ -268,11 +273,7 @@ export function DocsDepthPlayground() {
         <DepthReadoutPanel
           frameIndex={depthFrame}
           idleStatus={
-            isPlaying
-              ? "No depth while playing"
-              : depthFrame === null
-                ? "Loading depth…"
-                : "Point at the picture"
+            depthFrame === null ? "Loading depth…" : "Point at the picture"
           }
           kind={pointer.active?.map.kind}
           readout={pointer.readout}
