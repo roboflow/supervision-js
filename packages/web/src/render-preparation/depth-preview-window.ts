@@ -375,7 +375,15 @@ export function createDepthPreviewWindow(
     };
   };
 
+  /**
+   * The frame the gate last let through. It is presented a moment after the
+   * wait ends, by when the playhead may have moved on, as it does when seeks
+   * follow each other quickly; dropping it then would present it bare.
+   */
+  let released: number | null = null;
+
   const waitedFor = (index: number) => {
+    if (index === released) return true;
     for (const waiter of waiters) if (waiter.index === index) return true;
 
     return false;
@@ -802,7 +810,10 @@ export function createDepthPreviewWindow(
         playhead = frame;
         placed = true;
       }
-      if (isReady(frame, resumeAtSeconds)) return Promise.resolve();
+      if (isReady(frame, resumeAtSeconds)) {
+        released = frame;
+        return Promise.resolve();
+      }
 
       gateHoldCount += 1;
 
@@ -817,6 +828,7 @@ export function createDepthPreviewWindow(
         };
         const finish = () => {
           waiters.delete(waiter);
+          if (entries.has(frame)) released = frame;
           signal?.removeEventListener("abort", finish);
           options.onChange?.();
           resolve();

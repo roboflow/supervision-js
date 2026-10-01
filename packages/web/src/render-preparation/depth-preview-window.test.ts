@@ -381,6 +381,22 @@ describe("depth preview window", () => {
     expect(window.getEntry(47)).not.toBeNull();
   });
 
+  it("keeps the frame the gate let through until the next one, however far the playhead jumps meanwhile", async () => {
+    const { source, window } = setup({ active: false, keyEvery: 10 });
+
+    await window.waitForReady(40, thresholds(0.3), undefined);
+    // The next seek lands before frame 40 is presented.
+    window.setPlayhead(80);
+    await source.drain();
+    expect(window.getEntry(40)).not.toBeNull();
+
+    await window.waitForReady(80, thresholds(0.3), undefined);
+    window.setPlayhead(81);
+    await source.drain();
+    expect(window.getEntry(40)).toBeNull();
+    expect(window.getEntry(80)).not.toBeNull();
+  });
+
   it("gives up on a frame its decoder never produces instead of restarting forever", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { source, window } = setup({ missing: [0], prefetchSeconds: 0.3 });
