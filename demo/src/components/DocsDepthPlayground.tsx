@@ -3,6 +3,7 @@ import {
   createMediaSession,
   MediaRendererPlaybackState,
   type DepthMap,
+  type DepthPlaybackSource,
   type DepthQuantity,
   type MediaRendererState,
   type MediaSession,
@@ -37,7 +38,9 @@ type DepthLoad =
  * The depth renderer over the Spring stereo fixture: the left view of a
  * rendered shot, with the dataset's ground-truth disparity and a stereo
  * matcher's disparity as two layers. While the clip plays, each frame's
- * 8-bit preview depth is drawn; once it rests, the exact frame replaces it.
+ * exact 16-bit depth is drawn when it loads fast enough, its 8-bit preview
+ * otherwise; once it rests, the exact frame is drawn. `?depthPlayback=`
+ * `preview`, `exact` or `auto` picks what plays, for comparing them.
  *
  * The clip opens without depth and plays at once; each layer's depth loads
  * through `setDepth()`, which says when it is up or why it is not.
@@ -85,7 +88,11 @@ export function DocsDepthPlayground() {
           presentation: {
             renderers: [createDocsDepthRenderer(settingsRef.current)],
           },
-          renderer: { autoPlay: false, loop: true },
+          renderer: {
+            autoPlay: false,
+            loop: true,
+            renderPreparation: { depth: { playback: depthPlaybackFromUrl() } },
+          },
         });
         if (cancelled) {
           session.destroy();
@@ -189,10 +196,12 @@ export function DocsDepthPlayground() {
             : "Loading depth…"
           : isPlaying
             ? onScreen
-              ? `Playing: 8-bit preview depth for frame ${frame}`
+              ? pointer.active?.precision === "exact"
+                ? `Playing: exact depth for frame ${frame}`
+                : `Playing: 8-bit preview depth for frame ${frame}`
               : previewOff
                 ? "Playing: depth shows once paused"
-                : "Playing: decoding preview depth…"
+                : "Playing: decoding depth…"
             : onScreen && pointer.active?.precision === "exact"
               ? `Exact depth for frame ${frame}`
               : onScreen
@@ -350,4 +359,16 @@ function requireDepthFixture(): DemoFixtureDefinition & {
 
 function layerFor(depth: DemoFixtureDepthDefinition, id: string) {
   return depth.layers.find((layer) => layer.id === id) ?? depth.layers[0]!;
+}
+
+/** What plays, from `?depthPlayback=`; the library's default otherwise. */
+function depthPlaybackFromUrl(): DepthPlaybackSource | undefined {
+  const value =
+    typeof location === "undefined"
+      ? null
+      : new URLSearchParams(location.search).get("depthPlayback");
+
+  return value === "auto" || value === "exact" || value === "preview"
+    ? value
+    : undefined;
 }

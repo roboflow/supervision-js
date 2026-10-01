@@ -4,13 +4,17 @@
 /**
  * Plays the depth docs playground (`?embed=depth`, the Spring stereo fixture)
  * in a headless browser and checks depth during playback: the depth drawn is
- * always the frame on screen's, the preview is drawn while playing and the
- * exact frame once paused, a seek never shows the previous frame's depth, and
- * the preview decoder never has a second instance alive. It captures
- * screenshots on the way.
+ * always the frame on screen's, the depth `--playback` asks for is drawn while
+ * playing (the preview for `preview`, exact frames for `exact`, either for
+ * `auto`) and the exact frame once paused, a seek never shows the previous
+ * frame's depth, and the preview decoder never has a second instance alive.
+ * Each run reports the frames presented per second, gate holds, how often
+ * exact depth played, and, on Chrome, the browser's CPU time per frame. It
+ * captures screenshots on the way.
  *
  *   npm run build
  *   node benchmark/depth/run-playback.mjs --screens=<dir> [--browser=firefox]
+ *     [--playback=auto|preview|exact]
  *
  * Chrome is driven over CDP and Firefox over WebDriver BiDi. The demo dev
  * server is started on `--port` (5195 by default), never on the demo's own.
@@ -31,6 +35,7 @@ const { values: flags } = parseArgs({
   options: {
     browser: { default: "chrome", type: "string" },
     layers: { default: "sgbm,ground-truth", type: "string" },
+    playback: { default: "auto", type: "string" },
     out: {
       default: path.join(rootDir, "benchmark/depth/results"),
       type: "string",
@@ -41,7 +46,8 @@ const { values: flags } = parseArgs({
   },
 });
 const port = Number(flags.port);
-const pageUrl = `http://127.0.0.1:${port}/?embed=depth`;
+const playbackMode = flags.playback;
+const pageUrl = `http://127.0.0.1:${port}/?embed=depth&depthPlayback=${playbackMode}`;
 const browserName = flags.browser;
 const viewport = { height: 900, width: 1440 };
 const chromePath =
@@ -121,6 +127,18 @@ const pageHelpers = `(() => {
       status: text(".depth-playground__status"),
     };
   };
+  /** The depth windows' diagnostics: holds, and how exact playback fares. */
+  const depthWindows = () => {
+    const artifacts = findSession()?.getState().renderPreparation?.artifacts ?? [];
+    return artifacts
+      .filter((artifact) => artifact.kind === "depthFrame")
+      .map((artifact) => ({
+        exactPlayback: artifact.exactPlayback ?? null,
+        gateHoldCount: artifact.gateHoldCount ?? 0,
+        precision: artifact.precision ?? "preview",
+        preparedAheadSeconds: artifact.preparedAheadSeconds ?? null,
+      }));
+  };
   const pointAt = (x, y) => {
     const mount = document.querySelector(".depth-playground__mount");
     const canvas = mount.querySelector("canvas") ?? mount;
@@ -166,7 +184,7 @@ const pageHelpers = `(() => {
     const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
     return { meanAbsCodeError: error / n, intercept: (sy - slope * sx) / n, pixels: n, slope };
   };
-  globalThis.__depthE2E = { codeFit, findSession, meanDifference, pointAt, setInput, slider, state, kept: new Map() };
+  globalThis.__depthE2E = { codeFit, depthWindows, findSession, meanDifference, pointAt, setInput, slider, state, kept: new Map() };
 })();`;
 
 async function main() {
@@ -189,6 +207,7 @@ async function main() {
 
     const report = {
       browser: browserName,
+      playback: playbackMode,
       generatedAt: new Date().toISOString(),
       runs: [],
       userAgent: null,
@@ -212,7 +231,10 @@ async function main() {
     );
     report.decoders = await evaluateJson(browser, "globalThis.__depthDecoders");
 
-    const file = path.join(flags.out, `latest-playback-${browserName}.json`);
+    const file = path.join(
+      flags.out,
+      `latest-playback-${browserName}-${playbackMode}.json`,
+    );
 
     await fs.writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
     console.log(renderSummary(report));
@@ -296,6 +318,11 @@ async function playThrough(browser, layer, rate) {
   );
 
   const samples = [];
+  const windowsBefore = await evaluateJson(
+    browser,
+    "__depthE2E.depthWindows()",
+  );
+  const cpuBefore = await browser.cpuSeconds?.();
   const started = Date.now();
   let screenshotTaken = false;
   let playingReadout = null;
@@ -307,7 +334,8 @@ async function playThrough(browser, layer, rate) {
     if (
       !screenshotTaken &&
       Date.now() - started > 1500 &&
-      state.active?.precision === "preview"
+      state.active &&
+      state.playbackState === "playing"
     ) {
       await browser.evaluate(`__depthE2E.pointAt(0.43, 0.62)`);
       playingReadout = await pageState(browser);
@@ -321,8 +349,20 @@ async function playThrough(browser, layer, rate) {
     await sleep(50);
   }
 
+  const cpuAfter = await browser.cpuSeconds?.();
+  const windowsAfter = await evaluateJson(browser, "__depthE2E.depthWindows()");
   const playing = samples.filter(
     (sample) => sample.playbackState === "playing",
+  );
+  const presentedFrames = countPresentedFrames(samples);
+  const elapsedSeconds = (samples.at(-1).t - samples[0].t) / 1000;
+  const holds = (precision) =>
+    (windowsAfter.find((window) => window.precision === precision)
+      ?.gateHoldCount ?? 0) -
+    (windowsBefore.find((window) => window.precision === precision)
+      ?.gateHoldCount ?? 0);
+  const exactWindow = windowsAfter.find(
+    (window) => window.precision === "exact",
   );
   const drawn = playing.filter((sample) => sample.active);
   const wrongFrame = samples.filter(
@@ -344,12 +384,27 @@ async function playThrough(browser, layer, rate) {
       `${name}: ${wrongFrame.length} samples drew another frame's depth`,
     );
   }
-  if (exactWhilePlaying.length > 0) {
-    failures.push(`${name}: exact depth drawn while playing`);
+  const previewWhilePlaying = playing.filter(
+    (sample) => sample.active?.precision === "preview",
+  );
+
+  if (playbackMode === "preview" && exactWhilePlaying.length > 0) {
+    failures.push(`${name}: exact depth drawn while the preview plays`);
   }
-  if (playingReadout && !/preview/.test(playingReadout.readoutStatus ?? "")) {
+  if (playbackMode === "exact" && previewWhilePlaying.length > 0) {
     failures.push(
-      `${name}: readout while playing says "${playingReadout.readoutStatus}"`,
+      `${name}: preview drawn in ${previewWhilePlaying.length} samples while exact depth plays`,
+    );
+  }
+  const readoutPrecision = playingReadout?.active?.precision;
+
+  if (
+    playingReadout &&
+    readoutPrecision &&
+    !new RegExp(readoutPrecision).test(playingReadout.readoutStatus ?? "")
+  ) {
+    failures.push(
+      `${name}: readout while playing ${readoutPrecision} depth says "${playingReadout.readoutStatus}"`,
     );
   }
 
@@ -472,6 +527,16 @@ async function playThrough(browser, layer, rate) {
   return {
     alignment,
     exactAfterPauseMs: exactAfterMs,
+    exactPlayingSamples: exactWhilePlaying.length,
+    previewPlayingSamples: previewWhilePlaying.length,
+    presentedFps: presentedFrames / elapsedSeconds,
+    targetFps: 24 * rate,
+    gateHolds: { exact: holds("exact"), preview: holds("preview") },
+    exactPlayback: exactWindow?.exactPlayback ?? null,
+    cpuMsPerFrame:
+      cpuBefore === undefined || cpuAfter === undefined || presentedFrames === 0
+        ? null
+        : ((cpuAfter - cpuBefore) * 1000) / presentedFrames,
     failures,
     layer,
     pausedPreviewBeforeExact: pausedPreview !== null,
@@ -517,6 +582,27 @@ async function scrubRapidly(browser) {
   );
 }
 
+/**
+ * Frames the playhead moved through while sampling, wrapping at the loop:
+ * at 2x a present skips one, and those count too, since the clock passed them.
+ */
+function countPresentedFrames(samples) {
+  let frames = 0;
+  let last = null;
+
+  for (const sample of samples) {
+    const frame = sample.presentedFrame;
+
+    if (frame === null) continue;
+    if (last !== null && frame !== last) {
+      frames += frame > last ? frame - last : frame + 192 - last;
+    }
+    last = frame;
+  }
+
+  return frames;
+}
+
 function pick(state) {
   return {
     active: state.active,
@@ -556,11 +642,15 @@ async function screenshot(browser, name) {
 }
 
 function renderSummary(report) {
-  const lines = [`Depth playback (${report.browser}): ${report.userAgent}`];
+  const lines = [
+    `Depth playback (${report.browser}, ${report.playback}): ${report.userAgent}`,
+  ];
 
   for (const run of report.runs) {
     lines.push(
-      `- ${run.layer} ${run.rate}x: depth in ${run.previewDrawnSamples}/${run.playingSamples} playing samples, ` +
+      `- ${run.layer} ${run.rate}x: ${run.presentedFps.toFixed(1)}/${run.targetFps} fps, exact in ${run.exactPlayingSamples} and preview in ${run.previewPlayingSamples} of ${run.playingSamples} playing samples, ` +
+        `gate holds ${JSON.stringify(run.gateHolds)}, CPU ${run.cpuMsPerFrame?.toFixed(1) ?? "?"} ms/frame, exact playback ${JSON.stringify(run.exactPlayback)}; ` +
+        `depth in ${run.previewDrawnSamples}/${run.playingSamples} playing samples, ` +
         `readout "${run.playingReadout?.readoutStatus}" frame ${run.playingReadout?.depthFrameRow} on ${run.playingReadout?.frameOnScreen}; ` +
         `exact ${run.exactAfterPauseMs} ms after pause; seek depth after ${run.seek.depthAfterMs} ms (${run.seek.precisionFirst}), stale ${run.seek.stale}; ` +
         `buffering samples ${run.bufferingSamples}; alignment ${JSON.stringify(run.alignment?.differences ?? null)}; codes ${JSON.stringify(run.alignment?.codes ?? null)}`,
@@ -664,6 +754,8 @@ async function openChrome(profile) {
       cdp.close();
       await stopProcess(chrome);
     },
+    /** CPU seconds Chrome and every process it started have used so far. */
+    cpuSeconds: () => processTreeCpuSeconds(chrome.pid),
     async evaluate(expression) {
       const result = await cdp.send("Runtime.evaluate", {
         awaitPromise: true,
@@ -688,6 +780,42 @@ async function openChrome(profile) {
       return (await cdp.send("Page.captureScreenshot", { format: "png" })).data;
     },
   };
+}
+
+async function processTreeCpuSeconds(rootPid) {
+  const { execFile } = await import("node:child_process");
+  const table = await new Promise((resolve, reject) =>
+    execFile("ps", ["-A", "-o", "pid=,ppid=,time="], (error, stdout) =>
+      error ? reject(error) : resolve(stdout),
+    ),
+  );
+  const rows = table
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .map(([pid, ppid, time]) => ({
+      pid: Number(pid),
+      ppid: Number(ppid),
+      seconds: time
+        .split(":")
+        .reduce((total, part) => total * 60 + Number(part), 0),
+    }));
+  const tree = new Set([rootPid]);
+  let grew = true;
+
+  while (grew) {
+    grew = false;
+    for (const row of rows) {
+      if (!tree.has(row.pid) && tree.has(row.ppid)) {
+        tree.add(row.pid);
+        grew = true;
+      }
+    }
+  }
+
+  return rows
+    .filter((row) => tree.has(row.pid))
+    .reduce((total, row) => total + row.seconds, 0);
 }
 
 async function openFirefox(profile) {
