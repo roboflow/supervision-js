@@ -193,6 +193,56 @@ the codes as written.
   squeezes as Chrome's hardware path does and offers no software decoder,
   the probe's correction table brings the codes back to within one.
 
+### TV-range previews (2026-10-01)
+
+The Spring previews are now written in TV range (luma 16 to 235, flagged
+limited range with BT.709 colour; no depth is 16, codes up to 31 are no
+depth, depth runs 32 to 235). The probe has a TV-range clip of the same 256
+blocks and judges the 220 codes from 16 to 235, hardware decoder first.
+`node benchmark/depth/run-gpu.mjs --query="cases=codes&backends=webgl"`
+(and `--browser=firefox`), and the same page in the Claude desktop app's
+browser pane (Chrome 152, hardware decode):
+
+| Browser                     | Decoder                  | Codes changed | Max error | After the table | 16 reads as | 235 reads as | Luma from |
+| --------------------------- | ------------------------ | ------------: | --------: | --------------: | ----------: | -----------: | --------- |
+| Chrome 154 headless         | prefer-hardware (chosen) |      0 of 220 |         0 |               0 |          16 |          235 | plane     |
+| Chrome 154 headless         | prefer-software          |      0 of 220 |         0 |               0 |          16 |          235 | plane     |
+| Chrome 154 headless         | no-preference            |      0 of 220 |         0 |               0 |          16 |          235 | plane     |
+| Chrome 152, Claude app pane | prefer-hardware (chosen) |      0 of 220 |         0 |               0 |          16 |          235 | plane     |
+| Chrome 152, Claude app pane | prefer-software          |      0 of 220 |         0 |               0 |          16 |          235 | plane     |
+| Chrome 152, Claude app pane | no-preference            |      0 of 220 |         0 |               0 |          16 |          235 | plane     |
+| Firefox 155 headless        | prefer-hardware (chosen) |    214 of 220 |        20 |               0 |           0 |          255 | rgb       |
+| Firefox 155 headless        | prefer-software          |    214 of 220 |        20 |               0 |           0 |          255 | rgb       |
+| Firefox 155 headless        | no-preference            |    214 of 220 |        20 |               0 |           0 |          255 | rgb       |
+
+The first second of the SGBM preview (24 frames, 22.1 million pixels)
+through each decoder and its own probe's table, against ffmpeg's luma of the
+same frames, both clamped to 16 to 235:
+
+| Browser                     | Decoder         | Pixels that differ | Max error |
+| --------------------------- | --------------- | -----------------: | --------: |
+| Chrome 154 headless         | prefer-hardware |                  0 |         0 |
+| Chrome 154 headless         | prefer-software |                  0 |         0 |
+| Chrome 152, Claude app pane | prefer-hardware |                  0 |         0 |
+| Chrome 152, Claude app pane | prefer-software |                  0 |         0 |
+| Firefox 155 headless        | every decoder   |                  0 |         0 |
+
+- **Every decoder returns TV-range codes exactly.** Chrome's hardware
+  decoder, which squeezes full range, passes TV range through untouched, so
+  the session now asks for it by name and no longer needs the software one.
+  Firefox converts to RGB, `(code - 16) * 255 / 219`, which spreads 220 codes
+  over 256 without collisions, so the probe's table undoes it exactly; its
+  full-range previews stay one off on 36 codes.
+- 100,840 of the 22.1 million pixels (0.46 %) decode outside 16 to 235 in
+  ffmpeg, the codec's error next to holes and edges. An RGB path returns
+  them as 16 and 235, which decode to the same depth (no depth, and the top
+  of the range).
+- The playground's playback check (`run-playback.mjs`) in headless Chrome
+  matched the producer's codes with slope 1.000 and 0.21 to 0.34 codes mean
+  error (the codec's); Firefox 0.18 to 0.28, down from 0.27 to 0.64.
+- One step is a 203rd of `range_px` instead of a 239th: 0.31 px instead of
+  0.26 px on the SGBM layer, 0.19 px instead of 0.16 px on ground truth.
+
 ### Decode and copy cost
 
 Every frame of the preview decoded back to back through the library's

@@ -1,7 +1,8 @@
-import type { DepthMap } from "supervision-js-core";
+import type { DepthMap, DepthPreviewLevels } from "supervision-js-core";
 import {
   chooseDepthPreviewDecoding,
   probeDepthPreviewDecoder,
+  resolveDepthPreviewDecoding,
   type DepthPreviewDecoderVerdict,
 } from "../../../../packages/web/src/media/depth-preview-probe";
 import {
@@ -22,8 +23,14 @@ export interface PreviewClip {
   readonly url: string;
 }
 
-/** What the page's decoders do to preview codes (plan risk R2). */
+/** The levels the Spring fixture's preview, and its resizes, are written in. */
+export const FIXTURE_PREVIEW_LEVELS: DepthPreviewLevels = "tv";
+/** The fixture preview's reserved band. */
+const FIXTURE_RESERVED_MAX = 31;
+
+/** What the page's decoders do to preview codes at one level (plan risk R2). */
 export interface PreviewCodesCase {
+  readonly levels: DepthPreviewLevels;
   readonly chosen: string;
   readonly residualError: number | null;
   readonly correction: boolean;
@@ -31,13 +38,45 @@ export interface PreviewCodesCase {
     readonly hardwareAcceleration: string;
     readonly supported: boolean;
     readonly exact: boolean | null;
+    readonly judgedCodes: number | null;
     readonly mismatchedCodes: number | null;
     readonly maxError: number | null;
+    /** The largest error left once the probe's table corrects the codes. */
+    readonly correctedError: number | null;
     readonly lumaPath: string | null;
-    readonly codeZeroReadsAs: number | null;
-    readonly code255ReadsAs: number | null;
+    /** The lowest and highest judged codes: 0 and 255, or 16 and 235. */
+    readonly lowCode: number;
+    readonly lowReadsAs: number | null;
+    readonly highCode: number;
+    readonly highReadsAs: number | null;
     readonly error?: string;
   }[];
+}
+
+/**
+ * The Spring preview's first frames through one decoder, against the luma
+ * ffmpeg decodes from the same file: the decoder's own error on real depth,
+ * with the codec's error taken out.
+ */
+export interface PreviewClipCodesCase {
+  readonly levels: DepthPreviewLevels;
+  readonly decoder: string;
+  readonly corrected: boolean;
+  readonly frames: number;
+  readonly pixels: number;
+  /**
+   * Pixels ffmpeg decodes outside TV range, below 16 or above 235, as the
+   * codec's error leaves some next to holes and edges. A decoder that
+   * converts to RGB returns them as 16 and 235, which decode to the same
+   * depth, so the errors below compare both sides clamped to TV range.
+   */
+  readonly outsideRangePixels: number;
+  /** Pixels whose code differs from ffmpeg's. */
+  readonly mismatchedPixels: number;
+  readonly maxError: number;
+  readonly meanError: number;
+  readonly lumaPath: string | null;
+  readonly error?: string;
 }
 
 /** Case 4: decoding a whole preview as fast as it goes. */
@@ -110,45 +149,157 @@ function createWorkerCopier(): DepthPreviewLumaCopier {
   });
 }
 
+const PREFERENCES = [
+  "prefer-hardware",
+  "prefer-software",
+  "no-preference",
+] as const;
+
 /**
- * Probes the page's decoders the way a session does before a preview opens,
- * then every decoder the browser offers, so the report shows what the
- * session's choice avoided.
+ * Probes the page's decoders the way a session does before a preview at
+ * `levels` opens, then every decoder the browser offers, so the report shows
+ * what the session's choice avoided.
  */
-export async function runPreviewCodesProbe(): Promise<PreviewCodesCase> {
-  const decoding = await chooseDepthPreviewDecoding();
+export async function runPreviewCodesProbe(
+  levels: DepthPreviewLevels,
+): Promise<PreviewCodesCase> {
+  const decoding = await chooseDepthPreviewDecoding(levels);
   const verdicts: DepthPreviewDecoderVerdict[] = [];
 
-  for (const preference of [
-    "prefer-software",
-    "prefer-hardware",
-    "no-preference",
-  ] as const) {
-    verdicts.push(await probeDepthPreviewDecoder(preference));
+  for (const preference of PREFERENCES) {
+    verdicts.push(await probeDepthPreviewDecoder(preference, levels));
   }
 
   return {
     chosen: decoding.hardwareAcceleration,
     correction: decoding.correction !== null,
+    levels,
     residualError: Number.isFinite(decoding.residualError)
       ? decoding.residualError
       : null,
-    verdicts: verdicts.map(describeVerdict),
+    verdicts: verdicts.map((verdict) => describeVerdict(verdict, levels)),
   };
 }
 
-function describeVerdict(verdict: DepthPreviewDecoderVerdict) {
+function describeVerdict(
+  verdict: DepthPreviewDecoderVerdict,
+  levels: DepthPreviewLevels,
+) {
+  const [lowCode, highCode] = levels === "tv" ? [16, 235] : [0, 255];
+  const corrected = verdict.probe
+    ? resolveDepthPreviewDecoding([verdict], levels).residualError
+    : null;
+
   return {
-    code255ReadsAs: verdict.probe?.decoded[255] ?? null,
-    codeZeroReadsAs: verdict.probe?.decoded[0] ?? null,
+    correctedError: corrected,
     error: verdict.error,
     exact: verdict.probe?.exact ?? null,
     hardwareAcceleration: verdict.hardwareAcceleration,
+    highCode,
+    highReadsAs: verdict.probe?.decoded[highCode] ?? null,
+    judgedCodes: verdict.probe?.judgedCodes ?? null,
+    lowCode,
+    lowReadsAs: verdict.probe?.decoded[lowCode] ?? null,
     lumaPath: verdict.probe?.lumaPath ?? null,
     maxError: verdict.probe?.maxError ?? null,
     mismatchedCodes: verdict.probe?.mismatchedCodes ?? null,
     supported: verdict.supported,
   };
+}
+
+const clampTv = (code: number) => Math.min(235, Math.max(16, code));
+
+/**
+ * Decodes the first `frames` frames of `clip` through each decoder the
+ * browser offers, each with the table its own probe gives, and compares
+ * every code with `reference`, ffmpeg's luma of the same frames.
+ */
+export async function runPreviewClipCodes(
+  clip: PreviewClip,
+  reference: Uint8Array,
+  frames: number,
+): Promise<PreviewClipCodesCase[]> {
+  const levels = FIXTURE_PREVIEW_LEVELS;
+  const rows: PreviewClipCodesCase[] = [];
+
+  for (const preference of PREFERENCES) {
+    const verdict = await probeDepthPreviewDecoder(preference, levels);
+
+    if (!verdict.supported) continue;
+
+    const { correction } = resolveDepthPreviewDecoding([verdict], levels);
+    const row = {
+      corrected: correction !== null,
+      decoder: preference,
+      levels,
+    };
+
+    try {
+      const reader = await openDepthPreviewTrack(clip.url, {
+        correction,
+        hardwareAcceleration: preference,
+      });
+
+      try {
+        const run = reader.decode(0);
+        let mismatchedPixels = 0;
+        let outsideRangePixels = 0;
+        let maxError = 0;
+        let sum = 0;
+        let pixels = 0;
+        let decoded = 0;
+
+        for (
+          let frame = await run.next();
+          frame && decoded < frames;
+          frame = await run.next()
+        ) {
+          const offset = decoded * frame.luma.length;
+
+          for (let index = 0; index < frame.luma.length; index += 1) {
+            const written = reference[offset + index];
+            const error = Math.abs(
+              clampTv(frame.luma[index]) - clampTv(written),
+            );
+
+            if (written < 16 || written > 235) outsideRangePixels += 1;
+            if (error > 0) mismatchedPixels += 1;
+            if (error > maxError) maxError = error;
+            sum += error;
+          }
+          pixels += frame.luma.length;
+          decoded += 1;
+        }
+        run.cancel();
+        rows.push({
+          ...row,
+          frames: decoded,
+          lumaPath: reader.getStats().lumaPath,
+          maxError,
+          meanError: pixels ? sum / pixels : 0,
+          mismatchedPixels,
+          outsideRangePixels,
+          pixels,
+        });
+      } finally {
+        reader.dispose();
+      }
+    } catch (error) {
+      rows.push({
+        ...row,
+        error: String(error),
+        frames: 0,
+        lumaPath: null,
+        maxError: Number.NaN,
+        meanError: Number.NaN,
+        mismatchedPixels: 0,
+        outsideRangePixels: 0,
+        pixels: 0,
+      });
+    }
+  }
+
+  return rows;
 }
 
 /**
@@ -161,7 +312,7 @@ export async function runPreviewDecode(
   hardwareAcceleration: HardwareAcceleration,
   copy: "page" | "worker",
 ): Promise<PreviewDecodeCase> {
-  const decoding = await chooseDepthPreviewDecoding();
+  const decoding = await chooseDepthPreviewDecoding(FIXTURE_PREVIEW_LEVELS);
   const copier = copy === "worker" ? createWorkerCopier() : undefined;
   const reader = await openDepthPreviewTrack(clip.url, {
     copier,
@@ -227,7 +378,7 @@ export async function runPreviewPlayback(
   rate: number,
   uploadAhead: boolean,
 ): Promise<PreviewPlaybackCase> {
-  const decoding = await chooseDepthPreviewDecoding();
+  const decoding = await chooseDepthPreviewDecoding(FIXTURE_PREVIEW_LEVELS);
   const copier = createWorkerCopier();
   const reader = await openDepthPreviewTrack(clip.url, {
     copier,
@@ -251,8 +402,9 @@ export async function runPreviewPlayback(
         kind: "disparity_px",
         samples: {
           encoding: "preview8",
+          levels: FIXTURE_PREVIEW_LEVELS,
           range: { max: 40, min: 0 },
-          reservedMax: 15,
+          reservedMax: FIXTURE_RESERVED_MAX,
           values: frame.luma,
         },
         width: frame.width,

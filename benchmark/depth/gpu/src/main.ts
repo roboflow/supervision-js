@@ -12,11 +12,14 @@ import {
   type BackendDescription,
 } from "./pixi-backend";
 import {
+  FIXTURE_PREVIEW_LEVELS,
   readClipSize,
+  runPreviewClipCodes,
   runPreviewCodesProbe,
   runPreviewDecode,
   runPreviewPlayback,
   type PreviewClip,
+  type PreviewClipCodesCase,
   type PreviewCodesCase,
   type PreviewDecodeCase,
   type PreviewPlaybackCase,
@@ -47,7 +50,9 @@ export interface DepthGpuBenchmarkReport {
   readonly decode: readonly DecodeCase[];
   readonly uploadRender: readonly UploadRenderCase[];
   readonly memory: readonly MemoryCase[];
-  readonly previewCodes: PreviewCodesCase | null;
+  /** The probe at each level; the fixture's level first. */
+  readonly previewCodes: readonly PreviewCodesCase[];
+  readonly previewClipCodes: readonly PreviewClipCodesCase[];
   readonly previewDecode: readonly PreviewDecodeCase[];
   readonly previewPlayback: readonly PreviewPlaybackCase[];
 }
@@ -72,7 +77,16 @@ const ALL_CASES = [
   "memory",
   "preview",
   "playback",
+  "codes",
 ] as const;
+/**
+ * ffmpeg's luma of the first frames of the fixture's preview, which
+ * `run-gpu.mjs` writes, one byte per pixel, frame after frame.
+ */
+const CLIP_CODES_REFERENCE = {
+  frames: 24,
+  url: "/benchmark/depth/results/preview-720p-luma.gray",
+};
 /**
  * The Spring fixture's preview, and the runner's resizes of it with the
  * producer's encoder settings (`run-gpu.mjs` writes them with ffmpeg).
@@ -120,16 +134,45 @@ async function run() {
   const decode: DecodeCase[] = [];
   const previewDecode: PreviewDecodeCase[] = [];
   const previewPlayback: PreviewPlaybackCase[] = [];
-  let previewCodes: PreviewCodesCase | null = null;
+  const previewCodesByLevel: PreviewCodesCase[] = [];
+  const previewClipCodes: PreviewClipCodesCase[] = [];
   const clips: PreviewClip[] = [];
 
-  if (cases.has("preview") || cases.has("playback")) {
+  if (cases.has("preview") || cases.has("playback") || cases.has("codes")) {
     setStatus("Probing the page's preview decoders...");
-    try {
-      previewCodes = await runPreviewCodesProbe();
-    } catch (error) {
-      errors.push(`preview probe: ${String(error)}`);
+    for (const levels of [FIXTURE_PREVIEW_LEVELS, "full"] as const) {
+      try {
+        previewCodesByLevel.push(await runPreviewCodesProbe(levels));
+      } catch (error) {
+        errors.push(`preview probe (${levels}): ${String(error)}`);
+      }
     }
+  }
+  const previewCodes = previewCodesByLevel.find(
+    ({ levels }) => levels === FIXTURE_PREVIEW_LEVELS,
+  );
+
+  if (cases.has("codes")) {
+    setStatus("Comparing the preview's codes with ffmpeg's...");
+    try {
+      const response = await fetch(CLIP_CODES_REFERENCE.url);
+
+      if (!response.ok) throw new Error(`${response.status}`);
+      previewClipCodes.push(
+        ...(await runPreviewClipCodes(
+          PREVIEW_CLIPS[0],
+          new Uint8Array(await response.arrayBuffer()),
+          CLIP_CODES_REFERENCE.frames,
+        )),
+      );
+    } catch (error) {
+      errors.push(
+        `preview clip codes: ${String(error)}; run the benchmark through run-gpu.mjs, which writes ${CLIP_CODES_REFERENCE.url}.`,
+      );
+    }
+  }
+
+  if (cases.has("preview") || cases.has("playback")) {
     for (const clip of PREVIEW_CLIPS) {
       if (
         resolutions.some(({ label }) => label === clip.label) &&
@@ -292,7 +335,8 @@ async function run() {
     },
     exactness,
     memory: cases.has("memory") ? resolutions.map(computeMemoryCase) : [],
-    previewCodes,
+    previewClipCodes,
+    previewCodes: previewCodesByLevel,
     previewDecode,
     previewPlayback,
     uploadRender,
