@@ -381,9 +381,9 @@ shipped.
 
 **depth-drag** and **depth-backdrag** open the Spring stereo clip, whose depth
 layer is on, rest on exact depth at 15% (or 85%), then drag the timeline to 85%
-(or back to 15%) over a paced 1200ms and let go. Depth plays only on the web
-video engine path, so these need `?mediaPath=engine`; on Mediabunny they report
-`invalid-environment`. A depth clip's preview is a video decoded beside the
+(or back to 15%) over a paced 1200ms and let go. They read the web video
+engine's frame clock, which the default Mediabunny path does not have, so they
+need `?mediaPath=engine`; on Mediabunny they report `invalid-environment`. A depth clip's preview is a video decoded beside the
 picture, and with the session's playback gate on, a frame waits for its depth
 before it shows, so a decoder that cannot follow the hand shows up as a picture
 that falls behind the thumb rather than as frames without depth. Each reports:
@@ -396,10 +396,7 @@ configured for a new run, and how long after letting go the landed frame drew
 its depth and then its exact depth.
 
 The backward drag is the one the decoder finds hard: it can only decode forward
-from a key frame. Before depth followed drags it read 72ms behind on average,
-179ms at p95, held one frame for 200ms and showed a new frame on half the
-page's animation frames, against 28ms, 34ms, 34ms and nearly every animation
-frame with depth removed. The frame gate is per animation frame because the
+from a key frame. The new-frame gate is per animation frame because the
 page's own rate moves with what else is mounted: a full harness run has seen
 the demo at 30 Hz where a lone scenario ran at 60.
 
