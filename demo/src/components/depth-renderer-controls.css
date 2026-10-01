@@ -76,3 +76,17 @@
   display: flex;
   gap: 0.4rem;
 }
+
+.depth-renderer-controls__no-depth input[type="color"] {
+  block-size: 1.25rem;
+  border: 1px solid #ddd6fe;
+  border-radius: 6px;
+  cursor: pointer;
+  inline-size: 1.9rem;
+  padding: 0.1rem;
+}
+
+.depth-renderer-controls__no-depth input[type="color"]:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
