@@ -26,7 +26,6 @@ There is near rock, a mid-ground figure, a back wall and a little distant sky (1
 | `ground-truth/exact/000000.png` … `000191.png` | 16-bit disparity × 1024, 0 = no depth (sky) | 63,492,343 (about 331 kB/frame) |
 | `ground-truth/preview.mp4` | 8-bit preview, `range_px` [1.64, 37.271] | 2,953,220 |
 | `fixture.meta.json` | Demo metadata, pebbles shape plus a `depth` block | < 1 kB |
-| `sources.tsv` | The 577 Spring members used, with DaRUS zip, id, size, CRC-32 | 64 kB |
 
 In total, about 118.3 MB. The PNGs and MP4s are Git LFS objects, which Git LFS stores and checks by
 SHA-256.
@@ -45,7 +44,8 @@ opens it for depth only.
 
 ## Depth manifests (`*/depth.json`)
 
-Each layer has a manifest in the research/09 §1.4 wire format.
+Each layer has a manifest in the format the
+[depth maps page](../../../docs/public/annotation-renderers/depth.md#data-format) describes.
 
 - **Identity:** `schema` `"supervision.depth-manifest"`, `version` 1, `kind` `"disparity_px"`, `view`
   `"left"`.
@@ -68,7 +68,7 @@ Each layer has a manifest in the research/09 §1.4 wire format.
   - Encoding: 8-bit gray in the luma of H.264 yuv420p, chroma fixed at 128, TV (limited) range
     flagged with BT.709 colour, CRF 12, `-tune psnr`, a keyframe every second, faststart.
 - **PNG details:** every exact PNG is 16-bit grayscale, with PNG filter type 2 (Up) on every row for
-  fast browser decode. Written by the research workspace's `fixture/tools/png16.py` (see Rebuild).
+  fast browser decode. Written by the research workspace's `fixture/tools/png16.py`.
   - The build proves the round trip on frame 0 of each layer with two independent decoders: the
     script's own reader, and OpenCV/libpng.
 
@@ -140,40 +140,11 @@ they are material adapted from the Spring dataset.
 - **OpenCV:** `opencv-python-headless` 5.0.0.93, Apache-2.0. It computed the SGBM layer. The SGBM
   layer is data, not OpenCV code, and no model weights are involved.
 - **Build scripts:** `fixture/tools/*.py` belong to the depth-map rendering research workspace the
-  fixture was built in, not to supervision-js.
+  fixture was built in, not to supervision-js. That workspace keeps the rebuild commands and tool
+  versions, the list of Spring members fetched, and the output hashes.
 
 No learned stereo model was used, deliberately: every public stereo checkpoint was trained on data with
-research-only or non-commercial terms. See `research/11-real-fixture-sourcing.md` §5 and §9.
-
-## Rebuild
-
-The fixture was built in the depth-map rendering research workspace, which also holds Turbo check
-stills of frames 0, 96 and 191 (the video frame, ground truth over it, ground truth, and SGBM). From
-the root of that workspace (Python 3.14.7, numpy 2.5.3, opencv-python-headless 5.0.0.93,
-h5py 3.16.0, FFmpeg 8.1.1 with x264 core 165 r3222):
-
-```sh
-python3 -m venv .tools/fixture-venv
-.tools/fixture-venv/bin/pip install numpy==2.5.3 opencv-python-headless==5.0.0.93 h5py==3.16.0
-PY=.tools/fixture-venv/bin/python
-
-# Spring members for sequence 0021, frames 1–192. This reads only each DaRUS zip's index and the
-# requested members, about 1.3 GB, not the 42 GB of zips.
-for k in frame_left frame_right disp1_left cam_data; do
-  $PY fixture/tools/fetch_spring.py 0021 1 192 data/spring --kinds $k
-done > data/spring-0021-members.tsv
-
-$PY fixture/tools/build_spring_fixture.py data/spring/spring/train/0021 1 192 \
-  fixture/spring_0021 data/work/spring_0021
-$PY fixture/tools/write_sources.py data/spring-0021-members.tsv 0021 1 192 fixture/spring_0021/sources.tsv
-```
-
-- **Build time:** about 27 minutes on an M3 Max. Nearly all of it is zlib level 9 on the
-  384 PNGs (about 5 s each).
-- **`sources.tsv`:** lists all 577 Spring members used, with DaRUS zip, datafile id, size and CRC-32.
-  The fetch checks each CRC on extraction.
-- **Reproducibility:** different FFmpeg/x264 builds may not reproduce the MP4 bytes. The PNGs and
-  `depth.json` should match exactly with the same numpy/OpenCV/h5py versions.
+research-only or non-commercial terms.
 
 ## Known quirks
 
