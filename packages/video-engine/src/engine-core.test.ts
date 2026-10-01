@@ -305,6 +305,45 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
+  // A WebM block carries no duration of its own, so the demuxer reports the
+  // last frame of such a track as lasting no time at all.
+  it.each([
+    { clip: "a one-frame clip", ticks: [0], index: 0 },
+    { clip: "the last frame of a longer clip", ticks: [0, 333, 667], index: 2 },
+  ])(
+    "commit settles on $clip whose container gives that frame no duration",
+    async ({ ticks, index }) => {
+      const { engine, events, cursor } = setup(new FakeClock());
+      replaceProperty(cursor, "track", {
+        ...cursor.track,
+        durationS: asSec(ticks[index] / 1000),
+        timeline: FrameTimeline.from({
+          lastDurationTicks: 0,
+          tickRate: 1000,
+          ticks: Float64Array.from(ticks),
+        }),
+      });
+      await engine.load(LOAD_CONFIG);
+      bindFakeCanvas(engine);
+      let landing: FrameLanding | null | undefined;
+      void engine.commit(index).then(
+        (value) => {
+          landing = value;
+        },
+        () => undefined,
+      );
+      cursor.emit(asSec(ticks[index] / 1000));
+      await flushRaf();
+      await flushRaf();
+      expect(landing).toEqual({
+        frame: { index, ticks: ticks[index] },
+        mediaTimeS: ticks[index] / 1000,
+      });
+      expect(seekingOf(events)).toEqual([true, false]);
+      await engine.dispose();
+    },
+  );
+
   it("commit while playing re-anchors playback instead of seeking the cursor", async () => {
     const clock = new FakeClock();
     const { engine, cursor } = setup(clock);
