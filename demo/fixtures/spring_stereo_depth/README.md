@@ -21,15 +21,15 @@ There is near rock, a mid-ground figure, a back wall and a little distant sky (1
 | `left.mp4` | Left view, 1280x720, 24 fps, 192 frames (8 s), H.264 High 3.1 (`avc1.64001f`) yuv420p bt709, keyframe every 1 s, faststart | 4,276,966 |
 | `sgbm/depth.json` | Manifest for the SGBM layer | < 1 kB |
 | `sgbm/exact/000000.png` … `000191.png` | 16-bit disparity × 1024, 0 = no depth | 42,937,912 (about 224 kB/frame) |
-| `sgbm/preview.mp4` | 8-bit preview of the same, `range_px` [0, 63.0] | 2,505,744 |
+| `sgbm/preview.mp4` | 8-bit preview of the same, `range_px` [1.562, 37.25] | 4,530,702 |
 | `ground-truth/depth.json` | Manifest for the ground-truth layer | < 1 kB |
 | `ground-truth/exact/000000.png` … `000191.png` | 16-bit disparity × 1024, 0 = no depth (sky) | 63,492,343 (about 331 kB/frame) |
-| `ground-truth/preview.mp4` | 8-bit preview, `range_px` [0, 38.584] | 2,074,301 |
+| `ground-truth/preview.mp4` | 8-bit preview, `range_px` [1.64, 37.271] | 2,953,220 |
 | `fixture.meta.json` | Demo metadata, pebbles shape plus a `depth` block | < 1 kB |
 | `sources.tsv` | The 577 Spring members used, with DaRUS zip, id, size, CRC-32 | 64 kB |
 | `outputs.sha256` | SHA-256 of every generated file in this folder | 35 kB |
 
-In total, about 115.3 MB. The PNGs and MP4s are Git LFS objects. `outputs.sha256` pins their bytes:
+In total, about 118.5 MB. The PNGs and MP4s are Git LFS objects. `outputs.sha256` pins their bytes:
 run `shasum -a 256 -c outputs.sha256` in this folder after `git lfs pull`.
 
 There are no detections for this clip, so the folder has no `detections.manifest.json`. The demo
@@ -61,11 +61,13 @@ Each layer has a manifest in the research/09 §1.4 wire format.
   layer.
 - **`frames`:** `{count: 192, exact: "exact/{index:06}.png", times_s: null}`.
 - **`preview`:** `preview.mp4`. Its `codec` string is read from the file's avcC box.
-  - `levels` `"tv"`; `reserved_max` 31; `range_px` `[0, clip max]`.
+  - `levels` `"tv"`; `reserved_max` 31; `range_px` the 0.1st to 99.9th percentile of valid disparity over
+    the clip, so outliers do not widen the step. Disparity outside it clamps to its ends in the preview
+    only; the exact frames keep it.
   - Encode: `code = clamp(32 + round((d − lo) / (hi − lo) × 203), 32, 235)`, with `[lo, hi]` =
     `range_px`. No depth is written as 16, and codes up to 31 mean no depth.
   - Encoding: 8-bit gray in the luma of H.264 yuv420p, chroma fixed at 128, TV (limited) range
-    flagged with BT.709 colour, CRF 18, `-tune psnr`, a keyframe every second, faststart.
+    flagged with BT.709 colour, CRF 12, `-tune psnr`, a keyframe every second, faststart.
 - **PNG details:** every exact PNG is 16-bit grayscale, with PNG filter type 2 (Up) on every row for
   fast browser decode. Written by the research workspace's `fixture/tools/png16.py` (see Rebuild).
   - The build proves the round trip on frame 0 of each layer with two independent decoders: the
@@ -182,8 +184,8 @@ $PY fixture/tools/write_sources.py data/spring-0021-members.tsv 0021 1 192 fixtu
   code.
 - **SGBM outliers:** SGBM has occasional outliers up to 63 px, the top of its 64-px search range,
   while the true maximum is 38.6 px.
-  - `preview.range_px` for `sgbm/` is therefore wider than for `ground-truth/`, and the preview step is
-    coarser: 0.264 px, against 0.161 px for ground truth.
+  - `preview.range_px` stops at the 99.9th percentile, so they clamp there in the preview, and both layers
+    have about the same preview step: 0.176 px (it was 0.310 px for `sgbm/` when the range ran to 63 px).
   - `display_range_px` (2nd–98th percentile) is unaffected.
 - **Blur and focus:** Spring's images include motion blur and depth of field; its ground truth does
   not. SGBM errors in blurred areas are real errors on the input.

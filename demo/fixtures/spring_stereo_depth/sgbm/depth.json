@@ -32,8 +32,8 @@
     "levels": "tv",
     "reserved_max": 31,
     "range_px": [
-      0,
-      63.0
+      1.562,
+      37.25
     ]
   }
 }
