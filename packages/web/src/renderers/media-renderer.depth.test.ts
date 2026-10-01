@@ -36,7 +36,6 @@ function depthShaders() {
   );
 }
 
-/** A 16:9 image manifest with a confidence plane, served from example.test. */
 async function stubDepthServer(
   delayManifest?: Promise<void>,
 ): Promise<{ confidence: Uint8Array; samples: Uint16Array }> {
@@ -67,7 +66,6 @@ async function stubDepthServer(
     }),
   };
 
-  // The harness stubs globals of its own, so only fetch is replaced here.
   vi.spyOn(globalThis, "fetch").mockImplementation(
     async (input: string | URL | Request) => {
       const url = String(input);
@@ -140,7 +138,6 @@ async function stubClipServer(count: number) {
   return { fetched };
 }
 
-/** The exact frame a clip drew, read back from its disparity. */
 function drawnExactFrame(renderer: Awaited<ReturnType<typeof createRenderer>>) {
   const active = renderer.getActiveDepth?.();
 

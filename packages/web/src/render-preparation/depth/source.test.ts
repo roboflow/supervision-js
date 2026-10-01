@@ -228,7 +228,7 @@ describe("depth source from an image manifest", () => {
     const upload = createDepthMapUpload(map, false);
 
     expect(upload.textureWidth).toBe(6);
-    // The ring takes the decoder's padded rows instead of copying again.
+    // The upload holds the decoder's padded rows, apart from the map's samples.
     expect(upload.bytes.buffer).not.toBe(
       (map.samples.values as Uint16Array).buffer,
     );

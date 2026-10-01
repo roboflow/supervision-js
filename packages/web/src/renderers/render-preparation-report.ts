@@ -12,17 +12,17 @@ const WORKER_STATUS_RANK: Record<RenderPreparationWorkerStatus, number> = {
 };
 
 /**
- * One diagnostics report for every family that prepares artifacts. Masks,
- * polygons and depth each report on their own schedule; a host holding the
- * last report it heard would otherwise see one family replace another.
+ * Masks, polygons and depth each report on their own schedule; merging them
+ * keeps a host that holds the last report it heard from seeing one family
+ * replace another.
  */
 export interface RenderPreparationReport {
-  /** Records `family`'s latest report and returns what every family says now. */
+  /** Returns the merged report of every family. */
   update(
     family: string,
     diagnostics: RenderPreparationDiagnostics,
   ): RenderPreparationDiagnostics;
-  /** `family` stopped preparing; null when no family is left. */
+  /** Null when `family` was not reporting or no family is left. */
   remove(family: string): RenderPreparationDiagnostics | null;
 }
 
@@ -44,9 +44,9 @@ export function createRenderPreparationReport(): RenderPreparationReport {
 }
 
 /**
- * Every family's artifacts in one report. The worker status is the worst any
- * family reports, with that family's execution mode, so a worker that failed
- * stays visible beside one that is fine; messages are kept side by side.
+ * The worker status is the worst any family reports, with that family's
+ * execution mode, so a worker that failed stays visible beside one that is
+ * fine.
  */
 export function mergeRenderPreparationDiagnostics(
   reports: readonly RenderPreparationDiagnostics[],

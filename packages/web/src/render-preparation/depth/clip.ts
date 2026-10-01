@@ -20,7 +20,6 @@ import type {
   DepthSourceContext,
 } from "./source";
 
-/** How often a clip reports its windows, at most. */
 const DIAGNOSTICS_INTERVAL_MS = 100;
 
 /**
@@ -92,8 +91,8 @@ export async function openDepthClip(
   let lastStep: -1 | 0 | 1 = 0;
   /**
    * Set once the producer reports its playhead. From then on decoding
-   * follows that playhead, which leads the frames a drag puts on screen,
-   * rather than the drawn frame, which trails them.
+   * follows that playhead, which leads the frames a drag puts on screen;
+   * the drawn frame trails them.
    */
   let prefetchDriven = false;
 
@@ -105,7 +104,6 @@ export async function openDepthClip(
       context,
       signal,
     );
-  /** One load per decode worker, as the mask pool sizes them. */
   const concurrency = () => Math.max(1, context.preparer?.().concurrency ?? 1);
   const playing = () => active && !scrubbing;
 
@@ -187,7 +185,6 @@ export async function openDepthClip(
         frames: preview.reader,
         maxBytes: budgets.preview.maxCacheBytes,
         onChange: () => {
-          // A decoder that stopped is closed, not left holding its frames.
           if (
             previewWindow &&
             previewWindow.failure !== null &&
@@ -273,11 +270,6 @@ export async function openDepthClip(
     return map ? entryOf(index, map, "exact") : null;
   };
 
-  /**
-   * Decoding ahead follows the playhead. Exact frames load ahead only while
-   * playback runs and they may play; the preview is left alone only while
-   * exact depth plays in "exact".
-   */
   const moveWindows = (index: number) => {
     const exactMayPlay = exactWindow !== null && exactWindow.failure === null;
 
@@ -290,17 +282,12 @@ export async function openDepthClip(
     }
   };
 
-  /** Playback starts, or resumes after a drag. */
   const startPlaying = () => {
     exactPlayback?.restart();
     if (onScreen !== null) moveWindows(onScreen);
   };
 
-  /**
-   * The present asks for the frame on screen; decoding moves there right
-   * after it, never inside it. Only until the producer reports a playhead
-   * of its own.
-   */
+  /** Called from inside a present; decoding moves after it, never inside it. */
   const followPlayhead = (index: number) => {
     if ((!previewWindow && !exactWindow) || prefetchDriven) return;
     if (queuedPlayhead === null) {
@@ -412,7 +399,6 @@ export async function openDepthClip(
         return exactWindow!.needsPlaybackGateWait(index, thresholds);
       }
       if (previewWindow === null) return false;
-      // At rest an exact frame already in draws without its preview.
       if (!active && atRest.get(index)) return false;
 
       return previewWindow.needsPlaybackGateWait(index, thresholds);
@@ -437,7 +423,6 @@ export async function openDepthClip(
         previewWindow.waitForReady(index, thresholds, settled.signal),
       ];
 
-      // A step at rest is ready as soon as either of its depths is.
       if (!active) waits.push(atRest.landing(index, settled.signal));
 
       return Promise.race(waits).finally(() => {

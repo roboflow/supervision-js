@@ -15,7 +15,6 @@ export const DEFAULT_DEPTH_PERCENTILE_HIGH = 0.98;
 
 /** Below this share of valid samples a percentile says nothing about the scene. */
 const MIN_VALID_SAMPLE_SHARE = 0.01;
-/** The histogram reads every second pixel in each axis. */
 const PERCENTILE_SAMPLE_STRIDE = 2;
 const FALLBACK_RANGE: DepthRange = { min: 0, max: 1 };
 
@@ -33,7 +32,7 @@ export interface DepthColorMappingOptions {
 /** The quantity actually coloured, which can differ from the one requested. */
 export interface DepthQuantityResolution {
   readonly quantity: DepthQuantity;
-  /** The requested quantity is undefined for this map, so disparity is coloured. */
+  /** True when the map cannot provide the requested quantity, so disparity is coloured. */
   readonly fellBack: boolean;
 }
 
@@ -195,9 +194,8 @@ export function depthPreviewSpan(samples: PreviewDepthSamples): number {
  * This map's own percentile range in the coloured quantity's unit, or null
  * when fewer than 1 % of the samples it reads hold depth.
  *
- * It is a pure function of the one map: the same frame always gets the same
- * range, whichever frames were watched before it. Pass the result back as an
- * explicit range to keep colours still across frames.
+ * It depends on this map alone, so a frame always gets the same range. Pass
+ * the result back as an explicit range to keep colours steady across frames.
  */
 export function computeDepthPercentileRange(
   map: DepthMap,

@@ -44,7 +44,7 @@ const MICROSECONDS_PER_SECOND = 1_000_000;
 export type DepthPreviewTrackInput = string | URL | ArrayBuffer | Uint8Array;
 
 export interface DepthPreviewTrackOptions {
-  /** Which decoder the browser should pick. Defaults to its own choice. */
+  /** Defaults to the browser's own choice. */
   readonly hardwareAcceleration?: HardwareAcceleration;
   /**
    * Maps each code the decoder returns to the code written, for a decoder
@@ -87,7 +87,6 @@ export interface DepthPreviewDecodeOptions {
   readonly keep?: (index: number) => boolean;
 }
 
-/** Counters for diagnostics and the benchmark. */
 export interface DepthPreviewTrackStats {
   readonly framesDecoded: number;
   readonly framesCopied: number;
@@ -99,10 +98,9 @@ export interface DepthPreviewTrackStats {
 /**
  * The 8-bit preview video of a depth clip, decoded to luma codes.
  *
- * It holds one `VideoDecoder` for its whole life. A new run resets that
- * decoder instead of opening another, so a seek or a drag never has two of
- * its decoders alive at once, whatever the browser does about tearing the old
- * one down.
+ * It holds one `VideoDecoder` for its whole life and resets it for each new
+ * run, so a seek or a drag never has two of its decoders alive at once,
+ * however slowly the browser tears an old one down.
  */
 export interface DepthPreviewTrackReader {
   readonly width: number;
@@ -110,7 +108,6 @@ export interface DepthPreviewTrackReader {
   readonly frameCount: number;
   /** Frame start times, in seconds from the preview's first frame. */
   readonly times: Float64Array;
-  /** The key frame decoding has to start at to reach frame `index`. */
   keyIndexAtOrBefore(index: number): number;
   /**
    * Starts decoding at the key frame at or before `fromIndex`. The run
@@ -249,7 +246,6 @@ export function createDepthPreviewTrackReader(options: {
   readonly width: number;
   readonly height: number;
   readonly dispose?: () => void;
-  /** The decoder constructor; the browser's by default. */
   readonly VideoDecoder?: typeof VideoDecoder;
 }): DepthPreviewTrackReader {
   const Decoder = options.VideoDecoder ?? globalThis.VideoDecoder;
@@ -320,10 +316,7 @@ export function createDepthPreviewTrackReader(options: {
     return created;
   };
 
-  /**
-   * Hands one frame to the copier, which closes it, and keeps the time the
-   * page spent on it. Null for a frame the copier lost.
-   */
+  /** The copier closes `frame`. Resolves null for a frame the copier lost. */
   const copyLuma = (
     frame: VideoFrame,
     index: number,
@@ -401,7 +394,6 @@ export function createDepthPreviewTrackReader(options: {
     const sleep = () =>
       new Promise<void>((resolve) => {
         wakeUp = resolve;
-        // A decoder that never says `dequeue` is polled instead.
         setTimeout(
           wake,
           hearsDequeue
@@ -510,7 +502,7 @@ export function createDepthPreviewTrackReader(options: {
             const frame = await Promise.race([head, cancellation]);
 
             if (cancelled || disposed) return null;
-            // A frame the copier lost is a frame the window asks for again.
+            // A frame the copier lost is skipped; the caller asks for it again.
             if (frame) return frame;
             continue;
           }

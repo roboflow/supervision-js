@@ -5,7 +5,6 @@ import { DepthPreparationWorkerMessageType } from "./depth/worker-protocol";
 
 type MessageListener = (event: { data: unknown }) => void;
 
-/** Loads the worker script against a fake worker scope. */
 async function loadWorker() {
   const listeners: MessageListener[] = [];
   const posted: { message: unknown; transfer: Transferable[] }[] = [];

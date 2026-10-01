@@ -20,9 +20,9 @@ import {
 } from "../playhead-motion";
 
 /**
- * Of the lead a stop asks for, the share the window has to be able to hold.
- * A gate asking for more lead than the window covers would hold until it
- * gave up, so its ask is lowered to what fits.
+ * Share of the lead the window can reach that a gate may ask for. A gate
+ * asking for more lead than the window decodes ahead would hold until it
+ * gave up.
  */
 const REACHABLE_LEAD_SHARE = 0.9;
 /**
@@ -45,8 +45,7 @@ export interface DepthFrameRun<Frame> {
 }
 
 /**
- * What the window decodes from: a depth preview track, the exact PNGs, or a
- * test double. A video track decodes from a key frame forward; a source with
+ * A video track decodes from a key frame forward; a source with
  * `randomAccess` starts a run at any frame and skips the frames `keep`
  * turns away at no cost, so one run serves every frame ahead of it.
  */
@@ -76,15 +75,20 @@ export interface DepthFrameWindowOptions<
   readonly timeAt: (index: number) => number;
   /** End of frame `index` on the media timeline, in seconds. */
   readonly endAt: (index: number) => number;
-  /** Wraps one frame's luma as the map the layer draws. */
   readonly createMap: (frame: Frame) => DepthMap;
-  /** Bytes one decoded frame holds. */
+  /**
+   * Bytes one decoded frame is expected to hold; sets how many frames fit in
+   * `maxBytes`.
+   */
   readonly frameBytes: number;
-  /** Bytes a decoded frame holds, when frames differ; else `frameBytes`. */
+  /**
+   * For frames that differ in size. Defaults to the frame's `luma` length,
+   * then `frameBytes`.
+   */
   readonly bytesOf?: (frame: Frame) => number;
-  /** Names the frames in diagnostics and warnings. Defaults to "preview". */
+  /** Names the frames in errors and warnings. Defaults to "preview". */
   readonly precision?: "exact" | "preview";
-  /** Decoded luma kept, in bytes. */
+  /** Budget for decoded frames, in bytes. */
   readonly maxBytes: number;
   /**
    * How far ahead of the playhead to decode while playing, in seconds of
@@ -98,20 +102,18 @@ export interface DepthFrameWindowOptions<
    * step forward lands on a decoded frame.
    */
   readonly pausedFrameCount: number;
-  /** Whether playback wraps from the last frame to the first. */
   readonly loop?: boolean;
-  /** A frame landed. */
+  /** A frame was decoded and kept. */
   readonly onFrame?: (index: number) => void;
   /** What the window holds or waits for changed. */
   readonly onChange?: () => void;
 }
 
 export interface DepthFrameWindow {
-  /** The decoded preview for frame `index`, or null while it is not. */
   getEntry(index: number): DepthWindowEntry | null;
   /**
-   * The playhead moved to `index`: decoding follows it, and where it lands
-   * says whether it plays, is dragged, and which way it goes.
+   * The playhead moved to `index`: decoding follows it, and its moves give
+   * the heading and, while playing, how many frames each present moves.
    */
   setPlayhead(index: number): void;
   /**
@@ -124,7 +126,6 @@ export interface DepthFrameWindow {
    * playback does; this is what tells the two apart.
    */
   setScrubbing(scrubbing: boolean): void;
-  /** Whether playback wraps at the last frame; look-ahead wraps with it. */
   setLoop(loop: boolean): void;
   /** A hidden page decodes nothing and starts no run until it is shown. */
   setHidden(hidden: boolean): void;
@@ -179,7 +180,6 @@ interface Waiter {
 
 /** The frames the window wants decoded around the playhead. */
 interface Span {
-  /** Frames kept behind the playhead. */
   readonly behind: number;
   /** Offset of the farthest frame wanted ahead, the playhead's own being 0. */
   readonly aheadLast: number;
@@ -190,16 +190,16 @@ interface Span {
 }
 
 /**
- * Decoded 8-bit preview frames around the playhead, by frame index.
+ * Decoded depth frames around the playhead, by frame index.
  *
- * One decode run is active at a time; it runs from the key frame before the
- * frame it was started for. What the window wants decoded follows how the
- * playhead moves, read with the mask window's cadence and heading readings:
+ * One decode run is active at a time; it starts at the frame it is for, or
+ * at the key frame before it on a source without random access. What the
+ * window wants decoded follows how the playhead moves:
  *
  * - Playing, it leads the playhead by `prefetchSeconds` times how many frames
  *   presents move, wrapping at the last frame when the clip loops. Once every
- *   recent present has moved the same number of frames, it copies out only
- *   the frames presents land on.
+ *   recent present has moved the same number of frames, it keeps only the
+ *   frames presents land on.
  * - Dragged, it spends `prefetchSeconds` both ways, most of it the way the
  *   playhead heads. Dragged backwards, a run from a key frame keeps every
  *   frame up to the playhead, so the frames the hand reaches next are there.
@@ -313,10 +313,9 @@ export function createDepthFrameWindow<
     const heading = motion.heading();
 
     if (playing()) {
-      // The lead stretches with how far presents move, as the mask
-      // window's cooks spread over the frames presents land on; frames are
-      // skipped only when every present moves the same stride, since an
-      // uneven cadence lands on any of them.
+      // The lead stretches with how far presents move. Frames are skipped
+      // only when every present moves the same stride, since an uneven
+      // cadence lands on any of them.
       const step = stride.uniform();
       const aheadFrames = Math.min(
         capacityFrames,
@@ -690,7 +689,6 @@ export function createDepthFrameWindow<
     return Number.POSITIVE_INFINITY;
   };
 
-  /** The most lead the window wants ahead of `index`. */
   const reachableSeconds = (index: number) => {
     const wanted = span();
     const offset = wanted.aheadLast + wanted.stride;
@@ -751,7 +749,6 @@ export function createDepthFrameWindow<
       if (playing() && moved > 0) stride.observe(moved);
       if (next === playhead && active !== null) return;
       if (next !== playhead) {
-        // A new place starts the count of restarts for one frame over.
         restartedFor = -1;
       }
       playhead = next;

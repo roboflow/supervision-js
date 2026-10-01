@@ -79,7 +79,6 @@ import type {
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
 
-/** The key depth's diagnostics are kept under beside the scene's families. */
 const DEPTH_DIAGNOSTICS_FAMILY = "depth";
 
 const MILLISECONDS_PER_SECOND = 1000;
@@ -180,12 +179,7 @@ export async function createMediaRendererCore(
   let depthLumaCopier: DepthPreviewLumaCopier | undefined;
   let depthGeneration = 0;
   let depthLoad: AbortController | undefined;
-  /**
-   * Opens depth against the media it will stretch over and hands it to the
-   * scene, which redraws the frame on screen with it. A manifest loads and
-   * decodes first; a later call supersedes one still loading, whose result is
-   * dropped.
-   */
+  /** A later call supersedes one still loading, whose result is dropped. */
   const applyDepth = async (input: MediaRendererDepthInput | null) => {
     if (!mediaScene?.setDepthSource) {
       throw new Error("Media renderer is not ready.");
@@ -227,7 +221,7 @@ export async function createMediaRendererCore(
           signal: load.signal,
         });
       } catch (error) {
-        // Superseded or torn down: the newer state stands and this is not an error.
+        // Superseded or torn down: not an error.
         if (generation !== depthGeneration || runtimeState.isDestroyed()) {
           return;
         }
@@ -246,7 +240,7 @@ export async function createMediaRendererCore(
     depthSource?.destroy();
     depthSource = next;
     if (next === null) {
-      // Depth's last report would otherwise stand for depth that is gone.
+      // So depth's last report does not stand for depth that is gone.
       options.renderPreparation?.onDiagnostics?.(
         renderPreparationReport.remove(DEPTH_DIAGNOSTICS_FAMILY) ?? {
           artifacts: [],
@@ -258,10 +252,8 @@ export async function createMediaRendererCore(
     }
   };
   /**
-   * A depth manifest given at creation loads once the first frame is up:
-   * the picture never waits on depth files, which can take minutes on a slow
-   * link, and the frame on screen redraws with depth when they arrive. A load
-   * that fails leaves the media playing without depth and says why.
+   * A depth manifest given at creation loads once the first frame is up: the
+   * picture never waits on depth files, which can take minutes on a slow link.
    */
   const loadCreationDepthManifest = () => {
     const depth = options.depth;
@@ -417,10 +409,6 @@ export async function createMediaRendererCore(
     }
   };
 
-  /**
-   * Masks, polygons and depth each report on their own; the host hears every
-   * family's latest together, so one never stands in for another.
-   */
   const renderPreparationReport = createRenderPreparationReport();
   const reportRenderPreparation = (
     family: string,
@@ -734,8 +722,8 @@ export async function createMediaRendererCore(
     const presentedSample = mediaScene.presentSample(sample);
     runtimeState.recordPresentedSample(presentedSample);
     detectionTimeline?.prefetch(presentedSample.mediaTime);
-    // Depth decodes ahead of the frame just drawn. A drag points it at the
-    // hand's position instead, as the push transport does.
+    // During a drag, depth decoding follows the hand's position, not the
+    // frames drawn.
     if (!isSeekGestureInFlight) {
       mediaScene.prefetchDepth?.(presentedSample.mediaTime);
     }
@@ -1377,7 +1365,7 @@ export async function createMediaRendererCore(
           runtimeState.recordPlayheadTime(currentTime);
           detectionTimeline?.prefetch(currentTime);
           // A drag reports the frames it lands on, which trail the hand;
-          // depth follows the positions the hand asks for instead.
+          // depth follows the hand's position.
           if (!isSeekGestureInFlight) mediaScene?.prefetchDepth?.(currentTime);
         },
         waitForReadiness: shouldGatePlayback

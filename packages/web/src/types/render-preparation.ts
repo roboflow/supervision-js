@@ -258,10 +258,7 @@ export interface RenderPreparationArtifactWindowDiagnostics {
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
   readonly gateHold?: RenderPreparationGateHoldDiagnostics | null;
-  /**
-   * Holds this family has asked the playback gate for since it opened. Depth
-   * reports it; the count moves once per wait that actually waited.
-   */
+  /** Times this family held the playback gate since it opened. Only depth reports it. */
   readonly gateHoldCount?: number;
   readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
@@ -271,9 +268,9 @@ export interface RenderPreparationArtifactDiagnostics {
    */
   readonly precision?: "exact" | "preview";
   /**
-   * For exact frames loaded ahead for playback: whether they are what plays
-   * now, and how fast they load, in frames a second while loading (fetch and
-   * decode), with the wall milliseconds one load takes on average.
+   * Exact frames loaded ahead for playback: `drawn` when they are what plays
+   * now, `loadRate` in frames a second while loading (fetch and decode
+   * included), `meanLoadMs` the wall time one load takes.
    */
   readonly exactPlayback?: {
     readonly drawn: boolean;
@@ -328,46 +325,35 @@ export interface RenderPreparationDiagnostics {
  * Which depth a clip draws while playback runs.
  *
  * - `"preview"`: the 8-bit preview video, decoded ahead of the playhead.
- * - `"exact"`: the exact 16-bit PNGs, loaded ahead of the playhead through
- *   the decode workers; the playback gate holds for them as it does for the
- *   preview. A clip whose exact frames stop loading falls back to its
- *   preview.
+ * - `"exact"`: the exact 16-bit PNGs, loaded ahead of the playhead; the
+ *   playback gate holds for them. A clip whose exact frames stop loading
+ *   falls back to its preview.
  * - `"auto"` (the default): the exact PNGs while they keep up, the preview
- *   otherwise. Both load ahead; exact depth takes over once its lead reaches
- *   three quarters of what it loads ahead, and hands back to the preview
- *   when the lead falls under a quarter or a frame is missing, waiting
- *   longer each time before it tries again. A clip without a preview plays
- *   exact depth.
+ *   otherwise. Exact depth takes over once its lead reaches three quarters
+ *   of what it loads ahead, and hands back when the lead falls under a
+ *   quarter or a frame is missing, waiting longer each time before it tries
+ *   again. A clip without a preview plays exact depth.
  *
- * Whichever is drawn, it is always the depth of the frame on screen;
- * `getActiveDepth().precision` says which it is.
+ * Whichever is drawn is the depth of the frame on screen;
+ * `getActiveDepth().precision` says which.
  */
 export type DepthPlaybackSource = "auto" | "exact" | "preview";
 
 /**
- * Memory and timing for a depth clip, the `depth` channel a session draws
- * under its `depth` renderers.
- *
- * While playback runs, the clip's 8-bit preview video, or its exact 16-bit
- * frames when `playback` picks them, are loaded ahead of the playhead and
- * drawn frame by frame; once playback rests, the exact 16-bit frame on screen
- * is drawn. Every byte budget defaults to a size that scales with the clip's
- * resolution, so a 4K clip keeps as many seconds as a 720p one, within a
- * ceiling.
+ * Memory and timing for a depth clip. Every byte budget defaults to a size
+ * that scales with the clip's resolution, so a 4K clip keeps as many seconds
+ * as a 720p one, within a ceiling.
  */
 export interface RenderPreparationDepthOptions {
   /**
    * The box the host shows the picture in, in CSS pixels, with its pixel
    * ratio: exact depth that box cannot show whole, at least twice its size,
-   * goes up to the GPU decimated by a whole factor, prepared in the decode
-   * workers. Readouts still read every sample. Defaults to
+   * goes up to the GPU decimated by a whole factor. Readouts still read every
+   * sample. Defaults to
    * `maskFrame.display`; absent, depth goes up at its own size.
    */
   readonly display?: RenderPreparationMaskFrameOptions["display"];
-  /**
-   * Which depth plays: the preview, the exact frames, or the exact frames
-   * while they keep up. Defaults to `"auto"`. See {@link DepthPlaybackSource}.
-   */
+  /** Defaults to `"auto"`. See {@link DepthPlaybackSource}. */
   readonly playback?: DepthPlaybackSource;
   /**
    * Exact frames loaded ahead for playback, in bytes. Defaults to room for
@@ -391,12 +377,10 @@ export interface RenderPreparationDepthOptions {
   /**
    * How far ahead of the playhead the preview, and exact frames when they
    * play, are decoded while playing, in seconds of media. Defaults to 1, or
-   * 0.5 in a stream session. Above 1x it stretches by how many frames
-   * each present moves, as the mask window's cooks spread over the frames
-   * presents land on; a drag spends the same span both ways, most of it the
-   * way the hand heads. At rest the preview keeps the mask window's paused
-   * margin instead, one `maskFrame.scheduleBatchSize` past the frame on
-   * screen.
+   * 0.5 in a stream session. Above 1x it stretches by how many frames each
+   * present moves; a drag spends the same span both ways, most of it the way
+   * the hand heads. At rest the preview decodes one
+   * `maskFrame.scheduleBatchSize` past the frame on screen.
    */
   readonly previewPrefetchSeconds?: number;
   /** Preview kept behind the playhead, in seconds of media. Defaults to 0.25. */
@@ -414,7 +398,7 @@ export interface RenderPreparationDepthOptions {
  * long videos, worker policy, or playback gating need explicit behavior.
  */
 export interface RenderPreparationOptions {
-  /** Budgets and timing for depth clips. See {@link RenderPreparationDepthOptions}. */
+  /** Budgets and timing for depth clips. */
   readonly depth?: RenderPreparationDepthOptions;
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;

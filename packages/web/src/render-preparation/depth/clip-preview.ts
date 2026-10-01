@@ -37,9 +37,6 @@ export interface ClipPreview {
  * time. A preview that disagrees is refused with a `RangeError`. One this
  * browser cannot open or decode leaves the clip without it, and says why
  * once in the console and in diagnostics.
- *
- * The probe's decoder steps carry their own deadlines; the preview's file is
- * never given one, since a slow link is no reason to drop it.
  */
 export async function openClipPreview(
   manifest: DepthManifest,
@@ -166,9 +163,8 @@ async function chooseDefaultPreviewDecoding(levels: DepthPreviewLevels) {
 
 /**
  * Refuses a preview whose frames are not the depth frames, one for one, at
- * the same times. Both timelines are compared from their own first frame, so
- * a preview that starts its clock elsewhere still lines up; a different frame
- * count, rate, or a frame out of step does not.
+ * the same times. Each timeline is measured from its own first frame, so a
+ * preview that starts its clock elsewhere still lines up.
  */
 export function assertDepthPreviewTimeline(
   preview: { readonly frameCount: number; readonly times: Float64Array },

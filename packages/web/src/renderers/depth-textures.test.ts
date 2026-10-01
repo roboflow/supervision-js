@@ -107,7 +107,6 @@ describe("maps larger than the GPU's largest texture", () => {
 
       expect(texels[y * 4097 + x]).toBe(values[row * width + column]);
     }
-    // The map itself keeps every sample for readouts.
     expect(values).toHaveLength(width * height);
   });
 

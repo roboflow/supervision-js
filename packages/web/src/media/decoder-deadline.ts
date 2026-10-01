@@ -1,4 +1,3 @@
-/** What a deadline reads to tell whether anyone can see the page. */
 export interface DecoderDeadlinePage {
   readonly visibilityState: DocumentVisibilityState;
   addEventListener(type: "visibilitychange", listener: () => void): void;
@@ -11,12 +10,9 @@ export interface DecoderDeadlinePage {
  * `TimeoutError` naming the step once `milliseconds` pass; the step itself
  * carries on, and its owner closes the decoder.
  *
- * The budget runs only while the page is visible, as the web video engine's
- * decoder deadlines do: a browser may hold a hidden page's decoder work back,
- * and a step that waited on that is no broken decoder.
- *
- * Only decoder steps get a deadline. A wait on the network never does: a
- * slow link is no fault.
+ * The budget runs only while the page is visible: a browser may hold a
+ * hidden page's decoder work back, and a step that waited on that is no
+ * broken decoder.
  */
 export function withinDecoderDeadline<T>(
   step: Promise<T>,

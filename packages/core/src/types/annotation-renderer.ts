@@ -98,12 +98,10 @@ export interface BoxCornerAnnotationRenderer extends BaseAnnotationRenderer {
 /**
  * Colours the session's depth map over the media.
  *
- * Depth is its own per-frame channel, supplied through the session's `depth`
- * option rather than through detections, and the map is stretched over the
- * whole media rectangle. Every setting here is presentation: changing one
- * recolours the map on screen without reloading or re-uploading it.
- * Multiple descriptors with distinct ids may coexist, for example two
- * colormaps split by `wipe`.
+ * The map comes from the session's `depth` option, not from detections, and is
+ * stretched over the whole media rectangle. Changing a setting here recolours
+ * the map without reloading or re-uploading it. Descriptors with distinct ids
+ * may coexist, for example two colormaps split by `wipe`.
  */
 export interface DepthAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "depth";

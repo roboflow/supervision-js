@@ -13,10 +13,8 @@ export interface MediabunnyMediaSourceInput {
     readonly duration?: number | null;
   };
   readonly source: Source;
-  /**
-   * Set where the source cannot be indexed yet, such as a file still being
-   * written: what a depth clip is told when it asks for the frame index.
-   */
+  /** Set when the source cannot be indexed yet, such as a file still being
+   *  written. */
   readonly frameClockUnavailableReason?: string;
 }
 
@@ -119,8 +117,8 @@ export async function openMediabunnyMediaSource(
         ? {
             readFrameClock() {
               frameClock ??= readMediabunnyFrameClock(primaryVideoTrack);
-              // A walk that failed, say on a dropped connection, is tried
-              // again by the next caller rather than remembered.
+              // A walk that failed, say on a dropped connection, is retried
+              // by the next caller.
               frameClock.catch(() => {
                 frameClock = undefined;
               });

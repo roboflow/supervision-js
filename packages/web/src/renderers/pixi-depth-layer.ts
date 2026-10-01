@@ -60,12 +60,9 @@ interface DrawnDepth {
 }
 
 /**
- * Draws the session's depth under every depth renderer.
- *
- * All renderers share one upload of each map; a renderer change rewrites the
- * shader's uniforms and uploads nothing. The draw reads only the media time it
- * is given, and a time with no map hides every mesh rather than leaving the
- * previous map over new pixels.
+ * All depth renderers share one upload of each map; a renderer change rewrites
+ * the shader's uniforms and uploads nothing. A media time with no map hides
+ * every mesh, so a stale map never sits over new pixels.
  */
 export function createPixiDepthLayer(options: {
   readonly BufferImageSource: DepthBufferImageSourceConstructor;
@@ -76,7 +73,6 @@ export function createPixiDepthLayer(options: {
   readonly Shader: InjectedShaderFactory;
   readonly UniformGroup: DepthShaderOptions["UniformGroup"];
   readonly acceptsUnalignedTextureRows: () => boolean;
-  /** The GPU's largest texture side, asked once per backend. */
   readonly maxTextureSize?: () => number;
   readonly getMediaSize: () => { width: number; height: number };
   /**
@@ -86,7 +82,6 @@ export function createPixiDepthLayer(options: {
   readonly prepareTexture?: (source: PixiBufferImageSource) => void;
   readonly renderers: readonly DepthAnnotationRenderer[];
   readonly source?: DepthFrameProvider | null;
-  /** Whether annotations are hidden, which hides depth as removing its renderers would. */
   readonly hidden?: boolean;
 }) {
   const container = new options.Container();
@@ -115,13 +110,7 @@ export function createPixiDepthLayer(options: {
   let destroyed = false;
   let uploadsInPresent = 0;
   let uploadsAhead = 0;
-  /**
-   * The clip frame last drawn, and how far presents move. At a rate that is
-   * not a whole number of frames a present, a present moves the whole part
-   * or one more, and those two frames are what go up ahead.
-   */
   let lastFrameIndex: number | null = null;
-  /** How far the last few presents that moved went, in frames. */
   const recentSteps: number[] = [];
 
   const ringFor = (map: DepthMap) => {
@@ -146,7 +135,6 @@ export function createPixiDepthLayer(options: {
     rings.clear();
   };
 
-  /** Gating and prefetching only matter while some renderer draws depth. */
   const drawing = () => renderers.length > 0 && !hidden && !destroyed;
 
   const hide = () => {
@@ -163,7 +151,6 @@ export function createPixiDepthLayer(options: {
     meshOrder = "";
   };
 
-  /** One mesh per renderer id, stacked in presentation order. */
   const syncMeshes = (width: number, height: number) => {
     if (width !== meshWidth || height !== meshHeight) {
       destroyMeshes();
@@ -209,10 +196,6 @@ export function createPixiDepthLayer(options: {
     }
   };
 
-  /**
-   * A frame's percentile range is a function of the frame alone, so it is
-   * computed once per map and quantity rather than once per draw.
-   */
   const autoRangeFor = (
     map: DepthMap,
     renderer: DepthAnnotationRenderer,
@@ -309,9 +292,8 @@ export function createPixiDepthLayer(options: {
     },
 
     /**
-     * Hides depth with the other annotations: nothing draws, the playback
-     * gate stops waiting for depth and nothing decodes ahead, as when no
-     * depth renderer is set. The source and what it decoded are kept.
+     * Nothing draws, the playback gate stops waiting for depth and nothing
+     * decodes ahead. The source and what it decoded are kept.
      */
     setHidden(next: boolean) {
       hidden = next;
@@ -322,9 +304,7 @@ export function createPixiDepthLayer(options: {
       source = next;
       hide();
       if (!next) {
-        // Nothing will draw from these textures until another map arrives.
-        // The shaders let go of them first: Pixi warns about a texture
-        // destroyed while a shader still holds it.
+        // Pixi warns about a texture destroyed while a shader still holds it.
         for (const entry of drawn.values()) {
           entry.renderer.clearTexture();
           entry.drawnTexture = null;
@@ -385,7 +365,6 @@ export function createPixiDepthLayer(options: {
       return active;
     },
 
-    /** The playhead moved, outside any present: decoding ahead follows it. */
     prefetch(mediaTime: number) {
       if (drawing()) source?.prefetch?.(mediaTime);
     },
@@ -394,6 +373,9 @@ export function createPixiDepthLayer(options: {
      * Uploads the maps of the next frames into spare textures, so the
      * presents that draw them only bind. Call it after a present, never in
      * one: the frame on screen keeps its own texture.
+     *
+     * At a pace that is not a whole number of frames a present, a present
+     * moves the whole part or one more; those two frames are what go up.
      */
     uploadAhead(mediaTime: number) {
       if (!drawing() || !source?.getUpcomingEntries) return;
@@ -453,8 +435,7 @@ export function createPixiDepthLayer(options: {
 
     /**
      * Whether the depth a draw of `mediaTime` would show is decoded, asking
-     * nothing to load: what the prepared annotation window reads per frame.
-     * True where there is nothing to wait for.
+     * nothing to load. True where there is nothing to wait for.
      */
     isArtifactPrepared(mediaTime: number): boolean {
       if (!drawing() || !source?.getFrameStatus) return true;
@@ -462,12 +443,10 @@ export function createPixiDepthLayer(options: {
       return source.getFrameStatus(mediaTime)?.prepared !== false;
     },
 
-    /** Maps uploaded while presenting, and ahead of the presents that drew them. */
     getUploadCounts() {
       return { ahead: uploadsAhead, inPresent: uploadsInPresent };
     },
 
-    /** Changes whenever what the layer has on screen changes. */
     getContentKey(): string {
       return active ? `${identify(active.map)}:${active.precision}` : "none";
     },

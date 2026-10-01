@@ -23,7 +23,6 @@ export type FakeDecoderBehaviour =
 /** A clip of `frameCount` frames, each decoding to `luma(index)`. */
 export interface FakeDecoderClip {
   readonly frameCount: number;
-  /** A key frame every this many frames. */
   readonly keyEvery: number;
   readonly width: number;
   readonly height: number;
@@ -68,7 +67,6 @@ export interface FakeDecoderLog {
   outputs: number;
 }
 
-/** A constant-rate track from zero with a key frame every `keyEvery` frames. */
 export function uniformTrackFrameIndex(
   frameCount: number,
   frameRate: number,
@@ -89,7 +87,6 @@ export function uniformTrackFrameIndex(
   };
 }
 
-/** A track reader over `clip`, decoding through a fake decoder. */
 export function openFakeDepthPreviewTrack(
   behaviour:
     | FakeDecoderBehaviour

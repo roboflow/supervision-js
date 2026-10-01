@@ -12,15 +12,13 @@ import {
 
 export const DEPTH_MANIFEST_SCHEMA = "supervision.depth-manifest";
 
-/** The code standing for the top of a preview's range, at each level. */
 const PREVIEW_TOP_CODES: Readonly<Record<DepthPreviewLevels, number>> = {
   full: 255,
   tv: 235,
 };
 /**
- * The lowest reserved code at each level. TV black, 16, is written for no
- * depth, and a decoder that converts to RGB returns every code below it as
- * black too, so the reserved band must cover it.
+ * TV black, 16, is written for no depth, and a decoder that converts to RGB
+ * returns every code below it as black too, so the reserved band must cover it.
  */
 const PREVIEW_MIN_RESERVED_CODES: Readonly<Record<DepthPreviewLevels, number>> =
   { full: 0, tv: 16 };
@@ -129,8 +127,7 @@ export function resolveDepthFrameFile(pattern: string, index: number): string {
 }
 
 /**
- * Checks a host-supplied depth map's shape without walking its values, so a
- * full-resolution map costs nothing to accept.
+ * Checks a host-supplied depth map's shape, without reading its sample values.
  */
 export function validateDepthMap(map: DepthMap): void {
   const reject = (message: string): never => {
@@ -295,9 +292,7 @@ function readFrameTimes(value: unknown, count: number): readonly number[] {
   return [...(times as readonly number[])];
 }
 
-/**
- * A preview without `levels` predates TV range and is read as full range.
- */
+/** A preview without `levels` predates TV range and is read as full range. */
 function readPreview(value: unknown): DepthPreviewTrack {
   const preview = readObject(value, "preview");
   const file = readFileName(preview.file, "preview.file");
@@ -439,7 +434,7 @@ function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-/** Reserved codes must leave two valid ones below the top code. */
+/** At least two valid codes must remain, or the preview span is zero. */
 function isReservedPreviewCode(
   value: unknown,
   levels: DepthPreviewLevels,

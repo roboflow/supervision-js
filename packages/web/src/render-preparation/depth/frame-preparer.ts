@@ -49,7 +49,6 @@ export interface DepthFramePreparer {
     bytes: ArrayBuffer,
     options?: DepthDecodeOptions,
   ): Promise<DecodedDepthImage<Uint16Array>>;
-  /** Decodes an 8-bit confidence PNG. */
   decodeConfidence(
     bytes: ArrayBuffer,
     options?: Pick<DepthDecodeOptions, "signal">,

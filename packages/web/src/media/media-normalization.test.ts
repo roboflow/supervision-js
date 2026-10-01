@@ -440,7 +440,6 @@ describe("normalizeMedia", () => {
     const source = await normalized.rendererSource.open();
 
     expect(source.metadata.duration).toBe(1.25);
-    // Frames still being written cannot be indexed, so a depth clip is told why.
     expect(source.readFrameClock).toBeUndefined();
     expect(source.frameClockUnavailableReason).toMatch(
       /^the media is still being converted/,

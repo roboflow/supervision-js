@@ -28,10 +28,7 @@ export interface DepthFrameEntry {
   readonly precision: "exact" | "preview";
 }
 
-/**
- * What the depth layer reads to find the map for a media time. It stays
- * internal until a second producer needs to supply depth itself.
- */
+/** What the depth layer reads to find the map for a media time. */
 export interface DepthFrameProvider {
   /**
    * The depth to draw over the frame at `mediaTime`, or null to draw none.
@@ -45,7 +42,7 @@ export interface DepthFrameProvider {
    * until then.
    */
   setPlaybackActive?(active: boolean): void;
-  /** Whether a drag holds the playhead, as opposed to playback moving it. */
+  /** Whether a drag, not playback, holds the playhead. */
   setScrubbing?(scrubbing: boolean): void;
   /** Whether playback wraps at the media end: decoding ahead wraps with it. */
   setLoop?(loop: boolean): void;
@@ -108,13 +105,12 @@ export interface DepthSourceContext {
   /** Pad odd-width rows for WebGL while decoding, off the main thread. */
   readonly padRowsForWebGl?: boolean;
   /**
-   * The box the picture is shown in. Exact depth larger than that box shows
-   * at its pixel ratio, by a whole factor of 2 or more, goes up decimated by
-   * that factor, prepared while decoding; readouts keep the full map.
+   * The box the picture is shown in. Exact depth at least twice the size the
+   * box shows at its pixel ratio is uploaded shrunk by that whole factor,
+   * prepared while decoding; readouts keep the full map.
    */
   readonly display?: RenderPreparationMaskFrameOptions["display"];
   readonly signal?: AbortSignal;
-  /** The host's budgets and timing for clips. */
   readonly depth?: RenderPreparationDepthOptions;
   /**
    * The mask window's schedule batch, which also sizes what the preview keeps

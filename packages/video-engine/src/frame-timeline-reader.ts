@@ -18,8 +18,8 @@ interface TrackWithTimeResolution {
  * Decode order is not presentation order on a B-frame source, so the table is
  * sorted before it is indexed, and the trailing frame's duration comes from the
  * packet that ends up last in that order. A WebM block need not state a
- * duration, and the demuxer reads the last one that does not as lasting no
- * time, so that frame's duration is then found another way.
+ * duration, which the demuxer reads as zero, so a last frame without one is
+ * given a duration from elsewhere.
  */
 export async function readFrameTimeline(
   videoTrack: unknown,

@@ -64,7 +64,6 @@ describe("render preparation report", () => {
       workerStatus: RenderPreparationWorkerStatus.Ready,
     });
 
-    // A newer mask report replaces the masks' entry only.
     const later = report.update("maskFrame", {
       ...masks,
       artifacts: [{ ...masks.artifacts[0], pendingCount: 0 }],

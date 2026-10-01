@@ -85,7 +85,7 @@ export interface MediaFrameRenderTimings {
   readonly mediaUploadMs: number;
   /** Masks and heatmaps. */
   readonly maskMs: number;
-  /** The depth layer: binding, and uploading a map not uploaded ahead. */
+  /** Depth layer, including uploading any map not uploaded ahead of the frame. */
   readonly depthMs: number;
   readonly boxMs: number;
   readonly focusMs: number;

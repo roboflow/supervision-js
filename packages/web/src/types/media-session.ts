@@ -277,20 +277,14 @@ export interface MediaSessionOptions {
    */
   readonly detections?: MediaSessionDetectionOptions;
   /**
-   * Depth drawn by `depth` annotation renderers, as its own channel beside
-   * detections. A still `map` is drawn under every frame and stretched over
-   * the media rectangle, so it must share the media's aspect ratio. A clip
-   * manifest (`frames`) needs media with a frame index: a URL or file, or
-   * `createWebVideoEngineMediaRendererSource()`. While playing it draws each
-   * frame's exact depth when those load fast enough, its 8-bit preview video
-   * otherwise (`renderPreparation.depth.playback`), and each frame's exact
-   * depth once playback rests.
+   * Depth drawn by `depth` annotation renderers, beside detections. See
+   * {@link MediaRendererDepthInput} for what a map or a clip manifest needs.
    *
    * The session does not wait for a manifest: the media shows and plays as
    * soon as it can, and depth joins it when its files arrive. A manifest
    * that fails to load leaves the media playing without depth, with a
-   * console warning and the reason in `renderPreparation.message`. Call
-   * `setDepth()` instead to wait for depth or catch its error.
+   * console warning and the reason in `renderPreparation.message`. To wait
+   * for depth or catch its error, call `setDepth()`.
    */
   readonly depth?: MediaRendererDepthInput;
   /**
@@ -476,11 +470,10 @@ export interface MediaSession {
   captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
   setPresentation(presentation: MediaRendererPresentation): void;
   /**
-   * Optionally replace the session's depth, or remove it with `null`, and
-   * redraw the frame on screen. Resolves once the renderer has that depth,
-   * and rejects with the reason a manifest did not load; the media keeps
-   * playing meanwhile. `session.renderer.getActiveDepth()` reads back what
-   * is drawn.
+   * Replaces the session's depth, or removes it with `null`, and redraws the
+   * frame on screen. Resolves once the renderer has that depth, and rejects
+   * with the reason a manifest did not load; the media keeps playing
+   * meanwhile. `session.renderer.getActiveDepth()` reads back what is drawn.
    */
   setDepth?(depth: MediaRendererDepthInput | null): Promise<void>;
   setRenderQuality(quality: MediaRendererQuality): void;

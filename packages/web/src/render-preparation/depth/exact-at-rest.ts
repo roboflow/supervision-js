@@ -36,7 +36,7 @@ export function createExactFramesAtRest(options: {
   readonly exactFrameBytes: number;
   readonly options: DepthClipOptions["exact"];
   readonly load: (index: number, signal: AbortSignal) => Promise<DepthMap>;
-  /** A frame exact playback already holds, kept here instead of loaded again. */
+  /** A frame exact playback already holds, kept here without a second load. */
   readonly loadedAhead: (index: number) => DepthMap | null;
   /** Loads run at once: one per decode worker. */
   readonly concurrency: () => number;

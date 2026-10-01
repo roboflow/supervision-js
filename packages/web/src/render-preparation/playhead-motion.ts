@@ -1,8 +1,8 @@
 /**
  * How the playhead is moving, read from where it lands: playing forward at a
- * cadence, dragged, or stepped, and which way. Prepared windows that work
- * ahead of the playhead (mask cooks, depth preview decoding) share it, so a
- * drag or a fast rate reads the same to every family.
+ * cadence, dragged, or stepped, and which way. Every prepared window that
+ * works ahead of the playhead reads it here, so a drag or a fast rate reads
+ * the same to each.
  */
 
 /** A jump that repeats. One on its own is a seek, and it lands somewhere. */
@@ -11,9 +11,9 @@ const DRAGGED_PLAYHEAD_JUMP_COUNT = 2;
 export const MAX_PRESENTED_FRAME_STRIDE = 4;
 const PRESENTED_FRAME_STRIDE_SAMPLE_COUNT = 4;
 /**
- * Positions a heading is read from, and how many it needs: the web video
- * engine's scrub ring (`scrub-trajectory.ts`), with the same rules, so a
- * window here and the engine's residency agree on which way a drag goes.
+ * Positions a heading is read from, and how many it needs. These match the
+ * web video engine's scrub ring, so a window here and the engine's residency
+ * agree on which way a drag goes.
  */
 const HEADING_SAMPLE_CAPACITY = 8;
 const MIN_SAMPLES_FOR_HEADING = 3;
@@ -131,7 +131,6 @@ export function createPlayheadMotion(
  * a seek.
  */
 export interface PresentedFrameStride {
-  /** A present moved `step` frames forward. */
   observe(step: number): void;
   /** The narrowest of the repeated strides, 1 until there are enough. */
   narrowest(): number;

@@ -7,13 +7,8 @@ import {
   viridisTable,
 } from "#utils/depth-colormap-tables";
 
-/** Entries in every depth colour table; the colour coordinate t picks one. */
 export const DEPTH_COLORMAP_ENTRIES = 256;
 
-/**
- * Published tables rather than polynomial fits: a fit of Turbo misses its dark
- * ends by more than a colour step, which is where depth edges sit.
- */
 const colormapTables: Readonly<
   Record<Exclude<DepthColormap, "grayscale">, string>
 > = {

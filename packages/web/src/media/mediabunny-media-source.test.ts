@@ -65,7 +65,6 @@ describe("openMediabunnyMediaSource", () => {
       }),
     );
     expect(source.sampleSink).not.toBe(mediabunny.videoSampleSink);
-    // The frame index is offered, not read: opening walks no packets.
     expect(source.readFrameClock).toBeTypeOf("function");
     expect(source.frameClockUnavailableReason).toBeUndefined();
   });

@@ -92,11 +92,10 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    */
   readonly detectionTimelineOrigin?: DetectionTimelineOrigin;
   /**
-   * Depth drawn by `depth` annotation renderers. It is its own channel,
-   * never part of detection frames. A map must match the media's aspect
-   * ratio; a mismatch puts the renderer in its error state. A manifest loads
-   * once the media's first frame is up, never before it, and one that fails
-   * leaves the media playing without depth.
+   * Depth drawn by `depth` annotation renderers, separate from detection
+   * frames. A map whose aspect ratio differs from the media's puts the
+   * renderer in its error state. A manifest loads once the media's first
+   * frame is up; one that fails leaves the media playing without depth.
    */
   readonly depth?: MediaRendererDepthInput;
   readonly interaction?: MediaInteractionOptions;

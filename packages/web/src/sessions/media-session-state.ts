@@ -143,8 +143,8 @@ export function createMediaSessionStateSnapshot({
 
   for (const artifact of renderPreparation?.artifacts ?? []) {
     if (artifact.kind === RenderPreparationArtifactKind.ExactDepthFrame) {
-      // Exact depth loads while the frame rests, with its preview or no
-      // depth drawn meanwhile: it neither holds playback nor the picture.
+      // Exact depth loads while the frame rests, its preview or no depth
+      // drawn meanwhile; it never holds playback or the picture.
       if (artifact.pendingCount > 0) {
         activities.push(
           createActivity({
@@ -375,10 +375,7 @@ function resolveSessionStatus(
   return MediaSessionStatus.Ready;
 }
 
-/**
- * How the session's activity text names what one family prepares: depth by
- * its own name, masks and polygons as masks, which is what a viewer sees.
- */
+/** Polygons are named as masks, which is what a viewer sees. */
 function describeArtifactKind(kind: RenderPreparationArtifactKind) {
   return kind === RenderPreparationArtifactKind.DepthFrame
     ? {
@@ -395,7 +392,6 @@ function describeArtifactKind(kind: RenderPreparationArtifactKind) {
       };
 }
 
-/** Whose preparation a gate that gave up was waiting on. */
 function abandonedSubject(
   renderPreparation: RenderPreparationDiagnostics | null,
 ) {

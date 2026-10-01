@@ -284,7 +284,6 @@ export async function createPixiMediaScene(
    */
   const acceptsUnalignedTextureRows = () => app.renderer?.name === "webgpu";
   let maxTextureSide: number | undefined;
-  /** Asked of the backend once; nothing larger can be one texture. */
   const maxTextureSize = () =>
     (maxTextureSide ??= queryMaxTextureSize(app.renderer));
   const frameChannel = options.presentedFrames;
@@ -438,9 +437,9 @@ export async function createPixiMediaScene(
   let depthUploadTimer: ReturnType<typeof setTimeout> | undefined;
   let depthUploadMediaTime = 0;
   /**
-   * The next frames' depth goes up in a task of its own after a present, so
-   * the present that draws it only binds the texture, and the frame just
-   * rendered is not held back by the upload.
+   * A task of its own after the present, so the frame just rendered is not
+   * held back by the upload and the present that draws the next frame only
+   * binds its texture.
    */
   const scheduleDepthUploadAhead = (mediaTime: number) => {
     if (!depthLayer || !depthSource) return;
@@ -1476,8 +1475,8 @@ export async function createPixiMediaScene(
           presentation.visibility,
         );
         currentVisibility = presentation.visibility;
-        // Depth is an annotation layer on screen: hiding annotations hides
-        // it too. Classes and detection ids do not reach it, it has neither.
+        // Depth has no classes or detection ids, so only hiding all
+        // annotations reaches it.
         depthLayer?.setHidden(
           presentation.visibility.annotationsHidden === true,
         );
@@ -1666,7 +1665,7 @@ export async function createPixiMediaScene(
       if (timelineContext) source?.setLoop?.(timelineContext.loop);
       // A clip's exact frame lands after its frame was presented. The layer's
       // content key is in the render signature, so each of these redraws
-      // renders only when the depth on screen actually changed.
+      // renders only when the depth on screen changed.
       unsubscribeDepthSource = source?.subscribe?.(() => {
         if (hasPresentedSample) redrawAnnotationsNow();
       });

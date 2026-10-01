@@ -282,7 +282,7 @@ describe("depth preview window", () => {
     }
 
     // The last eight moved 3.25 frames on average, so 0.5 s of lead
-    // stretches past 1.6 s: seventeen frames, every one copied.
+    // stretches past 1.6 s: seventeen frames, every one kept.
     expect(stored(window, index, index + 16)).toEqual(range(index, index + 16));
     expect(window.getDiagnostics()).toMatchObject({ prefetchCount: 17 });
   });

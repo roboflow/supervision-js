@@ -17,7 +17,8 @@ export interface DecodedPng16 {
   readonly values: Uint16Array<ArrayBuffer>;
   /**
    * The samples as `rg8` texture bytes with every row padded to a multiple of
-   * four bytes, present only when padding was asked for and the width is odd.
+   * four bytes, present only when padding was asked for, the width is odd and
+   * the host is little-endian.
    */
   readonly paddedUpload?: {
     readonly bytes: Uint8Array<ArrayBuffer>;
@@ -25,7 +26,6 @@ export interface DecodedPng16 {
   };
 }
 
-/** A decoded 8-bit grayscale PNG, such as a confidence plane. */
 export interface DecodedPng8 {
   readonly width: number;
   readonly height: number;
@@ -54,7 +54,6 @@ const MAX_PNG_PIXELS = 16_384 * 16_384;
 const HOST_IS_LITTLE_ENDIAN =
   new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
-/** Decodes a 16-bit grayscale PNG, as a depth producer writes one. */
 export async function decodePng16(
   bytes: ArrayBuffer | Uint8Array,
   options: DecodePng16Options = {},
@@ -81,7 +80,6 @@ export async function decodePng16(
   };
 }
 
-/** Decodes an 8-bit grayscale PNG, as a confidence plane is written. */
 export async function decodePng8Gray(
   bytes: ArrayBuffer | Uint8Array,
   options: { readonly inflate?: PngInflate } = {},
@@ -257,10 +255,9 @@ function checkInflatedLength(raw: Uint8Array, expected: number) {
  * back from the output, which already holds it unfiltered; the first row reads
  * a row of zeros, which is what PNG defines above the image.
  *
- * Each filter is its own small function with one loop, called once per row:
- * no per-byte filter switch or call, and every engine compiles each loop on
- * its own (SpiderMonkey slowed a Paeth loop that shared a function with the
- * others to below the research prototype's speed).
+ * Each filter is its own small function with one loop, called once per row,
+ * so engines compile each loop on its own: SpiderMonkey slowed a Paeth loop
+ * that shared a function with the other filters.
  */
 function unfilterGray16(
   raw: Uint8Array,
@@ -549,8 +546,7 @@ const ROW_FILTERS_8: readonly RowFilter8[] = [
 
 /**
  * WebGL unpacks rows on four-byte boundaries, so an odd width of two-byte
- * texels needs one padding texel per row. Rows are copied whole, with no
- * per-sample work.
+ * texels needs one padding texel per row.
  */
 function padRows(values: Uint16Array, width: number, height: number) {
   const textureWidth = width + 1;

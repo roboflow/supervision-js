@@ -305,8 +305,6 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
-  // A WebM block carries no duration of its own, so the demuxer reports the
-  // last frame of such a track as lasting no time at all.
   it.each([
     { clip: "a one-frame clip", ticks: [0], index: 0 },
     { clip: "the last frame of a longer clip", ticks: [0, 333, 667], index: 2 },

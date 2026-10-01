@@ -797,7 +797,6 @@ function settle() {
   return new Promise((resolve) => setTimeout(resolve, 20));
 }
 
-/** Runs fake timers on until `work` settles. */
 async function advanceUntilSettled<T>(work: Promise<T>): Promise<T> {
   let settled = false;
 
@@ -825,7 +824,6 @@ interface PreviewClipOptions {
   /** Writes the preview's manifest in TV range, codes 32 to 235. */
   readonly tv?: boolean;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
-  /** Decodes the preview through fake decoders that behave this way. */
   readonly decoder?: FakeDecoders;
   /** Which depth plays; these tests are about the preview unless they say. */
   readonly playback?: DepthPlaybackSource;

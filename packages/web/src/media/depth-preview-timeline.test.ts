@@ -8,7 +8,6 @@ const mediabunny =
   await vi.importActual<typeof import("mediabunny")>("mediabunny");
 const FPS = 24;
 
-/** The video's frames: 24 fps from zero, as the engine's clock reads them. */
 const videoTime = (index: number) => index / FPS;
 
 /**

@@ -1,7 +1,6 @@
 import type { DepthMap } from "supervision-js-core";
 import type { DepthFrameRun, DepthFrameSource } from "./frame-window";
 
-/** One exact 16-bit depth frame, loaded and decoded. */
 export interface ExactDepthFrame {
   readonly index: number;
   readonly map: DepthMap;

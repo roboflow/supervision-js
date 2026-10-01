@@ -20,9 +20,8 @@ export const DEFAULT_DEPTH_TIMING_OPTIONS = {
 } as const satisfies RenderPreparationDepthOptions;
 
 /**
- * A stream session decodes depth half as far ahead, as its mask window cooks
- * 3 s ahead where a file's cooks 7 s: what is ahead of a live playhead is
- * still arriving, and depth shares the link with it.
+ * A stream session decodes depth half as far ahead: what is ahead of a live
+ * playhead is still arriving, and depth shares the link with it.
  */
 export const STREAM_DEPTH_TIMING_OPTIONS = {
   ...DEFAULT_DEPTH_TIMING_OPTIONS,

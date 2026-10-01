@@ -30,35 +30,23 @@ export interface DepthTextureUpload {
   readonly textureWidth: number;
 }
 
-/** The texels a map's texture holds, which the shader addresses. */
 export interface DepthDisplaySize {
   readonly width: number;
   readonly height: number;
 }
 
-/**
- * What goes up for one map: its bytes, and the size of the image they hold.
- * That size is the map's own unless the map is larger than the GPU's largest
- * texture, in which case the texture holds a decimated copy.
- */
 export interface DepthMapUpload extends DepthTextureUpload {
   readonly displaySize: DepthDisplaySize;
 }
 
-/**
- * Upload bytes prepared off the main thread for a map, such as the padded rows
- * the render-preparation worker writes while it decodes a PNG. They are used
- * when they fit the backend the map is drawn on.
- */
 const preparedUploads = new WeakMap<
   DepthMap,
   DepthTextureUpload & { readonly displaySize?: DepthDisplaySize }
 >();
 
 /**
- * Remembers bytes prepared for a map's upload. With a `displaySize` smaller
- * than the map, they are a decimated copy for a box that shows no more; the
- * map keeps its full samples for readouts.
+ * With a `displaySize` smaller than the map, the bytes are a decimated copy;
+ * the map keeps its full samples for readouts.
  */
 export function rememberPreparedDepthUpload(
   map: DepthMap,
@@ -75,9 +63,8 @@ const HOST_IS_LITTLE_ENDIAN =
  * shader rebuilds `red + 256 * green`. Pixi cannot upload a 16-bit integer
  * texture on WebGL, and a half float cannot hold every 1/256 step.
  *
- * On a little-endian host a `Uint16Array` already is those bytes, so the view
- * goes up without a copy. Only a row that WebGL would misread, or a
- * big-endian host, pays for one.
+ * On a little-endian host a `Uint16Array` already is those bytes, so aligned
+ * rows go up without a copy.
  */
 export function createPackedDepthUpload(
   values: Uint16Array,
@@ -103,7 +90,6 @@ export function createPackedDepthUpload(
   const bytes = new Uint8Array(textureWidth * height * 2);
 
   if (littleEndian) {
-    // Whole rows move with one copy each; only the padding texel is new.
     const texels = new Uint16Array(bytes.buffer);
 
     for (let y = 0; y < height; y += 1) {
@@ -128,7 +114,6 @@ export function createPackedDepthUpload(
   return { bytes, format: "rg8unorm", textureWidth };
 }
 
-/** Preview codes go up one byte per texel, padded the same way on WebGL. */
 export function createPreviewUpload(
   codes: Uint8Array,
   width: number,
@@ -151,9 +136,9 @@ export function createPreviewUpload(
 }
 
 /**
- * The upload for one map. A map larger than `maxTextureSize` on either side
- * goes up as a nearest-decimated copy that fits; the full-resolution samples
- * stay on the map for readouts.
+ * A map larger than `maxTextureSize` on either side goes up as a
+ * nearest-decimated copy that fits; the full-resolution samples stay on the
+ * map for readouts.
  */
 export function createDepthMapUpload(
   map: DepthMap,
@@ -231,10 +216,7 @@ function uploadSamples(
     : createPreviewUpload(samples.values, width, height, acceptsUnalignedRows);
 }
 
-/**
- * Picks the sample under each output texel's centre. Nearest keeps every
- * value a real one, so "no depth" never blends into its neighbours.
- */
+/** Nearest sampling, so "no depth" never blends into its neighbours. */
 function decimateSamples(
   map: DepthMap,
   size: DepthDisplaySize,
@@ -294,15 +276,9 @@ interface RingSlot {
   lastUsed: number;
 }
 
-/**
- * A few textures reused across maps. A map already resident is never
- * uploaded again, and a slot that gets a map of the same size keeps its GPU
- * texture and takes the new bytes in place.
- */
 export function createDepthTextureRing(options: {
   readonly BufferImageSource: DepthBufferImageSourceConstructor;
   readonly acceptsUnalignedTextureRows: () => boolean;
-  /** The GPU's largest texture side; larger maps go up decimated. */
   readonly maxTextureSize?: () => number;
   readonly size?: number;
 }): DepthTextureRing {
@@ -390,10 +366,6 @@ export function createDepthTextureRing(options: {
   };
 }
 
-/**
- * One 256x1 RGBA texture per colour table, filtered linearly so a colour
- * coordinate between two entries blends them.
- */
 export function createDepthLutCache(
   BufferImageSource: DepthBufferImageSourceConstructor,
 ): {
@@ -445,9 +417,8 @@ function alignedWidth(
 }
 
 /**
- * The largest texture side the backend accepts: WebGPU's device limit, or
- * WebGL's MAX_TEXTURE_SIZE. WebGL 2 promises at least 2048 and WebGPU 8192,
- * which is what an unreadable answer falls back to.
+ * An unreadable limit falls back to the minimum each backend guarantees:
+ * 2048 on WebGL 2, 8192 on WebGPU.
  */
 export function queryMaxTextureSize(renderer: unknown): number {
   const backend = renderer as {

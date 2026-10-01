@@ -141,11 +141,7 @@ export interface MediaRendererScene {
    * again.
    */
   setPlaybackActive?(active: boolean): void;
-  /**
-   * Whether a drag holds the playhead. Playback activity says the playhead
-   * moves; this says a hand moves it, so work ahead of it follows the hand
-   * rather than a playback cadence.
-   */
+  /** While a drag holds the playhead, work ahead of it follows the hand. */
   setScrubbing?(scrubbing: boolean): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
@@ -199,17 +195,10 @@ export interface MediaRendererScene {
     selection: DetectionSelectionOptions | null,
     mediaTime: number,
   ): DetectionPickResult | null;
-  /**
-   * Replaces the depth the scene draws under its depth renderers and redraws
-   * the frame on screen; null removes it.
-   */
+  /** Redraws the frame on screen with the new depth; null removes it. */
   setDepthSource?(source: DepthFrameProvider | null): void;
-  /** The depth map the scene last drew, or null when none is on screen. */
   getActiveDepth?(): ActiveDepthMap | null;
-  /**
-   * The producer's playhead moved: depth decoding ahead follows it. Called on
-   * every playhead move, never from inside a present.
-   */
+  /** Called on every playhead move, never from inside a present. */
   prefetchDepth?(mediaTime: number): void;
   destroy(): void;
 }

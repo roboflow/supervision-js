@@ -94,7 +94,6 @@ const TV_PROBE_MP4_BASE64 = [
   "j12857uBAAAADEGaIWxr/talUAAFxA==",
 ].join("");
 
-/** How a probe at one level is written, judged and decoded. */
 interface ProbeSpec {
   readonly base64: string;
   /**
@@ -149,16 +148,13 @@ export interface DepthPreviewCodeProbe {
   readonly exact: boolean;
   /** Codes judged: 256 at full levels, the 220 from 16 to 235 at TV levels. */
   readonly judgedCodes: number;
-  /** Judged codes that came back as another code. */
   readonly mismatchedCodes: number;
-  /** The largest difference between a judged code and the code read back. */
   readonly maxError: number;
   /** The code read back for each written code, indexed by the written one. */
   readonly decoded: Uint8Array;
   readonly lumaPath: DepthPreviewLumaPath | null;
 }
 
-/** One decoder the page could decode a preview with, and how it did. */
 export interface DepthPreviewDecoderVerdict {
   readonly hardwareAcceleration: HardwareAcceleration;
   readonly supported: boolean;
@@ -223,7 +219,6 @@ export function chooseDepthPreviewDecoding(
   return decoding;
 }
 
-/** The bytes of the probe clip written at `levels`. */
 export function depthPreviewProbeBytes(
   levels: DepthPreviewLevels = "full",
 ): Uint8Array {
@@ -278,7 +273,6 @@ async function runProbes(
   return resolveDepthPreviewDecoding(verdicts, levels);
 }
 
-/** Decodes the probe clip through one decoder, if the browser offers it. */
 export async function probeDepthPreviewDecoder(
   hardwareAcceleration: HardwareAcceleration,
   levels: DepthPreviewLevels = "full",
@@ -333,7 +327,6 @@ export function resolveDepthPreviewDecoding(
   }
 
   if (!best) {
-    // No decoder returned a frame of the probe: none to name.
     return {
       correction: null,
       hardwareAcceleration: "no-preference",
@@ -352,10 +345,6 @@ export function resolveDepthPreviewDecoding(
   };
 }
 
-/**
- * The table that brings a probe's codes closest to the written ones, if one
- * does, and the error left.
- */
 function assessProbe(
   probe: DepthPreviewCodeProbe,
   levels: DepthPreviewLevels,
@@ -421,10 +410,8 @@ function correctedError(
 }
 
 /**
- * Decodes the probe's first frame through one decoder. Opening may wait on
- * the network for the decoder's code; the decode waits on the decoder alone,
- * so it gets a deadline, and a decoder that returns nothing even once the
- * reader flushes it is one this page cannot use.
+ * Only the decode gets a deadline: opening may wait on the network to load
+ * the demuxer, which is no decoder fault.
  */
 async function runProbe(
   open: OpenTrack,
@@ -458,10 +445,6 @@ async function runProbe(
   }
 }
 
-/**
- * Reads the probe's blocks out of a decoded frame's luma, and judges the
- * codes a preview at `levels` writes.
- */
 export function readProbeFrame(
   luma: Uint8Array,
   width: number,

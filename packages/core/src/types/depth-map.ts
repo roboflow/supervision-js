@@ -1,8 +1,7 @@
 /**
  * What the stored values of a depth map measure.
  *
- * Every kind stores 0 where there is no depth, so "no measurement" never
- * reads as a distance.
+ * Every kind stores 0 where there is no depth.
  */
 export const DepthMapKind = {
   /** Stereo disparity in pixels of the map. Larger is nearer. */
@@ -32,7 +31,6 @@ export const DepthQuantity = {
 
 export type DepthQuantity = (typeof DepthQuantity)[keyof typeof DepthQuantity];
 
-/** Colour tables a depth renderer can paint with. */
 export const DepthColormap = {
   Turbo: "turbo",
   Viridis: "viridis",
@@ -48,7 +46,6 @@ export type DepthColormap = (typeof DepthColormap)[keyof typeof DepthColormap];
 export const DepthSampling = {
   /** Nearest when the map is at least media size, edge-aware otherwise. */
   Auto: "auto",
-  /** Each media pixel shows the map pixel under it. */
   Nearest: "nearest",
   /**
    * Bilinear over valid neighbours only, falling back to the nearest one
@@ -150,7 +147,6 @@ export interface DepthReadout {
   readonly y: number;
   /** The raw stored value or preview code. */
   readonly stored: number;
-  /** False where the map has no depth. */
   readonly valid: boolean;
   /** `"preview"` when the value came from 8-bit preview codes. */
   readonly precision: "exact" | "preview";

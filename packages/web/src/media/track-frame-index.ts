@@ -1,6 +1,5 @@
 import { readFrameIndex } from "#web-video-engine/frame-index";
 
-/** A track's presented frames, as a decoder beside the engine reads them. */
 export interface TrackFrameIndex {
   /** Seconds from the first presented frame. */
   readonly times: Float64Array;
@@ -11,9 +10,8 @@ export interface TrackFrameIndex {
 }
 
 /**
- * The frames of a track Mediabunny opened, read by the walk the web video
- * engine reads its own frames by, so a track decoded beside the media and
- * the media itself agree on every frame.
+ * Read by the same packet walk the web video engine uses, so a track decoded
+ * beside the media and the media itself agree on every frame.
  */
 export async function readTrackFrameIndex(
   track: unknown,

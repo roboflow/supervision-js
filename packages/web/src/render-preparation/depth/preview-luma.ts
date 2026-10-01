@@ -8,7 +8,6 @@ const PLANAR_8_BIT_FORMATS = new Set<string>([
   "I444A",
   "NV12",
 ]);
-/** Formats a browser may hand a decoded frame over in, already in RGB. */
 const RGB_FORMATS = new Set<string>(["RGBA", "RGBX", "BGRA", "BGRX"]);
 
 /** How the decoded pixels reached the luma codes. */
@@ -38,8 +37,7 @@ export interface DepthPreviewLumaScratch {
 
 /**
  * Copies a decoded preview frame's luma codes out of it, mapped through
- * `correction` when one is given. It runs wherever the frame is: the page
- * or the render-preparation worker. The frame stays open; its owner closes
+ * `correction` when one is given. The frame stays open; its owner closes
  * it.
  */
 export async function readVideoFrameLuma(
@@ -128,7 +126,6 @@ export interface DepthPreviewLumaCopier {
     frame: VideoFrame,
     correction: Uint8Array | null,
   ): Promise<DepthPreviewLuma | null> | null;
-  /** Whether copies currently run off the main thread. */
   readonly offMainThread: boolean;
   destroy(): void;
 }

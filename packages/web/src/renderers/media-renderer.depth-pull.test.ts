@@ -19,8 +19,6 @@ const depth = vi.hoisted(() => ({
   provider: null as unknown,
 }));
 
-// The Mediabunny pull path drives a depth clip through the provider's
-// contract; a fake provider shows what the path asks of it and when.
 vi.mock("#render-preparation/depth/source", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("#render-preparation/depth/source")

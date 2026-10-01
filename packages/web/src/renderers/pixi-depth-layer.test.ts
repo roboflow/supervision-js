@@ -40,7 +40,7 @@ function previewMap(code: number): DepthMap {
   };
 }
 
-/** One preview frame per second, and the frames after one on demand. */
+/** One preview frame per second. */
 function previewSource(
   maps: readonly DepthMap[],
   extra: Partial<DepthFrameProvider> = {},
@@ -61,7 +61,6 @@ function previewSource(
   };
 }
 
-/** Depth for `[0, 1)` and `[1, 2)`, nothing from 2 on. */
 function twoFrameSource(first: DepthMap, second: DepthMap): DepthFrameProvider {
   const entry = (map: DepthMap, frameIndex: number): DepthFrameEntry => ({
     frameIndex,

@@ -29,11 +29,10 @@ interface FakeTrackConfig {
   containerUnreadable?: boolean;
   otherTrackCount?: number;
   packetCount?: number;
-  /** What the demuxer reports for the last frame's packet. A WebM block that
-   *  states no duration reads as zero. Every other packet lasts 1/30 s. */
+  /** A WebM block that states no duration reads as zero. Every other packet
+   *  lasts 1/30 s. */
   lastPacketDuration?: number;
-  /** The track end the container's own metadata states, null when it states
-   *  none. */
+  /** The track end the container's metadata states. */
   statedDurationS?: number | null;
 }
 

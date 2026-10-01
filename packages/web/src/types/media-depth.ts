@@ -9,21 +9,19 @@ import type { DepthManifest, DepthMap } from "supervision-js-core";
  * session keeps the map's arrays for readouts and never copies them.
  *
  * A `manifest` is the URL of a `depth.json`, or its `parseDepthManifest`
- * output. The session fetches the 16-bit PNG it names (and the confidence PNG,
- * when there is one), decodes it in the render-preparation worker, and draws
- * the map.
+ * output. The session fetches the 16-bit PNG it names, and the confidence PNG
+ * when there is one.
  *
  * A clip manifest (`frames`) pairs one PNG with each video frame, so it needs
  * media with a frame index: a URL or file, or
- * `createWebVideoEngineMediaRendererSource()`. Other media refuse it with a
- * `RangeError`. While playback runs, the session draws the exact frames or the
- * manifest's 8-bit `preview` video, loaded ahead of the playhead, as
- * `renderPreparation.depth.playback` picks; by default the exact frames while
- * they keep up and the preview otherwise, and a clip without a preview plays
- * its exact frames. Once playback rests, the session fetches the exact frame
- * for the video frame on screen, then its neighbours, so stepping shows depth
- * at once. A preview whose frames are not the video's, by count or by time, is
- * refused with a `RangeError`.
+ * `createWebVideoEngineMediaRendererSource()`. Other media, and a `preview`
+ * whose frames are not the video's by count or by time, are refused with a
+ * `RangeError`. During playback the session draws the exact frames or the
+ * manifest's 8-bit `preview` video as `renderPreparation.depth.playback`
+ * picks: by default the exact frames while they keep up and the preview
+ * otherwise; a clip without a preview plays its exact frames. Once playback
+ * rests, the session fetches the exact frame on screen, then its neighbours,
+ * so stepping shows depth at once.
  */
 export type MediaRendererDepthInput =
   | {

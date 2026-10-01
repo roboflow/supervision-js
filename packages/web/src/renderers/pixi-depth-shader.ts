@@ -51,7 +51,6 @@ type UniformGroupConstructor = new (
   >,
 ) => PixiUniformGroup;
 
-/** Every value the depth fragment stage reads, in its uniform names. */
 export interface DepthShaderUniforms {
   readonly uEdgeRatio: number;
   readonly uEncoding: number;
@@ -88,10 +87,8 @@ export interface PixiDepthShaderRenderer {
 }
 
 /**
- * Shader terms for one map under one renderer. The quantity and range come
- * from core's mapping, the rest from the descriptor and the media size.
- * `texels` is the size of the image the texture holds, which is smaller than
- * the map when a map too large for the GPU went up decimated.
+ * `texels` is the size of the image the texture holds, smaller than the map
+ * when a map too large for the GPU went up decimated.
  */
 export function resolveDepthShaderUniforms(
   map: DepthMap,
@@ -139,11 +136,7 @@ export function resolveDepthShaderUniforms(
   };
 }
 
-/**
- * One mesh over the media rectangle that reads depth samples by texel,
- * converts them to the coloured quantity and looks the colour up in a 256x1
- * table. Opacity rides the mesh alpha, so changing it writes no uniform.
- */
+/** Opacity rides the mesh alpha, so changing it writes no uniform. */
 export function createPixiDepthShaderRenderer(options: {
   readonly ImageSource: ImageSourceConstructor;
   readonly Mesh: InjectedMeshConstructor<PixiDepthMesh>;
@@ -288,7 +281,7 @@ export function createPixiDepthShaderRenderer(options: {
 /*
  * Both programs read texels by integer position and never let the hardware
  * filter the packed bytes: a blend of two low bytes is not the low byte of a
- * blend. The edge-aware filter runs here on rebuilt values instead.
+ * blend, so the edge-aware filter runs here on rebuilt values.
  *
  * Its nearest tap decides whether a pixel has depth at all, so holes keep the
  * outline nearest sampling gives them; the blend then uses only valid taps,
