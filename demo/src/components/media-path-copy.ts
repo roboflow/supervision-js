@@ -1,7 +1,16 @@
 import { DemoMediaPath } from "../session/session-options";
 
+/**
+ * Why a depth clip draws on one media path only, as the Depth switch and the
+ * Depth section say it. The Mediabunny card says the same in its own facts.
+ */
+export const DEPTH_VIDEO_ENGINE_ONLY =
+  "Depth video plays only on the Web video engine path. On Mediabunny it would need a second video decoder running in the page, so it is not supported. A still depth picture works on every path.";
+
 /** What one media path is, in the terms someone choosing between them needs. */
 export interface DemoMediaPathCopy {
+  /** What depth it draws. */
+  readonly depth: string;
   /** What you import to get it. */
   readonly imports: string;
   readonly label: string;
@@ -17,6 +26,8 @@ export interface DemoMediaPathCopy {
 
 export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
   [DemoMediaPath.Mediabunny]: {
+    depth:
+      "A still depth picture, not depth video. Depth video plays only on the Web video engine path: playing it here would need a second video decoder running in the page, so it is not supported.",
     costs:
       "Every jump decodes forward from the nearest keyframe and keeps nothing, so dragging the playhead waits for a decode at each stop.",
     goodAt:
@@ -30,6 +41,8 @@ export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
       "The library is handed the clip's address and reads and decodes it itself. This is what createMediaSession does with a URL and no source of your own.",
   },
   [DemoMediaPath.Engine]: {
+    depth:
+      "Depth video in step with the clip, 8-bit preview depth while it plays and exact depth once it rests, and still depth pictures too.",
     costs:
       "Memory for the frames it keeps, and it reads the file itself, so the library's conversion step never runs on this path.",
     goodAt:
