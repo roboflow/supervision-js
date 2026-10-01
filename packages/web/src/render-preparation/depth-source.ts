@@ -28,8 +28,10 @@ import {
   type DepthPlaybackSource,
   type RenderPreparationDepthOptions,
   type RenderPreparationDiagnostics,
+  type RenderPreparationMaskFrameOptions,
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
+import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
   createExactDepthFrameSource,
   type ExactDepthFrame,
@@ -189,6 +191,12 @@ export interface DepthSourceContext {
   readonly fetch?: typeof globalThis.fetch;
   /** Pad odd-width rows for WebGL while decoding, off the main thread. */
   readonly padRowsForWebGl?: boolean;
+  /**
+   * The box the picture is shown in. Exact depth larger than that box shows
+   * at its pixel ratio, by a whole factor of 2 or more, goes up decimated by
+   * that factor, prepared while decoding; readouts keep the full map.
+   */
+  readonly display?: RenderPreparationMaskFrameOptions["display"];
   readonly signal?: AbortSignal;
   /** The host's budgets and timing for clips. */
   readonly depth?: RenderPreparationDepthOptions;
@@ -359,6 +367,7 @@ async function loadDepthMap(
   const [depth, confidence] = await Promise.all([
     fetchBytes(fetchFile, resolveUrl(files.file, base), signal).then((bytes) =>
       preparer.decodeDepth(bytes, {
+        decimateBy: displayDecimation(manifest, context),
         padRowsForWebGl: context.padRowsForWebGl,
         signal,
       }),
@@ -393,7 +402,17 @@ async function loadDepthMap(
   };
 
   validateDepthMap(map);
-  if (depth.paddedUpload) {
+  if (depth.decimatedUpload) {
+    rememberPreparedDepthUpload(map, {
+      bytes: depth.decimatedUpload.bytes,
+      displaySize: {
+        height: depth.decimatedUpload.height,
+        width: depth.decimatedUpload.width,
+      },
+      format: "rg8unorm",
+      textureWidth: depth.decimatedUpload.textureWidth,
+    });
+  } else if (depth.paddedUpload) {
     rememberPreparedDepthUpload(map, {
       bytes: depth.paddedUpload.bytes,
       format: "rg8unorm",
@@ -402,6 +421,34 @@ async function loadDepthMap(
   }
 
   return map;
+}
+
+/**
+ * The whole factor a map can shrink by for upload and still have a texel
+ * for every pixel of the box it is shown in, at the box's pixel ratio; 1
+ * without a box.
+ */
+export function displayDecimation(
+  map: { readonly width: number; readonly height: number },
+  context: Pick<DepthSourceContext, "display" | "media">,
+): number {
+  const { display, media } = context;
+
+  if (!display || media.width <= 0 || media.height <= 0) return 1;
+
+  const fit = Math.min(
+    display.boxWidth / media.width,
+    display.boxHeight / media.height,
+  );
+  const shownWidth = media.width * fit * resolveDisplayPixelRatio(display);
+  const shownHeight = media.height * fit * resolveDisplayPixelRatio(display);
+
+  if (!(shownWidth > 0) || !(shownHeight > 0)) return 1;
+
+  return Math.max(
+    1,
+    Math.floor(Math.min(map.width / shownWidth, map.height / shownHeight)),
+  );
 }
 
 interface CachedDepthFrame {

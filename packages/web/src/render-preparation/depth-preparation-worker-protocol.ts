@@ -47,6 +47,12 @@ export interface DepthPreparationWorkerRequest {
   readonly bitDepth: 16 | 8;
   /** Also return odd-width depth rows padded for a WebGL upload. */
   readonly padRowsForWebGl?: boolean;
+  /**
+   * Also return depth decimated by this whole factor for upload, when it is
+   * 2 or more: the texture the box shows, beside the full samples a readout
+   * reads.
+   */
+  readonly decimateBy?: number;
 }
 
 export type DepthPreparationWorkerResponse =
@@ -62,9 +68,18 @@ export type DepthPreparationWorkerResponse =
         readonly bytes: ArrayBuffer;
         readonly textureWidth: number;
       };
+      readonly decimatedUpload?: DecimatedDepthUpload<ArrayBuffer>;
     }
   | {
       readonly requestId: number;
       readonly type: DepthPreparationWorkerMessageType.Error;
       readonly error: string;
     };
+
+/** Depth decimated for upload: two bytes a texel, low byte first, rows padded as asked. */
+export interface DecimatedDepthUpload<Bytes extends ArrayBuffer | Uint8Array> {
+  readonly bytes: Bytes;
+  readonly width: number;
+  readonly height: number;
+  readonly textureWidth: number;
+}

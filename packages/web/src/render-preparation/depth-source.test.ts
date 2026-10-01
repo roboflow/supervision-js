@@ -512,6 +512,56 @@ describe("depth source from a clip manifest", () => {
     source.destroy();
   });
 
+  it("asks the decoder for depth decimated to the box it is shown in", async () => {
+    const server = clipServer();
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        display: {
+          boxHeight: MEDIA.height / 4,
+          boxWidth: MEDIA.width / 4,
+          devicePixelRatio: 1,
+        },
+        exactFrames: { settleSeconds: 0 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        // A box that shows the picture larger than the 16x9 map asks for none.
+        media: { height: 36, width: 64 },
+        preparer: server.preparer,
+      },
+    );
+
+    source.getEntry(2);
+    await vi.waitFor(() =>
+      expect(server.preparer().decodeDepth).toHaveBeenCalled(),
+    );
+    expect(
+      vi.mocked(server.preparer().decodeDepth).mock.calls[0]?.[1],
+    ).toMatchObject({ decimateBy: 1 });
+    source.destroy();
+
+    const halved = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        // At half a pixel a CSS pixel, a 16x9 box shows 8x4.5 of the map.
+        display: { boxHeight: 9, boxWidth: 16, devicePixelRatio: 0.5 },
+        exactFrames: { settleSeconds: 0 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: { height: 9, width: 16 },
+        preparer: server.preparer,
+      },
+    );
+
+    halved.getEntry(3);
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(server.preparer().decodeDepth).mock.calls.at(-1)?.[1],
+      ).toMatchObject({ decimateBy: 2 }),
+    );
+    halved.destroy();
+  });
+
   it("stays within the clip at its ends", async () => {
     const server = clipServer();
     const source = await openClip(server);

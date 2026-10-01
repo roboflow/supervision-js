@@ -357,6 +357,14 @@ export type DepthPlaybackSource = "auto" | "exact" | "preview";
  */
 export interface RenderPreparationDepthOptions {
   /**
+   * The box the host shows the picture in, in CSS pixels, with its pixel
+   * ratio: exact depth that box cannot show whole, at least twice its size,
+   * goes up to the GPU decimated by a whole factor, prepared in the decode
+   * workers. Readouts still read every sample. Defaults to
+   * `maskFrame.display`; absent, depth goes up at its own size.
+   */
+  readonly display?: RenderPreparationMaskFrameOptions["display"];
+  /**
    * Which depth plays: the preview, the exact frames, or the exact frames
    * while they keep up. Defaults to `"auto"`. See {@link DepthPlaybackSource}.
    */

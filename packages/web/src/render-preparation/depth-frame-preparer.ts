@@ -3,6 +3,7 @@ import { decodeDepthPreparationRequest } from "./depth-frame-decode";
 import { getBrowserMaskPreparationWorkerCount } from "./mask-preparation-worker-count";
 import {
   DepthPreparationWorkerMessageType,
+  type DecimatedDepthUpload,
   type DepthPreparationWorkerRequest,
   type DepthPreparationWorkerResponse,
 } from "./depth-preparation-worker-protocol";
@@ -25,10 +26,14 @@ export interface DecodedDepthImage<Values extends Uint16Array | Uint8Array> {
     readonly bytes: Uint8Array;
     readonly textureWidth: number;
   };
+  /** Depth decimated for upload, when `decimateBy` asked for it. */
+  readonly decimatedUpload?: DecimatedDepthUpload<Uint8Array>;
 }
 
 export interface DepthDecodeOptions {
   readonly padRowsForWebGl?: boolean;
+  /** Also decimate depth by this whole factor for upload, from 2 up. */
+  readonly decimateBy?: number;
   /** Drops the result; the decode itself runs to the end in the worker. */
   readonly signal?: AbortSignal;
 }
@@ -154,6 +159,7 @@ export function createDepthFramePreparer(
     const request = {
       bitDepth,
       bytes,
+      decimateBy: decodeOptions.decimateBy,
       padRowsForWebGl: decodeOptions.padRowsForWebGl,
       type: DepthPreparationWorkerMessageType.Decode,
     } as const;
@@ -232,6 +238,12 @@ export function createDepthFramePreparer(
       const response = await decode(bytes, 16, decodeOptions);
 
       return {
+        decimatedUpload: response.decimatedUpload
+          ? {
+              ...response.decimatedUpload,
+              bytes: new Uint8Array(response.decimatedUpload.bytes),
+            }
+          : undefined,
         height: response.height,
         paddedUpload: response.paddedUpload
           ? {

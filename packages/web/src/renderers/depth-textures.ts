@@ -50,11 +50,19 @@ export interface DepthMapUpload extends DepthTextureUpload {
  * the render-preparation worker writes while it decodes a PNG. They are used
  * when they fit the backend the map is drawn on.
  */
-const preparedUploads = new WeakMap<DepthMap, DepthTextureUpload>();
+const preparedUploads = new WeakMap<
+  DepthMap,
+  DepthTextureUpload & { readonly displaySize?: DepthDisplaySize }
+>();
 
+/**
+ * Remembers bytes prepared for a map's upload. With a `displaySize` smaller
+ * than the map, they are a decimated copy for a box that shows no more; the
+ * map keeps its full samples for readouts.
+ */
 export function rememberPreparedDepthUpload(
   map: DepthMap,
-  upload: DepthTextureUpload,
+  upload: DepthTextureUpload & { readonly displaySize?: DepthDisplaySize },
 ): void {
   preparedUploads.set(map, upload);
 }
@@ -152,21 +160,32 @@ export function createDepthMapUpload(
   acceptsUnalignedRows: boolean,
   maxTextureSize = Number.POSITIVE_INFINITY,
 ): DepthMapUpload {
+  const prepared = preparedUploads.get(map);
+  const preparedSize = prepared?.displaySize ?? {
+    height: map.height,
+    width: map.width,
+  };
+
+  if (
+    prepared &&
+    preparedSize.width <= maxTextureSize &&
+    preparedSize.height <= maxTextureSize &&
+    prepared.textureWidth ===
+      alignedWidth(
+        preparedSize.width,
+        prepared.format === "rg8unorm" ? 2 : 1,
+        acceptsUnalignedRows,
+      )
+  ) {
+    return {
+      bytes: prepared.bytes,
+      displaySize: preparedSize,
+      format: prepared.format,
+      textureWidth: prepared.textureWidth,
+    };
+  }
   if (map.width <= maxTextureSize && map.height <= maxTextureSize) {
     const displaySize = { height: map.height, width: map.width };
-    const prepared = preparedUploads.get(map);
-
-    if (
-      prepared &&
-      prepared.textureWidth ===
-        alignedWidth(
-          map.width,
-          prepared.format === "rg8unorm" ? 2 : 1,
-          acceptsUnalignedRows,
-        )
-    ) {
-      return { ...prepared, displaySize };
-    }
 
     return {
       ...uploadSamples(map, map.width, map.height, acceptsUnalignedRows),

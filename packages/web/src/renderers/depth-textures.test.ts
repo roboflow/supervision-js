@@ -10,6 +10,8 @@ import {
   queryMaxTextureSize,
   rememberPreparedDepthUpload,
 } from "#renderers/depth-textures";
+import { decimateDepthUpload } from "#render-preparation/depth-frame-decode";
+import { displayDecimation } from "#render-preparation/depth-source";
 
 function scaledMap(width: number, height: number, first = 1): DepthMap {
   return {
@@ -195,6 +197,66 @@ describe("uploads prepared off the main thread", () => {
     expect(createDepthMapUpload(map, true).bytes.buffer).toBe(
       (map.samples.values as Uint16Array).buffer,
     );
+  });
+
+  it("go up decimated for the box they are shown in, the map kept whole", () => {
+    const map = scaledMap(8, 4);
+    const decimated = decimateDepthUpload(
+      map.samples.values as Uint16Array,
+      8,
+      4,
+      2,
+      true,
+    )!;
+
+    rememberPreparedDepthUpload(map, {
+      bytes: decimated.bytes,
+      displaySize: { height: decimated.height, width: decimated.width },
+      format: "rg8unorm",
+      textureWidth: decimated.textureWidth,
+    });
+
+    const upload = createDepthMapUpload(map, false);
+
+    expect(upload.displaySize).toEqual({ height: 2, width: 4 });
+    expect(upload.bytes).toBe(decimated.bytes);
+    expect(map.samples.values).toHaveLength(32);
+  });
+});
+
+describe("depth decimated for display while decoding", () => {
+  it("keeps each block's centre sample, low byte first", () => {
+    const values = Uint16Array.from({ length: 6 * 4 }, (_, index) => index);
+    const upload = decimateDepthUpload(values, 6, 4, 2, false)!;
+
+    expect(upload).toMatchObject({ height: 2, textureWidth: 3, width: 3 });
+    expect(Array.from(new Uint16Array(upload.bytes.buffer))).toEqual([
+      7, 9, 11, 19, 21, 23,
+    ]);
+  });
+
+  it("pads an odd decimated row for WebGL", () => {
+    const upload = decimateDepthUpload(new Uint16Array(6 * 2), 6, 2, 2, true)!;
+
+    expect(upload).toMatchObject({ textureWidth: 4, width: 3 });
+    expect(upload.bytes.byteLength).toBe(4 * 1 * 2);
+  });
+
+  it("shrinks only by a whole factor the box cannot show", () => {
+    const media = { height: 2160, width: 3840 };
+    const map = { height: 2160, width: 3840 };
+    const box = (boxWidth: number, devicePixelRatio: number) =>
+      displayDecimation(map, {
+        display: { boxHeight: 2160, boxWidth, devicePixelRatio },
+        media,
+      });
+
+    expect(displayDecimation(map, { media })).toBe(1);
+    expect(box(1280, 1)).toBe(3);
+    expect(box(1280, 2)).toBe(1);
+    expect(box(1920, 1)).toBe(2);
+    // The ceiling on the pixel ratio applies, as it does to masks.
+    expect(box(640, 3)).toBe(3);
   });
 });
 
