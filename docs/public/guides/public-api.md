@@ -74,7 +74,9 @@ Start here for normal application code:
   frames once playback rests), and the `depth`
   annotation renderer. Depth is its own channel beside detections, never a
   `DetectionFrame` field, and a map is stretched over the media rectangle
-  rather than projected by `coordinateSpace`
+  rather than projected by `coordinateSpace`. Depth video plays only over the
+  web video engine source; which media draws which depth is in
+  [Depth maps](../annotation-renderers/depth.md#where-depth-works)
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`

@@ -160,6 +160,19 @@ colormaps split by `wipe`. `session.setDepth()` swaps or removes the map without
 reopening the media; it takes a map or a manifest, and a call made while a
 manifest is still loading wins over it.
 
+## Where depth works
+
+A depth picture is one map drawn under every frame: `depth: { map }`, or a
+manifest with `image`. Depth video is a clip manifest (`frames`), one map per
+video frame.
+
+| Media                                                         | Depth picture                                            | Depth video                                                                                           |
+| ------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| A URL or file: the default path, through Mediabunny           | Yes                                                      | No, by design: playing depth decodes a second video beside the clip, which this path does not support |
+| Web video engine: `createWebVideoEngineMediaRendererSource()` | Yes                                                      | Yes                                                                                                   |
+| Still image                                                   | Yes                                                      | No video to pair it with                                                                              |
+| `MediaStream` (camera): `createMediaStreamRendererSource()`   | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                                                         |
+
 ## Depth during playback
 
 A clip's `preview` is decoded beside the video, by one WebCodecs decoder in
