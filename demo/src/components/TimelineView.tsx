@@ -295,6 +295,8 @@ export function TimelineView({
   const inputPointerActiveRef = useRef(false);
   const inputPointerTimeRef = useRef<number | null>(null);
   const releasedInputTimeRef = useRef<number | null>(null);
+  /** When the pointer let go, on the events' own clock. */
+  const releasedInputAtRef = useRef<number | null>(null);
   const handleSeek = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const nextTime = quantizeScrubTime(
       gestureRef.current.frames,
@@ -306,13 +308,21 @@ export function TimelineView({
     }
 
     const releasedTime = releasedInputTimeRef.current;
+    const releasedAt = releasedInputAtRef.current;
     releasedInputTimeRef.current = null;
+    releasedInputAtRef.current = null;
 
     if (
       releasedTime !== null &&
       // The range rounds to 10 ms, so its native value may sit half a step
       // from the coordinate-authoritative target already committed on release.
-      Math.abs(releasedTime - nextTime) <= 0.005
+      (Math.abs(releasedTime - nextTime) <= 0.005 ||
+        // The change the browser fires for the release itself is the same
+        // gesture, whatever value its own thumb geometry gives it: near the
+        // ends of the track that is several frames from the pointer. Taken
+        // as a new change, it would open a scrub nothing ever ends, holding
+        // the player as dragged.
+        isReleaseEcho(releasedAt, event.timeStamp))
     ) {
       return;
     }
@@ -359,16 +369,20 @@ export function TimelineView({
     },
     [handleHoverMove, publishInputPointer],
   );
-  const handleInputPointerEnd = useCallback(() => {
-    if (!inputPointerActiveRef.current) {
-      return;
-    }
+  const handleInputPointerEnd = useCallback(
+    (event?: { timeStamp?: number }) => {
+      if (!inputPointerActiveRef.current) {
+        return;
+      }
 
-    inputPointerActiveRef.current = false;
-    releasedInputTimeRef.current = inputPointerTimeRef.current;
-    inputPointerTimeRef.current = null;
-    gestureRef.current.onScrubEnd();
-  }, []);
+      inputPointerActiveRef.current = false;
+      releasedInputTimeRef.current = inputPointerTimeRef.current;
+      releasedInputAtRef.current = event?.timeStamp ?? null;
+      inputPointerTimeRef.current = null;
+      gestureRef.current.onScrubEnd();
+    },
+    [],
+  );
   const handleInputPointerUp = useCallback(
     (event: ReactPointerEvent<HTMLInputElement>) => {
       if (!inputPointerActiveRef.current) {
@@ -376,7 +390,7 @@ export function TimelineView({
       }
 
       publishInputPointer(event);
-      handleInputPointerEnd();
+      handleInputPointerEnd(event);
     },
     [handleInputPointerEnd, publishInputPointer],
   );
@@ -897,6 +911,25 @@ interface PendingTimelineSeek {
  * finish after a newer one, and must not release the newer target's playhead
  * latch.
  */
+/**
+ * How soon after a pointer lets go the browser's own change event for that
+ * release arrives. It follows within the same input dispatch, a few
+ * milliseconds; an assistive change is a separate act seconds later.
+ */
+const RELEASE_ECHO_MILLISECONDS = 100;
+
+function isReleaseEcho(
+  releasedAt: number | null,
+  changedAt: number | undefined,
+) {
+  return (
+    releasedAt !== null &&
+    typeof changedAt === "number" &&
+    changedAt >= releasedAt &&
+    changedAt - releasedAt <= RELEASE_ECHO_MILLISECONDS
+  );
+}
+
 export function settlePendingTimelineSeek(
   pending: PendingTimelineSeek | null,
   completedRunId: number,
