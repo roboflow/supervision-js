@@ -153,7 +153,7 @@ research-only or non-commercial terms.
 - **SGBM outliers:** SGBM has occasional outliers up to 63 px, the top of its 64-px search range,
   while the true maximum is 38.6 px.
   - `preview.range_px` stops at the 99.9th percentile, so they clamp there in the preview, and both layers
-    have about the same preview step: 0.176 px (it was 0.310 px for `sgbm/` when the range ran to 63 px).
+    have about the same preview step: 0.176 px.
   - `display_range_px` (2nd–98th percentile) is unaffected.
 - **Blur and focus:** Spring's images include motion blur and depth of field; its ground truth does
   not. SGBM errors in blurred areas are real errors on the input.

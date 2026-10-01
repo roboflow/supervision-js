@@ -325,7 +325,7 @@ the console.
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `"auto"` (default) | Exact frames while they keep up, the preview otherwise. A clip without a preview plays exact frames.                                            |
 | `"exact"`          | Exact frames only. The playback gate holds for them as it does for the preview, so a link or a machine that cannot keep up slows playback down. |
-| `"preview"`        | The preview only, the behaviour before this option. A clip without a preview draws no depth while it plays.                                     |
+| `"preview"`        | The preview only. A clip without a preview draws no depth while it plays.                                                                       |
 
 Exact frames for playback load ahead of the playhead through the same worker
 pool, with the preview's lead, budget and drag rules: above 1x only the frames
@@ -351,15 +351,9 @@ playback handed back to the preview (`fallbackCount`).
 How to choose: leave `"auto"` unless you know the link and the machine. Pick
 `"exact"` when every value has to be exact, such as for measuring while the
 clip plays, and a stall is acceptable; pick `"preview"` to spend nothing on
-exact frames while playing, on a metered link or a busy page. In the depth
-benchmark on an Apple-silicon Mac with the demo served locally, the Spring
-720p clip played exact depth at its full 24 and 48 frames a second at 1x and
-2x, with the exact frames loading at 150 to 220 a second and one gate hold
-at the start in `"exact"`; the whole browser spent about 18 to 31 ms of CPU a
-presented frame against 12 to 23 ms for the preview. With downloads capped
-at 50 Mbit/s (about 23 exact frames a second for that clip's 224 kB frames),
-`"auto"` kept the preview throughout with no hand-backs and no holds, while
-`"exact"` at 30 Mbit/s held playback to about 13 frames a second.
+exact frames while playing, on a metered link or a busy page. The depth
+benchmark's findings (`benchmark/depth/findings.md`) have what each choice
+cost on the Spring clip, locally and on a capped link.
 
 Exact frames shown in a box smaller than they are go up smaller. When the
 host gives `renderPreparation.depth.display` (or `maskFrame.display`, which
@@ -367,8 +361,7 @@ masks use for the same), exact depth that the box cannot show at least twice
 over, at its pixel ratio capped as for masks, is decimated by that whole
 factor in the decode workers, and that copy is what goes to the GPU; readouts
 still read the full map. A 4K map in a 1920-wide box at 1x uploads 4 MiB a
-frame instead of 16, which the depth benchmark measured at 0.8 ms instead of
-2.7 in Chrome and 2.1 ms instead of 8.3 in Firefox. The preview is not
+frame instead of 16. The preview is not
 decimated, so encode it at the size it is shown: it may be smaller than the
 exact frames as long as it keeps their aspect ratio.
 
@@ -496,17 +489,17 @@ and describe it in `depth.json`:
 ```
 
 Pick `range_px` from the depth the clip actually has, not from 0 to its
-largest value: the Spring previews span the 0.1st to 99.9th percentile of
-each layer's valid disparity, so the matcher's outliers up to 63 px no longer
-stretch every step. That took one preview step on the SGBM layer from 0.31 px
-to 0.18 px; depth outside the range clamps to its ends in the preview only.
-At CRF 12, 98.5 % of decoded codes come back within one of the code written
-and 99.9 % within three, where CRF 18 left blocks you can see while the clip
-plays; the Spring previews grew from 2.35 and 1.91 MB to 4.53 and 2.95 MB.
+largest value, so outliers do not stretch every step: the Spring previews
+span the 0.1st to 99.9th percentile of each layer's valid disparity, which
+keeps the matcher's outliers up to 63 px out and one step at 0.18 px. Depth
+outside the range clamps to its ends in the preview only. At CRF 12, 98.5 %
+of decoded codes come back within one of the code written and 99.9 % within
+three; CRF 18 makes files half to two thirds that size but leaves blocks you
+can see while the clip plays.
 
 On the Spring clip at CRF 18, a 16-code guard lets 0.04 % of hole pixels
-read as depth, fewer than the earlier full-range previews did; a guard of 8
-lets 0.16 % through. Each code of guard costs one step of depth precision.
+read as depth, and a guard of 8 lets 0.16 % through. Each code of guard
+costs one step of depth precision.
 
 Opening the clip checks the preview against the video: a different frame
 count, or a frame whose time differs from its video frame's by more than half

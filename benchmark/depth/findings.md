@@ -378,3 +378,18 @@ layers, at 1x and 2x, and checks what is drawn every 50 ms:
   the page's decoders removed), so playback there was checked on the
   frame it stops at: preview depth drawn for it, codes within one (0.27 to
   0.64 codes mean), no stale depth, one decoder.
+
+### Exact depth while playing (2026-10-01)
+
+`node benchmark/depth/run-playback.mjs --playback=<auto|exact>` (with
+`--throttle-mbps` for the capped runs) on an Apple-silicon Mac, the demo
+served locally, the Spring 720p clip:
+
+- `"exact"` played exact depth at the clip's full 24 and 48 frames a second
+  at 1x and 2x, with the exact frames loading at 150 to 220 a second and one
+  gate hold at the start. The whole browser spent about 18 to 31 ms of CPU a
+  presented frame, against 12 to 23 ms for the preview.
+- With downloads capped at 50 Mbit/s (about 23 exact frames a second for the
+  clip's 224 kB frames), `"auto"` kept the preview throughout, with no
+  hand-backs and no holds.
+- `"exact"` at 30 Mbit/s held playback to about 13 frames a second.
