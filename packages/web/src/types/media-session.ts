@@ -280,9 +280,11 @@ export interface MediaSessionOptions {
    * Depth drawn by `depth` annotation renderers, as its own channel beside
    * detections. A still `map` is drawn under every frame and stretched over
    * the media rectangle, so it must share the media's aspect ratio. A clip
-   * manifest (`frames`) needs `createWebVideoEngineMediaRendererSource()`
-   * media; it draws its 8-bit preview video while playing and each frame's
-   * exact depth once playback rests.
+   * manifest (`frames`) needs media with a frame index: a URL or file, or
+   * `createWebVideoEngineMediaRendererSource()`. While playing it draws each
+   * frame's exact depth when those load fast enough, its 8-bit preview video
+   * otherwise (`renderPreparation.depth.playback`), and each frame's exact
+   * depth once playback rests.
    *
    * The session does not wait for a manifest: the media shows and plays as
    * soon as it can, and depth joins it when its files arrive. A manifest

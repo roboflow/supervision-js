@@ -27,7 +27,7 @@ export interface DemoMediaPathCopy {
 export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
   [DemoMediaPath.Mediabunny]: {
     depth:
-      "Depth video in step with the clip, as on the Web video engine: 8-bit preview depth while it plays, exact depth once it rests. The preview decodes in the page beside the clip, so a drag waits for both at each stop. Depth stays off while the clip is converted first.",
+      "Depth video in step with the clip, as on the Web video engine: exact depth while it plays when it keeps up, 8-bit preview depth otherwise, and exact depth once it rests. The preview decodes in the page beside the clip, so a drag waits for both at each stop. Depth stays off while the clip is converted first.",
     costs:
       "Every jump decodes forward from the nearest keyframe and keeps nothing, so dragging the playhead waits for a decode at each stop.",
     goodAt:
@@ -42,7 +42,7 @@ export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
   },
   [DemoMediaPath.Engine]: {
     depth:
-      "Depth video in step with the clip, 8-bit preview depth while it plays and exact depth once it rests, and still depth pictures too.",
+      "Depth video in step with the clip, exact or 8-bit preview depth while it plays and exact depth once it rests, and still depth pictures too.",
     costs:
       "Memory for the frames it keeps, and it reads the file itself, so the library's conversion step never runs on this path.",
     goodAt:

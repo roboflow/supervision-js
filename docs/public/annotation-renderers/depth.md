@@ -33,9 +33,10 @@ The playground plays eight seconds of a rendered stereo shot, Spring sequence
 
 Each layer is a clip `depth.json`: an exact 16-bit PNG per frame and an 8-bit
 preview video of the same frames. While the clip plays, each video frame is
-drawn with its own preview frame, and the readout says it is an 8-bit preview
-value with its step; once playback rests, the exact frame replaces it. The
-readout's depth frame is always the frame on screen. Turn on **Paint pixels
+drawn with its own exact frame when those load fast enough to keep up, and
+with its own preview frame otherwise, where the readout says it is an 8-bit
+preview value with its step; once playback rests, the exact frame is drawn.
+The readout's depth frame is always the frame on screen. Turn on **Paint pixels
 without depth** to see where the matcher found nothing.
 
 The clip is adapted from the Spring dataset by Mehl et al. (CVPR 2023,
@@ -81,9 +82,10 @@ A clip manifest names one PNG per video frame, so its media must come with a
 frame index. A URL or file gets one the first time a clip asks: the session
 reads the file's packet table, the way the web video engine reads its own, and
 pairs each depth frame with the video frame of the same timestamp. While the
-video plays, the session draws the manifest's 8-bit preview video, decoded
-ahead of the playhead, frame for frame; once playback rests, it draws the
-exact frame for the video frame on screen:
+video plays, the session draws the exact frames, loaded ahead of the
+playhead, when they keep up, and the manifest's 8-bit preview video, decoded
+ahead the same way, when they do not; once playback rests, it draws the exact
+frame for the video frame on screen:
 
 ```ts
 import { annotationRenderers, createMediaSession } from "supervision";
@@ -217,7 +219,8 @@ resumes once it has caught up, and `maxWaitSeconds` bounds every wait. The
 picture never waits for depth to open: a manifest loads after the first frame
 is up, and until it has, the media plays without depth. Once it is open, a
 preview frame still downloading or decoding holds playback like a mask still
-cooking; an exact PNG never does, since it is drawn only at rest.
+cooking. Exact frames hold playback only while they are what plays (see
+[Exact depth while playing](#exact-depth-while-playing)).
 
 How far ahead the preview decodes follows how the playhead moves, read the way
 the mask window reads it:
@@ -253,16 +256,24 @@ report depth's draw as `depthMs`.
 
 When playback rests for 0.15 s, the exact PNG for the frame on screen is
 fetched and replaces the preview, then its neighbours are fetched for
-stepping, three in four the way the frame last moved. A preview value is
-within one preview step of the exact value, plus the video codec's error;
-`readDepthAt` reports `precision: "preview"` and the `step` for it.
+stepping, three in four the way the frame last moved. They load several at
+once, nearest first, through a pool of decode workers sized the way the mask
+workers are: `maskFrame.workerCount`, by default half the cores up to 4, with
+`renderPreparation.mode` and `workerFactory` applying as they do for masks.
+An exact frame that was already loaded for playback is there at once. A
+preview value is within one preview step of the exact value, plus the video
+codec's error; `readDepthAt` reports `precision: "preview"` and the `step`
+for it.
 
 `renderPreparation.depth` sets the budgets, and
 `resolveMediaSessionDefaults()` reports the timing a session runs on. By
 default the session keeps about 2.25 seconds of preview (twice the 1-second
 prefetch, plus a quarter second behind the playhead) at the clip's resolution,
-at least 96 MiB and at most 512 MiB, and 128 MiB of exact frames, more for
-clips too large to hold the frame at rest and its neighbours twice. The gate's
+at least 96 MiB and at most 512 MiB, the same span of exact frames for
+playback within the same bounds (`maxExactPlaybackCacheBytes`), and 128 MiB of
+exact frames at rest, more for clips too large to hold the frame at rest and
+its neighbours twice. A session in `MediaSessionMode.Stream` decodes depth
+0.5 s ahead instead of 1 s, as its mask window cooks 3 s ahead instead of 7. The gate's
 `requiredAheadSeconds` caps the lead a stop waits for, never how far depth
 decodes, as it does for masks:
 
@@ -305,6 +316,67 @@ preview is left off without being fetched, and a decoder that stops while
 playing is closed: the clip then draws exact depth while playback rests and
 none while it plays, and says why in the diagnostics `message` and once in
 the console.
+
+### Exact depth while playing
+
+`renderPreparation.depth.playback` picks which depth plays:
+
+| `playback`         | While playing                                                                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"auto"` (default) | Exact frames while they keep up, the preview otherwise. A clip without a preview plays exact frames.                                            |
+| `"exact"`          | Exact frames only. The playback gate holds for them as it does for the preview, so a link or a machine that cannot keep up slows playback down. |
+| `"preview"`        | The preview only, the behaviour before this option. A clip without a preview draws no depth while it plays.                                     |
+
+Exact frames for playback load ahead of the playhead through the same worker
+pool, with the preview's lead, budget and drag rules: above 1x only the frames
+presents land on are loaded. In `"auto"` both the preview and the exact frames
+load ahead, and exact depth takes over once its unbroken lead in front of the
+playhead reaches three quarters of what it loads ahead. It hands back to the
+preview when that lead falls under a quarter or the frame about to show is
+missing, then waits 1 s before trying again, doubling to at most 16 s with
+each hand-back; ten seconds of steady exact playback earn the short wait
+back. Starting playback, resuming after a drag, or a seek starts over on the
+preview without counting against exact depth. Either way the depth drawn is
+the frame on screen's own, never a neighbour's, and `readDepthAt` and
+`getActiveDepth()` say `precision: "exact"` when it is exact. Exact frames
+that fail to load hand playback to the preview for good, with a console
+warning.
+
+The diagnostics add a second `depthFrame` artifact with `precision: "exact"`
+for the frames loaded for playback; its `exactPlayback` says whether they are
+what plays (`drawn`), how fast they load (`loadRate` in frames a second while
+loading, `meanLoadMs` per frame, fetch and decode together) and how often
+playback handed back to the preview (`fallbackCount`).
+
+How to choose: leave `"auto"` unless you know the link and the machine. Pick
+`"exact"` when every value has to be exact, such as for measuring while the
+clip plays, and a stall is acceptable; pick `"preview"` to spend nothing on
+exact frames while playing, on a metered link or a busy page. In the depth
+benchmark on an Apple-silicon Mac with the demo served locally, the Spring
+720p clip played exact depth at its full 24 and 48 frames a second at 1x and
+2x, with the exact frames loading at 150 to 220 a second and one gate hold
+at the start in `"exact"`; the whole browser spent about 18 to 31 ms of CPU a
+presented frame against 12 to 23 ms for the preview. With downloads capped
+at 50 Mbit/s (about 23 exact frames a second for that clip's 224 kB frames),
+`"auto"` kept the preview throughout with no hand-backs and no holds, while
+`"exact"` at 30 Mbit/s held playback to about 13 frames a second.
+
+Exact frames shown in a box smaller than they are go up smaller. When the
+host gives `renderPreparation.depth.display` (or `maskFrame.display`, which
+masks use for the same), exact depth that the box cannot show at least twice
+over, at its pixel ratio capped as for masks, is decimated by that whole
+factor in the decode workers, and that copy is what goes to the GPU; readouts
+still read the full map. A 4K map in a 1920-wide box at 1x uploads 4 MiB a
+frame instead of 16, which the depth benchmark measured at 0.8 ms instead of
+2.7 in Chrome and 2.1 ms instead of 8.3 in Firefox. The preview is not
+decimated, so encode it at the size it is shown: it may be smaller than the
+exact frames as long as it keeps their aspect ratio.
+
+Hiding annotations with `presentation.visibility.annotationsHidden` hides
+depth too: nothing draws, playback stops waiting for depth and nothing decodes
+ahead, as when no `depth` renderer is set, and showing annotations again draws
+it from what is already decoded. `hiddenClasses` and `hiddenDetectionIds` do
+not touch depth, which belongs to no class or detection.
 
 ## Reading depth under the pointer
 
@@ -408,7 +480,7 @@ input, so ffmpeg does not convert it, and on the stream:
 ```sh
 TV="-color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709"
 ffmpeg -f rawvideo -pix_fmt yuv420p $TV -s 1280x720 -r 24 -i preview.yuv \
-  -c:v libx264 -crf 18 -tune psnr -g 24 -keyint_min 24 -sc_threshold 0 $TV \
+  -c:v libx264 -crf 12 -tune psnr -g 24 -keyint_min 24 -sc_threshold 0 $TV \
   -bsf:v h264_metadata=video_full_range_flag=0 -movflags +faststart preview.mp4
 ```
 
@@ -419,9 +491,18 @@ and describe it in `depth.json`:
   "file": "preview.mp4",
   "levels": "tv",
   "reserved_max": 31,
-  "range_px": [0, 63]
+  "range_px": [1.562, 37.25]
 }
 ```
+
+Pick `range_px` from the depth the clip actually has, not from 0 to its
+largest value: the Spring previews span the 0.1st to 99.9th percentile of
+each layer's valid disparity, so the matcher's outliers up to 63 px no longer
+stretch every step. That took one preview step on the SGBM layer from 0.31 px
+to 0.18 px; depth outside the range clamps to its ends in the preview only.
+At CRF 12, 98.5 % of decoded codes come back within one of the code written
+and 99.9 % within three, where CRF 18 left blocks you can see while the clip
+plays; the Spring previews grew from 2.35 and 1.91 MB to 4.53 and 2.95 MB.
 
 On the Spring clip at CRF 18, a 16-code guard lets 0.04 % of hole pixels
 read as depth, fewer than the earlier full-range previews did; a guard of 8
@@ -457,11 +538,17 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
   and a file still converting under `normalize: { stream: true }` refuse it
   with a `RangeError` that says why, and so does a clip whose frame count
   differs from the video's without `frames.times_s`.
-- A clip without a `preview`, or on a browser that cannot decode it, draws
-  no depth while it plays. With one, the preview's precision is what plays:
+- Exact depth plays only while its frames load as fast as playback presents
+  them; in `"auto"`, below that rate the preview's precision is what plays:
   one step of `range_px` (a 203rd of it in TV range with 31 reserved codes,
-  0.31 px on the Spring SGBM clip), plus the codec's error. Exact depth needs
-  playback to rest for 0.15 s.
+  0.18 px on the Spring clips), plus the codec's error. A clip without a
+  `preview`, or on a browser that cannot decode it, plays exact frames, which
+  the gate waits for. A drag always draws the preview; exact depth then needs
+  the playhead to rest for 0.15 s.
+- Exact frames playing load ahead next to the preview in `"auto"`, so they
+  cost their fetch and decode even while the preview is what plays, and they
+  are judged by their lead, not by a measured rate: a link that only just
+  keeps up may stay on the preview.
 - A preview decodes at the browser's pace. Where that is slower than the
   rate asks for (in a benchmark, Firefox decoded a 4K preview at about 51
   frames a second, so 8x of a 24 fps clip outran it), the playback gate

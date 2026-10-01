@@ -180,7 +180,7 @@ function GlobalRenderControls({
             checked={depthDrawn}
             disabled={availability?.depthEnabled === false}
             label="Depth"
-            tooltip="A sample's depth clip: 8-bit preview depth while playing, exact depth once playback rests."
+            tooltip="A sample's depth clip: exact depth while playing when it keeps up, 8-bit preview depth otherwise, and exact depth once playback rests."
             onChange={(checked) => onChange("depthEnabled", checked)}
           />
           <ToggleControl
