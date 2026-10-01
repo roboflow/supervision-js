@@ -54,9 +54,8 @@ const MEBIBYTE = 1024 * 1024;
 const DEFAULT_PREVIEW_PREFETCH_SECONDS = 1;
 const DEFAULT_PREVIEW_RETAIN_SECONDS = 0.25;
 /**
- * Depth's timing defaults, the same for a file and a stream session: a depth
- * clip pairs with the media's frames, so it is either all there or refused.
- * The byte budgets are left out because they scale with each clip's size.
+ * Depth's timing defaults for a file session. The byte budgets are left out
+ * because they scale with each clip's size.
  */
 export const DEFAULT_DEPTH_TIMING_OPTIONS = {
   exactNeighborFrameCount: 2,
@@ -64,6 +63,15 @@ export const DEFAULT_DEPTH_TIMING_OPTIONS = {
   playback: "auto",
   previewPrefetchSeconds: DEFAULT_PREVIEW_PREFETCH_SECONDS,
   previewRetainSeconds: DEFAULT_PREVIEW_RETAIN_SECONDS,
+} as const satisfies RenderPreparationDepthOptions;
+/**
+ * A stream session decodes depth half as far ahead, as its mask window cooks
+ * 3 s ahead where a file's cooks 7 s: what is ahead of a live playhead is
+ * still arriving, and depth shares the link with it.
+ */
+export const STREAM_DEPTH_TIMING_OPTIONS = {
+  ...DEFAULT_DEPTH_TIMING_OPTIONS,
+  previewPrefetchSeconds: DEFAULT_PREVIEW_PREFETCH_SECONDS / 2,
 } as const satisfies RenderPreparationDepthOptions;
 /** Of the lead exact playback loads ahead, the share it needs to take over. */
 const EXACT_TAKEOVER_SHARE = 0.75;
