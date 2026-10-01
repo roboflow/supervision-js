@@ -477,13 +477,9 @@ function fakeReader(
     frameCount: 2,
     getStats: () => ({
       copyMainThreadMs: 0,
-      decodersCreated: 1,
       framesCopied: 1,
       framesDecoded: 1,
-      framesSkipped: 0,
-      liveDecoders: 1,
       lumaPath: "plane",
-      runsStarted: 1,
     }),
     height: 256,
     keyIndexAtOrBefore: () => 0,

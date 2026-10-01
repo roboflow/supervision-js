@@ -87,14 +87,8 @@ export interface DepthPreviewDecodeOptions {
 
 /** Counters for diagnostics and the benchmark. */
 export interface DepthPreviewTrackStats {
-  /** Decoders constructed; a new one only replaces one that failed. */
-  readonly decodersCreated: number;
-  /** Decoders constructed and not yet closed: one at most. */
-  readonly liveDecoders: number;
-  readonly runsStarted: number;
   readonly framesDecoded: number;
   readonly framesCopied: number;
-  readonly framesSkipped: number;
   /** Main-thread time spent handing frames over and copying their luma. */
   readonly copyMainThreadMs: number;
   readonly lumaPath: DepthPreviewLumaPath | null;
@@ -384,13 +378,9 @@ export function createDepthPreviewTrackReader(options: {
   const pageCopier = createMainThreadLumaCopier();
   const stats = {
     copyMainThreadMs: 0,
-    decodersCreated: 0,
     framesCopied: 0,
     framesDecoded: 0,
-    framesSkipped: 0,
-    liveDecoders: 0,
     lumaPath: null as DepthPreviewLumaPath | null,
-    runsStarted: 0,
   };
 
   const indexOfTimestamp = (microseconds: number) => {
@@ -418,7 +408,6 @@ export function createDepthPreviewTrackReader(options: {
     if (!decoder) return;
     if (decoder.state !== "closed") decoder.close();
     decoder = null;
-    stats.liveDecoders = 0;
   };
 
   const ensureDecoder = () => {
@@ -427,7 +416,6 @@ export function createDepthPreviewTrackReader(options: {
     const created = new Decoder({
       error: (error) => {
         // The decoder closes itself on an error; the next run makes another.
-        stats.liveDecoders = 0;
         decoder = null;
         current?.fail(error);
       },
@@ -440,8 +428,6 @@ export function createDepthPreviewTrackReader(options: {
     hearsDequeue = typeof created.addEventListener === "function";
     created.addEventListener?.("dequeue", () => current?.wake());
     decoder = created;
-    stats.decodersCreated += 1;
-    stats.liveDecoders = 1;
 
     return created;
   };
@@ -463,10 +449,7 @@ export function createDepthPreviewTrackReader(options: {
     stats.copyMainThreadMs += performance.now() - started;
 
     return copied.then((result) => {
-      if (!result) {
-        stats.framesSkipped += 1;
-        return null;
-      }
+      if (!result) return null;
       stats.copyMainThreadMs += result.busyMs;
       stats.framesCopied += 1;
       stats.lumaPath =
@@ -598,7 +581,6 @@ export function createDepthPreviewTrackReader(options: {
         const index = indexOfTimestamp(frame.timestamp);
 
         if (index < 0 || !keep(index)) {
-          stats.framesSkipped += 1;
           frame.close();
           wake();
           return;
@@ -625,7 +607,6 @@ export function createDepthPreviewTrackReader(options: {
     };
 
     current = state;
-    stats.runsStarted += 1;
     if (runDecoder.state === "configured") runDecoder.reset();
     runDecoder.configure(options.config);
 

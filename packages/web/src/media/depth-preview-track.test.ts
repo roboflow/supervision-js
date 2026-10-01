@@ -146,7 +146,6 @@ describe("depth preview track reader", () => {
     const frame = await run.next();
 
     expect(frame?.index).toBe(3);
-    expect(reader.getStats().framesSkipped).toBe(3);
     expect(FakeFrame.copied).not.toContain(0);
     run.cancel();
     await settle();
@@ -166,14 +165,8 @@ describe("depth preview track reader", () => {
     expect((await second.next())?.index).toBe(24);
     expect(FakeDecoder.instances).toHaveLength(1);
     expect(FakeDecoder.instances[0].resets).toBe(1);
-    expect(reader.getStats()).toMatchObject({
-      decodersCreated: 1,
-      liveDecoders: 1,
-      runsStarted: 2,
-    });
     reader.dispose();
     expect(FakeDecoder.instances[0].state).toBe("closed");
-    expect(reader.getStats().liveDecoders).toBe(0);
   });
 
   it("lets a cancelled run go at once, whatever read it was waiting on", async () => {
@@ -214,13 +207,12 @@ describe("depth preview track reader", () => {
     await run.next();
     FakeDecoder.instances[0].fail(new Error("decoder lost"));
     await expect(run.next()).rejects.toThrow("decoder lost");
-    expect(reader.getStats().liveDecoders).toBe(0);
 
     const next = reader.decode(0);
 
     expect((await next.next())?.index).toBe(0);
     expect(FakeDecoder.instances).toHaveLength(2);
-    expect(reader.getStats().liveDecoders).toBe(1);
+    expect(FakeDecoder.instances[1].state).toBe("configured");
     reader.dispose();
   });
 

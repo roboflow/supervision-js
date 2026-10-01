@@ -971,13 +971,9 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     frameCount,
     getStats: () => ({
       copyMainThreadMs: 0,
-      decodersCreated: 1,
       framesCopied: 0,
       framesDecoded: 0,
-      framesSkipped: 0,
-      liveDecoders: 1,
       lumaPath: "plane",
-      runsStarted: 0,
     }),
     height: HEIGHT,
     keyIndexAtOrBefore: (index) => index,
