@@ -43,6 +43,7 @@ import {
 } from "./depth-preview-window";
 import {
   getPausedPreparedWindowFrameCount,
+  MAX_PRESENTED_FRAME_STRIDE,
   WINDOW_LEAD_FRACTION,
 } from "./playhead-motion";
 import { DEFAULT_MASK_SCHEDULE_BATCH_SIZE } from "./prepared-render-window";
@@ -722,6 +723,9 @@ async function openDepthClip(
   let exactRetryAt = 0;
   let exactBackoffMs = EXACT_RETRY_START_MS;
   let exactSince = 0;
+  /** The frame playback last drew, to tell a seek from exact depth falling behind. */
+  let lastPlayed: number | null = null;
+  let looping = false;
 
   /** Exact frames that stop loading leave playback to the preview, for good. */
   function dropExactPlayback() {
@@ -741,6 +745,20 @@ async function openDepthClip(
   const playsExactAt = (index: number): boolean => {
     if (!exactWindow || exactWindow.failure !== null) return false;
     if (playbackSource !== "auto" || !previewWindow) return true;
+
+    if (lastPlayed !== null && index !== lastPlayed) {
+      const forward =
+        index >= lastPlayed
+          ? index - lastPlayed
+          : looping
+            ? index + frames.count - lastPlayed
+            : Number.POSITIVE_INFINITY;
+
+      // A seek lands where nothing was loaded ahead, which says nothing
+      // about whether exact depth keeps up: it starts over on the preview.
+      if (forward > 2 * MAX_PRESENTED_FRAME_STRIDE) playsExact = false;
+    }
+    lastPlayed = index;
 
     const lead = exactWindow.leadSeconds(index);
     // Near the end of a clip that does not loop, the end is all there is to lead.
@@ -780,6 +798,16 @@ async function openDepthClip(
   };
 
   const playing = () => active && !scrubbing;
+
+  /**
+   * Playback starts, or resumes after a drag: in "auto" it opens on the
+   * preview until exact depth has its lead, whatever played last time.
+   */
+  const startPlaying = () => {
+    lastPlayed = null;
+    if (playbackSource === "auto" && previewWindow) playsExact = false;
+    if (onScreen !== null) moveWindows(onScreen);
+  };
 
   scheduleDiagnostics();
 
@@ -1127,22 +1155,26 @@ async function openDepthClip(
       active = next;
       previewWindow?.setPlaybackActive(next);
       exactWindow?.setPlaybackActive(playing());
-      if (playing() && onScreen !== null) moveWindows(onScreen);
+      if (playing()) startPlaying();
       settle();
       // The frame on screen swaps between its exact and its preview depth.
       notify();
     },
 
     setLoop(loop) {
+      looping = loop;
       previewWindow?.setLoop(loop);
       exactWindow?.setLoop(loop);
     },
 
     setScrubbing(next) {
+      const wasPlaying = playing();
+
       scrubbing = next;
       previewWindow?.setScrubbing(next);
       // Exact frames load ahead for playback only; a drag draws the preview.
       exactWindow?.setPlaybackActive(playing());
+      if (playing() && !wasPlaying) startPlaying();
     },
 
     subscribe(listener) {

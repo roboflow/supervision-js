@@ -586,6 +586,38 @@ describe("exact depth while playing", () => {
     clip.source.destroy();
   });
 
+  it('starts over on the preview after a seek in "auto", without counting it against exact depth', async () => {
+    let diagnostics: RenderPreparationDiagnostics | null = null;
+    const clip = await openPreviewClip({
+      onDiagnostics: (next) => (diagnostics = next),
+      playback: "auto",
+    });
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await vi.waitFor(() =>
+      expect(clip.source.getEntry(CLOCK.timeAt(0))?.precision).toBe("exact"),
+    );
+
+    // Nine frames on is a seek, not a present.
+    const landed = clip.source.getEntry(CLOCK.timeAt(9));
+
+    expect(landed === null || landed.precision === "preview").toBe(true);
+    expect(landed?.frameIndex ?? 9).toBe(9);
+    clip.source.prefetch?.(CLOCK.timeAt(9));
+    await vi.waitFor(() =>
+      expect(clip.source.getEntry(CLOCK.timeAt(9))?.precision).toBe("exact"),
+    );
+    await vi.waitFor(() =>
+      expect(
+        diagnostics?.artifacts.find(
+          (artifact) => artifact.precision === "exact",
+        )?.exactPlayback,
+      ).toMatchObject({ drawn: true, fallbackCount: 0 }),
+    );
+    clip.source.destroy();
+  });
+
   it('plays exact frames in "auto" when the clip has no preview', async () => {
     const server = previewlessServer();
     const source = await openDepthSource(
