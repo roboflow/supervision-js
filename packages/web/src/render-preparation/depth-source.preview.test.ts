@@ -17,6 +17,8 @@ import {
 } from "#render-preparation/depth-source";
 import {
   RenderPreparationArtifactKind,
+  RenderPreparationExecutionMode,
+  RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 
@@ -126,6 +128,11 @@ describe("depth source from a clip with a preview", () => {
       preparedAheadFrameCount: expect.any(Number),
     });
     expect(last?.message).toBeNull();
+    // Frames' codes are copied in the worker, so that is where the work runs.
+    expect(last).toMatchObject({
+      executionMode: RenderPreparationExecutionMode.Worker,
+      workerStatus: RenderPreparationWorkerStatus.Ready,
+    });
     clip.source.destroy();
   });
 
@@ -151,11 +158,12 @@ describe("depth source from a clip with a preview", () => {
     });
 
     expect(opened).toEqual([
-      {
+      expect.objectContaining({
         correction: decoding.correction,
         hardwareAcceleration: "prefer-hardware",
-      },
+      }),
     ]);
+    expect(opened[0]?.copier?.offMainThread).toBe(true);
     expect(warn.mock.calls[0]?.[0]).toContain("prefer-hardware");
     expect(describePreviewDecoding(decoding)).toContain(
       "249 of 256 come back different, by up to 20",
@@ -429,6 +437,11 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
       frameClock: CLOCK,
       media: MEDIA,
       onDiagnostics: options.onDiagnostics,
+      previewLumaCopier: () => ({
+        copy: () => null,
+        destroy: () => undefined,
+        offMainThread: true,
+      }),
       openPreviewTrack: async (url, trackOptions) => {
         expect(url).toBe("https://example.test/clip/preview.mp4");
         options.onOpen?.(trackOptions);

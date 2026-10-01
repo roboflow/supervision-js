@@ -437,9 +437,15 @@ async function openDepthClip(
     if (destroyed || !previewWindow) return;
     context.onDiagnostics?.({
       artifacts: [previewWindow.getDiagnostics()],
-      executionMode: RenderPreparationExecutionMode.MainThread,
+      // The decoder runs where the browser puts it; the work this page
+      // does per frame, copying its codes out, runs in the worker or here.
+      executionMode: preview?.copier?.offMainThread
+        ? RenderPreparationExecutionMode.Worker
+        : RenderPreparationExecutionMode.MainThread,
       message: preview?.message() ?? null,
-      workerStatus: RenderPreparationWorkerStatus.Disabled,
+      workerStatus: preview?.copier?.offMainThread
+        ? RenderPreparationWorkerStatus.Ready
+        : RenderPreparationWorkerStatus.Disabled,
     });
   };
 
@@ -705,6 +711,8 @@ async function openDepthClip(
 
 interface OpenedClipPreview {
   readonly reader: DepthPreviewTrackReader;
+  /** What copies decoded frames' codes out, when not the page itself. */
+  readonly copier: DepthPreviewLumaCopier | undefined;
   readonly track: NonNullable<DepthManifest["preview"]>;
   /** What diagnostics say about the preview, such as altered codes. */
   message(): string | null;
@@ -742,11 +750,12 @@ async function openClipPreview(
   // The probe decodes before the preview opens, so the page never holds two
   // of their decoders at once.
   const decoding = choose ? await choose().catch(() => null) : null;
+  const copier = context.previewLumaCopier?.();
   let reader: DepthPreviewTrackReader;
 
   try {
     reader = await open(url, {
-      copier: context.previewLumaCopier?.(),
+      copier,
       correction: decoding?.correction ?? null,
       hardwareAcceleration: decoding?.hardwareAcceleration,
     });
@@ -775,7 +784,7 @@ async function openClipPreview(
 
   if (message) console.warn(message);
 
-  return { message: () => message, reader, track };
+  return { copier, message: () => message, reader, track };
 }
 
 /**
