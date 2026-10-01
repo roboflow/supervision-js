@@ -44,6 +44,13 @@ import {
 } from "./live-frame-stage";
 import { useReactNativeSharedValue } from "./worklet-bridge";
 import { scheduleReactNativeOnJs } from "./worklet-scheduler";
+import {
+  createReactNativeGhostCoachState,
+  evaluateReactNativeGhostCoach,
+  type ReactNativeGhostCoachOptions,
+  type ReactNativeGhostCoachRuntime,
+  type ReactNativeGhostCoachState,
+} from "./ghost-coach";
 
 export type ReactNativeLiveInferenceMode = "segmentation" | "pose";
 export type ReactNativeLiveClassEffect = "redact" | "spotlight";
@@ -143,6 +150,8 @@ export interface ReactNativeLiveInferenceExtensionOptions {
 export interface UseReactNativeLiveInferenceOptions<TPoseRunOnFrame = unknown> {
   readonly classEffects: ReactNativeLiveClassEffects;
   readonly extension?: ReactNativeLiveInferenceExtensionOptions;
+  /** Optional temporal pose overlay. It stays inside the package-owned worklet. */
+  readonly ghostCoach?: ReactNativeGhostCoachOptions;
   readonly inferenceMode: ReactNativeLiveInferenceMode;
   readonly mediaRect: {
     readonly height: number;
@@ -156,6 +165,9 @@ export interface UseReactNativeLiveInferenceOptions<TPoseRunOnFrame = unknown> {
   readonly onError?: (error: ReactNativeLiveInferenceError) => void;
   readonly onInteraction?: (
     result: ReactNativeLiveInferenceInteractionResult,
+  ) => void;
+  readonly onGhostCoachRuntime?: (
+    runtime: ReactNativeGhostCoachRuntime,
   ) => void;
   readonly onReadout?: (readout: ReactNativeLiveInferenceReadout) => void;
   readonly onRuleRuntime?: (runtime: readonly InstantCvRuleRuntime[]) => void;
@@ -205,6 +217,9 @@ const NOOP_DETECTIONS_REPORTER: (
 const NOOP_READOUT_REPORTER: (
   readout: ReactNativeLiveInferenceReadout,
 ) => void = () => {};
+const NOOP_GHOST_COACH_REPORTER: (
+  runtime: ReactNativeGhostCoachRuntime,
+) => void = () => {};
 
 const EMPTY_EXTENSION: ReactNativeLiveInferenceExtensionOptions = {
   active: false,
@@ -218,6 +233,30 @@ const EMPTY_EXTENSION_RESULT = {
   ruleEvalMs: 0,
   runtime: [] as readonly InstantCvRuleRuntime[],
 };
+const EMPTY_GHOST_COACH: ReactNativeGhostCoachOptions = {
+  active: false,
+  intent: "idle",
+  reference: null,
+};
+
+function reportGhostCoachRuntimeIfChanged(
+  runtime: ReactNativeGhostCoachRuntime,
+  signature: SharedValue<string>,
+  lastReportAt: SharedValue<number>,
+  reportRuntime: ((runtime: ReactNativeGhostCoachRuntime) => void) | undefined,
+) {
+  "worklet";
+  const nextSignature = `${runtime.status}:${runtime.sampleCount}:${Math.round(runtime.match / 4)}:${Math.round(runtime.progress * 10)}:${runtime.cue}`;
+  const nowMs = Date.now();
+  if (signature.value !== nextSignature && nowMs - lastReportAt.value > 250) {
+    signature.value = nextSignature;
+    lastReportAt.value = nowMs;
+    scheduleReactNativeOnJs(
+      reportRuntime ?? NOOP_GHOST_COACH_REPORTER,
+      runtime,
+    );
+  }
+}
 
 function prepareLiveInferenceMask(options: {
   readonly classEffects: ReactNativeLiveClassEffects;
@@ -689,12 +728,20 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
     useReactNativeSharedValue<ReactNativeLiveInferenceExtensionOptions>(
       options.extension ?? EMPTY_EXTENSION,
     );
+  const ghostCoach = useReactNativeSharedValue<ReactNativeGhostCoachOptions>(
+    options.ghostCoach ?? EMPTY_GHOST_COACH,
+  );
+  const ghostCoachState = useReactNativeSharedValue<ReactNativeGhostCoachState>(
+    createReactNativeGhostCoachState(),
+  );
   const interaction =
     useReactNativeSharedValue<ReactNativeLiveInferenceInteractionRequest | null>(
       null,
     );
   const lastInteractionId = useReactNativeSharedValue(0);
   const lastRuntimeSignature = useReactNativeSharedValue("");
+  const lastGhostCoachRuntimeSignature = useReactNativeSharedValue("");
+  const lastGhostCoachReportAt = useReactNativeSharedValue(0);
   const lastReportAt = useReactNativeSharedValue(0);
   const lastErrorAt = useReactNativeSharedValue(0);
   const droppedFrames = useReactNativeSharedValue(0);
@@ -718,12 +765,18 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
     extension.value = options.extension ?? EMPTY_EXTENSION;
     interaction.value = null;
   }, [extension, interaction, options.extension]);
+  useEffect(() => {
+    ghostCoach.value = options.ghostCoach ?? EMPTY_GHOST_COACH;
+  }, [ghostCoach, options.ghostCoach]);
 
   const reportFrame = useLatestReporter(options.onReadout);
   const reportDetections = useLatestReporter(options.onDetections);
   const reportError = useLatestReporter(options.onError);
   const reportRuntime = useLatestReporter(options.onRuleRuntime);
   const reportInteraction = useLatestReporter(options.onInteraction);
+  const reportGhostCoachRuntime = useLatestReporter(
+    options.onGhostCoachRuntime,
+  );
   const segmentationProcessor = options.segmentationProcessor;
   const configuredPoseRunner = options.pose?.runOnFrame as
     ExecutorchLivePoseRunner | null | undefined;
@@ -825,6 +878,18 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
                 detectionFrame,
               )
             : EMPTY_EXTENSION_RESULT;
+          const ghostCoachResult = evaluateReactNativeGhostCoach({
+            config: ghostCoach.value,
+            frame: detectionFrame,
+            nowMs: Date.now(),
+            state: ghostCoachState.value,
+          });
+          reportGhostCoachRuntimeIfChanged(
+            ghostCoachResult.runtime,
+            lastGhostCoachRuntimeSignature,
+            lastGhostCoachReportAt,
+            reportGhostCoachRuntime,
+          );
           stage = "pose-extension-complete";
           metrics.runtime.value = extensionResult.runtime;
           metrics.ruleEvalMs.value = extensionResult.ruleEvalMs;
@@ -844,7 +909,11 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
           const vector = presentation.prepareVector({
             frameHeight: frameSize.height,
             frameWidth: frameSize.width,
-            keypoints: [...poseInstructions, ...extensionResult.keypoints],
+            keypoints: [
+              ...ghostCoachResult.keypoints,
+              ...poseInstructions,
+              ...extensionResult.keypoints,
+            ],
             mediaRect: mediaRect.value,
             polygons: extensionResult.polygons,
           });
@@ -957,10 +1026,14 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
       classEffects,
       droppedFrames,
       extension,
+      ghostCoach,
+      ghostCoachState,
       fillOpacity,
       inferenceMode,
       interaction,
       lastErrorAt,
+      lastGhostCoachReportAt,
+      lastGhostCoachRuntimeSignature,
       lastInteractionId,
       lastReportAt,
       lastRuntimeSignature,
@@ -982,6 +1055,7 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
       reportDetections,
       reportError,
       reportFrame,
+      reportGhostCoachRuntime,
       reportInteraction,
       reportRuntime,
       segmentationProcessor,

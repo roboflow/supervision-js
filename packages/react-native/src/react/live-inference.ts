@@ -12,3 +12,9 @@ export {
   type ReactNativeLiveInferenceReadout,
   type UseReactNativeLiveInferenceOptions,
 } from "./use-live-inference";
+export {
+  type ReactNativeGhostCoachIntent,
+  type ReactNativeGhostCoachOptions,
+  type ReactNativeGhostCoachReference,
+  type ReactNativeGhostCoachRuntime,
+} from "./ghost-coach";
