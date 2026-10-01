@@ -285,12 +285,12 @@ keeps the first that returns the codes as written. Firefox hands decoded
 frames over in RGB; the clip shows how it converted them, and the session
 converts back, so every TV-range code arrives exact there too.
 
-An older full-range preview (no `levels` in its manifest) still plays.
-Chrome's hardware decoder on macOS squeezes full range into TV range (code 0
-comes back as 16, 255 as 235), so for such a preview the session asks Chrome
-for its software decoder. Firefox's RGB conversion leaves 36 of its 256 codes
-one off, and the session says so in the depth diagnostics `message` and in a
-console warning.
+A full-range preview (`levels` `"full"`, or no `levels`) plays too, though
+TV range is the one to write. Chrome's hardware decoder on macOS squeezes
+full range into TV range (code 0 comes back as 16, 255 as 235), so for a
+full-range preview the session asks Chrome for its software decoder.
+Firefox's RGB conversion leaves 36 of its 256 codes one off, and the session
+says so in the depth diagnostics `message` and in a console warning.
 
 Some decoders hand frames back only once more input arrives or a flush asks
 for them. The session flushes a decoder that sits on every frame it was
