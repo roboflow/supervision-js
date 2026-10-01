@@ -87,6 +87,13 @@ around it, and its codes with the codes the producer wrote. `--screens=<dir>`
 saves screenshots of each step. Build the packages first: the demo runs the
 built package.
 
+`run-mediabunny-depth.mjs` plays the Spring sample's depth clip in the demo
+workbench on the Mediabunny media path (`?mediaPath=mediabunny`, port 5196 by
+default) in headless Chrome: play, pause until exact depth, two seeks, and a
+drag each way on the timeline. Every animation frame it compares the depth
+drawn with the frame on screen, both named by the video's packet timestamps
+read in Node, and fails on any depth drawn for another frame.
+
 `run-android-decoders.mjs` opens the same playground, at phone size, with the
 page's `VideoDecoder` made to misbehave the ways a phone's can:
 `prefer-software` H.264 reported unsupported, and frames held back until
