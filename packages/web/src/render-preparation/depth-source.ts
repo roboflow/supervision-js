@@ -64,12 +64,15 @@ export interface DepthFrameProvider {
   /** The playhead moved: decoding ahead follows it. Never called in a present. */
   prefetch?(mediaTime: number): void;
   /**
-   * The entries the frames after `mediaTime` will draw, nearest first, so
-   * their textures can go up before the presents that draw them.
+   * The entries the next presents will draw, nearest first, so their
+   * textures can go up before those presents: the frames `stride`,
+   * `2 * stride`, ... after the one at `mediaTime`. Above 1x a present skips
+   * frames, and `stride` is how many.
    */
   getUpcomingEntries?(
     mediaTime: number,
     count: number,
+    stride?: number,
   ): readonly DepthFrameEntry[];
   /** Whether the frame at `mediaTime` has to wait for depth before it shows. */
   needsPlaybackGateWait?(
@@ -633,13 +636,13 @@ async function openDepthClip(
       if (index !== null && !destroyed) previewWindow?.setPlayhead(index);
     },
 
-    getUpcomingEntries(mediaTime, count) {
+    getUpcomingEntries(mediaTime, count, stride) {
       const index = indexAt(mediaTime);
 
       if (!previewWindow || !active || index === null) return [];
 
       return previewWindow
-        .upcoming(index, count)
+        .upcoming(index, count, stride)
         .map((entry) => previewEntry(entry.index)!)
         .filter(Boolean);
     },

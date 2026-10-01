@@ -164,27 +164,45 @@ async function runProbes(
   const verdicts: DepthPreviewDecoderVerdict[] = [];
 
   for (const hardwareAcceleration of DECODER_PREFERENCES) {
-    if (!(await isSupported(hardwareAcceleration))) {
-      verdicts.push({ hardwareAcceleration, probe: null, supported: false });
-      continue;
-    }
+    const verdict = await probeDepthPreviewDecoder(
+      hardwareAcceleration,
+      open,
+      isSupported,
+    );
 
-    try {
-      const probe = await runProbe(open, hardwareAcceleration);
-
-      verdicts.push({ hardwareAcceleration, probe, supported: true });
-      if (probe.exact) break;
-    } catch (error) {
-      verdicts.push({
-        error: String(error),
-        hardwareAcceleration,
-        probe: null,
-        supported: true,
-      });
-    }
+    verdicts.push(verdict);
+    if (verdict.probe?.exact) break;
   }
 
   return resolveDepthPreviewDecoding(verdicts);
+}
+
+/** Decodes the probe clip through one decoder, if the browser offers it. */
+export async function probeDepthPreviewDecoder(
+  hardwareAcceleration: HardwareAcceleration,
+  open: OpenTrack = openDepthPreviewTrack,
+  isSupported: (
+    preference: HardwareAcceleration,
+  ) => Promise<boolean> = isProbeConfigSupported,
+): Promise<DepthPreviewDecoderVerdict> {
+  if (!(await isSupported(hardwareAcceleration))) {
+    return { hardwareAcceleration, probe: null, supported: false };
+  }
+
+  try {
+    return {
+      hardwareAcceleration,
+      probe: await runProbe(open, hardwareAcceleration),
+      supported: true,
+    };
+  } catch (error) {
+    return {
+      error: String(error),
+      hardwareAcceleration,
+      probe: null,
+      supported: true,
+    };
+  }
 }
 
 /**

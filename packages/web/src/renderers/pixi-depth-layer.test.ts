@@ -339,6 +339,30 @@ describe("pixi depth layer", () => {
     });
   });
 
+  it("uploads ahead the frames a fast rate will present, not the ones it skips", () => {
+    const maps = Array.from({ length: 12 }, (_, index) =>
+      previewMap(20 + index),
+    );
+    const strides: (number | undefined)[] = [];
+    const source = previewSource(maps);
+    const upcoming = source.getUpcomingEntries!;
+
+    source.getUpcomingEntries = (mediaTime, count, stride) => {
+      strides.push(stride);
+      return upcoming(mediaTime, count);
+    };
+
+    const { layer } = createLayer({ source });
+
+    layer.drawFrame(0);
+    layer.drawFrame(3);
+    layer.uploadAhead(3);
+    layer.drawFrame(3.5);
+    layer.uploadAhead(3.5);
+
+    expect(strides).toEqual([3, 3]);
+  });
+
   it("never uploads over the texture on screen while uploading ahead", () => {
     const maps = Array.from({ length: 8 }, (_, index) =>
       previewMap(20 + index),

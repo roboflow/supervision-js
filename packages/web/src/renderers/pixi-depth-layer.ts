@@ -42,6 +42,12 @@ type PixiDepthMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
 /** The frame on screen and the two after it, uploaded ahead while playing. */
 const TEXTURE_RING_SIZE = 3;
+/**
+ * The most frames one present is taken to skip when guessing which frames
+ * the next presents draw: 8x on a 60 Hz display skips about three of a
+ * 24 fps clip.
+ */
+const MAX_UPLOAD_STRIDE = 8;
 type DepthShaderOptions = Parameters<typeof createPixiDepthShaderRenderer>[0];
 
 interface DrawnDepth {
@@ -104,6 +110,9 @@ export function createPixiDepthLayer(options: {
   let destroyed = false;
   let uploadsInPresent = 0;
   let uploadsAhead = 0;
+  /** The clip frame last drawn, and how many frames the draw before it skipped. */
+  let lastFrameIndex: number | null = null;
+  let frameStride = 1;
 
   const ringFor = (map: DepthMap) => {
     const encoding = map.samples.encoding;
@@ -331,6 +340,14 @@ export function createPixiDepthLayer(options: {
         drawRenderer(entry, texture, descriptor);
       }
 
+      if (entry.frameIndex !== null && entry.frameIndex !== lastFrameIndex) {
+        const step =
+          lastFrameIndex === null ? 1 : entry.frameIndex - lastFrameIndex;
+
+        frameStride = step > 0 ? Math.min(MAX_UPLOAD_STRIDE, step) : 1;
+        lastFrameIndex = entry.frameIndex;
+      }
+
       active = {
         frameIndex: entry.frameIndex,
         map: entry.map,
@@ -361,6 +378,7 @@ export function createPixiDepthLayer(options: {
       for (const entry of source.getUpcomingEntries(
         mediaTime,
         TEXTURE_RING_SIZE - 1,
+        frameStride,
       )) {
         const textures = ringFor(entry.map);
 

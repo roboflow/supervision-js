@@ -233,15 +233,13 @@ export async function openDepthPreviewTrack(
       );
     }
 
-    const [config, canDecode, rotation, width, height, tickRate] =
-      await Promise.all([
-        track.getDecoderConfig(),
-        track.canDecode(),
-        track.getRotation(),
-        track.getDisplayWidth(),
-        track.getDisplayHeight(),
-        track.getTimeResolution(),
-      ]);
+    const [config, canDecode, rotation, width, height] = await Promise.all([
+      track.getDecoderConfig(),
+      track.canDecode(),
+      track.getRotation(),
+      track.getDisplayWidth(),
+      track.getDisplayHeight(),
+    ]);
 
     if (!config || !canDecode || typeof VideoDecoder === "undefined") {
       throw new MediaSourceError(
@@ -255,11 +253,8 @@ export async function openDepthPreviewTrack(
       );
     }
 
+    const timeline = await readDepthPreviewTrackTimeline(track);
     const packetSink = new mediabunny.EncodedPacketSink(track);
-    const timeline = readDepthPreviewTimeline(
-      await readTimelinePackets(packetSink, tickRate),
-      tickRate,
-    );
 
     return createDepthPreviewTrackReader({
       config: options.hardwareAcceleration
@@ -277,6 +272,22 @@ export async function openDepthPreviewTrack(
     media.dispose();
     throw error;
   }
+}
+
+/**
+ * A track's presented frames from its packet table, without decoding a
+ * frame: what a preview is checked against its video by.
+ */
+export async function readDepthPreviewTrackTimeline(
+  track: InputVideoTrack,
+): Promise<DepthPreviewTimeline> {
+  const { EncodedPacketSink } = await import("mediabunny");
+  const tickRate = await track.getTimeResolution();
+
+  return readDepthPreviewTimeline(
+    await readTimelinePackets(new EncodedPacketSink(track), tickRate),
+    tickRate,
+  );
 }
 
 async function readTimelinePackets(
