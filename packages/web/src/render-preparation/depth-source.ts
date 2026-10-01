@@ -1261,7 +1261,7 @@ async function openDepthClip(
  * in order, so the first ones land first. An abort starts no more; loads
  * already running finish.
  */
-export async function loadInOrder(
+async function loadInOrder(
   indices: readonly number[],
   load: (index: number) => Promise<void>,
   concurrency: number,
@@ -1287,7 +1287,7 @@ export async function loadInOrder(
  * heading, three in four go the way the playhead moves, as a scrub window
  * spends its frames; without one, both sides alternate.
  */
-export function neighbourOrder(
+function neighbourOrder(
   center: number,
   perSide: number,
   heading: -1 | 0 | 1,

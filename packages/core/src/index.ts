@@ -398,7 +398,6 @@ export {
 export { readDepthAt } from "#utils/depth-readout";
 export {
   computeDepthPercentileRange,
-  depthColorCoordinate,
   resolveDepthColorMapping,
   resolveDepthQuantity,
   type DepthColorMapping,

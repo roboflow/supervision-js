@@ -31,8 +31,6 @@ const REACHABLE_LEAD_SHARE = 0.9;
  * never produces would otherwise restart the run forever.
  */
 const MAX_RESTARTS_FOR_ONE_FRAME = 3;
-/** Frames a resting playhead keeps decoded ahead, its own included. */
-const DEFAULT_PAUSED_FRAME_COUNT = 3;
 /**
  * Presents a stride has to repeat over before frames off it are skipped:
  * more than one lap of a cadence that is not a whole number of frames.
@@ -97,10 +95,9 @@ export interface DepthPreviewWindowOptions<
   readonly retainSeconds: number;
   /**
    * Frames a resting playhead keeps decoded ahead, its own included, so a
-   * step forward lands on a decoded frame. Defaults to 3, the mask window's
-   * paused margin.
+   * step forward lands on a decoded frame.
    */
-  readonly pausedFrameCount?: number;
+  readonly pausedFrameCount: number;
   /** Whether playback wraps from the last frame to the first. */
   readonly loop?: boolean;
   /** A frame landed. */
@@ -227,10 +224,7 @@ export function createDepthPreviewWindow<
     1,
     Math.floor(options.maxBytes / Math.max(1, options.frameBytes)),
   );
-  const pausedFrameCount = Math.max(
-    1,
-    Math.floor(options.pausedFrameCount ?? DEFAULT_PAUSED_FRAME_COUNT),
-  );
+  const pausedFrameCount = Math.max(1, Math.floor(options.pausedFrameCount));
   let heldBytes = 0;
   let playhead = 0;
   /** Nothing decodes before something says where the playhead is. */

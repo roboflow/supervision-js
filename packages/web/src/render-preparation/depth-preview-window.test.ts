@@ -466,7 +466,7 @@ function setup(options: SetupOptions = {}) {
     frames: source,
     loop: options.loop,
     maxBytes: options.maxBytes ?? FRAME_BYTES * 1000,
-    pausedFrameCount: options.pausedFrameCount,
+    pausedFrameCount: options.pausedFrameCount ?? 3,
     prefetchSeconds: options.prefetchSeconds ?? 1,
     retainSeconds: options.retainSeconds ?? 0,
     timeAt: (index) => index / FPS,
