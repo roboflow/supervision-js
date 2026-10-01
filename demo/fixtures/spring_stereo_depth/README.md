@@ -61,11 +61,11 @@ Each layer has a manifest in the research/09 §1.4 wire format.
   layer.
 - **`frames`:** `{count: 192, exact: "exact/{index:06}.png", times_s: null}`.
 - **`preview`:** `preview.mp4`. Its `codec` string is read from the file's avcC box.
-  - `reserved_max` 15; `range_px` `[0, clip max]`.
-  - Encode: `code = clamp(16 + round((d − lo) / (hi − lo) × 239), 16, 255)`, with `[lo, hi]` =
-    `range_px`. Codes 0–15 mean no depth.
-  - Encoding: 8-bit gray in the luma of H.264 yuv420p, chroma fixed at 128, full-range flag, CRF 18,
-    `-tune psnr`, a keyframe every second, faststart.
+  - `levels` `"tv"`; `reserved_max` 31; `range_px` `[0, clip max]`.
+  - Encode: `code = clamp(32 + round((d − lo) / (hi − lo) × 203), 32, 235)`, with `[lo, hi]` =
+    `range_px`. No depth is written as 16, and codes up to 31 mean no depth.
+  - Encoding: 8-bit gray in the luma of H.264 yuv420p, chroma fixed at 128, TV (limited) range
+    flagged with BT.709 colour, CRF 18, `-tune psnr`, a keyframe every second, faststart.
 - **PNG details:** every exact PNG is 16-bit grayscale, with PNG filter type 2 (Up) on every row for
   fast browser decode. Written by the research workspace's `fixture/tools/png16.py` (see Rebuild).
   - The build proves the round trip on frame 0 of each layer with two independent decoders: the
