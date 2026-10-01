@@ -63,3 +63,31 @@ export function createDepthColormapLut(name: DepthColormap): Uint8Array {
 
   return lut;
 }
+
+/**
+ * CSS colours of a depth colormap at `stops` evenly spaced points, far end
+ * first and near end last, read from the same table the depth renderer draws
+ * with. A legend that matches the picture is
+ * `linear-gradient(to right, ${colors.join(", ")})`.
+ */
+export function depthColormapColors(
+  colormap: DepthColormap,
+  stops = 16,
+): string[] {
+  if (!Number.isInteger(stops) || stops < 2 || stops > DEPTH_COLORMAP_ENTRIES) {
+    throw new RangeError(
+      `Depth colormap stops must be an integer from 2 to ${DEPTH_COLORMAP_ENTRIES}, got ${stops}.`,
+    );
+  }
+
+  const lut = createDepthColormapLut(colormap);
+
+  return Array.from({ length: stops }, (_, stop) => {
+    const offset =
+      Math.round((stop * (DEPTH_COLORMAP_ENTRIES - 1)) / (stops - 1)) * 4;
+
+    return `#${Array.from(lut.subarray(offset, offset + 3), (channel) =>
+      channel.toString(16).padStart(2, "0"),
+    ).join("")}`;
+  });
+}

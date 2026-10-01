@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DepthColormap } from "#types/depth-map";
 import {
   createDepthColormapLut,
+  depthColormapColors,
   isDepthColormap,
 } from "#utils/depth-colormaps";
 
@@ -91,5 +92,33 @@ describe("depth colour tables", () => {
     expect(() => createDepthColormapLut("jet" as DepthColormap)).toThrow(
       RangeError,
     );
+  });
+});
+
+describe("depth colormap colours", () => {
+  it("reads the renderer's table far end first, near end last", () => {
+    const colors = depthColormapColors("turbo", 3);
+
+    expect(colors).toEqual(["#30123b", expect.any(String), "#7a0403"]);
+    expect(depthColormapColors("grayscale", 2)).toEqual(["#000000", "#ffffff"]);
+    expect(depthColormapColors("viridis")).toHaveLength(16);
+  });
+
+  it("matches the table entry it samples", () => {
+    const lut = createDepthColormapLut("magma");
+    const [r, g, b] = entry(lut, 128);
+
+    expect(depthColormapColors("magma", 3)[1]).toBe(
+      `#${[r, g, b].map((channel) => channel!.toString(16).padStart(2, "0")).join("")}`,
+    );
+  });
+
+  it("rejects an unknown colormap and a stop count outside 2 to 256", () => {
+    expect(() => depthColormapColors("jet" as never)).toThrow(RangeError);
+    expect(() => depthColormapColors("turbo", 1)).toThrow(
+      "Depth colormap stops must be an integer from 2 to 256, got 1.",
+    );
+    expect(() => depthColormapColors("turbo", 2.5)).toThrow(RangeError);
+    expect(() => depthColormapColors("turbo", 257)).toThrow(RangeError);
   });
 });

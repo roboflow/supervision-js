@@ -235,7 +235,8 @@ not the first thing most users should reach for:
   reopening the media, `renderer.getActiveDepth()` for the map on screen, `readDepthAt()`
   for the stored value, disparity, metres, and confidence under a media point,
   `computeDepthPercentileRange()` to lock a frame's automatic colour range,
-  and `parseDepthManifest()` to validate the `depth.json` a producer writes;
+  `depthColormapColors()` for a legend in the renderer's own colours, and
+  `parseDepthManifest()` to validate the `depth.json` a producer writes;
 - cold detection stores for custom persistence and testing;
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;

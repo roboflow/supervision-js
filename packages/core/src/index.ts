@@ -405,6 +405,7 @@ export {
 } from "#utils/depth-color-mapping";
 export {
   createDepthColormapLut,
+  depthColormapColors,
   isDepthColormap,
 } from "#utils/depth-colormaps";
 export type {

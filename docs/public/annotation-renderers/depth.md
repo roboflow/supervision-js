@@ -173,6 +173,17 @@ With a `camera`, disparity converts to metres as
 returns the range `"auto"` would use for that map; pass it back as
 `range: { min, max }` to keep colours still while the view changes.
 
+`depthColormapColors(colormap, stops)` returns CSS colours from the same table
+the renderer draws with, far end first, so a legend matches the picture:
+
+```ts
+import { depthColormapColors } from "supervision";
+
+legend.style.background = `linear-gradient(to right, ${depthColormapColors(
+  "turbo",
+).join(", ")})`;
+```
+
 ## Data format
 
 Exact maps are 16-bit: `values[i] / scale` is the value in the kind's unit, and

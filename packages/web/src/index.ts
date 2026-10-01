@@ -378,6 +378,7 @@ export {
   DepthQuantity,
   DepthSampling,
   computeDepthPercentileRange,
+  depthColormapColors,
   parseDepthManifest,
   readDepthAt,
   type DepthCamera,

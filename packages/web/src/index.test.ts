@@ -146,6 +146,7 @@ describe("package entrypoint", () => {
       "createStaticImageMediaSource",
       "createWebVideoEngineMediaRendererSource",
       "createWritableDetectionFrameSource",
+      "depthColormapColors",
       "detectionPostProcessors",
       "getMediaErrorKind",
       "isMediaSourceError",

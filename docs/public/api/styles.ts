@@ -42,6 +42,7 @@ export {
   annotationRendererKinds,
   annotationRenderers,
   createDefaultAnnotationPresentation,
+  depthColormapColors,
   normalizeDetectionClassName,
   resolveDetectionClassColorStyle,
   type BaseBoxStyleOptions,
