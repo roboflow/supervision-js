@@ -82,6 +82,18 @@ around it, and its codes with the codes the producer wrote. `--screens=<dir>`
 saves screenshots of each step. Build the packages first: the demo runs the
 built package.
 
+`run-android-decoders.mjs` opens the same playground, at phone size, with the
+page's `VideoDecoder` made to misbehave the ways a phone's can:
+`prefer-software` H.264 reported unsupported, and frames held back until
+`flush()` (`android`), or never returned at all with a `flush()` that never
+settles (`silent`). It checks that the video comes up and plays without
+waiting for depth, that preview depth plays wherever a decoder can play it,
+that exact depth shows at rest, and that the page says why when the preview
+is off. It serves nothing: build the packages and the demo, serve
+`demo/dist` (`npm run preview -w demo`), and pass that page as `--url`.
+`--throttle=<kbps>` slows the page's network and lists when each depth file
+and lazy chunk was fetched, and how much of it.
+
 Timing numbers are local-machine measurements; the report records the host's
 load average, and numbers taken on a busy machine are not comparable. The
 exactness verdicts are not timings and hold regardless.
