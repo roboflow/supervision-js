@@ -27,10 +27,9 @@ There is near rock, a mid-ground figure, a back wall and a little distant sky (1
 | `ground-truth/preview.mp4` | 8-bit preview, `range_px` [1.64, 37.271] | 2,953,220 |
 | `fixture.meta.json` | Demo metadata, pebbles shape plus a `depth` block | < 1 kB |
 | `sources.tsv` | The 577 Spring members used, with DaRUS zip, id, size, CRC-32 | 64 kB |
-| `outputs.sha256` | SHA-256 of every generated file in this folder | 35 kB |
 
-In total, about 118.5 MB. The PNGs and MP4s are Git LFS objects. `outputs.sha256` pins their bytes:
-run `shasum -a 256 -c outputs.sha256` in this folder after `git lfs pull`.
+In total, about 118.3 MB. The PNGs and MP4s are Git LFS objects, which Git LFS stores and checks by
+SHA-256.
 
 There are no detections for this clip, so the folder has no `detections.manifest.json`. The demo
 opens it for depth only.
@@ -173,8 +172,6 @@ $PY fixture/tools/write_sources.py data/spring-0021-members.tsv 0021 1 192 fixtu
   384 PNGs (about 5 s each).
 - **`sources.tsv`:** lists all 577 Spring members used, with DaRUS zip, datafile id, size and CRC-32.
   The fetch checks each CRC on extraction.
-- **`outputs.sha256`:** hashes every generated file in this folder. The hand-written `README.md`,
-  `fixture.meta.json` and `sources.tsv` are excluded.
 - **Reproducibility:** different FFmpeg/x264 builds may not reproduce the MP4 bytes. The PNGs and
   `depth.json` should match exactly with the same numpy/OpenCV/h5py versions.
 

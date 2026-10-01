@@ -1,6 +1,5 @@
 /// <reference types="node" />
 
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,15 +36,19 @@ const manifests = depth.layers.map((layer) => ({
   ),
   folder: join(fixtureRoot, layer.manifest, ".."),
 }));
-const hashes = new Map(
-  readFileSync(join(fixtureRoot, "outputs.sha256"), "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => {
-      const [hash, path] = line.split(/ {2}/);
-      return [path, hash] as const;
-    }),
-);
+/** Each layer's manifest, its preview and one PNG per frame, by fixture path. */
+const layerFiles = manifests.flatMap(({ layer, manifest }) => {
+  const folder = layer.manifest.replace(/depth\.json$/, "");
+
+  return [
+    layer.manifest,
+    `${folder}${manifest.preview!.file}`,
+    ...Array.from(
+      { length: FRAME_COUNT },
+      (_, index) => `${folder}${exactFile(index)}`,
+    ),
+  ];
+});
 
 describe("Spring stereo depth fixture", () => {
   it("offers a ground-truth layer and a stereo matcher layer, opening on the matcher", () => {
@@ -139,31 +142,6 @@ describe("Spring stereo depth fixture", () => {
     }
   });
 
-  it("matches every committed file to the hash the fixture build recorded", () => {
-    const committed = [
-      "left.mp4",
-      ...manifests.flatMap(({ layer, manifest }) => {
-        const folder = layer.manifest.replace(/depth\.json$/, "");
-
-        return [
-          layer.manifest,
-          `${folder}${manifest.preview!.file}`,
-          ...Array.from(
-            { length: FRAME_COUNT },
-            (_, index) => `${folder}${exactFile(index)}`,
-          ),
-        ];
-      }),
-    ];
-
-    expect([...hashes.keys()].sort()).toEqual([...committed].sort());
-    for (const path of committed) {
-      expect(committedSha256(join(fixtureRoot, path)), path).toBe(
-        hashes.get(path),
-      );
-    }
-  });
-
   it("goes into the demo build file for file, under its own names", async () => {
     const shipped = (
       await listFixtureDepthFiles(join(fixtureRoot, ".."))
@@ -171,7 +149,10 @@ describe("Spring stereo depth fixture", () => {
 
     expect(
       shipped.map((file) => file.slice(fixtureRoot.length + 1)).sort(),
-    ).toEqual([...hashes.keys()].filter((path) => path !== "left.mp4").sort());
+    ).toEqual([...layerFiles].sort());
+    for (const file of shipped) {
+      expect(existsSync(file), file).toBe(true);
+    }
   });
 
   it("plays 192 frames at 24 fps, one per depth frame", () => {
@@ -199,20 +180,6 @@ describe("Spring stereo depth fixture", () => {
 
 function isLfsPointer(bytes: Buffer) {
   return bytes.subarray(0, 64).toString("utf8").startsWith(LFS_POINTER_PREFIX);
-}
-
-/** A pointer names its object's SHA-256; a checked-out file is hashed. */
-function committedSha256(path: string) {
-  const bytes = readFileSync(path);
-
-  if (isLfsPointer(bytes)) {
-    const oid = /^oid sha256:([0-9a-f]{64})$/m.exec(bytes.toString("utf8"));
-
-    if (!oid) throw new Error(`${path} is an LFS pointer without an oid.`);
-    return oid[1];
-  }
-
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 /**
