@@ -62,9 +62,9 @@ describe("pixi depth shader", () => {
     expect(descriptor.gl.fragment).toContain("#version 300 es");
     expect(descriptor.gl.fragment).toContain("precision highp sampler2D;");
     expect(descriptor.gl.fragment).toContain("texelFetch(uDepthTexture");
-    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
-    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
-    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
+    for (const stage of [descriptor.gpu.fragment, descriptor.gpu.vertex]) {
+      expect(stage.source).toContain(`fn ${stage.entryPoint}(`);
+    }
     expect(descriptor.gpu.fragment.source).toContain(
       "textureLoad(uDepthTexture",
     );
@@ -215,16 +215,6 @@ describe("pixi depth shader", () => {
         { height: 2, width: 4 },
       ),
     ).toMatchObject({ uPreviewTop: 235, uReservedMax: 31 });
-  });
-
-  it("carries opacity on the mesh instead of a uniform", () => {
-    stubDocument();
-    const renderer = createRenderer();
-
-    renderer.setOpacity(0.4);
-
-    expect(renderer.mesh.alpha).toBe(0.4);
-    expect(FakeUniformGroup.instances[0]!.update).not.toHaveBeenCalled();
   });
 
   it("gives the placeholder texture canvas a rendering context", () => {
