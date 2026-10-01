@@ -324,18 +324,16 @@ test("tarball ships the project license and package README", () => {
 });
 
 test("tarball carries the depth colour tables' third-party notices", () => {
-  for (const notices of [
-    path.join(extractedDir, "THIRD_PARTY_NOTICES.md"),
+  const text = readFileSync(
     path.join(
       extractedDir,
       "node_modules/supervision-js-core/THIRD_PARTY_NOTICES.md",
     ),
-  ]) {
-    const text = readFileSync(notices, "utf8");
+    "utf8",
+  );
 
-    assert.match(text, /Copyright 2019 Google LLC/);
-    assert.match(text, /Battelle Memorial Institute/);
-  }
+  assert.match(text, /Copyright 2019 Google LLC/);
+  assert.match(text, /Battelle Memorial Institute/);
 });
 
 test("tarball ships self-contained worker assets", () => {

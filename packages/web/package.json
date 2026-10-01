@@ -112,8 +112,7 @@
     }
   },
   "files": [
-    "dist",
-    "THIRD_PARTY_NOTICES.md"
+    "dist"
   ],
   "sideEffects": false,
   "scripts": {
