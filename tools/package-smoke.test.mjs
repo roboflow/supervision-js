@@ -109,6 +109,7 @@ const expectedWebRuntimeExports = [
   "createStaticImageMediaSource",
   "createWebVideoEngineMediaRendererSource",
   "createWritableDetectionFrameSource",
+  "depthColormapColors",
   "detectionPostProcessors",
   "getMediaErrorKind",
   "isMediaSourceError",
