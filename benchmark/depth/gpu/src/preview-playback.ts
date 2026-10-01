@@ -413,6 +413,7 @@ export async function runPreviewPlayback(
     frameBytes,
     frames: reader,
     maxBytes: budgets.preview.maxCacheBytes,
+    pausedFrameCount: budgets.preview.pausedFrameCount,
     prefetchSeconds: budgets.preview.prefetchSeconds,
     retainSeconds: budgets.preview.retainSeconds,
     timeAt,
@@ -453,7 +454,9 @@ export async function runPreviewPlayback(
   let uploadFrom = 0;
 
   try {
-    // Opening a session waits for the first frame's depth, as play does.
+    // Play makes the window lead the playhead, then waits for the first
+    // frame's depth, as a session's play does.
+    window.setPlaybackActive(true);
     await window.waitForReady(0, thresholds);
 
     let mediaTime = 0;
@@ -547,6 +550,7 @@ export async function runPreviewPlayback(
     const seekStarted = performance.now();
     let seekToPreviewMs: number | null = null;
 
+    window.setPlaybackActive(false);
     window.setPlayhead(target);
     while (performance.now() - seekStarted < 5000) {
       if (window.getEntry(target)) {
