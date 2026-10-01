@@ -60,6 +60,23 @@ const session = await createMediaSession({
 });
 ```
 
+The session does not wait for a manifest. The media shows and plays as soon
+as it can, and depth joins it when its files arrive, redrawing the frame on
+screen; on a slow link that can be well after the video starts. A manifest
+that fails to load leaves the media playing without depth, with a console
+warning and the reason in the depth diagnostics `message`. To show that
+depth is still loading, or to catch its error, open the session without
+`depth` and call `session.setDepth()`, which resolves once the renderer has
+it:
+
+```ts
+setStatus("Loading depth…");
+session
+  .setDepth?.({ manifest: "sgbm/depth.json" })
+  .then(() => setStatus(null))
+  .catch((error) => setStatus(`Depth did not load: ${error}`));
+```
+
 A clip manifest names one PNG per video frame, so its media must come with a
 frame index: the web video engine source. While the video plays, the session
 draws the manifest's 8-bit preview video, decoded ahead of the playhead, frame
@@ -193,6 +210,17 @@ software, where every code is exact. Firefox hands decoded frames over in RGB,
 which leaves 36 of the 256 codes one off; the session says so in the depth
 diagnostics `message` and in a console warning.
 
+Some decoders hand frames back only once more input arrives or a flush asks
+for them. The session flushes a decoder that sits on every frame it was
+given, at the next key frame, so no frame is lost. Every wait on a decoder
+has a deadline (3 s for a support check or a flush that returns nothing, 5 s
+for the probe's first frame); downloading the preview never does, since a
+slow link is no fault. Where no decoder returns a frame of the probe, the
+preview is left off without being fetched, and a decoder that stops while
+playing is closed: the clip then draws exact depth while playback rests and
+none while it plays, and says why in the diagnostics `message` and once in
+the console.
+
 ## Reading depth under the pointer
 
 `session.renderer.getActiveDepth()` returns the map on screen and the media
@@ -311,9 +339,10 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
   media with a frame index: `createWebVideoEngineMediaRendererSource()`. Other
   media refuse it with a `RangeError`, and so does a clip whose frame count
   differs from the video's without `frames.times_s`.
-- A clip without a `preview` draws no depth while it plays. With one, the
-  preview's precision is what plays: one 8-bit step of `range_px`, plus the
-  codec's error. Exact depth needs playback to rest for 0.15 s.
+- A clip without a `preview`, or on a browser that cannot decode it, draws
+  no depth while it plays. With one, the preview's precision is what plays:
+  one 8-bit step of `range_px`, plus the codec's error. Exact depth needs
+  playback to rest for 0.15 s.
 - A preview decodes at the browser's pace. Where that is slower than the
   rate asks for (in a benchmark, Firefox decoded a 4K preview at about 51
   frames a second, so 8x of a 24 fps clip outran it), the playback gate

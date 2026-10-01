@@ -283,6 +283,12 @@ export interface MediaSessionOptions {
    * manifest (`frames`) needs `createWebVideoEngineMediaRendererSource()`
    * media; it draws its 8-bit preview video while playing and each frame's
    * exact depth once playback rests.
+   *
+   * The session does not wait for a manifest: the media shows and plays as
+   * soon as it can, and depth joins it when its files arrive. A manifest
+   * that fails to load leaves the media playing without depth, with a
+   * console warning and the reason in `renderPreparation.message`. Call
+   * `setDepth()` instead to wait for depth or catch its error.
    */
   readonly depth?: MediaRendererDepthInput;
   /**
@@ -469,8 +475,10 @@ export interface MediaSession {
   setPresentation(presentation: MediaRendererPresentation): void;
   /**
    * Optionally replace the session's depth, or remove it with `null`, and
-   * redraw the frame on screen. `session.renderer.getActiveDepth()` reads
-   * back what is drawn.
+   * redraw the frame on screen. Resolves once the renderer has that depth,
+   * and rejects with the reason a manifest did not load; the media keeps
+   * playing meanwhile. `session.renderer.getActiveDepth()` reads back what
+   * is drawn.
    */
   setDepth?(depth: MediaRendererDepthInput | null): Promise<void>;
   setRenderQuality(quality: MediaRendererQuality): void;
