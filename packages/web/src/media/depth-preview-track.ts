@@ -5,6 +5,7 @@ import {
   type DepthPreviewLumaCopier,
   type DepthPreviewLumaPath,
 } from "#render-preparation/depth-preview-luma";
+import { formatSeconds, withinDecoderDeadline } from "./decoder-deadline";
 import { MediaSourceError } from "./media-errors";
 
 /**
@@ -21,6 +22,19 @@ const MAX_FRAMES_IN_FLIGHT = 24;
 const DECODER_POLL_MILLISECONDS = 4;
 /** The same, as a safety net, for a decoder that does say `dequeue`. */
 const DECODER_IDLE_POLL_MILLISECONDS = 25;
+/**
+ * How long a decoder may sit on frames it was given, with nothing more it
+ * can be fed, before it is flushed for them. Some decoders return frames only
+ * once more input arrives or a flush asks for them.
+ */
+const STALLED_DECODER_FLUSH_MILLISECONDS = 100;
+/**
+ * How long a flush may go without returning a frame before the decoder is
+ * taken for stuck. A flush waits on the decoder alone, never the network.
+ */
+export const FLUSH_SILENCE_MILLISECONDS = 3000;
+/** How long the browser may take to say whether it decodes the preview. */
+export const DECODER_SUPPORT_MILLISECONDS = 3000;
 /** A decoded frame's timestamp is a packet's, truncated to microseconds. */
 const TIMESTAMP_MATCH_TOLERANCE_SECONDS = 0.0005;
 const MICROSECONDS_PER_SECOND = 1_000_000;
@@ -40,6 +54,8 @@ export interface DepthPreviewTrackOptions {
    * keep the copies off the page. Defaults to copying on the page.
    */
   readonly copier?: DepthPreviewLumaCopier;
+  /** Stops opening: the container's reads are cancelled. */
+  readonly signal?: AbortSignal;
 }
 
 export type { DepthPreviewLumaPath };
@@ -211,8 +227,14 @@ export async function openDepthPreviewTrack(
     formats: [mediabunny.MP4, mediabunny.QTFF],
     source,
   });
+  const { signal } = options;
+  const stop = () => media.dispose();
+
+  signal?.addEventListener("abort", stop, { once: true });
 
   try {
+    if (signal?.aborted) throw signal.reason;
+
     const track = await media.getPrimaryVideoTrack();
 
     if (!track) {
@@ -222,15 +244,18 @@ export async function openDepthPreviewTrack(
       );
     }
 
-    const [config, canDecode, rotation, width, height] = await Promise.all([
+    const [config, rotation, width, height] = await Promise.all([
       track.getDecoderConfig(),
-      track.canDecode(),
       track.getRotation(),
       track.getDisplayWidth(),
       track.getDisplayHeight(),
     ]);
 
-    if (!config || !canDecode || typeof VideoDecoder === "undefined") {
+    if (
+      !config ||
+      typeof VideoDecoder === "undefined" ||
+      !(await isDecoderConfigSupported(config))
+    ) {
       throw new MediaSourceError(
         MediaErrorKind.UnsupportedFormat,
         `This browser cannot decode the depth preview's codec ${config?.codec ?? "(unknown)"}.`,
@@ -244,6 +269,8 @@ export async function openDepthPreviewTrack(
 
     const timeline = await readDepthPreviewTrackTimeline(track);
     const packetSink = new mediabunny.EncodedPacketSink(track);
+
+    if (signal?.aborted) throw signal.reason;
 
     return createDepthPreviewTrackReader({
       config: options.hardwareAcceleration
@@ -260,7 +287,27 @@ export async function openDepthPreviewTrack(
     });
   } catch (error) {
     media.dispose();
-    throw error;
+    throw signal?.aborted ? signal.reason : error;
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
+/**
+ * Whether the browser decodes `config`, given a deadline: a browser that
+ * never answers is taken as one that does not.
+ */
+async function isDecoderConfigSupported(config: VideoDecoderConfig) {
+  try {
+    const support = await withinDecoderDeadline(
+      VideoDecoder.isConfigSupported(config),
+      DECODER_SUPPORT_MILLISECONDS,
+      "VideoDecoder.isConfigSupported",
+    );
+
+    return support.supported === true;
+  } catch {
+    return false;
   }
 }
 
@@ -455,6 +502,15 @@ export function createDepthPreviewTrackReader(options: {
     let packetsDone = false;
     let fed = 0;
     let delivered = 0;
+    /** Last time the decoder took a chunk or returned a frame. */
+    let lastProgressAt = performance.now();
+    /**
+     * The decoder sat on every frame it was given: it is fed past the
+     * in-flight limit up to the next key frame, and flushed there.
+     */
+    let stalled = false;
+    /** A key frame read while stalled, fed once the flush before it ends. */
+    let heldKey: EncodedPacket | null = null;
     let flushing = false;
     let flushed = false;
     let wakeUp: (() => void) | null = null;
@@ -482,6 +538,31 @@ export function createDepthPreviewTrackReader(options: {
             : DECODER_POLL_MILLISECONDS,
         );
       });
+
+    /**
+     * Asks the decoder for every frame it holds. After a flush the decoder
+     * takes only a key frame, so one mid-run waits for the next key frame;
+     * the one at the end of input ends the run.
+     */
+    const flush = (atEnd: boolean) => {
+      flushing = true;
+      lastProgressAt = performance.now();
+      runDecoder.flush().then(
+        () => {
+          flushing = false;
+          stalled = false;
+          if (atEnd) flushed = true;
+          wake();
+        },
+        (error: unknown) => {
+          // A reset for the next run aborts this flush; that is no failure.
+          if (!cancelled && !isAbortError(error)) failure ??= { error };
+          flushing = false;
+          if (atEnd) flushed = true;
+          wake();
+        },
+      );
+    };
 
     const readPacket = async () => {
       if (!packets) {
@@ -511,6 +592,8 @@ export function createDepthPreviewTrackReader(options: {
       accept(frame) {
         stats.framesDecoded += 1;
         delivered += 1;
+        lastProgressAt = performance.now();
+        if (!flushing) stalled = false;
 
         const index = indexOfTimestamp(frame.timestamp);
 
@@ -564,40 +647,67 @@ export function createDepthPreviewTrackReader(options: {
           }
           if (flushed) return null;
 
+          if (flushing) {
+            // Only the decoder can end a flush; one silent this long never will.
+            if (
+              performance.now() - lastProgressAt >
+              FLUSH_SILENCE_MILLISECONDS
+            ) {
+              failure ??= {
+                error: new Error(
+                  `The depth preview decoder returned no frame for ${formatSeconds(FLUSH_SILENCE_MILLISECONDS)} of a flush.`,
+                ),
+              };
+              continue;
+            }
+            await Promise.race([sleep(), cancellation]);
+            continue;
+          }
+
           if (
             !packetsDone &&
             runDecoder.decodeQueueSize < MAX_DECODE_QUEUE_SIZE &&
-            fed - delivered < MAX_FRAMES_IN_FLIGHT
+            (stalled || fed - delivered < MAX_FRAMES_IN_FLIGHT)
           ) {
-            const reading = readPacket();
+            let packet = heldKey;
 
-            reading.catch(() => undefined);
+            heldKey = null;
+            if (!packet) {
+              const reading = readPacket();
 
-            const packet = await Promise.race([reading, cancellation]);
-
-            if (cancelled || disposed) return null;
+              reading.catch(() => undefined);
+              packet = await Promise.race([reading, cancellation]);
+              if (cancelled || disposed) return null;
+            }
             if (packet) {
+              if (stalled && packet.type === "key" && fed > delivered) {
+                // Every frame before this key frame is in the decoder, so a
+                // flush now returns them all and loses none.
+                heldKey = packet;
+                flush(false);
+                continue;
+              }
               runDecoder.decode(packet.toEncodedVideoChunk());
               fed += 1;
+              lastProgressAt = performance.now();
               continue;
             }
             packetsDone = true;
           }
 
-          if (packetsDone && !flushing) {
-            flushing = true;
-            runDecoder.flush().then(
-              () => {
-                flushed = true;
-                wake();
-              },
-              (error: unknown) => {
-                // A reset for the next run aborts this flush; that is no failure.
-                if (!cancelled && !isAbortError(error)) failure ??= { error };
-                flushed = true;
-                wake();
-              },
-            );
+          if (packetsDone) {
+            flush(true);
+            continue;
+          }
+
+          if (
+            !stalled &&
+            fed - delivered >= MAX_FRAMES_IN_FLIGHT &&
+            runDecoder.decodeQueueSize === 0 &&
+            performance.now() - lastProgressAt >=
+              STALLED_DECODER_FLUSH_MILLISECONDS
+          ) {
+            stalled = true;
             continue;
           }
 

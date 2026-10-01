@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createFakeDecoderLog,
+  openFakeDepthPreviewTrack,
+  type FakeDecoderClip,
+} from "../../../../test/fake-video-decoder";
+import {
   createDepthPreviewTrackReader,
+  FLUSH_SILENCE_MILLISECONDS,
   readDepthPreviewTimeline,
   type DepthPreviewTimeline,
 } from "./depth-preview-track";
@@ -218,6 +224,60 @@ describe("depth preview track reader", () => {
     reader.dispose();
   });
 
+  it("flushes a decoder that holds every frame, at the next key frame, and loses none", async () => {
+    const log = createFakeDecoderLog();
+    const reader = openFakeDepthPreviewTrack(
+      "holdsUntilFlush",
+      clip({ frameCount: 60, keyEvery: 24 }),
+      {},
+      log,
+    );
+    const run = reader.decode(0);
+    const indices: number[] = [];
+
+    for (let frame = await run.next(); frame; frame = await run.next()) {
+      indices.push(frame.index);
+    }
+
+    expect(indices).toEqual(Array.from({ length: 60 }, (_, index) => index));
+    // Two flushes before key frames 24 and 48, so the decoder is handed a
+    // key frame after each, and one at the end.
+    expect(log.flushes).toBe(3);
+    reader.dispose();
+  });
+
+  it("fails a run whose decoder never finishes a flush", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+
+    try {
+      const reader = openFakeDepthPreviewTrack(
+        "silent",
+        clip({ frameCount: 2, keyEvery: 24 }),
+      );
+      const failed = expect(reader.decode(0).next()).rejects.toThrow(
+        "The depth preview decoder returned no frame for 3 s of a flush.",
+      );
+
+      await vi.advanceTimersByTimeAsync(FLUSH_SILENCE_MILLISECONDS + 100);
+      await failed;
+      reader.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a run at once when the decoder will not take its configuration", () => {
+    const reader = openFakeDepthPreviewTrack(
+      "refusesConfig",
+      clip({ frameCount: 2, keyEvery: 24 }),
+    );
+
+    expect(() => reader.decode(0)).toThrow(
+      "No decoder takes this configuration.",
+    );
+    reader.dispose();
+  });
+
   it("never keeps more than a few frames in flight in the decoder", async () => {
     const { reader } = createReader({ frameCount: 200, holdOutputs: 1000 });
     const run = reader.decode(0);
@@ -230,6 +290,19 @@ describe("depth preview track reader", () => {
     reader.dispose();
   });
 });
+
+function clip(options: {
+  frameCount: number;
+  keyEvery: number;
+}): FakeDecoderClip {
+  return {
+    ...options,
+    frameRate: FPS,
+    height: HEIGHT,
+    luma: (index) => Uint8Array.from(expectedLuma(index)),
+    width: WIDTH,
+  };
+}
 
 function timeline(frameCount: number, keyEvery: number): DepthPreviewTimeline {
   return readDepthPreviewTimeline(

@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  openFakeDepthPreviewTrack,
+  type FakeDecoderBehaviour,
+} from "../../../../test/fake-video-decoder";
 import type {
   DepthPreviewTrackInput,
+  DepthPreviewTrackOptions,
   DepthPreviewTrackReader,
 } from "./depth-preview-track";
 
@@ -109,7 +114,7 @@ describe("depth preview probe", () => {
     expect(decoding.residualError).toBe(1);
   });
 
-  it("leaves the choice to the browser when nothing could be probed", async () => {
+  it("names no decoder when none returned a frame of the probe", async () => {
     const { resolveDepthPreviewDecoding } =
       await import("./depth-preview-probe");
 
@@ -181,6 +186,71 @@ describe("depth preview probe", () => {
     });
   });
 
+  it("reads the probe from a decoder that returns frames only when flushed", async () => {
+    const { chooseDepthPreviewDecoding } =
+      await import("./depth-preview-probe");
+    const decoding = await chooseDepthPreviewDecoding(
+      probeThrough(() => "holdsUntilFlush"),
+      async () => true,
+    );
+
+    expect(decoding).toMatchObject({
+      correction: null,
+      hardwareAcceleration: "prefer-software",
+      probe: { exact: true },
+    });
+  });
+
+  it("moves on from a decoder that refuses its configuration to the next", async () => {
+    const { chooseDepthPreviewDecoding } =
+      await import("./depth-preview-probe");
+    const decoding = await chooseDepthPreviewDecoding(
+      probeThrough((preference) =>
+        preference === "prefer-software" ? "refusesConfig" : "outputs",
+      ),
+      async () => true,
+    );
+
+    expect(decoding.hardwareAcceleration).toBe("prefer-hardware");
+    expect(decoding.probe?.exact).toBe(true);
+    expect(decoding.verdicts[0]).toMatchObject({
+      error: expect.stringContaining("No decoder takes this configuration."),
+      hardwareAcceleration: "prefer-software",
+      probe: null,
+      supported: true,
+    });
+  });
+
+  it("gives up on a decoder that never returns a frame, and names none when every one is like it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+
+    try {
+      const { chooseDepthPreviewDecoding } =
+        await import("./depth-preview-probe");
+      let settled = false;
+      const choosing = chooseDepthPreviewDecoding(
+        probeThrough(() => "silent"),
+        async () => true,
+      ).finally(() => {
+        settled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(2900);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const decoding = await choosing;
+
+      expect(decoding.probe).toBeNull();
+      expect(decoding.verdicts.map(({ error }) => error)).toEqual([
+        "Error: The depth preview decoder returned no frame for 3 s of a flush.",
+        "Error: The depth preview decoder returned no frame for 3 s of a flush.",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("ships a probe clip Mediabunny reads as two full-range 256x256 H.264 frames", async () => {
     const { depthPreviewProbeBytes } = await import("./depth-preview-probe");
     const { BufferSource, EncodedPacketSink, Input, MP4 } =
@@ -205,6 +275,30 @@ describe("depth preview probe", () => {
     input.dispose();
   });
 });
+
+/** Opens the probe through fake decoders, one behaviour per preference. */
+function probeThrough(
+  behaviour: (
+    preference: HardwareAcceleration | undefined,
+  ) => FakeDecoderBehaviour,
+) {
+  return async (
+    _input: DepthPreviewTrackInput,
+    options?: DepthPreviewTrackOptions,
+  ) =>
+    openFakeDepthPreviewTrack(
+      ({ hardwareAcceleration }) => behaviour(hardwareAcceleration),
+      {
+        frameCount: 2,
+        frameRate: 24,
+        height: 256,
+        keyEvery: 24,
+        luma: () => probeLuma((code) => code),
+        width: 256,
+      },
+      options,
+    );
+}
 
 function probe(decode: (code: number) => number) {
   const decoded = Uint8Array.from({ length: 256 }, (_, code) => decode(code));

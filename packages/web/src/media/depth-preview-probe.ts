@@ -1,4 +1,6 @@
+import { withinDecoderDeadline } from "./decoder-deadline";
 import {
+  DECODER_SUPPORT_MILLISECONDS,
   openDepthPreviewTrack,
   type DepthPreviewLumaPath,
   type DepthPreviewTrackReader,
@@ -53,6 +55,12 @@ const PROBE_BLOCK_SIZE = 16;
 const PROBE_BLOCKS_PER_ROW = 16;
 /** Pixels this far inside a block are read, clear of any edge filtering. */
 const PROBE_BLOCK_INSET = 4;
+/**
+ * How long one decoder may take to return the probe's first frame. The clip
+ * is in memory, so this is decoder time alone; a decoder that works takes a
+ * few milliseconds.
+ */
+export const PROBE_DECODE_MILLISECONDS = 5000;
 
 /** What a browser's decoder did to the codes a producer wrote. */
 export interface DepthPreviewCodeProbe {
@@ -78,7 +86,10 @@ export interface DepthPreviewDecoderVerdict {
 /** How this page decodes depth previews, chosen once by probing. */
 export interface DepthPreviewDecoding {
   readonly hardwareAcceleration: HardwareAcceleration;
-  /** The probe through the chosen decoder, before any correction. */
+  /**
+   * The probe through the chosen decoder, before any correction; null when
+   * no decoder returned a frame of it, and a preview would not decode either.
+   */
   readonly probe: DepthPreviewCodeProbe | null;
   /**
    * Maps a code read back to the code written, when the chosen decoder
@@ -147,12 +158,16 @@ export function depthPreviewProbeBytes(): Uint8Array {
 async function isProbeConfigSupported(preference: HardwareAcceleration) {
   if (typeof VideoDecoder === "undefined") return false;
 
-  const support = await VideoDecoder.isConfigSupported({
-    codec: PROBE_CODEC,
-    codedHeight: PROBE_SIZE,
-    codedWidth: PROBE_SIZE,
-    hardwareAcceleration: preference,
-  }).catch(() => ({ supported: false }));
+  const support = await withinDecoderDeadline(
+    VideoDecoder.isConfigSupported({
+      codec: PROBE_CODEC,
+      codedHeight: PROBE_SIZE,
+      codedWidth: PROBE_SIZE,
+      hardwareAcceleration: preference,
+    }),
+    DECODER_SUPPORT_MILLISECONDS,
+    "VideoDecoder.isConfigSupported",
+  ).catch(() => ({ supported: false }));
 
   return support.supported === true;
 }
@@ -237,7 +252,7 @@ export function resolveDepthPreviewDecoding(
   }
 
   if (!best) {
-    // Nothing could be probed; the browser's own choice, unverified.
+    // No decoder returned a frame of the probe: none to name.
     return {
       correction: null,
       hardwareAcceleration: "no-preference",
@@ -296,6 +311,12 @@ function correctedError(decoded: Uint8Array, table: Uint8Array) {
   return error;
 }
 
+/**
+ * Decodes the probe's first frame through one decoder. Opening may wait on
+ * the network for the decoder's code; the decode waits on the decoder alone,
+ * so it gets a deadline, and a decoder that returns nothing even once the
+ * reader flushes it is one this page cannot use.
+ */
 async function runProbe(
   open: OpenTrack,
   hardwareAcceleration: HardwareAcceleration,
@@ -303,15 +324,24 @@ async function runProbe(
   const track = await open(depthPreviewProbeBytes(), { hardwareAcceleration });
 
   try {
-    const frame = await track.decode(0).next();
+    const frame = await withinDecoderDeadline(
+      track.decode(0).next(),
+      PROBE_DECODE_MILLISECONDS,
+      `The ${hardwareAcceleration} decoder`,
+    );
 
-    if (!frame) throw new Error("The depth preview probe decoded no frame.");
+    if (!frame) {
+      throw new Error(
+        `The ${hardwareAcceleration} decoder returned no frame of the probe, even flushed.`,
+      );
+    }
 
     return {
       ...readProbeFrame(frame.luma, frame.width),
       lumaPath: track.getStats().lumaPath,
     };
   } finally {
+    // Closing the decoder ends a decode still waiting past its deadline.
     track.dispose();
   }
 }
