@@ -145,9 +145,11 @@ manifest is still loading wins over it.
 
 ## Depth during playback
 
-A clip's `preview` is decoded beside the video, by WebCodecs in the page,
-ahead of the playhead, and every presented video frame is drawn with the
-preview frame of the same index. A frame whose preview has not been decoded
+A clip's `preview` is decoded beside the video, by one WebCodecs decoder in
+the page, ahead of the playhead; each decoded frame's codes are copied out in
+the session's render-preparation worker. Every presented video frame is drawn
+with the preview frame of the same index, its texture uploaded before the
+frame is presented. A frame whose preview has not been decoded
 yet draws no depth rather than another frame's. When the session's playback
 gate is on (the default), playback waits for the preview the way it waits for
 masks: it holds while the decoded lead in front of the playhead is short and
@@ -312,10 +314,12 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
 - A clip without a `preview` draws no depth while it plays. With one, the
   preview's precision is what plays: one 8-bit step of `range_px`, plus the
   codec's error. Exact depth needs playback to rest for 0.15 s.
-- The preview is decoded on the page's main thread's schedule, one frame
-  copied at a time; above 2x on large clips the decoder may not keep up, and
-  the playback gate then holds playback until it does, up to its
-  `maxWaitSeconds`.
+- A preview decodes at the browser's pace. Where that is slower than the
+  rate asks for (in a benchmark, Firefox decoded a 4K preview at about 51
+  frames a second, so 8x of a 24 fps clip outran it), the playback gate
+  stops playback until the decoded lead catches up, each stop bounded by
+  `maxWaitSeconds`; with the gate off, frames the decoder has not reached
+  draw no depth.
 - On WebGL a map whose width is odd goes up with one padding texel per row,
   padded by the worker while it decodes a manifest's PNG; WebGPU uploads the
   samples as they are.
