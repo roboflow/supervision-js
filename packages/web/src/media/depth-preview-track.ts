@@ -1,4 +1,4 @@
-import type { EncodedPacket, InputVideoTrack } from "mediabunny";
+import type { EncodedPacket } from "mediabunny";
 import { MediaErrorKind } from "supervision-js-core";
 import {
   createMainThreadLumaCopier,
@@ -7,6 +7,10 @@ import {
 } from "#render-preparation/depth-preview-luma";
 import { formatSeconds, withinDecoderDeadline } from "./decoder-deadline";
 import { MediaSourceError } from "./media-errors";
+import {
+  readMediabunnyFrameIndex,
+  type TrackFrameIndex,
+} from "./mediabunny-frame-clock";
 
 /**
  * Decode requests kept waiting in the decoder. Enough to keep a hardware
@@ -122,87 +126,6 @@ export interface DepthPreviewTrackReader {
   dispose(): void;
 }
 
-/** The preview's frames in presentation order, as the container times them. */
-export interface DepthPreviewTimeline {
-  /** Seconds from the first presented frame. */
-  readonly times: Float64Array;
-  /** Container presentation times in seconds, which packets are found by. */
-  readonly sourceTimes: Float64Array;
-  /** Presentation indices of key frames, ascending. */
-  readonly keyIndices: Int32Array;
-}
-
-export interface DepthPreviewTimelinePacket {
-  /** Presentation timestamp in ticks of the track's time resolution. */
-  readonly ticks: number;
-  readonly durationTicks: number;
-  readonly key: boolean;
-}
-
-/**
- * The presented frames of a track from its packets, by the rules the video
- * engine reads its own track by: one frame per presentation instant, and
- * pre-roll that ends at or before zero dropped. A depth preview and the video
- * it describes are then compared frame for frame on the same terms.
- */
-export function readDepthPreviewTimeline(
-  packets: readonly DepthPreviewTimelinePacket[],
-  tickRate: number,
-): DepthPreviewTimeline {
-  if (!(tickRate > 0)) {
-    throw new RangeError(
-      `Depth preview time resolution ${tickRate} is not positive.`,
-    );
-  }
-
-  const sorted = [...packets].sort((a, b) => a.ticks - b.ticks);
-  const ticks: number[] = [];
-  const keys: boolean[] = [];
-  let lastDurationTicks = 0;
-
-  for (const packet of sorted) {
-    if (ticks.length > 0 && ticks[ticks.length - 1] === packet.ticks) {
-      keys[keys.length - 1] ||= packet.key;
-      continue;
-    }
-    ticks.push(packet.ticks);
-    keys.push(packet.key);
-    lastDurationTicks = packet.durationTicks;
-  }
-
-  let first = 0;
-
-  while (first < ticks.length) {
-    const end =
-      first + 1 < ticks.length
-        ? ticks[first + 1]
-        : ticks[first] + lastDurationTicks;
-
-    if (end > 0) break;
-    first += 1;
-  }
-  if (first === ticks.length) {
-    throw new RangeError("The depth preview has no presented frames.");
-  }
-
-  const visible = ticks.slice(first);
-  const origin = Math.max(0, visible[0]);
-  const keyIndices: number[] = [];
-
-  for (let index = 0; index < visible.length; index += 1) {
-    if (keys[first + index]) keyIndices.push(index);
-  }
-
-  return {
-    keyIndices: Int32Array.from(keyIndices),
-    sourceTimes: Float64Array.from(visible, (tick) => tick / tickRate),
-    times: Float64Array.from(
-      visible,
-      (tick) => (Math.max(0, tick) - origin) / tickRate,
-    ),
-  };
-}
-
 /**
  * Opens a depth preview video: an 8-bit grayscale H.264 whose luma codes are
  * depth. Mediabunny is loaded on first use, so a page without a preview never
@@ -261,7 +184,7 @@ export async function openDepthPreviewTrack(
       );
     }
 
-    const timeline = await readDepthPreviewTrackTimeline(track);
+    const timeline = await readMediabunnyFrameIndex(track);
     const packetSink = new mediabunny.EncodedPacketSink(track);
 
     if (signal?.aborted) throw signal.reason;
@@ -276,7 +199,6 @@ export async function openDepthPreviewTrack(
       height,
       packetSink,
       timeline,
-      track,
       width,
     });
   } catch (error) {
@@ -305,41 +227,6 @@ async function isDecoderConfigSupported(config: VideoDecoderConfig) {
   }
 }
 
-/**
- * A track's presented frames from its packet table, without decoding a
- * frame: what a preview is checked against its video by.
- */
-export async function readDepthPreviewTrackTimeline(
-  track: InputVideoTrack,
-): Promise<DepthPreviewTimeline> {
-  const { EncodedPacketSink } = await import("mediabunny");
-  const tickRate = await track.getTimeResolution();
-
-  return readDepthPreviewTimeline(
-    await readTimelinePackets(new EncodedPacketSink(track), tickRate),
-    tickRate,
-  );
-}
-
-async function readTimelinePackets(
-  sink: InstanceType<typeof import("mediabunny").EncodedPacketSink>,
-  tickRate: number,
-): Promise<DepthPreviewTimelinePacket[]> {
-  const packets: DepthPreviewTimelinePacket[] = [];
-
-  for await (const packet of sink.packets(undefined, undefined, {
-    metadataOnly: true,
-  })) {
-    packets.push({
-      durationTicks: Math.round(packet.duration * tickRate),
-      key: packet.type === "key",
-      ticks: Math.round(packet.timestamp * tickRate),
-    });
-  }
-
-  return packets;
-}
-
 interface PacketReader {
   getKeyPacket(
     timestamp: number,
@@ -360,10 +247,9 @@ export function createDepthPreviewTrackReader(options: {
   readonly copier?: DepthPreviewLumaCopier;
   readonly correction?: Uint8Array | null;
   readonly packetSink: PacketReader;
-  readonly timeline: DepthPreviewTimeline;
+  readonly timeline: TrackFrameIndex;
   readonly width: number;
   readonly height: number;
-  readonly track?: InputVideoTrack;
   readonly dispose?: () => void;
   /** The decoder constructor; the browser's by default. */
   readonly VideoDecoder?: typeof VideoDecoder;

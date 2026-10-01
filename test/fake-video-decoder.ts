@@ -1,10 +1,9 @@
 import {
   createDepthPreviewTrackReader,
-  readDepthPreviewTimeline,
-  type DepthPreviewTimeline,
   type DepthPreviewTrackOptions,
   type DepthPreviewTrackReader,
 } from "../packages/web/src/media/depth-preview-track";
+import type { TrackFrameIndex } from "../packages/web/src/media/mediabunny-frame-clock";
 
 /**
  * How a fake decoder treats what it is fed, after the ways real ones do:
@@ -69,6 +68,27 @@ export interface FakeDecoderLog {
   outputs: number;
 }
 
+/** A constant-rate track from zero with a key frame every `keyEvery` frames. */
+export function uniformTrackFrameIndex(
+  frameCount: number,
+  frameRate: number,
+  keyEvery: number,
+): TrackFrameIndex {
+  const times = Float64Array.from(
+    { length: frameCount },
+    (_, index) => index / frameRate,
+  );
+
+  return {
+    keyIndices: Int32Array.from(
+      { length: Math.ceil(frameCount / keyEvery) },
+      (_, key) => key * keyEvery,
+    ),
+    sourceTimes: times,
+    times,
+  };
+}
+
 /** A track reader over `clip`, decoding through a fake decoder. */
 export function openFakeDepthPreviewTrack(
   behaviour:
@@ -78,13 +98,10 @@ export function openFakeDepthPreviewTrack(
   options: DepthPreviewTrackOptions = {},
   log: FakeDecoderLog = createFakeDecoderLog(),
 ): DepthPreviewTrackReader {
-  const timeline = readDepthPreviewTimeline(
-    Array.from({ length: clip.frameCount }, (_, index) => ({
-      durationTicks: 1,
-      key: index % clip.keyEvery === 0,
-      ticks: index,
-    })),
+  const timeline = uniformTrackFrameIndex(
+    clip.frameCount,
     clip.frameRate,
+    clip.keyEvery,
   );
 
   return createDepthPreviewTrackReader({
@@ -116,7 +133,7 @@ interface FakeChunk {
   readonly type: "key" | "delta";
 }
 
-function createFakePacketSink(timeline: DepthPreviewTimeline) {
+function createFakePacketSink(timeline: TrackFrameIndex) {
   const keys = new Set(timeline.keyIndices);
   const packet = (index: number) => ({
     index,
@@ -155,7 +172,7 @@ function createFakePacketSink(timeline: DepthPreviewTimeline) {
 function createFakeDecoderClass(
   behaviour: FakeDecoderBehaviour,
   clip: FakeDecoderClip,
-  timeline: DepthPreviewTimeline,
+  timeline: TrackFrameIndex,
   log: FakeDecoderLog,
 ): typeof VideoDecoder {
   class FakeVideoDecoder {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { assertDepthPreviewTimeline } from "#render-preparation/depth-source";
 import { depthPreviewProbeBytes } from "./depth-preview-probe";
-import { readDepthPreviewTrackTimeline } from "./depth-preview-track";
+import { readMediabunnyFrameIndex } from "./mediabunny-frame-clock";
 
 const mediabunny =
   await vi.importActual<typeof import("mediabunny")>("mediabunny");
@@ -60,12 +60,13 @@ async function timelineOf(bytes: Uint8Array) {
   });
 
   try {
-    const timeline = await readDepthPreviewTrackTimeline(
+    const timeline = await readMediabunnyFrameIndex(
       (await input.getPrimaryVideoTrack())!,
     );
 
     return {
       frameCount: timeline.times.length,
+      keyIndices: [...timeline.keyIndices],
       start: timeline.sourceTimes[0],
       times: timeline.times,
     };
@@ -89,7 +90,7 @@ describe("depth preview timeline against the video's", () => {
     ).not.toThrow();
   });
 
-  it("accepts B-frames written in decode order, read back in presentation order", async () => {
+  it("reads B-frames written in decode order back in presentation order, key frames included", async () => {
     // I P B B, as presented 0 3 1 2.
     const order = [0, 3, 1, 2, 4, 7, 5, 6];
     const preview = await timelineOf(
@@ -101,6 +102,7 @@ describe("depth preview timeline against the video's", () => {
       ),
     );
 
+    expect(preview.keyIndices).toEqual([0, 4]);
     expect(() =>
       assertDepthPreviewTimeline(preview, 8, videoTime),
     ).not.toThrow();

@@ -24,6 +24,17 @@ interface TrackWithTimeResolution {
 export async function readFrameTimeline(
   videoTrack: unknown,
 ): Promise<FrameTimeline> {
+  return (await readFrameIndex(videoTrack)).timeline;
+}
+
+/**
+ * The same walk, also naming the key frames: the presentation index of every
+ * frame a decode can start at, ascending.
+ */
+export async function readFrameIndex(videoTrack: unknown): Promise<{
+  readonly timeline: FrameTimeline;
+  readonly keyIndices: Int32Array;
+}> {
   const track = videoTrack as TrackWithTimeResolution;
   const tickRate =
     typeof track.getTimeResolution === "function"
@@ -33,6 +44,7 @@ export async function readFrameTimeline(
     videoTrack as ConstructorParameters<typeof EncodedPacketSink>[0],
   );
   const ticks: number[] = [];
+  const keyTicks = new Set<number>();
   let lastTicks = -Infinity;
   let lastDurationTicks = 0;
   for await (const packet of sink.packets(undefined, undefined, {
@@ -46,6 +58,7 @@ export async function readFrameTimeline(
       );
     }
     ticks.push(at);
+    if (packet.type === "key") keyTicks.add(at);
     if (at >= lastTicks) {
       lastTicks = at;
       lastDurationTicks = Math.round(packet.duration * tickRate);
@@ -61,11 +74,17 @@ export async function readFrameTimeline(
   if (lastDurationTicks === 0) {
     lastDurationTicks = await unstatedLastDurationTicks(track, ticks, tickRate);
   }
-  return FrameTimeline.from({
+  const timeline = FrameTimeline.from({
     lastDurationTicks,
     tickRate,
     ticks: Float64Array.from(ticks),
   });
+  const { ticks: presented, sourceTicks = presented } = timeline.toData();
+  const keyIndices: number[] = [];
+  for (let index = 0; index < sourceTicks.length; index += 1) {
+    if (keyTicks.has(sourceTicks[index])) keyIndices.push(index);
+  }
+  return { keyIndices: Int32Array.from(keyIndices), timeline };
 }
 
 /**

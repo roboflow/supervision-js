@@ -3,64 +3,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakeDecoderLog,
   openFakeDepthPreviewTrack,
+  uniformTrackFrameIndex,
   type FakeDecoderClip,
 } from "../../../../test/fake-video-decoder";
 import {
   createDepthPreviewTrackReader,
   FLUSH_SILENCE_MILLISECONDS,
-  readDepthPreviewTimeline,
-  type DepthPreviewTimeline,
 } from "./depth-preview-track";
+import type { TrackFrameIndex } from "./mediabunny-frame-clock";
 
 const WIDTH = 8;
 const HEIGHT = 4;
 const FPS = 24;
-
-describe("readDepthPreviewTimeline", () => {
-  it("puts frames in presentation order from the first one, with their key frames", () => {
-    // Decode order of an IBBP stream: 0 3 1 2 6 4 5, key frames at 0 and 4.
-    const ticks = [0, 3, 1, 2, 6, 4, 5].map((frame) => frame * 1000);
-    const timeline = readDepthPreviewTimeline(
-      ticks.map((tick) => ({
-        durationTicks: 1000,
-        key: tick === 0 || tick === 4000,
-        ticks: tick + 500,
-      })),
-      24000,
-    );
-
-    expect([...timeline.times]).toEqual(
-      [0, 1, 2, 3, 4, 5, 6].map((frame) => (frame * 1000) / 24000),
-    );
-    expect(timeline.sourceTimes[0]).toBeCloseTo(500 / 24000);
-    expect([...timeline.keyIndices]).toEqual([0, 4]);
-  });
-
-  it("keeps one frame per instant and drops pre-roll that ends before zero, as the engine does", () => {
-    const timeline = readDepthPreviewTimeline(
-      [
-        { durationTicks: 10, key: true, ticks: -20 },
-        { durationTicks: 10, key: false, ticks: -10 },
-        { durationTicks: 10, key: false, ticks: 0 },
-        { durationTicks: 10, key: true, ticks: 0 },
-        { durationTicks: 10, key: false, ticks: 10 },
-      ],
-      100,
-    );
-
-    expect([...timeline.times]).toEqual([0, 0.1]);
-    expect([...timeline.keyIndices]).toEqual([0]);
-  });
-
-  it("refuses a track with nothing presented", () => {
-    expect(() =>
-      readDepthPreviewTimeline(
-        [{ durationTicks: 10, key: true, ticks: -10 }],
-        100,
-      ),
-    ).toThrow(RangeError);
-  });
-});
 
 describe("depth preview track reader", () => {
   afterEach(() => {
@@ -296,16 +250,8 @@ function clip(options: {
   };
 }
 
-function timeline(frameCount: number, keyEvery: number): DepthPreviewTimeline {
-  return readDepthPreviewTimeline(
-    Array.from({ length: frameCount }, (_, index) => ({
-      durationTicks: 1,
-      key: index % keyEvery === 0,
-      ticks: index,
-    })),
-    FPS,
-  );
-}
+const timeline = (frameCount: number, keyEvery: number) =>
+  uniformTrackFrameIndex(frameCount, FPS, keyEvery);
 
 function expectedLuma(index: number) {
   return Array.from(
@@ -371,7 +317,7 @@ class FakePacketSink {
   keyLookups: number[] = [];
   gate: Promise<void> | null = null;
 
-  constructor(private readonly line: DepthPreviewTimeline) {}
+  constructor(private readonly line: TrackFrameIndex) {}
 
   private packet(index: number): FakePacket {
     const timestamp = this.line.sourceTimes[index];
@@ -470,7 +416,7 @@ class FakeDecoder {
     format: string;
     holdOutputs: number;
     stride: number;
-    timeline: DepthPreviewTimeline;
+    timeline: TrackFrameIndex;
   };
   state: "unconfigured" | "configured" | "closed" = "unconfigured";
   decodeQueueSize = 0;
