@@ -236,11 +236,20 @@ describe("pixi depth layer", () => {
     });
 
     layer.drawFrame(0);
+    const uploaded = pixi.depthSources[0]!;
+    let boundWhenDestroyed: unknown;
+
+    uploaded.destroy.mockImplementation(() => {
+      boundWhenDestroyed = pixi.shaders[0]!.resources.uDepthTexture;
+    });
     layer.setDepthSource(null);
 
     expect(pixi.meshes[0]!.visible).toBe(false);
     expect(layer.getActiveDepth()).toBeNull();
-    expect(pixi.depthSources[0]!.destroy).toHaveBeenCalledOnce();
+    expect(uploaded.destroy).toHaveBeenCalledOnce();
+    // The shader let go of the texture before it was destroyed.
+    expect(boundWhenDestroyed).toBeDefined();
+    expect(boundWhenDestroyed).not.toBe(uploaded);
 
     layer.drawFrame(0);
     expect(pixi.meshes[0]!.visible).toBe(false);

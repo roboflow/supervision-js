@@ -253,12 +253,14 @@ export function createPixiDepthLayer(options: {
       hide();
       if (!next) {
         // Nothing will draw from these textures until another map arrives.
-        ring?.destroy();
-        ring = undefined;
+        // The shaders let go of them first: Pixi warns about a texture
+        // destroyed while a shader still holds it.
         for (const entry of drawn.values()) {
           entry.renderer.clearTexture();
           entry.drawnTexture = null;
         }
+        ring?.destroy();
+        ring = undefined;
       }
     },
 
