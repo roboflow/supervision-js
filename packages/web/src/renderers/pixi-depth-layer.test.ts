@@ -363,6 +363,21 @@ describe("pixi depth layer", () => {
     expect(strides).toEqual([3, 3]);
   });
 
+  it("keeps frames uploaded ahead through a present that repeats the frame on screen", () => {
+    const maps = Array.from({ length: 8 }, (_, index) =>
+      previewMap(20 + index),
+    );
+    const { layer } = createLayer({ source: previewSource(maps) });
+
+    // 48 fps on a 60 Hz display: every fifth present repeats its frame.
+    for (const time of [0, 1, 2, 2.5, 3, 4, 4.5, 5]) {
+      layer.drawFrame(time);
+      layer.uploadAhead(time);
+    }
+
+    expect(layer.getUploadCounts().inPresent).toBe(1);
+  });
+
   it("never uploads over the texture on screen while uploading ahead", () => {
     const maps = Array.from({ length: 8 }, (_, index) =>
       previewMap(20 + index),

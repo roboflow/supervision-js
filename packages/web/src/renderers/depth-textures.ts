@@ -257,8 +257,11 @@ export interface DepthTextureSlot {
 }
 
 export interface DepthTextureRing {
-  /** The texture holding `map`, uploading it into the stalest slot if needed. */
-  acquire(map: DepthMap): DepthTextureSlot;
+  /**
+   * The texture holding `map`, uploading it into the stalest slot if needed.
+   * A slot holding a map in `keep` is reused only when every slot does.
+   */
+  acquire(map: DepthMap, keep?: ReadonlySet<DepthMap>): DepthTextureSlot;
   has(map: DepthMap): boolean;
   destroy(): void;
 }
@@ -300,7 +303,7 @@ export function createDepthTextureRing(options: {
   const find = (map: DepthMap) => slots.find((slot) => slot.map === map);
 
   return {
-    acquire(map) {
+    acquire(map, keep) {
       clock += 1;
       const resident = find(map);
 
@@ -309,8 +312,12 @@ export function createDepthTextureRing(options: {
         return resident as DepthTextureSlot;
       }
 
-      const slot = slots.reduce((stalest, candidate) =>
-        candidate.lastUsed < stalest.lastUsed ? candidate : stalest,
+      const spare = keep
+        ? slots.filter((slot) => slot.map === null || !keep.has(slot.map))
+        : slots;
+      const slot = (spare.length > 0 ? spare : slots).reduce(
+        (stalest, candidate) =>
+          candidate.lastUsed < stalest.lastUsed ? candidate : stalest,
       );
       const upload = createDepthMapUpload(
         map,

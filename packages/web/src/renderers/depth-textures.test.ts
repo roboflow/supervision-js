@@ -253,6 +253,26 @@ describe("depth texture ring", () => {
     expect(ring.has(b)).toBe(true);
   });
 
+  it("spares the maps it is told to keep, however stale", () => {
+    const { ring } = createRing(3);
+    const [now, next, after, later] = [1, 2, 3, 4].map((first) =>
+      scaledMap(4, 2, first),
+    );
+
+    ring.acquire(next);
+    ring.acquire(after);
+    ring.acquire(now);
+    ring.acquire(now);
+    ring.acquire(later, new Set([now, next, after]));
+
+    // Every slot was kept, so the stalest of them went: `next`.
+    expect(ring.has(next)).toBe(false);
+
+    ring.acquire(next, new Set([now, next, later]));
+    expect(ring.has(after)).toBe(false);
+    expect(ring.has(later)).toBe(true);
+  });
+
   it("reallocates a slot when the size changes", () => {
     const { ring, sources } = createRing(1);
 

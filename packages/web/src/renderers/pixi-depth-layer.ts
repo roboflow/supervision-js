@@ -375,16 +375,23 @@ export function createPixiDepthLayer(options: {
     uploadAhead(mediaTime: number) {
       if (!drawing() || !source?.getUpcomingEntries) return;
 
-      for (const entry of source.getUpcomingEntries(
+      const upcoming = source.getUpcomingEntries(
         mediaTime,
         TEXTURE_RING_SIZE - 1,
         frameStride,
-      )) {
+      );
+      // The frame on screen and the ones about to be: a present repeating
+      // the frame on screen must not make the next frames look stale.
+      const keep = new Set(upcoming.map(({ map }) => map));
+
+      if (active) keep.add(active.map);
+
+      for (const entry of upcoming) {
         const textures = ringFor(entry.map);
 
         if (textures.has(entry.map)) continue;
 
-        const slot = textures.acquire(entry.map);
+        const slot = textures.acquire(entry.map, keep);
 
         options.prepareTexture?.(slot.source);
         uploadsAhead += 1;
