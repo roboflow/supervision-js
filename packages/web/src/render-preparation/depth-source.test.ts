@@ -495,7 +495,7 @@ describe("depth source from a clip manifest", () => {
     source.destroy();
   });
 
-  it("stops the neighbours not yet asked for when the frame on screen moves", async () => {
+  it("stops the neighbours not yet asked for when the frame on screen moves, and loads the way it moved first", async () => {
     const server = clipServer();
     const gate = createGate();
     const decode = server.preparer().decodeDepth;
@@ -520,9 +520,11 @@ describe("depth source from a clip manifest", () => {
     await vi.waitFor(() =>
       expect(drawnFrame(source, 8)).toEqual({ file: 8, frameIndex: 8 }),
     );
-    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
-    // Frame 5 was in flight and is kept; 6, 4, 7 and 3 were never asked for.
-    expect(server.fetchedFrames()).toEqual([5, 8, 9, 7, 6]);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(4));
+    // Frame 5 was in flight and is kept; 6, 4 and 3 were never asked for.
+    // The frame moved forward, so three of 8's four neighbours lie ahead of
+    // it, and the two past the clip's last frame are skipped.
+    expect(server.fetchedFrames()).toEqual([5, 8, 9, 7]);
     expect(drawnFrame(source, 5)).toEqual({ file: 5, frameIndex: 5 });
 
     source.destroy();
@@ -538,10 +540,11 @@ describe("depth source from a clip manifest", () => {
     source.getEntry(2);
     await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(3));
     source.getEntry(3);
-    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(4));
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
 
-    // 1, 2, 3 and 4 were decoded; 1 is farthest from 3 and was dropped.
-    expect(server.fetchedFrames()).toEqual([2, 3, 1, 4]);
+    // A step forward loads both neighbours ahead of 3. Of 1 to 5, the frames
+    // two away from 3 were dropped as the others landed.
+    expect(server.fetchedFrames()).toEqual([2, 3, 1, 4, 5]);
     expect(drawnFrame(source, 4)).not.toBeNull();
     source.getEntry(3);
     expect(drawnFrame(source, 2)).not.toBeNull();

@@ -221,6 +221,149 @@ describe("depth preview window", () => {
     warn.mockRestore();
   });
 
+  it("keeps every frame a run reaches back over while a drag heads backwards, so the next steps back start no run", async () => {
+    const { source, window } = setup({ keyEvery: 10, prefetchSeconds: 1 });
+
+    window.setScrubbing(true);
+    for (const index of [55, 54, 53]) {
+      window.setPlayhead(index);
+      await source.drain();
+    }
+    expect(window.heading()).toBe(-1);
+
+    const starts = source.starts.length;
+
+    // 0.75 s behind 53 reaches 46, whose key frame is 40: 40 to 52 are in.
+    expect(stored(window, 40, 52)).toEqual(range(40, 52));
+    for (let index = 52; index >= 41; index -= 1) {
+      window.setPlayhead(index);
+      await source.drain();
+      expect(window.getEntry(index)).not.toBeNull();
+    }
+    // Going back past 40 needs the key frame before it, once.
+    expect(source.starts.length).toBe(starts + 1);
+    expect(source.starts.at(-1)).toBeLessThan(40);
+  });
+
+  it("treats a drag forward in small steps as a drag, not as a playback cadence", async () => {
+    const { source, window } = setup({ prefetchSeconds: 1 });
+
+    window.setScrubbing(true);
+    for (const index of [0, 2, 4, 6, 8, 10]) {
+      window.setPlayhead(index);
+      await source.drain();
+    }
+
+    // Every frame the hand may land on is kept, odd ones included.
+    expect(stored(window, 10, 15)).toEqual(range(10, 15));
+    expect(source.starts).toEqual([0]);
+  });
+
+  it("copies only the frames presents land on once playback moves a steady stride", async () => {
+    const { source, window } = setup({ prefetchSeconds: 0.5 });
+
+    for (const index of [0, 2, 4, 6, 8]) {
+      window.setPlayhead(index);
+      await source.drain();
+    }
+
+    // As many frames as 0.5 s holds, spread over a second: 8 to 16.
+    expect(stored(window, 9, 30)).toEqual([10, 12, 14, 16]);
+    expect(window.leadSeconds(8)).toBeCloseTo(1);
+    expect(window.getDiagnostics()).toMatchObject({ prefetchCount: 5 });
+  });
+
+  it("decodes past the last frame into the first when the clip loops", async () => {
+    const { source, window } = setup({
+      frameCount: 20,
+      loop: true,
+      prefetchSeconds: 0.5,
+    });
+
+    window.setPlayhead(17);
+    await source.drain();
+
+    expect(stored(window, 0, 19)).toEqual([0, 1, 17, 18, 19]);
+    expect(window.leadSeconds(17)).toBeCloseTo(0.5);
+
+    window.setLoop(false);
+    expect(window.leadSeconds(17)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("keeps a small margin at rest, and asks a step for its own frame only", async () => {
+    const { source, window } = setup({ active: false, prefetchSeconds: 2 });
+
+    window.setPlayhead(10);
+    await source.drain();
+
+    expect(stored(window, 0, 40)).toEqual([10, 11, 12]);
+    // Nothing plays at rest, so no lead is owed.
+    expect(window.needsPlaybackGateWait(10, thresholds(0.5))).toBe(false);
+    expect(window.needsPlaybackGateWait(13, thresholds(0.5))).toBe(true);
+
+    window.setPlaybackActive(true);
+    await source.drain();
+    expect(stored(window, 10, 40)).toEqual(range(10, 29));
+  });
+
+  it("fills behind a playhead stepped backwards at rest", async () => {
+    const { source, window } = setup({
+      active: false,
+      keyEvery: 5,
+      prefetchSeconds: 1,
+      retainSeconds: 0.3,
+    });
+
+    for (const index of [12, 11, 10]) {
+      window.setPlayhead(index);
+      await source.drain();
+    }
+
+    expect(window.heading()).toBe(-1);
+    expect(stored(window, 7, 9)).toEqual([7, 8, 9]);
+  });
+
+  it("never decodes further ahead for a gate's lead than its own prefetch", async () => {
+    const { source, window } = setup({ prefetchSeconds: 0.5 });
+
+    await window.waitForReady(0, thresholds(3), undefined);
+    await source.drain();
+
+    expect(stored(window, 0, 40)).toEqual([0, 1, 2, 3, 4]);
+    expect(window.needsPlaybackGateWait(0, thresholds(3, 3))).toBe(false);
+  });
+
+  it("decodes nothing while the page is hidden, and picks up where the playhead is when it shows", async () => {
+    const { source, window } = setup({ gated: true, prefetchSeconds: 0.5 });
+
+    window.setPlayhead(0);
+    await source.release(2);
+    window.setHidden(true);
+    expect(source.cancelled).toBe(1);
+
+    window.setPlayhead(30);
+    await source.release(10);
+    expect(stored(window, 0, 40)).toEqual([0, 1]);
+
+    window.setHidden(false);
+    await source.release(10);
+    expect(stored(window, 30, 40)).toEqual([30, 31, 32, 33, 34]);
+  });
+
+  it("decodes a frame the gate waits on before anything else", async () => {
+    const { source, window } = setup({ keyEvery: 10, prefetchSeconds: 0.5 });
+
+    window.setScrubbing(true);
+    window.setPlayhead(50);
+    await source.drain();
+
+    const wait = window.waitForReady(47, thresholds(0.3), undefined);
+
+    await source.drain();
+    await wait;
+    expect(window.getEntry(47)).not.toBeNull();
+  });
+
   it("gives up on a frame its decoder never produces instead of restarting forever", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { source, window } = setup({ missing: [0], prefetchSeconds: 0.3 });
@@ -233,6 +376,10 @@ describe("depth preview window", () => {
     warn.mockRestore();
   });
 });
+
+function range(from: number, to: number) {
+  return Array.from({ length: to - from + 1 }, (_, offset) => from + offset);
+}
 
 function stored(
   window: ReturnType<typeof createDepthPreviewWindow>,
@@ -260,6 +407,10 @@ interface SetupOptions {
   readonly failAt?: number;
   /** Frames the decoder never outputs. */
   readonly missing?: readonly number[];
+  /** Whether playback runs; it does unless a test rests it. */
+  readonly active?: boolean;
+  readonly loop?: boolean;
+  readonly pausedFrameCount?: number;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -280,11 +431,15 @@ function setup(options: SetupOptions = {}) {
     endAt: (index) => (index + 1) / FPS,
     frameBytes: FRAME_BYTES,
     frames: source,
+    loop: options.loop,
     maxBytes: options.maxBytes ?? FRAME_BYTES * 1000,
+    pausedFrameCount: options.pausedFrameCount,
     prefetchSeconds: options.prefetchSeconds ?? 1,
     retainSeconds: options.retainSeconds ?? 0,
     timeAt: (index) => index / FPS,
   });
+
+  if (options.active !== false) window.setPlaybackActive(true);
 
   return { source, window };
 }

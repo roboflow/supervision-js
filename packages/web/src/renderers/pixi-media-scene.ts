@@ -318,6 +318,7 @@ export async function createPixiMediaScene(
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
   let isPlaybackActive = true;
+  let isScrubbing = false;
   let displayBrightness = 1;
   let displayContrast = 1;
   let viewportScale = 1;
@@ -1214,10 +1215,16 @@ export async function createPixiMediaScene(
       depthSource?.setPlaybackActive?.(active);
     },
 
+    setScrubbing(scrubbing) {
+      isScrubbing = scrubbing;
+      depthSource?.setScrubbing?.(scrubbing);
+    },
+
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
       polygonLayer?.setTimelineContext(context);
+      depthSource?.setLoop?.(context.loop);
     },
 
     presentSample(sample) {
@@ -1647,6 +1654,8 @@ export async function createPixiMediaScene(
       unsubscribeDepthSource?.();
       depthSource = source;
       source?.setPlaybackActive?.(isPlaybackActive);
+      source?.setScrubbing?.(isScrubbing);
+      if (timelineContext) source?.setLoop?.(timelineContext.loop);
       // A clip's exact frame lands after its frame was presented. The layer's
       // content key is in the render signature, so each of these redraws
       // renders only when the depth on screen actually changed.

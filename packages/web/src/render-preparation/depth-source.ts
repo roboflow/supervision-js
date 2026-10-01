@@ -19,8 +19,11 @@ import { rememberPreparedDepthUpload } from "#renderers/depth-textures";
 import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaRendererDepthInput } from "#types/media-depth";
 import {
+  RenderPreparationArtifactFrameStatus,
+  RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
   RenderPreparationWorkerStatus,
+  type RenderPreparationArtifactDiagnostics,
   type RenderPreparationDepthOptions,
   type RenderPreparationDiagnostics,
   type ResolvedRenderPreparationGateThresholds,
@@ -28,6 +31,7 @@ import {
 import { abortable, type DepthFramePreparer } from "./depth-frame-preparer";
 import type { DepthPreviewLumaCopier } from "./depth-preview-luma";
 import { createDepthPreviewWindow } from "./depth-preview-window";
+import { WINDOW_LEAD_FRACTION } from "./playhead-motion";
 
 /** How far a map's aspect ratio may stray from the media's. */
 const DEPTH_ASPECT_TOLERANCE = 0.01;
@@ -63,6 +67,10 @@ export interface DepthFrameProvider {
    * until then.
    */
   setPlaybackActive?(active: boolean): void;
+  /** Whether a drag holds the playhead, as opposed to playback moving it. */
+  setScrubbing?(scrubbing: boolean): void;
+  /** Whether playback wraps at the media end: decoding ahead wraps with it. */
+  setLoop?(loop: boolean): void;
   /** Calls `listener` whenever an answer of `getEntry` may have changed. */
   subscribe?(listener: () => void): () => void;
   /** The playhead moved: decoding ahead follows it. Never called in a present. */
@@ -91,6 +99,13 @@ export interface DepthFrameProvider {
   ): Promise<void>;
   /** Depth frames prepared ahead, counted up across the source's life. */
   getPreparationProgress?(): number;
+  /**
+   * The depth frame `getEntry` answers for `mediaTime`, without drawing it,
+   * and whether it is decoded yet. Null where there is no depth frame.
+   */
+  getFrameStatus?(
+    mediaTime: number,
+  ): { readonly frameIndex: number | null; readonly prepared: boolean } | null;
   destroy(): void;
 }
 
@@ -406,17 +421,37 @@ async function openDepthClip(
   const listeners = new Set<() => void>();
   const cache = new Map<number, CachedDepthFrame>();
   const loading = new Map<number, Promise<void>>();
+  const landingWaiters = new Set<() => void>();
   const previewEntries = new WeakMap<DepthMap, DepthFrameEntry>();
   const teardown = new AbortController();
+  const exactCapacityFrames = Math.max(
+    1,
+    Math.floor(
+      options.maxCacheBytes /
+        Math.max(
+          1,
+          manifest.width *
+            manifest.height *
+            (frames.confidence === undefined ? 2 : 3),
+        ),
+    ),
+  );
   let cachedBytes = 0;
   let onScreen: number | null = null;
   let active = false;
+  let hidden = false;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   let run: AbortController | undefined;
   let warned = false;
   let destroyed = false;
   let queuedPlayhead: number | null = null;
   let diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Set once the producer reports its playhead. From then on decoding
+   * follows that playhead, which leads the frames a drag puts on screen,
+   * rather than the drawn frame, which trails them.
+   */
+  let prefetchDriven = false;
 
   const indexAt = (mediaTime: number): number | null => {
     if (!Number.isFinite(mediaTime)) return null;
@@ -440,14 +475,38 @@ async function openDepthClip(
 
   let previewStopped: string | null = null;
 
+  /** The exact frames: those kept, those loading, and whether the one on screen is in. */
+  const exactDiagnostics = (): RenderPreparationArtifactDiagnostics => ({
+    activeFrame:
+      onScreen === null
+        ? null
+        : {
+            key: `depth:${onScreen}`,
+            mediaTime: timeAt(onScreen),
+            status: cache.has(onScreen)
+              ? RenderPreparationArtifactFrameStatus.Prepared
+              : RenderPreparationArtifactFrameStatus.Pending,
+          },
+    inFlightCount: loading.size,
+    kind: RenderPreparationArtifactKind.ExactDepthFrame,
+    maxInFlightCount: 1,
+    maxPreparedCount: exactCapacityFrames,
+    pendingCount: loading.size,
+    prefetchCount: 2 * options.neighborFrameCount + 1,
+    preparedCount: cache.size,
+  });
+
   const reportDiagnostics = () => {
     diagnosticsTimer = undefined;
-    if (destroyed || (!previewWindow && !unavailable)) return;
+    if (destroyed) return;
 
     const offMainThread = preview?.copier?.offMainThread === true;
 
     context.onDiagnostics?.({
-      artifacts: previewWindow ? [previewWindow.getDiagnostics()] : [],
+      artifacts: [
+        ...(previewWindow ? [previewWindow.getDiagnostics()] : []),
+        exactDiagnostics(),
+      ],
       // The decoder runs where the browser puts it; the work this page
       // does per frame, copying its codes out, runs in the worker or here.
       executionMode: offMainThread
@@ -511,26 +570,30 @@ async function openDepthClip(
           // Only a landing for the frame on screen changes the picture.
           if (index === onScreen) notify();
         },
+        pausedFrameCount: budgets.preview.pausedFrameCount,
         prefetchSeconds: budgets.preview.prefetchSeconds,
         retainSeconds: budgets.preview.retainSeconds,
         timeAt,
       })
     : null;
 
-  if (unavailable) scheduleDiagnostics();
+  scheduleDiagnostics();
 
   /**
    * The present asks for the frame on screen; decoding moves there right
-   * after it, never inside it.
+   * after it, never inside it. Only until the producer reports a playhead
+   * of its own.
    */
   const followPlayhead = (index: number) => {
-    if (!previewWindow) return;
+    if (!previewWindow || prefetchDriven) return;
     if (queuedPlayhead === null) {
       queueMicrotask(() => {
         const next = queuedPlayhead;
 
         queuedPlayhead = null;
-        if (next !== null && !destroyed) previewWindow.setPlayhead(next);
+        if (next !== null && !destroyed && !prefetchDriven) {
+          previewWindow.setPlayhead(next);
+        }
       });
     }
     queuedPlayhead = index;
@@ -604,6 +667,7 @@ async function openDepthClip(
         .then((map) => {
           if (destroyed) return;
           store(index, map);
+          for (const landed of [...landingWaiters]) landed();
           if (index === onScreen && !active) notify();
         })
         .catch((error: unknown) => {
@@ -613,35 +677,45 @@ async function openDepthClip(
             `Depth frame ${index} did not load, so ${previewWindow ? "its preview stands in for it at rest" : "no depth is drawn over it"}: ${String(error)}`,
           );
         })
-        .finally(() => loading.delete(index));
+        .finally(() => {
+          loading.delete(index);
+          scheduleDiagnostics();
+        });
       loading.set(index, pending);
+      scheduleDiagnostics();
     }
 
     return pending;
   };
 
   /**
-   * The frame on screen first, then its neighbours nearest first. A move
-   * stops the frames not yet asked for; one already loading finishes and is
-   * kept.
+   * The frame on screen first, then its neighbours nearest first, most of
+   * them the way the playhead last moved: a step lands on a frame already
+   * loaded, as a step onto the mask window's paused margin does. A move stops
+   * the frames not yet asked for; one already loading finishes and is kept.
    */
   const loadAround = async (center: number, signal: AbortSignal) => {
     await load(center);
 
-    for (let step = 1; step <= options.neighborFrameCount; step += 1) {
-      for (const index of [center + step, center - step]) {
-        if (signal.aborted) return;
-        if (index >= 0 && index < frames.count) await load(index);
-      }
+    for (const index of neighbourOrder(
+      center,
+      options.neighborFrameCount,
+      previewWindow?.heading() ?? lastStep,
+    )) {
+      if (signal.aborted) return;
+      if (index >= 0 && index < frames.count) await load(index);
     }
   };
+
+  /** Which way the frame on screen last moved, for a clip without a preview. */
+  let lastStep: -1 | 0 | 1 = 0;
 
   const settle = () => {
     clearTimeout(settleTimer);
     settleTimer = undefined;
     run?.abort();
     run = undefined;
-    if (active || onScreen === null || destroyed) return;
+    if (active || hidden || onScreen === null || destroyed) return;
 
     const center = onScreen;
     const next = new AbortController();
@@ -653,6 +727,35 @@ async function openDepthClip(
     }, options.settleSeconds * 1000);
   };
 
+  const onVisibility = () => {
+    const next = document.visibilityState === "hidden";
+
+    if (next === hidden || destroyed) return;
+    hidden = next;
+    previewWindow?.setHidden(hidden);
+    settle();
+  };
+
+  if (typeof document !== "undefined") {
+    hidden = document.visibilityState === "hidden";
+    previewWindow?.setHidden(hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+  }
+
+  /** Resolves once an exact frame lands for `index`, or `signal` aborts. */
+  const exactLanding = (index: number, signal?: AbortSignal) =>
+    new Promise<void>((resolve) => {
+      const landed = () => {
+        if (!cache.has(index) && !destroyed && !signal?.aborted) return;
+        landingWaiters.delete(landed);
+        signal?.removeEventListener("abort", landed);
+        resolve();
+      };
+
+      landingWaiters.add(landed);
+      signal?.addEventListener("abort", landed, { once: true });
+    });
+
   return {
     getEntry(mediaTime) {
       if (destroyed) return null;
@@ -660,6 +763,9 @@ async function openDepthClip(
       const index = indexAt(mediaTime);
 
       if (index !== onScreen) {
+        if (index !== null && onScreen !== null) {
+          lastStep = index > onScreen ? 1 : -1;
+        }
         onScreen = index;
         settle();
         if (index !== null) followPlayhead(index);
@@ -673,10 +779,25 @@ async function openDepthClip(
       return exact ?? previewEntry(index);
     },
 
+    getFrameStatus(mediaTime) {
+      const index = indexAt(mediaTime);
+
+      if (index === null || destroyed) return null;
+
+      return {
+        frameIndex: index,
+        prepared:
+          (!active && cache.has(index)) ||
+          previewWindow?.getEntry(index) != null,
+      };
+    },
+
     prefetch(mediaTime) {
       const index = indexAt(mediaTime);
 
-      if (index !== null && !destroyed) previewWindow?.setPlayhead(index);
+      if (index === null || destroyed || !previewWindow) return;
+      prefetchDriven = true;
+      previewWindow.setPlayhead(index);
     },
 
     getUpcomingEntries(mediaTime, count, skip) {
@@ -693,19 +814,35 @@ async function openDepthClip(
     needsPlaybackGateWait(mediaTime, thresholds) {
       const index = indexAt(mediaTime);
 
-      return (
-        previewWindow !== null &&
-        index !== null &&
-        previewWindow.needsPlaybackGateWait(index, thresholds)
-      );
+      if (previewWindow === null || index === null) return false;
+      // At rest an exact frame already in draws without its preview.
+      if (!active && cache.has(index)) return false;
+
+      return previewWindow.needsPlaybackGateWait(index, thresholds);
     },
 
     waitForReady(mediaTime, thresholds, signal) {
       const index = indexAt(mediaTime);
 
-      return previewWindow && index !== null
-        ? previewWindow.waitForReady(index, thresholds, signal)
-        : Promise.resolve();
+      if (!previewWindow || index === null) return Promise.resolve();
+      if (!active && cache.has(index)) return Promise.resolve();
+
+      const settled = new AbortController();
+      const stop = () => settled.abort();
+
+      signal?.addEventListener("abort", stop, { once: true });
+
+      const waits = [
+        previewWindow.waitForReady(index, thresholds, settled.signal),
+      ];
+
+      // A step at rest is ready as soon as either of its depths is.
+      if (!active) waits.push(exactLanding(index, settled.signal));
+
+      return Promise.race(waits).finally(() => {
+        signal?.removeEventListener("abort", stop);
+        settled.abort();
+      });
     },
 
     getPreparationProgress: () => previewWindow?.getPreparationProgress() ?? 0,
@@ -713,9 +850,18 @@ async function openDepthClip(
     setPlaybackActive(next) {
       if (next === active || destroyed) return;
       active = next;
+      previewWindow?.setPlaybackActive(next);
       settle();
       // The frame on screen swaps between its exact and its preview depth.
       notify();
+    },
+
+    setLoop(loop) {
+      previewWindow?.setLoop(loop);
+    },
+
+    setScrubbing(scrubbing) {
+      previewWindow?.setScrubbing(scrubbing);
     },
 
     subscribe(listener) {
@@ -726,10 +872,14 @@ async function openDepthClip(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
       clearTimeout(settleTimer);
       clearTimeout(diagnosticsTimer);
       run?.abort();
       teardown.abort();
+      for (const landed of [...landingWaiters]) landed();
       previewWindow?.destroy();
       preview?.reader.dispose();
       listeners.clear();
@@ -737,6 +887,39 @@ async function openDepthClip(
       cachedBytes = 0;
     },
   };
+}
+
+/**
+ * The neighbours of `center` an exact load visits, nearest first. With a
+ * heading, three in four go the way the playhead moves, as a scrub window
+ * spends its frames; without one, both sides alternate.
+ */
+export function neighbourOrder(
+  center: number,
+  perSide: number,
+  heading: -1 | 0 | 1,
+): number[] {
+  const total = 2 * perSide;
+
+  if (heading === 0) {
+    const order: number[] = [];
+
+    for (let step = 1; step <= perSide; step += 1) {
+      order.push(center + step, center - step);
+    }
+
+    return order;
+  }
+
+  const towards = Math.min(total, Math.ceil(total * WINDOW_LEAD_FRACTION));
+  const order: number[] = [];
+
+  for (let step = 1; step <= Math.max(towards, total - towards); step += 1) {
+    if (step <= towards) order.push(center + heading * step);
+    if (step <= total - towards) order.push(center - heading * step);
+  }
+
+  return order;
 }
 
 interface OpenedClipPreview {
@@ -946,6 +1129,8 @@ export function resolveDepthClipOptions(
   readonly exact: ExactDepthFrameOptions;
   readonly preview: {
     readonly maxCacheBytes: number;
+    /** Frames a resting playhead keeps decoded ahead, its own included. */
+    readonly pausedFrameCount: number;
     readonly prefetchSeconds: number;
     readonly retainSeconds: number;
   };
@@ -996,6 +1181,9 @@ export function resolveDepthClipOptions(
             clip.previewFrameBytes * previewSpanFrames,
           ),
         ),
+      // The frame on screen and the neighbours a step reaches: what the mask
+      // window keeps at rest, one batch past its own frame.
+      pausedFrameCount: neighborFrameCount + 1,
       prefetchSeconds,
       retainSeconds,
     },

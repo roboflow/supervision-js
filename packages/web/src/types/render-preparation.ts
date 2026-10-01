@@ -45,6 +45,11 @@ export enum RenderPreparationArtifactKind {
   PolygonFrame = "polygonFrame",
   /** A clip's 8-bit preview depth, decoded ahead of playback. */
   DepthFrame = "depthFrame",
+  /**
+   * A clip's exact 16-bit depth, loaded for the frame at rest and its
+   * neighbours: `preparedCount` frames kept, `pendingCount` loading.
+   */
+  ExactDepthFrame = "exactDepthFrame",
 }
 
 /**

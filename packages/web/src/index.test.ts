@@ -374,6 +374,7 @@ describe("package entrypoint", () => {
     });
     expect(entrypoint.RenderPreparationArtifactKind).toEqual({
       DepthFrame: "depthFrame",
+      ExactDepthFrame: "exactDepthFrame",
       MaskFrame: "maskFrame",
       PolygonFrame: "polygonFrame",
     });

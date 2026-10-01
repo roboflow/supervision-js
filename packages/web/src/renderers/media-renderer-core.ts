@@ -267,6 +267,7 @@ export async function createMediaRendererCore(
     mediaScene?.setPlaybackActive?.(
       runtimeState.isPlaybackActive() || isSeekGestureInFlight,
     );
+    mediaScene?.setScrubbing?.(isSeekGestureInFlight);
   };
   const endSeekGesture = () => {
     cancelPullScrubPreview();
@@ -852,6 +853,7 @@ export async function createMediaRendererCore(
     publishPlaybackActivity();
     if (transport) {
       transport.scrub(targetTime);
+      mediaScene?.prefetchDepth?.(targetTime);
       return;
     }
     pendingPullScrubTime = targetTime;
@@ -1324,7 +1326,9 @@ export async function createMediaRendererCore(
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);
           detectionTimeline?.prefetch(currentTime);
-          mediaScene?.prefetchDepth?.(currentTime);
+          // A drag reports the frames it lands on, which trail the hand;
+          // depth follows the positions the hand asks for instead.
+          if (!isSeekGestureInFlight) mediaScene?.prefetchDepth?.(currentTime);
         },
         waitForReadiness: shouldGatePlayback
           ? waitForPlaybackReadiness

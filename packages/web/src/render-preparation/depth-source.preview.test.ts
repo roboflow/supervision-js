@@ -118,6 +118,93 @@ describe("depth source from a clip with a preview", () => {
     clip.source.destroy();
   });
 
+  it("lets a step at rest through on an exact frame already in, without its preview", async () => {
+    const clip = await openPreviewClip({ gated: true });
+
+    clip.source.setPlaybackActive?.(false);
+    clip.source.getEntry(CLOCK.timeAt(3));
+    await vi.waitFor(() =>
+      expect(clip.source.getEntry(CLOCK.timeAt(3))?.precision).toBe("exact"),
+    );
+
+    // No preview frame is out, and the exact one is all a step at rest needs.
+    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(3), OPEN)).toBe(
+      false,
+    );
+    await clip.source.waitForReady!(CLOCK.timeAt(3), OPEN);
+    expect(clip.source.getFrameStatus?.(CLOCK.timeAt(3))).toEqual({
+      frameIndex: 3,
+      prepared: true,
+    });
+    // Playing, the exact frame is not drawn, so the preview is owed again.
+    clip.source.setPlaybackActive?.(true);
+    expect(clip.source.getFrameStatus?.(CLOCK.timeAt(3))).toEqual({
+      frameIndex: 3,
+      prepared: false,
+    });
+    clip.source.destroy();
+  });
+
+  it("ends a wait at rest on whichever depth lands first", async () => {
+    const clip = await openPreviewClip({ gated: true });
+
+    clip.source.setPlaybackActive?.(false);
+
+    let ready = false;
+    const wait = clip.source.waitForReady!(CLOCK.timeAt(6), OPEN).then(
+      () => (ready = true),
+    );
+
+    // The exact frame loads once the frame is on screen; the preview never
+    // releases a frame here.
+    clip.source.getEntry(CLOCK.timeAt(6));
+    await wait;
+    expect(ready).toBe(true);
+    expect(clip.fetchedExact()).toEqual([6]);
+    clip.source.destroy();
+  });
+
+  it("decodes no preview while the page is hidden", async () => {
+    const page = new EventTarget() as EventTarget & {
+      visibilityState: DocumentVisibilityState;
+    };
+
+    page.visibilityState = "hidden";
+    vi.stubGlobal("document", page);
+
+    const clip = await openPreviewClip();
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await settle();
+    expect(clip.source.getEntry(CLOCK.timeAt(0))).toBeNull();
+
+    page.visibilityState = "visible";
+    page.dispatchEvent(new Event("visibilitychange"));
+    await settle();
+    expect(clip.source.getEntry(CLOCK.timeAt(0))?.precision).toBe("preview");
+    clip.source.destroy();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports its exact frames beside its preview", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
+    const clip = await openPreviewClip({ onDiagnostics });
+
+    clip.source.setPlaybackActive?.(false);
+    clip.source.getEntry(CLOCK.timeAt(2));
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(onDiagnostics.mock.calls.at(-1)?.[0].artifacts[1]).toMatchObject({
+      activeFrame: { key: "depth:2", status: "prepared" },
+      kind: RenderPreparationArtifactKind.ExactDepthFrame,
+      pendingCount: 0,
+      preparedCount: 1,
+    });
+    clip.source.destroy();
+  });
+
   it("reports its window as depth diagnostics", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
@@ -262,7 +349,11 @@ describe("depth source from a clip with a preview", () => {
       await vi.advanceTimersByTimeAsync(200);
       expect(onDiagnostics).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          artifacts: [],
+          artifacts: [
+            expect.objectContaining({
+              kind: RenderPreparationArtifactKind.ExactDepthFrame,
+            }),
+          ],
           message: warn.mock.calls[0]?.[0],
         }),
       );
@@ -437,7 +528,12 @@ describe("resolveDepthClipOptions", () => {
       ),
     ).toEqual({
       exact: { maxCacheBytes: 1, neighborFrameCount: 1, settleSeconds: 0.5 },
-      preview: { maxCacheBytes: 2, prefetchSeconds: 3, retainSeconds: 4 },
+      preview: {
+        maxCacheBytes: 2,
+        pausedFrameCount: 2,
+        prefetchSeconds: 3,
+        retainSeconds: 4,
+      },
     });
   });
 });

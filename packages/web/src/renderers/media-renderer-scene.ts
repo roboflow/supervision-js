@@ -141,6 +141,12 @@ export interface MediaRendererScene {
    * again.
    */
   setPlaybackActive?(active: boolean): void;
+  /**
+   * Whether a drag holds the playhead. Playback activity says the playhead
+   * moves; this says a hand moves it, so work ahead of it follows the hand
+   * rather than a playback cadence.
+   */
+  setScrubbing?(scrubbing: boolean): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   /**
