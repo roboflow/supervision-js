@@ -24,14 +24,34 @@
 }
 
 .depth-renderer-controls__range-inputs button {
+  background: #ffffff;
+  border: 1px solid #ddd6fe;
+  border-radius: 8px;
+  color: var(--violet);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 720;
   grid-column: 1 / -1;
+  min-height: 1.9rem;
 }
 
+.depth-renderer-controls__range-inputs button:hover:not(:disabled) {
+  background: #f5f3ff;
+}
+
+.depth-renderer-controls__range-inputs button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Two lines tall whatever the range, so the controls below never move. */
 .depth-renderer-controls__note {
   color: var(--muted);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
+  line-height: 1rem;
   margin: 0;
+  min-height: 2rem;
 }
 
 .depth-renderer-controls__no-depth {

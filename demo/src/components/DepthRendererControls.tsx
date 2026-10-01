@@ -75,8 +75,8 @@ export function DepthRendererControls(props: {
           }
         }}
         options={[
-          [DocsDepthRangeMode.Clip, "Clip (manifest's range)"],
-          [DocsDepthRangeMode.Auto, "Auto (2nd–98th percentile)"],
+          [DocsDepthRangeMode.Clip, "Clip (manifest)"],
+          [DocsDepthRangeMode.Auto, "Auto (this frame)"],
           [DocsDepthRangeMode.Manual, "Manual"],
         ]}
         value={settings.rangeMode}
