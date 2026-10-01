@@ -951,6 +951,120 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getActiveDepth?.()).toBeNull();
   });
 
+  it("renders a clip's exact frame once when it lands, then holds at zero renders while paused", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const channel = createChannel();
+    const { openDepthSource } =
+      await import("#render-preparation/depth-source");
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    const decodeDepth = vi.fn(async () => ({
+      height: 24,
+      values: new Uint16Array(32 * 24).fill(2560),
+      width: 32,
+    }));
+    const source = await openDepthSource(
+      {
+        manifest: {
+          frames: { count: 10, exact: "exact/{index:06}.png" },
+          height: 24,
+          kind: "disparity_px",
+          schema: "supervision.depth-manifest",
+          storage: { format: "png16", noDepth: 0, scale: 256 },
+          version: 1,
+          width: 32,
+        },
+        baseUrl: "https://example.test/clip/",
+      },
+      {
+        exactFrames: { neighborFrameCount: 0, settleSeconds: 0.15 },
+        fetch: (async () =>
+          new Response(new Uint8Array(4))) as unknown as typeof fetch,
+        frameClock: {
+          duration: 10,
+          durationAt: () => 1,
+          endTimestamp: 10,
+          firstTimestamp: 0,
+          frameCount: 10,
+          indexAtOrBefore: (time: number) =>
+            Math.min(9, Math.max(0, Math.floor(time))),
+          timeAt: (index: number) => index,
+        },
+        media: { height: 240, width: 320 },
+        preparer: () => ({
+          decodeConfidence: vi.fn(),
+          decodeDepth,
+          destroy: vi.fn(),
+        }),
+      },
+    );
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setPlaybackActive?.(false);
+    scene.setDepthSource?.(source);
+    channel.present(presentedFrame(3000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+    const presented = scene.getRenderCount?.() ?? 0;
+
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.waitFor(() =>
+      expect(scene.getActiveDepth?.()).toMatchObject({
+        frameIndex: 3,
+        precision: "exact",
+      }),
+    );
+    expect(scene.getRenderCount?.()).toBe(presented + 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(decodeDepth).toHaveBeenCalledTimes(1);
+    expect(scene.getRenderCount?.()).toBe(presented + 1);
+
+    // Playing hides it at once; it is never drawn over the next frames.
+    scene.setPlaybackActive?.(true);
+    expect(scene.getActiveDepth?.()).toBeNull();
+    expect(scene.getRenderCount?.()).toBe(presented + 2);
+    channel.present(presentedFrame(4000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+
+    source.destroy();
+    vi.useRealTimers();
+  });
+
+  it("tells its depth source whether playback runs, and stops listening to a replaced one", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    const listeners = new Set<() => void>();
+    const first = {
+      destroy: vi.fn(),
+      getEntry: vi.fn(() => null),
+      setPlaybackActive: vi.fn(),
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setPlaybackActive?.(false);
+    scene.setDepthSource?.(first);
+    expect(first.setPlaybackActive).toHaveBeenLastCalledWith(false);
+
+    scene.setPlaybackActive?.(true);
+    expect(first.setPlaybackActive).toHaveBeenLastCalledWith(true);
+
+    scene.setDepthSource?.(null);
+    expect(listeners.size).toBe(0);
+    scene.setPlaybackActive?.(false);
+    expect(first.setPlaybackActive).toHaveBeenCalledTimes(2);
+  });
+
   it("renders a display adjustment once, and a repeat of it never", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
