@@ -1065,6 +1065,96 @@ describe("push-presented Pixi scene", () => {
     expect(first.setPlaybackActive).toHaveBeenCalledTimes(2);
   });
 
+  it("holds the producer when the depth lead is short, and releases it at the resume lead", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    let lead = 0;
+    let release: () => void = () => undefined;
+    const thresholds = { resumeAtSeconds: 0.3, stopBelowSeconds: 0.1 };
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry: () => null,
+      getPreparationProgress: () => Math.round(lead * 10),
+      needsPlaybackGateWait: (_time, gate) => lead < gate.stopBelowSeconds,
+      waitForReady: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    });
+
+    expect(scene.needsRenderPreparationWait?.(1, thresholds)).toBe(true);
+
+    let released = false;
+    const wait = scene
+      .waitForRenderPreparation?.(1, thresholds)
+      ?.then(() => (released = true));
+
+    lead = 0.3;
+    await Promise.resolve();
+    expect(released).toBe(false);
+    release();
+    await wait;
+    expect(released).toBe(true);
+    expect(scene.needsRenderPreparationWait?.(1, thresholds)).toBe(false);
+    expect(scene.getRenderPreparationProgress?.()).toBe(3);
+  });
+
+  it("uploads the next depth frames after a present, never inside it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const map = createDepthMap();
+    const asked: number[] = [];
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry: () => ({ frameIndex: 0, map, precision: "preview" }),
+      getUpcomingEntries: (mediaTime) => {
+        asked.push(mediaTime);
+        return [];
+      },
+    });
+
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(2000));
+    expect(asked).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual([2]);
+    vi.useRealTimers();
+  });
+
+  it("points depth decoding at the producer's playhead", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    const prefetch = vi.fn();
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry: () => null,
+      prefetch,
+    });
+    scene.prefetchDepth?.(4.5);
+
+    expect(prefetch).toHaveBeenCalledWith(4.5);
+  });
+
   it("renders a display adjustment once, and a repeat of it never", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");

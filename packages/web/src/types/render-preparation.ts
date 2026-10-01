@@ -43,6 +43,8 @@ export enum RenderPreparationArtifactKind {
   MaskFrame = "maskFrame",
   /** Frame-level ID-mask artifact rasterized from semantic polygons. */
   PolygonFrame = "polygonFrame",
+  /** A clip's 8-bit preview depth, decoded ahead of playback. */
+  DepthFrame = "depthFrame",
 }
 
 /**
@@ -251,6 +253,11 @@ export interface RenderPreparationArtifactWindowDiagnostics {
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
   readonly gateHold?: RenderPreparationGateHoldDiagnostics | null;
+  /**
+   * Holds this family has asked the playback gate for since it opened. Depth
+   * reports it; the count moves once per wait that actually waited.
+   */
+  readonly gateHoldCount?: number;
   readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
   readonly maxInFlightCount?: number;
@@ -296,12 +303,51 @@ export interface RenderPreparationDiagnostics {
 }
 
 /**
+ * Memory and timing for a depth clip, the `depth` channel a session draws
+ * under its `depth` renderers.
+ *
+ * While playback runs, the clip's 8-bit preview video is decoded ahead of the
+ * playhead and drawn frame by frame; once playback rests, the exact 16-bit
+ * frame on screen replaces it. Every byte budget defaults to a size that
+ * scales with the clip's resolution, so a 4K clip keeps as many seconds as a
+ * 720p one, within a ceiling.
+ */
+export interface RenderPreparationDepthOptions {
+  /**
+   * Decoded exact frames kept, in bytes. Defaults to 128 MiB, or room for
+   * twice the frame on screen and its neighbours when that is more.
+   */
+  readonly maxExactCacheBytes?: number;
+  /**
+   * Decoded preview frames kept, in bytes. Defaults to room for twice
+   * `previewPrefetchSeconds` plus `previewRetainSeconds` of the clip, at least
+   * 96 MiB and at most 512 MiB. A budget shorter than the playback gate's lead
+   * lowers the lead the gate waits for.
+   */
+  readonly maxPreviewCacheBytes?: number;
+  /**
+   * How far ahead of the playhead the preview is decoded, in seconds of
+   * media. Defaults to 1. A playback gate asking for more lead at a fast rate
+   * raises it to twice that lead.
+   */
+  readonly previewPrefetchSeconds?: number;
+  /** Preview kept behind the playhead, in seconds of media. Defaults to 0.25. */
+  readonly previewRetainSeconds?: number;
+  /** Exact frames fetched on each side of the frame at rest. Defaults to 2. */
+  readonly exactNeighborFrameCount?: number;
+  /** Rest before the exact frame is fetched, in seconds. Defaults to 0.15. */
+  readonly exactSettleSeconds?: number;
+}
+
+/**
  * Render-preparation configuration.
  *
  * Most applications can use the session defaults. Tune this when dense masks,
  * long videos, worker policy, or playback gating need explicit behavior.
  */
 export interface RenderPreparationOptions {
+  /** Budgets and timing for depth clips. See {@link RenderPreparationDepthOptions}. */
+  readonly depth?: RenderPreparationDepthOptions;
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;

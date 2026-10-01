@@ -495,6 +495,7 @@ export {
   type RenderPreparationActiveFrameDiagnostics,
   type RenderPreparationArtifactDiagnostics,
   type RenderPreparationArtifactWindowDiagnostics,
+  type RenderPreparationDepthOptions,
   type RenderPreparationDiagnostics,
   type RenderPreparationMaskFrameOptions,
   type RenderPreparationOptions,

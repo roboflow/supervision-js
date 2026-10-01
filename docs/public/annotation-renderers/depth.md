@@ -31,10 +31,12 @@ The playground plays eight seconds of a rendered stereo shot, Spring sequence
 - **Ground truth (Spring)** is the disparity the dataset rendered for the same
   frames. Only the sky has no depth.
 
-Both layers are exact 16-bit maps, one PNG per frame, loaded from a clip
-`depth.json`. Depth is drawn while the clip rests, so pause and step a frame at
-a time; the readout's depth frame is always the frame on screen. Turn on
-**Paint pixels without depth** to see where the matcher found nothing.
+Each layer is a clip `depth.json`: an exact 16-bit PNG per frame and an 8-bit
+preview video of the same frames. While the clip plays, each video frame is
+drawn with its own preview frame, and the readout says it is an 8-bit preview
+value with its step; once playback rests, the exact frame replaces it. The
+readout's depth frame is always the frame on screen. Turn on **Paint pixels
+without depth** to see where the matcher found nothing.
 
 The clip is adapted from the Spring dataset by Mehl et al. (CVPR 2023,
 [doi:10.18419/darus-3376](https://doi.org/10.18419/darus-3376)) and the Spring
@@ -59,8 +61,10 @@ const session = await createMediaSession({
 ```
 
 A clip manifest names one PNG per video frame, so its media must come with a
-frame index: the web video engine source. The session draws the exact frame
-for the video frame on screen once playback rests:
+frame index: the web video engine source. While the video plays, the session
+draws the manifest's 8-bit preview video, decoded ahead of the playhead, frame
+for frame; once playback rests, it draws the exact frame for the video frame
+on screen:
 
 ```ts
 import {
@@ -139,6 +143,54 @@ colormaps split by `wipe`. `session.setDepth()` swaps or removes the map without
 reopening the media; it takes a map or a manifest, and a call made while a
 manifest is still loading wins over it.
 
+## Depth during playback
+
+A clip's `preview` is decoded beside the video, by WebCodecs in the page,
+ahead of the playhead, and every presented video frame is drawn with the
+preview frame of the same index. A frame whose preview has not been decoded
+yet draws no depth rather than another frame's. When the session's playback
+gate is on (the default), playback waits for the preview the way it waits for
+masks: it holds while the decoded lead in front of the playhead is short and
+resumes once it has caught up, and `maxWaitSeconds` bounds every wait.
+`renderPreparation.onDiagnostics` reports the preview window as a
+`depthFrame` artifact: frames held, the lead in seconds, the hold in force and
+`gateHoldCount`.
+
+When playback rests for 0.15 s, the exact PNG for the frame on screen is
+fetched and replaces the preview, then its neighbours are fetched for
+stepping. A preview value is within one preview step of the exact value, plus
+the video codec's error; `readDepthAt` reports `precision: "preview"` and the
+`step` for it.
+
+`renderPreparation.depth` sets the budgets. By default the session keeps about
+2.25 seconds of preview (twice the 1-second prefetch, plus a quarter second
+behind the playhead) at the clip's resolution, at least 96 MiB and at most
+512 MiB, and 128 MiB of exact frames, more for clips too large to hold the
+frame at rest and its neighbours twice:
+
+```ts
+const session = await createMediaSession({
+  // ...
+  renderer: {
+    renderPreparation: {
+      depth: {
+        maxPreviewCacheBytes: 256 * 1024 * 1024,
+        previewPrefetchSeconds: 2,
+      },
+    },
+  },
+});
+```
+
+Browsers decode the same H.264 differently. Once per page, before the first
+preview opens, the session decodes a small clip of all 256 codes with each
+decoder the browser offers and keeps the one that returns them as written.
+Chrome's hardware decoder on macOS returns full-range luma squeezed into video
+range (code 0 comes back as 16, 255 as 235), so Chrome decodes previews in
+software, where every code is exact. Firefox hands decoded frames over in RGB,
+which leaves 36 of the 256 codes one off; the session says so in the depth
+diagnostics `message` and in a console warning.
+
 ## Reading depth under the pointer
 
 `session.renderer.getActiveDepth()` returns the map on screen and the media
@@ -215,6 +267,26 @@ frame count and an `exact/{index:06}.png` pattern) and may add an 8-bit
 `preview` video. Preview code `c` above the reserved codes `T` stands for
 `lo + (c - T - 1) / (254 - T) * (hi - lo)` of its `range_px`.
 
+### Writing the preview video
+
+The preview is H.264 with the codes in luma: one frame per depth frame, at the
+video's frame times, `yuv420p` with every chroma sample 128, and the full-range
+flag set so the codes keep their values. Monochrome (`gray`, High 4:0:0)
+streams do not decode reliably in browsers. From raw `yuv420p` frames whose
+luma holds the codes:
+
+```sh
+ffmpeg -f rawvideo -pix_fmt yuv420p -s 1280x720 -r 24 -i preview.yuv \
+  -c:v libx264 -crf 18 -tune psnr -g 24 -keyint_min 24 -sc_threshold 0 \
+  -bsf:v h264_metadata=video_full_range_flag=1 -movflags +faststart preview.mp4
+```
+
+Opening the clip checks the preview against the video: a different frame
+count, or a frame whose time differs from its video frame's by more than half
+a millisecond, counted from each one's first frame, rejects the depth with a
+`RangeError` that names the frame and both times. A preview that starts its
+clock at another time but keeps the frames in step is accepted.
+
 ### Writing depth PNGs that decode fast
 
 The depth PNG is a standard 16-bit grayscale PNG, not interlaced, with 0 where
@@ -237,11 +309,13 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
   media with a frame index: `createWebVideoEngineMediaRendererSource()`. Other
   media refuse it with a `RangeError`, and so does a clip whose frame count
   differs from the video's without `frames.times_s`.
-- A clip draws no depth while it plays. Once playback has rested for 0.15 s,
-  the session fetches the exact PNG for the frame on screen, then the two
-  frames on either side, so stepping shows depth at once. It keeps up to
-  128 MiB of decoded frames and drops the ones farthest from the frame on
-  screen first. The 8-bit `preview` video is not played yet.
+- A clip without a `preview` draws no depth while it plays. With one, the
+  preview's precision is what plays: one 8-bit step of `range_px`, plus the
+  codec's error. Exact depth needs playback to rest for 0.15 s.
+- The preview is decoded on the page's main thread's schedule, one frame
+  copied at a time; above 2x on large clips the decoder may not keep up, and
+  the playback gate then holds playback until it does, up to its
+  `maxWaitSeconds`.
 - On WebGL a map whose width is odd goes up with one padding texel per row,
   padded by the worker while it decodes a manifest's PNG; WebGPU uploads the
   samples as they are.

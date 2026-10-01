@@ -281,7 +281,8 @@ export interface MediaSessionOptions {
    * detections. A still `map` is drawn under every frame and stretched over
    * the media rectangle, so it must share the media's aspect ratio. A clip
    * manifest (`frames`) needs `createWebVideoEngineMediaRendererSource()`
-   * media and draws each frame's exact depth once playback rests.
+   * media; it draws its 8-bit preview video while playing and each frame's
+   * exact depth once playback rests.
    */
   readonly depth?: MediaRendererDepthInput;
   /**

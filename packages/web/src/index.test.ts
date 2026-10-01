@@ -373,6 +373,7 @@ describe("package entrypoint", () => {
       TargetVideoCannotEncode: "targetVideoCannotEncode",
     });
     expect(entrypoint.RenderPreparationArtifactKind).toEqual({
+      DepthFrame: "depthFrame",
       MaskFrame: "maskFrame",
       PolygonFrame: "polygonFrame",
     });

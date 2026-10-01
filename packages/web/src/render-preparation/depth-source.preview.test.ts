@@ -1,0 +1,452 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { DepthPreviewDecoding } from "#media/depth-preview-probe";
+import type {
+  DepthPreviewDecodeOptions,
+  DepthPreviewLumaFrame,
+  DepthPreviewTrackOptions,
+  DepthPreviewTrackReader,
+} from "#media/depth-preview-track";
+import type { DepthFramePreparer } from "#render-preparation/depth-frame-preparer";
+import {
+  assertDepthPreviewTimeline,
+  describePreviewDecoding,
+  openDepthSource,
+  resolveDepthClipOptions,
+  type DepthFrameProvider,
+} from "#render-preparation/depth-source";
+import {
+  RenderPreparationArtifactKind,
+  type RenderPreparationDiagnostics,
+} from "#types/render-preparation";
+
+const MEDIA = { height: 720, width: 1280 };
+const WIDTH = 16;
+const HEIGHT = 9;
+const COUNT = 10;
+/** Ten one-second frames on the media's timeline, starting at 0.5 s. */
+const CLOCK = {
+  duration: 10,
+  durationAt: () => 1,
+  endTimestamp: 10.5,
+  firstTimestamp: 0.5,
+  frameCount: COUNT,
+  indexAtOrBefore: (time: number) =>
+    Math.min(COUNT - 1, Math.max(0, Math.floor(time - 0.5))),
+  timeAt: (index: number) => index + 0.5,
+};
+const OPEN = { resumeAtSeconds: 2, stopBelowSeconds: 1 };
+
+describe("depth source from a clip with a preview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("draws the preview of the frame on screen while playing, and only that frame's", async () => {
+    const clip = await openPreviewClip();
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await settle();
+
+    const drawn = clip.source.getEntry(CLOCK.timeAt(3) + 0.25);
+
+    expect(drawn).toMatchObject({ frameIndex: 3, precision: "preview" });
+    expect(previewCode(drawn)).toBe(code(3));
+    // Never a neighbour's depth for a frame not decoded yet.
+    expect(clip.source.getEntry(CLOCK.timeAt(9))).toBeNull();
+    expect(clip.fetchedExact()).toEqual([]);
+    clip.source.destroy();
+  });
+
+  it("swaps the preview for the exact frame once playback rests, and back when it plays", async () => {
+    const clip = await openPreviewClip();
+    const changed = vi.fn();
+
+    clip.source.subscribe?.(changed);
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(2));
+    await settle();
+    expect(clip.source.getEntry(CLOCK.timeAt(2))?.precision).toBe("preview");
+
+    clip.source.setPlaybackActive?.(false);
+    // Until the exact frame lands, the frame's own preview stays.
+    expect(clip.source.getEntry(CLOCK.timeAt(2))).toMatchObject({
+      frameIndex: 2,
+      precision: "preview",
+    });
+    await vi.waitFor(() =>
+      expect(clip.source.getEntry(CLOCK.timeAt(2))).toMatchObject({
+        frameIndex: 2,
+        precision: "exact",
+      }),
+    );
+    expect(changed).toHaveBeenCalled();
+
+    clip.source.setPlaybackActive?.(true);
+    expect(clip.source.getEntry(CLOCK.timeAt(2))?.precision).toBe("preview");
+    clip.source.destroy();
+  });
+
+  it("holds for a frame whose preview is not decoded, and lets go at the resume lead", async () => {
+    const clip = await openPreviewClip({ gated: true });
+
+    clip.source.setPlaybackActive?.(true);
+    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(0), OPEN)).toBe(
+      true,
+    );
+
+    let ready = false;
+    const wait = clip.source.waitForReady!(CLOCK.timeAt(0), OPEN).then(
+      () => (ready = true),
+    );
+
+    await clip.release(1);
+    expect(ready).toBe(false);
+    await clip.release(2);
+    await wait;
+    expect(ready).toBe(true);
+    expect(clip.source.getPreparationProgress?.()).toBe(3);
+    clip.source.destroy();
+  });
+
+  it("reports its window as depth diagnostics", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
+    const clip = await openPreviewClip({ onDiagnostics });
+
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await vi.advanceTimersByTimeAsync(200);
+
+    const last = onDiagnostics.mock.calls.at(-1)?.[0];
+
+    expect(last?.artifacts[0]).toMatchObject({
+      kind: RenderPreparationArtifactKind.DepthFrame,
+      preparedAheadFrameCount: expect.any(Number),
+    });
+    expect(last?.message).toBeNull();
+    clip.source.destroy();
+  });
+
+  it("opens the preview with the decoder the page probe chose, and says when codes change", async () => {
+    const decoding: DepthPreviewDecoding = {
+      correction: new Uint8Array(256),
+      hardwareAcceleration: "prefer-hardware",
+      probe: {
+        decoded: new Uint8Array(256),
+        exact: false,
+        lumaPath: "plane",
+        maxError: 20,
+        mismatchedCodes: 249,
+      },
+      residualError: 1,
+      verdicts: [],
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const opened: (DepthPreviewTrackOptions | undefined)[] = [];
+    const clip = await openPreviewClip({
+      choosePreviewDecoding: async () => decoding,
+      onOpen: (options) => opened.push(options),
+    });
+
+    expect(opened).toEqual([
+      {
+        correction: decoding.correction,
+        hardwareAcceleration: "prefer-hardware",
+      },
+    ]);
+    expect(warn.mock.calls[0]?.[0]).toContain("prefer-hardware");
+    expect(describePreviewDecoding(decoding)).toContain(
+      "249 of 256 come back different, by up to 20",
+    );
+    clip.source.destroy();
+  });
+
+  it("refuses a preview whose frames are not the video's, naming both times", async () => {
+    await expect(
+      openPreviewClip({ times: (index) => index * 1.04 }),
+    ).rejects.toThrow(
+      /Depth preview frame 1 is at 1\.04 s and its video frame at 1 s/,
+    );
+    await expect(openPreviewClip({ frameCount: COUNT - 1 })).rejects.toThrow(
+      /9 frames and depth.json has 10/,
+    );
+  });
+
+  it("refuses a preview of another shape than the media", async () => {
+    await expect(openPreviewClip({ width: 12 })).rejects.toThrow(
+      /does not have the aspect ratio/,
+    );
+  });
+
+  it("falls back to exact depth at rest when the preview cannot open", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const clip = await openPreviewClip({
+      openError: new Error("no H.264 decoder"),
+    });
+
+    clip.source.setPlaybackActive?.(true);
+    expect(clip.source.getEntry(CLOCK.timeAt(1))).toBeNull();
+    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(1), OPEN)).toBe(
+      false,
+    );
+    expect(warn.mock.calls[0]?.[0]).toContain("did not open");
+    clip.source.destroy();
+  });
+
+  it("hands over the next decoded frames for uploading ahead while playing", async () => {
+    const clip = await openPreviewClip();
+
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await settle();
+    expect(clip.source.getUpcomingEntries?.(CLOCK.timeAt(0), 2)).toEqual([]);
+
+    clip.source.setPlaybackActive?.(true);
+    expect(
+      clip.source
+        .getUpcomingEntries?.(CLOCK.timeAt(0), 2)
+        .map(({ frameIndex }) => frameIndex),
+    ).toEqual([1, 2]);
+    clip.source.destroy();
+  });
+
+  it("closes its preview decoder with the source", async () => {
+    const clip = await openPreviewClip();
+
+    clip.source.destroy();
+    expect(clip.disposed()).toBe(true);
+  });
+});
+
+describe("assertDepthPreviewTimeline", () => {
+  const preview = (times: number[]) => ({
+    frameCount: times.length,
+    times: Float64Array.from(times),
+  });
+
+  it("accepts a preview whose frames keep the video's times from its first one", () => {
+    expect(() =>
+      assertDepthPreviewTimeline(
+        preview([0, 0.0412, 0.0833]),
+        3,
+        (index) => [0, 0.04166, 0.08333][index],
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a variable rate the video does not have", () => {
+    expect(() =>
+      assertDepthPreviewTimeline(
+        preview([0, 0.05, 0.0833]),
+        3,
+        (index) => [0, 0.04166, 0.08333][index],
+      ),
+    ).toThrow(/frame 1 is at 0\.05 s and its video frame at 0\.04166 s/);
+  });
+});
+
+describe("resolveDepthClipOptions", () => {
+  const MIB = 1024 * 1024;
+
+  it("scales the preview budget with the frame size, between 96 and 512 MiB", () => {
+    const at = (width: number, height: number) =>
+      resolveDepthClipOptions({
+        exactFrameBytes: width * height * 2,
+        frameRate: 30,
+        previewFrameBytes: width * height,
+      }).preview.maxCacheBytes / MIB;
+
+    expect(at(1280, 720)).toBe(96);
+    expect(at(1920, 1080)).toBeCloseTo((1920 * 1080 * 68) / MIB);
+    expect(at(3840, 2160)).toBe(512);
+  });
+
+  it("keeps room for the frame at rest and its neighbours twice over", () => {
+    const options = resolveDepthClipOptions({
+      exactFrameBytes: 3840 * 2160 * 2,
+      frameRate: 30,
+      previewFrameBytes: 0,
+    });
+
+    expect(options.exact.maxCacheBytes).toBe(3840 * 2160 * 2 * 10);
+  });
+
+  it("takes the host's numbers over the defaults", () => {
+    expect(
+      resolveDepthClipOptions(
+        { exactFrameBytes: 10, frameRate: 30, previewFrameBytes: 10 },
+        {
+          exactNeighborFrameCount: 1,
+          exactSettleSeconds: 0.5,
+          maxExactCacheBytes: 1,
+          maxPreviewCacheBytes: 2,
+          previewPrefetchSeconds: 3,
+          previewRetainSeconds: 4,
+        },
+      ),
+    ).toEqual({
+      exact: { maxCacheBytes: 1, neighborFrameCount: 1, settleSeconds: 0.5 },
+      preview: { maxCacheBytes: 2, prefetchSeconds: 3, retainSeconds: 4 },
+    });
+  });
+});
+
+/** Preview code a frame's luma is filled with: says which frame it is. */
+function code(index: number) {
+  return 16 + index * 10;
+}
+
+function previewCode(entry: ReturnType<DepthFrameProvider["getEntry"]>) {
+  return entry?.map.samples.encoding === "preview8"
+    ? entry.map.samples.values[0]
+    : null;
+}
+
+function settle() {
+  return new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+interface PreviewClipOptions {
+  readonly gated?: boolean;
+  readonly frameCount?: number;
+  readonly width?: number;
+  readonly times?: (index: number) => number;
+  readonly openError?: Error;
+  readonly onOpen?: (options: DepthPreviewTrackOptions | undefined) => void;
+  readonly choosePreviewDecoding?: () => Promise<DepthPreviewDecoding>;
+  readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
+}
+
+async function openPreviewClip(options: PreviewClipOptions = {}) {
+  const frameCount = options.frameCount ?? COUNT;
+  const width = options.width ?? WIDTH;
+  let allowance = 0;
+  let wake: (() => void) | null = null;
+  let disposed = false;
+  const fetched: number[] = [];
+  const manifest = {
+    camera: { baseline_m: 0.12, fx_px: 1000 },
+    display_range_px: [2, 60],
+    frames: { count: COUNT, exact: "exact/{index:06}.png" },
+    height: HEIGHT,
+    kind: "disparity_px",
+    preview: { file: "preview.mp4", range_px: [0, 100], reserved_max: 15 },
+    schema: "supervision.depth-manifest",
+    storage: { format: "png16", no_depth: 0, scale: 256 },
+    version: 1,
+    width: WIDTH,
+  };
+  const fetch = vi.fn(async (url: string | URL | Request) => {
+    const text = String(url);
+
+    if (text.endsWith("depth.json"))
+      return new Response(JSON.stringify(manifest));
+
+    const index = Number(/exact\/(\d+)\.png$/.exec(text)?.[1]);
+
+    fetched.push(index);
+    return new Response(Uint8Array.of(index));
+  }) as unknown as typeof globalThis.fetch;
+  const preparer = {
+    decodeConfidence: vi.fn(),
+    decodeDepth: vi.fn(async (bytes: ArrayBuffer) => ({
+      height: HEIGHT,
+      values: new Uint16Array(WIDTH * HEIGHT).fill(
+        new Uint8Array(bytes)[0] * 256 + 1,
+      ),
+      width: WIDTH,
+    })),
+    destroy: vi.fn(),
+  } as unknown as DepthFramePreparer;
+  const reader: DepthPreviewTrackReader = {
+    decode(fromIndex: number, { keep }: DepthPreviewDecodeOptions = {}) {
+      let next = fromIndex;
+      let cancelled = false;
+
+      return {
+        cancel: () => {
+          cancelled = true;
+          wake?.();
+        },
+        next: async (): Promise<DepthPreviewLumaFrame | null> => {
+          while (!cancelled && next < frameCount) {
+            const index = next;
+
+            next += 1;
+            if (keep && !keep(index)) continue;
+            if (options.gated) {
+              while (allowance === 0 && !cancelled) {
+                await new Promise<void>((resolve) => {
+                  wake = resolve;
+                });
+              }
+              if (cancelled) return null;
+              allowance -= 1;
+            }
+            await Promise.resolve();
+            return {
+              height: HEIGHT,
+              index,
+              luma: new Uint8Array(width * HEIGHT).fill(code(index)),
+              width,
+            };
+          }
+          return null;
+        },
+      };
+    },
+    dispose: () => {
+      disposed = true;
+    },
+    frameCount,
+    getStats: () => ({
+      copyMainThreadMs: 0,
+      decodersCreated: 1,
+      framesCopied: 0,
+      framesDecoded: 0,
+      framesSkipped: 0,
+      liveDecoders: 1,
+      lumaPath: "plane",
+      runsStarted: 0,
+    }),
+    height: HEIGHT,
+    keyIndexAtOrBefore: (index) => index,
+    times: Float64Array.from(
+      { length: frameCount },
+      (_, index) => options.times?.(index) ?? index,
+    ),
+    width,
+  };
+  const source = await openDepthSource(
+    { manifest: "https://example.test/clip/depth.json" },
+    {
+      choosePreviewDecoding: options.choosePreviewDecoding ?? null,
+      // One-second frames: five seconds ahead is five frames.
+      depth: { previewPrefetchSeconds: 5 },
+      exactFrames: { neighborFrameCount: 0, settleSeconds: 0 },
+      fetch,
+      frameClock: CLOCK,
+      media: MEDIA,
+      onDiagnostics: options.onDiagnostics,
+      openPreviewTrack: async (url, trackOptions) => {
+        expect(url).toBe("https://example.test/clip/preview.mp4");
+        options.onOpen?.(trackOptions);
+        if (options.openError) throw options.openError;
+        return reader;
+      },
+      preparer: () => preparer,
+    },
+  );
+
+  return {
+    disposed: () => disposed,
+    fetchedExact: () => [...fetched],
+    async release(count: number) {
+      allowance += count;
+      wake?.();
+      await settle();
+    },
+    source,
+  };
+}

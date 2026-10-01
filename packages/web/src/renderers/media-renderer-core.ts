@@ -193,8 +193,10 @@ export async function createMediaRendererCore(
       depthLoad = load;
       try {
         next = await openDepthSource(input, {
+          depth: options.renderPreparation?.depth,
           frameClock,
           media: mediaSize,
+          onDiagnostics: handleRenderPreparationDiagnostics,
           padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
           preparer: () =>
             (depthPreparer ??= createDepthFramePreparer(
@@ -1284,6 +1286,7 @@ export async function createMediaRendererCore(
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);
           detectionTimeline?.prefetch(currentTime);
+          mediaScene?.prefetchDepth?.(currentTime);
         },
         waitForReadiness: shouldGatePlayback
           ? waitForPlaybackReadiness
@@ -1330,6 +1333,7 @@ export async function createMediaRendererCore(
         transport.setPlaybackRate(initialPlaybackRate);
       }
       detectionTimeline?.prefetch(metadata.firstTimestamp);
+      mediaScene.prefetchDepth?.(metadata.firstTimestamp);
       // Loading is not complete until the scene has accepted real media
       // pixels. A paused, non-autoplay source otherwise reports Ready over a
       // blank compositor because the producer's load settled before a frame

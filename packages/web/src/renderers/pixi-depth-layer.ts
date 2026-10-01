@@ -8,6 +8,7 @@ import {
   type DepthRange,
 } from "supervision-js-core";
 import type {
+  BufferImageSource as PixiBufferImageSource,
   Container as PixiContainer,
   Mesh as PixiMesh,
   MeshGeometry as PixiMeshGeometry,
@@ -23,6 +24,7 @@ import type {
   InjectedShaderFactory,
 } from "#renderers/injected-pixi";
 import type { ActiveDepthMap } from "#types/media-depth";
+import type { ResolvedRenderPreparationGateThresholds } from "#types/render-preparation";
 import {
   createDepthLutCache,
   createDepthTextureRing,
@@ -37,6 +39,9 @@ import {
 } from "./pixi-depth-shader";
 
 type PixiDepthMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
+
+/** The frame on screen and the two after it, uploaded ahead while playing. */
+const TEXTURE_RING_SIZE = 3;
 type DepthShaderOptions = Parameters<typeof createPixiDepthShaderRenderer>[0];
 
 interface DrawnDepth {
@@ -66,6 +71,11 @@ export function createPixiDepthLayer(options: {
   /** The GPU's largest texture side, asked once per backend. */
   readonly maxTextureSize?: () => number;
   readonly getMediaSize: () => { width: number; height: number };
+  /**
+   * Gives a texture its GPU copy now. Pixi otherwise creates one lazily, at
+   * the first render that draws it, which is inside a present.
+   */
+  readonly prepareTexture?: (source: PixiBufferImageSource) => void;
   readonly renderers: readonly DepthAnnotationRenderer[];
   readonly source?: DepthFrameProvider | null;
 }) {
@@ -79,7 +89,12 @@ export function createPixiDepthLayer(options: {
   const mapIdentities = new WeakMap<DepthMap, number>();
   let renderers = options.renderers;
   let source = options.source ?? null;
-  let ring: DepthTextureRing | undefined;
+  /**
+   * One ring per encoding. Exact and preview maps go up in different texture
+   * formats, so sharing slots would destroy a texture of one format to make
+   * room for the other, possibly while a shader still holds it.
+   */
+  const rings = new Map<DepthMap["samples"]["encoding"], DepthTextureRing>();
   let meshOrder = "";
   let meshWidth = 0;
   let meshHeight = 0;
@@ -87,6 +102,33 @@ export function createPixiDepthLayer(options: {
   let active: ActiveDepthMap | null = null;
   let warnedFallback = false;
   let destroyed = false;
+  let uploadsInPresent = 0;
+  let uploadsAhead = 0;
+
+  const ringFor = (map: DepthMap) => {
+    const encoding = map.samples.encoding;
+    let ring = rings.get(encoding);
+
+    if (!ring) {
+      ring = createDepthTextureRing({
+        BufferImageSource: options.BufferImageSource,
+        acceptsUnalignedTextureRows: options.acceptsUnalignedTextureRows,
+        maxTextureSize: options.maxTextureSize,
+        size: TEXTURE_RING_SIZE,
+      });
+      rings.set(encoding, ring);
+    }
+
+    return ring;
+  };
+
+  const destroyRings = () => {
+    for (const ring of rings.values()) ring.destroy();
+    rings.clear();
+  };
+
+  /** Gating and prefetching only matter while some renderer draws depth. */
+  const drawing = () => renderers.length > 0 && !destroyed;
 
   const hide = () => {
     for (const entry of drawn.values()) entry.renderer.hide();
@@ -259,8 +301,7 @@ export function createPixiDepthLayer(options: {
           entry.renderer.clearTexture();
           entry.drawnTexture = null;
         }
-        ring?.destroy();
-        ring = undefined;
+        destroyRings();
       }
     },
 
@@ -279,13 +320,12 @@ export function createPixiDepthLayer(options: {
       }
 
       syncMeshes(width, height);
-      ring ??= createDepthTextureRing({
-        BufferImageSource: options.BufferImageSource,
-        acceptsUnalignedTextureRows: options.acceptsUnalignedTextureRows,
-        maxTextureSize: options.maxTextureSize,
-      });
 
-      const texture = ring.acquire(entry.map);
+      const textures = ringFor(entry.map);
+
+      if (!textures.has(entry.map)) uploadsInPresent += 1;
+
+      const texture = textures.acquire(entry.map);
 
       for (const descriptor of renderers) {
         drawRenderer(entry, texture, descriptor);
@@ -305,6 +345,63 @@ export function createPixiDepthLayer(options: {
       return active;
     },
 
+    /** The playhead moved, outside any present: decoding ahead follows it. */
+    prefetch(mediaTime: number) {
+      if (drawing()) source?.prefetch?.(mediaTime);
+    },
+
+    /**
+     * Uploads the maps of the next frames into spare textures, so the
+     * presents that draw them only bind. Call it after a present, never in
+     * one: the frame on screen keeps its own texture.
+     */
+    uploadAhead(mediaTime: number) {
+      if (!drawing() || !source?.getUpcomingEntries) return;
+
+      for (const entry of source.getUpcomingEntries(
+        mediaTime,
+        TEXTURE_RING_SIZE - 1,
+      )) {
+        const textures = ringFor(entry.map);
+
+        if (textures.has(entry.map)) continue;
+
+        const slot = textures.acquire(entry.map);
+
+        options.prepareTexture?.(slot.source);
+        uploadsAhead += 1;
+      }
+    },
+
+    needsRenderPreparationWait(
+      mediaTime: number,
+      thresholds: ResolvedRenderPreparationGateThresholds,
+    ): boolean {
+      return (
+        drawing() &&
+        source?.needsPlaybackGateWait?.(mediaTime, thresholds) === true
+      );
+    },
+
+    waitForRenderPreparation(
+      mediaTime: number,
+      thresholds: ResolvedRenderPreparationGateThresholds,
+      signal?: AbortSignal,
+    ): Promise<void> {
+      return drawing() && source?.waitForReady
+        ? source.waitForReady(mediaTime, thresholds, signal)
+        : Promise.resolve();
+    },
+
+    getPreparationProgress(): number {
+      return source?.getPreparationProgress?.() ?? 0;
+    },
+
+    /** Maps uploaded while presenting, and ahead of the presents that drew them. */
+    getUploadCounts() {
+      return { ahead: uploadsAhead, inPresent: uploadsInPresent };
+    },
+
     /** Changes whenever what the layer has on screen changes. */
     getContentKey(): string {
       return active ? `${identify(active.map)}:${active.precision}` : "none";
@@ -314,7 +411,7 @@ export function createPixiDepthLayer(options: {
       if (destroyed) return;
       destroyed = true;
       destroyMeshes();
-      ring?.destroy();
+      destroyRings();
       luts.destroy();
       container.destroy();
     },

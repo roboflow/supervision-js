@@ -200,6 +200,11 @@ export interface MediaRendererScene {
   setDepthSource?(source: DepthFrameProvider | null): void;
   /** The depth map the scene last drew, or null when none is on screen. */
   getActiveDepth?(): ActiveDepthMap | null;
+  /**
+   * The producer's playhead moved: depth decoding ahead follows it. Called on
+   * every playhead move, never from inside a present.
+   */
+  prefetchDepth?(mediaTime: number): void;
   destroy(): void;
 }
 

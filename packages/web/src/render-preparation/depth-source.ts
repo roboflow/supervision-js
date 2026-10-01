@@ -7,13 +7,33 @@ import {
   type DepthManifest,
   type DepthMap,
 } from "supervision-js-core";
+import type { DepthPreviewDecoding } from "#media/depth-preview-probe";
+import type {
+  DepthPreviewTrackOptions,
+  DepthPreviewTrackReader,
+} from "#media/depth-preview-track";
 import { rememberPreparedDepthUpload } from "#renderers/depth-textures";
 import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaRendererDepthInput } from "#types/media-depth";
+import {
+  RenderPreparationExecutionMode,
+  RenderPreparationWorkerStatus,
+  type RenderPreparationDepthOptions,
+  type RenderPreparationDiagnostics,
+  type ResolvedRenderPreparationGateThresholds,
+} from "#types/render-preparation";
 import type { DepthFramePreparer } from "./depth-frame-preparer";
+import { createDepthPreviewWindow } from "./depth-preview-window";
 
 /** How far a map's aspect ratio may stray from the media's. */
 const DEPTH_ASPECT_TOLERANCE = 0.01;
+const MEBIBYTE = 1024 * 1024;
+const DEFAULT_PREVIEW_PREFETCH_SECONDS = 1;
+const DEFAULT_PREVIEW_RETAIN_SECONDS = 0.25;
+/** The preview budget's floor: what a 1080p clip needs for a 1.35 s lead. */
+const MIN_DEFAULT_PREVIEW_CACHE_BYTES = 96 * MEBIBYTE;
+/** And its ceiling: 64 frames of 4K, about two seconds at 30 fps. */
+const MAX_DEFAULT_PREVIEW_CACHE_BYTES = 512 * MEBIBYTE;
 
 /** One depth map ready to draw, and which frame of depth it is. */
 export interface DepthFrameEntry {
@@ -35,11 +55,35 @@ export interface DepthFrameProvider {
   getEntry(mediaTime: number): DepthFrameEntry | null;
   /**
    * Whether playback runs or a drag is still moving. A clip fetches exact
-   * frames only once this has been false for a moment.
+   * frames only once this has been false for a moment, and draws its preview
+   * until then.
    */
   setPlaybackActive?(active: boolean): void;
   /** Calls `listener` whenever an answer of `getEntry` may have changed. */
   subscribe?(listener: () => void): () => void;
+  /** The playhead moved: decoding ahead follows it. Never called in a present. */
+  prefetch?(mediaTime: number): void;
+  /**
+   * The entries the frames after `mediaTime` will draw, nearest first, so
+   * their textures can go up before the presents that draw them.
+   */
+  getUpcomingEntries?(
+    mediaTime: number,
+    count: number,
+  ): readonly DepthFrameEntry[];
+  /** Whether the frame at `mediaTime` has to wait for depth before it shows. */
+  needsPlaybackGateWait?(
+    mediaTime: number,
+    thresholds: ResolvedRenderPreparationGateThresholds,
+  ): boolean;
+  /** Resolves once depth leads `mediaTime` as far as the thresholds ask. */
+  waitForReady?(
+    mediaTime: number,
+    thresholds: ResolvedRenderPreparationGateThresholds,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /** Depth frames prepared ahead, counted up across the source's life. */
+  getPreparationProgress?(): number;
   destroy(): void;
 }
 
@@ -73,7 +117,27 @@ export interface DepthSourceContext {
   /** Pad odd-width rows for WebGL while decoding, off the main thread. */
   readonly padRowsForWebGl?: boolean;
   readonly signal?: AbortSignal;
+  /** The host's budgets and timing for clips. */
+  readonly depth?: RenderPreparationDepthOptions;
+  /** Overrides for the exact frames, over `depth`. */
   readonly exactFrames?: Partial<ExactDepthFrameOptions>;
+  /**
+   * Opens a clip's preview video; null leaves the preview out. Defaults to
+   * the WebCodecs decoder, loaded on first use.
+   */
+  readonly openPreviewTrack?:
+    | ((
+        url: string,
+        options?: DepthPreviewTrackOptions,
+      ) => Promise<DepthPreviewTrackReader>)
+    | null;
+  /**
+   * Picks, once per page, the decoder that returns preview codes as written;
+   * null skips the probe and leaves the choice to the browser.
+   */
+  readonly choosePreviewDecoding?: (() => Promise<DepthPreviewDecoding>) | null;
+  /** Hears the preview window's state: its lead, frames held and gate holds. */
+  readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
 }
 
 type ManifestInput = Extract<MediaRendererDepthInput, { manifest: unknown }>;
@@ -106,7 +170,7 @@ export async function openDepthSource(
   assertMediaAspect(manifest, context.media);
 
   if (manifest.frames) {
-    return openDepthClip(manifest, manifest.frames, base, context);
+    return await openDepthClip(manifest, manifest.frames, base, context);
   }
   if (!manifest.image) {
     throw new RangeError("depth.json needs an image or frames.");
@@ -260,23 +324,28 @@ interface CachedDepthFrame {
   readonly bytes: number;
 }
 
+/** How often a clip reports its preview window, at most. */
+const PREVIEW_DIAGNOSTICS_INTERVAL_MS = 100;
+
 /**
- * A clip's exact depth, one 16-bit PNG per frame.
+ * A clip's depth: exact 16-bit PNGs, one per frame, and an optional 8-bit
+ * preview video.
  *
- * While playback runs nothing is drawn: an exact frame takes a fetch and a
- * decode, and depth kept from another frame would sit over the wrong pixels.
- * Once playback has rested for `settleSeconds`, the frame on screen is
- * fetched, then its neighbours nearest first, so a step shows the next frame's
- * depth at once. A frame that lands for the frame on screen asks for one
- * redraw. Decoded frames are kept up to `maxCacheBytes`, dropping the ones
- * farthest from the frame on screen first.
+ * While playback runs, the preview frame for the video frame on screen is
+ * drawn, decoded ahead of the playhead; a frame not decoded yet draws no
+ * depth, never another frame's. Once playback has rested for
+ * `settleSeconds`, the exact frame on screen is fetched, then its neighbours
+ * nearest first, so a step shows the next frame's depth at once; until it
+ * lands the preview stands in for it. A frame that lands for the frame on
+ * screen asks for one redraw. Decoded exact frames are kept up to
+ * `maxCacheBytes`, dropping the ones farthest from the frame on screen first.
  */
-function openDepthClip(
+async function openDepthClip(
   manifest: DepthManifest,
   frames: DepthClipFrames,
   base: string | URL | undefined,
   context: DepthSourceContext,
-): DepthFrameProvider {
+): Promise<DepthFrameProvider> {
   const clock = context.frameClock;
 
   if (!clock) {
@@ -290,10 +359,38 @@ function openDepthClip(
     );
   }
 
-  const options = { ...defaultExactDepthFrameOptions, ...context.exactFrames };
+  const timesS = frames.timesS;
+  const timeAt = (index: number) =>
+    timesS ? clock.firstTimestamp + timesS[index] : clock.timeAt(index);
+  const endAt = (index: number) =>
+    timesS
+      ? index + 1 < timesS.length
+        ? timeAt(index + 1)
+        : clock.endTimestamp
+      : clock.timeAt(index) + clock.durationAt(index);
+  const preview = await openClipPreview(manifest, frames, base, context, {
+    endAt,
+    timeAt,
+  });
+  const budgets = resolveDepthClipOptions(
+    {
+      exactFrameBytes:
+        manifest.width *
+        manifest.height *
+        (frames.confidence === undefined ? 2 : 3),
+      frameRate:
+        frames.count / Math.max(1e-6, endAt(frames.count - 1) - timeAt(0)),
+      previewFrameBytes: preview
+        ? preview.reader.width * preview.reader.height
+        : 0,
+    },
+    context.depth,
+  );
+  const options = { ...budgets.exact, ...context.exactFrames };
   const listeners = new Set<() => void>();
   const cache = new Map<number, CachedDepthFrame>();
   const loading = new Map<number, Promise<void>>();
+  const previewEntries = new WeakMap<DepthMap, DepthFrameEntry>();
   const teardown = new AbortController();
   let cachedBytes = 0;
   let onScreen: number | null = null;
@@ -302,17 +399,19 @@ function openDepthClip(
   let run: AbortController | undefined;
   let warned = false;
   let destroyed = false;
+  let queuedPlayhead: number | null = null;
+  let diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
 
   const indexAt = (mediaTime: number): number | null => {
     if (!Number.isFinite(mediaTime)) return null;
-    if (!frames.timesS) {
+    if (!timesS) {
       return clock.indexAtOrBefore(
         mediaTime + PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS,
       );
     }
 
     return lastTimeAtOrBefore(
-      frames.timesS,
+      timesS,
       mediaTime -
         clock.firstTimestamp +
         PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS,
@@ -321,6 +420,89 @@ function openDepthClip(
 
   const notify = () => {
     for (const listener of listeners) listener();
+  };
+
+  const reportDiagnostics = () => {
+    diagnosticsTimer = undefined;
+    if (destroyed || !previewWindow) return;
+    context.onDiagnostics?.({
+      artifacts: [previewWindow.getDiagnostics()],
+      executionMode: RenderPreparationExecutionMode.MainThread,
+      message: preview?.message() ?? null,
+      workerStatus: RenderPreparationWorkerStatus.Disabled,
+    });
+  };
+
+  /** A busy preview window changes every frame; hosts hear about it a few times a second. */
+  const scheduleDiagnostics = () => {
+    if (diagnosticsTimer !== undefined || !context.onDiagnostics) return;
+    diagnosticsTimer = setTimeout(
+      reportDiagnostics,
+      PREVIEW_DIAGNOSTICS_INTERVAL_MS,
+    );
+  };
+
+  const previewWindow = preview
+    ? createDepthPreviewWindow({
+        createMap: (frame) => ({
+          camera: manifest.camera,
+          displayRange: manifest.displayRange,
+          height: frame.height,
+          kind: manifest.kind,
+          samples: {
+            encoding: "preview8",
+            range: preview.track.range,
+            reservedMax: preview.track.reservedMax,
+            values: frame.luma,
+          },
+          view: manifest.view,
+          width: frame.width,
+        }),
+        endAt,
+        frameBytes: preview.reader.width * preview.reader.height,
+        frames: preview.reader,
+        maxBytes: budgets.preview.maxCacheBytes,
+        onChange: scheduleDiagnostics,
+        onFrame: (index) => {
+          // Only a landing for the frame on screen changes the picture.
+          if (index === onScreen) notify();
+        },
+        prefetchSeconds: budgets.preview.prefetchSeconds,
+        retainSeconds: budgets.preview.retainSeconds,
+        timeAt,
+      })
+    : null;
+
+  /**
+   * The present asks for the frame on screen; decoding moves there right
+   * after it, never inside it.
+   */
+  const followPlayhead = (index: number) => {
+    if (!previewWindow) return;
+    if (queuedPlayhead === null) {
+      queueMicrotask(() => {
+        const next = queuedPlayhead;
+
+        queuedPlayhead = null;
+        if (next !== null && !destroyed) previewWindow.setPlayhead(next);
+      });
+    }
+    queuedPlayhead = index;
+  };
+
+  const previewEntry = (index: number): DepthFrameEntry | null => {
+    const entry = previewWindow?.getEntry(index);
+
+    if (!entry) return null;
+
+    let wrapped = previewEntries.get(entry.map);
+
+    if (!wrapped) {
+      wrapped = { frameIndex: index, map: entry.map, precision: "preview" };
+      previewEntries.set(entry.map, wrapped);
+    }
+
+    return wrapped;
   };
 
   const distance = (index: number) =>
@@ -382,7 +564,7 @@ function openDepthClip(
           if (destroyed || isAbortError(error) || warned) return;
           warned = true;
           console.warn(
-            `Depth frame ${index} did not load, so no depth is drawn over it: ${String(error)}`,
+            `Depth frame ${index} did not load, so ${previewWindow ? "its preview stands in for it at rest" : "no depth is drawn over it"}: ${String(error)}`,
           );
         })
         .finally(() => loading.delete(index));
@@ -434,17 +616,59 @@ function openDepthClip(
       if (index !== onScreen) {
         onScreen = index;
         settle();
+        if (index !== null) followPlayhead(index);
       }
-      if (active || index === null) return null;
+      if (index === null) return null;
 
-      return cache.get(index)?.entry ?? null;
+      // Exact depth is drawn only at rest. Mixing it into playback would
+      // flicker: a preview step is coarser than a colour step.
+      const exact = active ? null : (cache.get(index)?.entry ?? null);
+
+      return exact ?? previewEntry(index);
     },
+
+    prefetch(mediaTime) {
+      const index = indexAt(mediaTime);
+
+      if (index !== null && !destroyed) previewWindow?.setPlayhead(index);
+    },
+
+    getUpcomingEntries(mediaTime, count) {
+      const index = indexAt(mediaTime);
+
+      if (!previewWindow || !active || index === null) return [];
+
+      return previewWindow
+        .upcoming(index, count)
+        .map((entry) => previewEntry(entry.index)!)
+        .filter(Boolean);
+    },
+
+    needsPlaybackGateWait(mediaTime, thresholds) {
+      const index = indexAt(mediaTime);
+
+      return (
+        previewWindow !== null &&
+        index !== null &&
+        previewWindow.needsPlaybackGateWait(index, thresholds)
+      );
+    },
+
+    waitForReady(mediaTime, thresholds, signal) {
+      const index = indexAt(mediaTime);
+
+      return previewWindow && index !== null
+        ? previewWindow.waitForReady(index, thresholds, signal)
+        : Promise.resolve();
+    },
+
+    getPreparationProgress: () => previewWindow?.getPreparationProgress() ?? 0,
 
     setPlaybackActive(next) {
       if (next === active || destroyed) return;
       active = next;
       settle();
-      // The frame on screen gains its cached depth, or loses it.
+      // The frame on screen swaps between its exact and its preview depth.
       notify();
     },
 
@@ -457,11 +681,231 @@ function openDepthClip(
       if (destroyed) return;
       destroyed = true;
       clearTimeout(settleTimer);
+      clearTimeout(diagnosticsTimer);
       run?.abort();
       teardown.abort();
+      previewWindow?.destroy();
+      preview?.reader.dispose();
       listeners.clear();
       cache.clear();
       cachedBytes = 0;
+    },
+  };
+}
+
+interface OpenedClipPreview {
+  readonly reader: DepthPreviewTrackReader;
+  readonly track: NonNullable<DepthManifest["preview"]>;
+  /** What diagnostics say about the preview, such as altered codes. */
+  message(): string | null;
+}
+
+/**
+ * Opens the clip's preview video and checks it against the media it is
+ * drawn over: one preview frame per depth frame, each at its video frame's
+ * time. A preview that disagrees is refused with a `RangeError`; one this
+ * browser cannot open leaves the clip with exact depth at rest only.
+ */
+async function openClipPreview(
+  manifest: DepthManifest,
+  frames: DepthClipFrames,
+  base: string | URL | undefined,
+  context: DepthSourceContext,
+  timing: {
+    readonly timeAt: (index: number) => number;
+    readonly endAt: (index: number) => number;
+  },
+): Promise<OpenedClipPreview | null> {
+  const track = manifest.preview;
+  const open =
+    context.openPreviewTrack === undefined
+      ? openDefaultPreviewTrack
+      : context.openPreviewTrack;
+
+  if (!track || !open) return null;
+
+  const url = resolveUrl(track.file, base);
+  const choose =
+    context.choosePreviewDecoding === undefined
+      ? chooseDefaultPreviewDecoding
+      : context.choosePreviewDecoding;
+  // The probe decodes before the preview opens, so the page never holds two
+  // of their decoders at once.
+  const decoding = choose ? await choose().catch(() => null) : null;
+  let reader: DepthPreviewTrackReader;
+
+  try {
+    reader = await open(url, {
+      correction: decoding?.correction ?? null,
+      hardwareAcceleration: decoding?.hardwareAcceleration,
+    });
+  } catch (error) {
+    if (error instanceof RangeError || context.signal?.aborted) throw error;
+    console.warn(
+      `The depth preview ${url} did not open, so depth is drawn only while playback rests: ${String(error)}`,
+    );
+    return null;
+  }
+
+  try {
+    if (context.signal?.aborted) throw context.signal.reason;
+    assertMediaAspect(reader, context.media);
+    assertDepthPreviewTimeline(
+      reader,
+      frames.count,
+      (index) => timing.timeAt(index) - timing.timeAt(0),
+    );
+  } catch (error) {
+    reader.dispose();
+    throw error;
+  }
+
+  const message = describePreviewDecoding(decoding);
+
+  if (message) console.warn(message);
+
+  return { message: () => message, reader, track };
+}
+
+/**
+ * Says what diagnostics should about the page's preview decoder: nothing
+ * when it returns codes as written.
+ */
+export function describePreviewDecoding(
+  decoding: DepthPreviewDecoding | null,
+): string | null {
+  const probe = decoding?.probe;
+
+  if (!decoding || !probe || probe.exact) return null;
+
+  const corrected = decoding.correction
+    ? `; corrected through the probe's table to within ${decoding.residualError}`
+    : "";
+
+  return `This browser's ${decoding.hardwareAcceleration} decoder changes depth preview codes: ${probe.mismatchedCodes} of 256 come back different, by up to ${probe.maxError} (${probe.lumaPath ?? "unknown"} path)${corrected}. Preview depth during playback is off by up to ${decoding.correction ? decoding.residualError : probe.maxError} preview steps; exact depth at rest is not affected.`;
+}
+
+async function openDefaultPreviewTrack(
+  url: string,
+  options?: DepthPreviewTrackOptions,
+) {
+  const { openDepthPreviewTrack } = await import("#media/depth-preview-track");
+
+  return openDepthPreviewTrack(url, options);
+}
+
+async function chooseDefaultPreviewDecoding() {
+  const { chooseDepthPreviewDecoding } =
+    await import("#media/depth-preview-probe");
+
+  return chooseDepthPreviewDecoding();
+}
+
+/**
+ * Refuses a preview whose frames are not the depth frames, one for one, at
+ * the same times. Both timelines are compared from their own first frame, so
+ * a preview that starts its clock elsewhere still lines up; a different frame
+ * count, rate, or a frame out of step does not.
+ */
+export function assertDepthPreviewTimeline(
+  preview: { readonly frameCount: number; readonly times: Float64Array },
+  count: number,
+  expectedTime: (index: number) => number,
+): void {
+  if (preview.frameCount !== count) {
+    throw new RangeError(
+      `The depth preview has ${preview.frameCount} frames and depth.json has ${count}; a preview needs one frame per depth frame.`,
+    );
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    const previewTime = preview.times[index];
+    const videoTime = expectedTime(index);
+
+    if (
+      Math.abs(previewTime - videoTime) >
+      PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS
+    ) {
+      throw new RangeError(
+        `Depth preview frame ${index} is at ${formatSeconds(previewTime)} and its video frame at ${formatSeconds(videoTime)}, each from its own first frame; a preview must keep the video's frame times.`,
+      );
+    }
+  }
+}
+
+function formatSeconds(seconds: number) {
+  return `${Number(seconds.toFixed(6))} s`;
+}
+
+/**
+ * The clip's budgets. Byte budgets that are not given scale with the clip's
+ * resolution, so a 4K clip keeps about as many seconds as a 720p one.
+ */
+export function resolveDepthClipOptions(
+  clip: {
+    /** Bytes of one decoded exact frame, its confidence plane included. */
+    readonly exactFrameBytes: number;
+    /** Bytes of one decoded preview frame, 0 without a preview. */
+    readonly previewFrameBytes: number;
+    readonly frameRate: number;
+  },
+  options: RenderPreparationDepthOptions = {},
+): {
+  readonly exact: ExactDepthFrameOptions;
+  readonly preview: {
+    readonly maxCacheBytes: number;
+    readonly prefetchSeconds: number;
+    readonly retainSeconds: number;
+  };
+} {
+  const neighborFrameCount = Math.max(
+    0,
+    Math.floor(
+      options.exactNeighborFrameCount ??
+        defaultExactDepthFrameOptions.neighborFrameCount,
+    ),
+  );
+  const prefetchSeconds = Math.max(
+    0,
+    options.previewPrefetchSeconds ?? DEFAULT_PREVIEW_PREFETCH_SECONDS,
+  );
+  const retainSeconds = Math.max(
+    0,
+    options.previewRetainSeconds ?? DEFAULT_PREVIEW_RETAIN_SECONDS,
+  );
+  const frameRate =
+    Number.isFinite(clip.frameRate) && clip.frameRate > 0 ? clip.frameRate : 30;
+  const previewSpanFrames = Math.ceil(
+    (2 * prefetchSeconds + retainSeconds) * frameRate,
+  );
+
+  return {
+    exact: {
+      maxCacheBytes:
+        options.maxExactCacheBytes ??
+        Math.max(
+          defaultExactDepthFrameOptions.maxCacheBytes,
+          clip.exactFrameBytes * (2 * neighborFrameCount + 1) * 2,
+        ),
+      neighborFrameCount,
+      settleSeconds: Math.max(
+        0,
+        options.exactSettleSeconds ??
+          defaultExactDepthFrameOptions.settleSeconds,
+      ),
+    },
+    preview: {
+      maxCacheBytes:
+        options.maxPreviewCacheBytes ??
+        Math.min(
+          MAX_DEFAULT_PREVIEW_CACHE_BYTES,
+          Math.max(
+            MIN_DEFAULT_PREVIEW_CACHE_BYTES,
+            clip.previewFrameBytes * previewSpanFrames,
+          ),
+        ),
+      prefetchSeconds,
+      retainSeconds,
     },
   };
 }

@@ -426,9 +426,27 @@ export async function createPixiMediaScene(
       acceptsUnalignedTextureRows,
       getMediaSize: () => ({ height: mediaHeight, width: mediaWidth }),
       maxTextureSize,
+      prepareTexture: (source) => {
+        app.renderer?.texture?.initSource?.(source);
+      },
       renderers: currentDepthRenderers,
       source: depthSource,
     }));
+  let depthUploadTimer: ReturnType<typeof setTimeout> | undefined;
+  let depthUploadMediaTime = 0;
+  /**
+   * The next frames' depth goes up in a task of its own after a present, so
+   * the present that draws it only binds the texture, and the frame just
+   * rendered is not held back by the upload.
+   */
+  const scheduleDepthUploadAhead = (mediaTime: number) => {
+    if (!depthLayer || !depthSource) return;
+    depthUploadMediaTime = mediaTime;
+    depthUploadTimer ??= setTimeout(() => {
+      depthUploadTimer = undefined;
+      if (!isDestroyed) depthLayer?.uploadAhead(depthUploadMediaTime);
+    }, 0);
+  };
   let polygonLayer =
     options.polygonStyle !== undefined &&
     currentPolygonStyle &&
@@ -1285,7 +1303,8 @@ export async function createPixiMediaScene(
     getRenderPreparationProgress() {
       return (
         (maskLayer?.getPreparationProgress() ?? 0) +
-        (polygonLayer?.getPreparationProgress() ?? 0)
+        (polygonLayer?.getPreparationProgress() ?? 0) +
+        (depthLayer?.getPreparationProgress() ?? 0)
       );
     },
 
@@ -1294,7 +1313,8 @@ export async function createPixiMediaScene(
         maskLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
           true ||
         polygonLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
-          true
+          true ||
+        depthLayer?.needsRenderPreparationWait(mediaTime, gateOptions) === true
       );
     },
 
@@ -1302,6 +1322,7 @@ export async function createPixiMediaScene(
       return Promise.all([
         maskLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
         polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
+        depthLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
       ]).then(() => undefined);
     },
 
@@ -1640,6 +1661,10 @@ export async function createPixiMediaScene(
       return depthLayer?.getActiveDepth() ?? null;
     },
 
+    prefetchDepth(mediaTime) {
+      depthLayer?.prefetch(mediaTime);
+    },
+
     setSelectedDetection(selection, mediaTime) {
       const pick =
         interactionLayer?.setSelectedDetection(
@@ -1692,6 +1717,7 @@ export async function createPixiMediaScene(
       regionLayer.destroy();
       heatmapLayer?.destroy();
       unsubscribeDepthSource?.();
+      clearTimeout(depthUploadTimer);
       depthLayer?.destroy();
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
@@ -2484,6 +2510,7 @@ export async function createPixiMediaScene(
     } finally {
       isPresenting = false;
     }
+    scheduleDepthUploadAhead(presented.mediaTimeS);
   }
 
   function advanceFocusAnimation(mediaTime: number) {
