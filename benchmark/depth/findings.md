@@ -55,7 +55,8 @@ goes up decimated there.
 `paeth-up-mix` is two Paeth rows to one Up row, the mix Pillow wrote for the
 research scene; `adaptive` is libpng's per-row heuristic (on this scene it
 picks mostly Average and Up). "Prototype decoder" is research 08's
-`png16.js` on the same file. The worker column is the round trip: post the
+`png16.js` on the same file; the benchmark no longer runs it, so a rerun
+has no prototype rows. The worker column is the round trip: post the
 bytes, decode, transfer the samples back.
 
 | Resolution | File                                   |     Size | Chrome main | Chrome worker | Firefox main | Firefox worker |

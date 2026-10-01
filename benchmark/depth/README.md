@@ -49,9 +49,8 @@ JSON the page prints.
   painted as such.
 - **Case 2, PNG16 decode** at 720p, 1080p and 4K, one file per PNG row filter, on the
   main thread and in a worker. `adaptive` is libpng's default per-row choice;
-  `paeth-up-mix` is the mix Pillow wrote for the research scene. The research
-  prototype's decoder and a row-delta + gzip file of the same samples are
-  decoded as references.
+  `paeth-up-mix` is the mix Pillow wrote for the research scene. A row-delta +
+  gzip file of the same samples is decoded as a reference.
 - **Case 3, upload and render** per frame at each resolution, exact (`rg8`, 2 bytes
   per sample) and preview (`r8`, 1 byte), with the upload in the present and
   uploaded ahead, and a half-size map drawn edge-aware. The GPU is waited on

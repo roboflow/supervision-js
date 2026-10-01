@@ -1,6 +1,5 @@
 import { decodePng16 } from "../../../../packages/web/src/render-preparation/depth-png16";
 import { encodePng16, PngFilter } from "./png-encode";
-import { decodePng16Prototype } from "./prototype-png16";
 import { summarize, type TimingSummary } from "./timing";
 import type { Resolution } from "./upload-render";
 
@@ -36,12 +35,6 @@ const FILTERS: readonly PngFilter[] = [
   PngFilter.PaethUpMix,
   PngFilter.Adaptive,
 ];
-/** Files the research prototype decoder also reads, for the before/after. */
-const PROTOTYPE_FILTERS: ReadonlySet<PngFilter> = new Set([
-  PngFilter.Up,
-  PngFilter.Paeth,
-  PngFilter.PaethUpMix,
-]);
 
 /**
  * PNG16 decode per frame, one PNG per row filter, on the main thread and in a
@@ -89,22 +82,6 @@ export async function runDecodeCases(
         workerDecodeMs: inWorker.decode,
         workerRoundTripMs: inWorker.roundTrip,
       });
-
-      if (PROTOTYPE_FILTERS.has(filter)) {
-        const before = await decodePng16Prototype(png.bytes);
-
-        cases.push({
-          bytes: png.bytes.byteLength,
-          exact: equal(before.data, frame.values),
-          filterCounts: png.filterCounts,
-          format: `png16 ${filter} (research prototype decoder)`,
-          height: resolution.height,
-          mainThreadMs: await time(runs, () => decodePng16Prototype(png.bytes)),
-          resolution: resolution.label,
-          scale: frame.scale,
-          width: resolution.width,
-        });
-      }
     }
   } finally {
     worker.terminate();
