@@ -86,6 +86,8 @@ export function createPixiDepthLayer(options: {
   readonly prepareTexture?: (source: PixiBufferImageSource) => void;
   readonly renderers: readonly DepthAnnotationRenderer[];
   readonly source?: DepthFrameProvider | null;
+  /** Whether annotations are hidden, which hides depth as removing its renderers would. */
+  readonly hidden?: boolean;
 }) {
   const container = new options.Container();
   const luts = createDepthLutCache(options.BufferImageSource);
@@ -96,6 +98,7 @@ export function createPixiDepthLayer(options: {
   >();
   const mapIdentities = new WeakMap<DepthMap, number>();
   let renderers = options.renderers;
+  let hidden = options.hidden === true;
   let source = options.source ?? null;
   /**
    * One ring per encoding. Exact and preview maps go up in different texture
@@ -144,7 +147,7 @@ export function createPixiDepthLayer(options: {
   };
 
   /** Gating and prefetching only matter while some renderer draws depth. */
-  const drawing = () => renderers.length > 0 && !destroyed;
+  const drawing = () => renderers.length > 0 && !hidden && !destroyed;
 
   const hide = () => {
     for (const entry of drawn.values()) entry.renderer.hide();
@@ -305,6 +308,15 @@ export function createPixiDepthLayer(options: {
       renderers = next;
     },
 
+    /**
+     * Hides depth with the other annotations: nothing draws, the playback
+     * gate stops waiting for depth and nothing decodes ahead, as when no
+     * depth renderer is set. The source and what it decoded are kept.
+     */
+    setHidden(next: boolean) {
+      hidden = next;
+    },
+
     setDepthSource(next: DepthFrameProvider | null) {
       if (next === source) return;
       source = next;
@@ -326,7 +338,7 @@ export function createPixiDepthLayer(options: {
 
       const { height, width } = options.getMediaSize();
       const entry =
-        renderers.length > 0 && width > 0 && height > 0
+        drawing() && width > 0 && height > 0
           ? (source?.getEntry(mediaTime) ?? null)
           : null;
 

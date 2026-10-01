@@ -431,6 +431,7 @@ export async function createPixiMediaScene(
       prepareTexture: (source) => {
         app.renderer?.texture?.initSource?.(source);
       },
+      hidden: currentVisibility?.annotationsHidden === true,
       renderers: currentDepthRenderers,
       source: depthSource,
     }));
@@ -1474,6 +1475,11 @@ export async function createPixiMediaScene(
           presentation.visibility,
         );
         currentVisibility = presentation.visibility;
+        // Depth is an annotation layer on screen: hiding annotations hides
+        // it too. Classes and detection ids do not reach it, it has neither.
+        depthLayer?.setHidden(
+          presentation.visibility.annotationsHidden === true,
+        );
         heatmapLayer?.invalidate();
         boxLayer.invalidate();
         vectorLayer.setStyles({});

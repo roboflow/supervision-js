@@ -328,4 +328,27 @@ describe("media renderer depth", () => {
 
     renderer.destroy();
   });
+
+  it("hides depth with the annotations, and shows it again", async () => {
+    const renderer = await createRenderer(false, false, {
+      depth: { map: depthMap() },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    const renderers = [annotationRenderers.depth()];
+
+    renderer.setPresentation({
+      renderers,
+      visibility: { annotationsHidden: true },
+    });
+    expect(renderer.getActiveDepth?.()).toBeNull();
+
+    renderer.setPresentation({
+      renderers,
+      visibility: { annotationsHidden: false },
+    });
+    expect(renderer.getActiveDepth?.()).not.toBeNull();
+
+    renderer.destroy();
+  });
 });

@@ -82,6 +82,7 @@ function createLayer(
     maxTextureSize?: number;
     renderers?: Parameters<typeof createPixiDepthLayer>[0]["renderers"];
     source?: DepthFrameProvider | null;
+    hidden?: boolean;
   } = {},
 ) {
   vi.stubGlobal("document", {
@@ -91,6 +92,7 @@ function createLayer(
   const layer = createPixiDepthLayer({
     ...pixi.constructors,
     acceptsUnalignedTextureRows: () => false,
+    hidden: options.hidden,
     getMediaSize: () => ({ height: 20, width: 40 }),
     maxTextureSize:
       options.maxTextureSize === undefined
@@ -487,6 +489,33 @@ describe("pixi depth layer", () => {
     layer.prefetch(3);
     expect(waitForReady).toHaveBeenCalledOnce();
     expect(prefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides with the annotations, stops waiting and prefetching, and comes back", () => {
+    const thresholds = { resumeAtSeconds: 0.3, stopBelowSeconds: 0.1 };
+    const prefetch = vi.fn();
+    const source = previewSource([previewMap(20), previewMap(30)], {
+      needsPlaybackGateWait: () => true,
+      prefetch,
+    });
+    const { layer, pixi } = createLayer({ hidden: true, source });
+
+    layer.drawFrame(0);
+    layer.prefetch(1);
+    expect(pixi.meshes).toHaveLength(0);
+    expect(layer.getActiveDepth()).toBeNull();
+    expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(false);
+    expect(prefetch).not.toHaveBeenCalled();
+
+    layer.setHidden(false);
+    layer.drawFrame(0);
+    expect(layer.getActiveDepth()).not.toBeNull();
+    expect(layer.needsRenderPreparationWait(0, thresholds)).toBe(true);
+
+    layer.setHidden(true);
+    layer.drawFrame(1);
+    expect(layer.getActiveDepth()).toBeNull();
+    expect(pixi.meshes.every((mesh) => !mesh.visible)).toBe(true);
   });
 
   it("draws nothing without a depth renderer", () => {
