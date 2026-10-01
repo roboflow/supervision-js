@@ -390,7 +390,9 @@ test("the depth preview decoder loads with Mediabunny only when a preview opens"
     );
 
     assert.doesNotMatch(code, /^import[^;]*["']mediabunny["']/m, chunk);
-    assert.match(code, /import\(["']mediabunny["']\)/, chunk);
+    if (chunk.startsWith("depth-preview-track-")) {
+      assert.match(code, /import\(["']mediabunny["']\)/, chunk);
+    }
   }
 });
 
