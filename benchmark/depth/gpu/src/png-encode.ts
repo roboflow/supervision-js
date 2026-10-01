@@ -1,12 +1,9 @@
 /**
- * A grayscale PNG writer on the browser's own zlib (`CompressionStream`), for
- * the depth benchmark and the dev depth page. Every row can use one fixed PNG
- * filter, or the per-row choice libpng makes by default ("adaptive": the
+ * A 16-bit grayscale PNG writer on the browser's own zlib
+ * (`CompressionStream`), for the depth benchmark. Every row can use one fixed
+ * PNG filter, or the per-row choice libpng makes by default ("adaptive": the
  * filter whose output has the smallest sum of absolute signed bytes), which
  * is what Pillow and most writers produce.
- *
- * This module imports nothing, so the benchmark and the demo both load it by
- * relative path.
  */
 
 export const PngFilter = {
@@ -69,18 +66,6 @@ export function encodePng16(
 
     return row;
   });
-}
-
-/** Writes 8-bit samples, such as a confidence plane, as a grayscale PNG. */
-export function encodePng8Gray(
-  width: number,
-  height: number,
-  values: Uint8Array,
-  filter: PngFilter = PngFilter.Up,
-): Promise<EncodedPng> {
-  return encodeGray(width, height, 8, filter, (y) =>
-    values.subarray(y * width, (y + 1) * width),
-  );
 }
 
 async function encodeGray(

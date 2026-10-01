@@ -1,8 +1,7 @@
 /**
- * A synthetic stereo scene, ray cast on the CPU: a left camera image and the
- * disparity a stereo matcher would report for it. It exists to exercise the
- * depth renderer before a real stereo fixture is committed, and it is never
- * presented as model output.
+ * A synthetic stereo scene, ray cast on the CPU: the disparity a stereo
+ * matcher would report for a left camera at any resolution, for the depth
+ * benchmark. It is never presented as model output.
  *
  * Camera: pinhole at the origin looking down +z with image y down. The focal
  * length is 1000 px at 1280 px wide and scales with width, so every resolution
@@ -12,8 +11,7 @@
  * textureless monitor and a few blob holes. Each frame also carries a handful
  * of "flying pixel" outliers. The animation loops every `SYNTHETIC_PERIOD_SECONDS`.
  *
- * Ported from the depth-map rendering research prototype. This module imports
- * nothing, so a benchmark and the demo can both load it by relative path.
+ * Ported from the depth-map rendering research prototype.
  */
 
 export const SYNTHETIC_PERIOD_SECONDS = 8;
@@ -37,13 +35,11 @@ interface Sphere {
   readonly cy: number;
   readonly cz: number;
   readonly r: number;
-  readonly color: Vector3;
 }
 
 interface Box {
   readonly min: Vector3;
   readonly max: Vector3;
-  readonly color: Vector3;
 }
 
 interface Intrinsics {
@@ -95,21 +91,18 @@ function sceneAt(timeSeconds: number) {
   const slidingX = 0.3 + 2.3 * Math.sin(w * t);
   const spheres: Sphere[] = [
     {
-      color: [0.85, 0.25, 0.2],
       cx: -1.0 + 0.8 * Math.sin(w * t),
       cy: FLOOR_Y - 0.35,
       cz: 3.5 + 2.3 * Math.cos(w * t),
       r: 0.35,
     },
     {
-      color: [0.2, 0.55, 0.9],
       cx: 1.0 * Math.cos(2 * w * t),
       cy: -0.3 + 0.25 * Math.sin(3 * w * t),
       cz: 2.4 + 0.8 * Math.sin(2 * w * t),
       r: 0.25,
     },
     {
-      color: [0.95, 0.8, 0.2],
       cx: -0.55,
       cy: 0.35,
       cz: 3.55 - 3.0 * pulse,
@@ -118,12 +111,10 @@ function sceneAt(timeSeconds: number) {
   ];
   const boxes: Box[] = [
     {
-      color: [0.55, 0.4, 0.3],
       max: [1.9, FLOOR_Y, 5.2],
       min: [0.7, 0.45, 4.2],
     },
     {
-      color: [0.35, 0.6, 0.35],
       max: [slidingX + 0.25, FLOOR_Y, 6.75],
       min: [slidingX - 0.25, -0.5, 6.4],
     },
@@ -437,123 +428,4 @@ export function renderSyntheticDisparity(
     values,
     width,
   };
-}
-
-const LIGHT: Vector3 = (() => {
-  const l: Vector3 = [-0.4, -0.8, -0.45];
-  const n = Math.hypot(...l);
-  return [l[0] / n, l[1] / n, l[2] / n];
-})();
-
-/** The left camera image, as RGBA bytes. */
-export function renderSyntheticImage(
-  width: number,
-  height: number,
-  timeSeconds: number,
-): Uint8ClampedArray<ArrayBuffer> {
-  const k = syntheticIntrinsics(width, height);
-  const scene = sceneAt(timeSeconds);
-  const out = new Uint8ClampedArray(width * height * 4);
-
-  for (let y = 0; y < height; y += 1) {
-    const v = (y - k.cy) / k.fy;
-
-    for (let x = 0; x < width; x += 1) {
-      const u = (x - k.cx) / k.fx;
-      const room = castRoom(u, v);
-      let z = room.z;
-      let color: Vector3;
-      let normal: Vector3 | null = null;
-      const X = u * z;
-      const Y = v * z;
-
-      switch (room.surface) {
-        case Surface.Floor: {
-          const checker = (Math.floor(X / 0.5) + Math.floor(z / 0.5)) & 1;
-          color = checker ? [0.62, 0.6, 0.55] : [0.42, 0.4, 0.37];
-          normal = [0, -1, 0];
-          break;
-        }
-        case Surface.BackWall: {
-          const stripe = Math.floor((X + 10) / 0.8) & 1;
-          color = stripe ? [0.83, 0.79, 0.7] : [0.78, 0.74, 0.66];
-          normal = [0, 0, -1];
-          break;
-        }
-        case Surface.LeftWall:
-          color = [0.7, 0.75, 0.8];
-          normal = [1, 0, 0];
-          break;
-        case Surface.RightWall:
-          color = [0.8, 0.72, 0.72];
-          normal = [-1, 0, 0];
-          break;
-        case Surface.Building: {
-          const windows = (Math.floor(X / 1.5) + Math.floor(Y / 1.2)) & 1;
-          color = windows ? [0.45, 0.5, 0.58] : [0.62, 0.64, 0.68];
-          break;
-        }
-        case Surface.Monitor:
-          color = [0.08, 0.08, 0.09];
-          break;
-        default:
-          color = [
-            0.55 + 0.3 * (1 - y / height),
-            0.72 + 0.2 * (1 - y / height),
-            0.95,
-          ];
-          z = Infinity;
-      }
-
-      for (const sphere of scene.spheres) {
-        const zs = raySphere(u, v, sphere);
-        if (zs < z) {
-          z = zs;
-          color = sphere.color;
-          normal = [
-            (u * zs - sphere.cx) / sphere.r,
-            (v * zs - sphere.cy) / sphere.r,
-            (zs - sphere.cz) / sphere.r,
-          ];
-        }
-      }
-      for (const box of scene.boxes) {
-        const zb = rayBox(u, v, box);
-        if (zb < z) {
-          z = zb;
-          color = box.color;
-          const p: Vector3 = [u * zb, v * zb, zb];
-          const e = 1e-3 * zb;
-          normal =
-            Math.abs(p[2] - box.min[2]) < e
-              ? [0, 0, -1]
-              : Math.abs(p[1] - box.min[1]) < e
-                ? [0, -1, 0]
-                : p[0] < (box.min[0] + box.max[0]) / 2
-                  ? [-1, 0, 0]
-                  : [1, 0, 0];
-        }
-      }
-
-      const lambert = normal
-        ? 0.55 +
-          0.6 *
-            Math.max(
-              0,
-              -(
-                normal[0] * LIGHT[0] +
-                normal[1] * LIGHT[1] +
-                normal[2] * LIGHT[2]
-              ),
-            )
-        : 1;
-      const i = (y * width + x) * 4;
-      out[i] = color[0] * lambert * 255;
-      out[i + 1] = color[1] * lambert * 255;
-      out[i + 2] = color[2] * lambert * 255;
-      out[i + 3] = 255;
-    }
-  }
-
-  return out;
 }
