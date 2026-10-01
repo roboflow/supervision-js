@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -66,17 +64,6 @@ const docsUrl = resolveDemoDocsUrl(
   globalThis.location,
 );
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
-/**
- * Draws a synthetic scene, not model output, so it is reachable from the dev
- * server only; a production build drops the branch and the module with it.
- */
-const DevDepthPlayground = import.meta.env.DEV
-  ? lazy(() =>
-      import("./components/DevDepthPlayground").then((module) => ({
-        default: module.DevDepthPlayground,
-      })),
-    )
-  : null;
 const urlSourceResidency = readDemoSourceResidency(
   globalThis.location?.search ?? "",
 );
@@ -105,16 +92,6 @@ export function App() {
     return (
       <EmbeddedPlaygroundFrame>
         <DocsDepthPlayground />
-      </EmbeddedPlaygroundFrame>
-    );
-  }
-
-  if (embeddedView === "depth-dev" && DevDepthPlayground) {
-    return (
-      <EmbeddedPlaygroundFrame>
-        <Suspense fallback={null}>
-          <DevDepthPlayground />
-        </Suspense>
       </EmbeddedPlaygroundFrame>
     );
   }
