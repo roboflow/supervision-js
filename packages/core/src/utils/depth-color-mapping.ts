@@ -7,6 +7,7 @@ import {
   type PreviewDepthSamples,
   type ScaledDepthSamples,
 } from "#types/depth-map";
+import { depthPreviewTopCode } from "#utils/depth-manifest";
 
 /** Percentiles `"auto"` colours between: outliers and flying pixels fall outside. */
 export const DEFAULT_DEPTH_PERCENTILE_LOW = 0.02;
@@ -173,12 +174,21 @@ export function decodeDepthSample(
   if (stored <= samples.reservedMax) {
     return null;
   }
+  const span = depthPreviewSpan(samples);
 
   return (
     samples.range.min +
-    ((stored - samples.reservedMax - 1) / (254 - samples.reservedMax)) *
+    (Math.min(stored - samples.reservedMax - 1, span) / span) *
       (samples.range.max - samples.range.min)
   );
+}
+
+/**
+ * Steps between the lowest valid preview code and the top one, so one step
+ * is `(range.max - range.min) / span`.
+ */
+export function depthPreviewSpan(samples: PreviewDepthSamples): number {
+  return depthPreviewTopCode(samples.levels) - samples.reservedMax - 1;
 }
 
 /**

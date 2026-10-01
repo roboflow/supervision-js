@@ -1,3 +1,4 @@
+import type { DepthPreviewLevels } from "supervision-js-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -148,6 +149,7 @@ describe("depth source from a clip with a preview", () => {
       probe: {
         decoded: new Uint8Array(256),
         exact: false,
+        judgedCodes: 256,
         lumaPath: "plane",
         maxError: 20,
         mismatchedCodes: 249,
@@ -173,6 +175,47 @@ describe("depth source from a clip with a preview", () => {
     expect(describePreviewDecoding(decoding)).toContain(
       "249 of 256 come back different, by up to 20",
     );
+    clip.source.destroy();
+  });
+
+  it("probes at a TV-range preview's levels, and maps its codes up to 235", async () => {
+    const probed: DepthPreviewLevels[] = [];
+    // An RGB path the probe's table undoes exactly: nothing to warn about.
+    const decoding: DepthPreviewDecoding = {
+      correction: new Uint8Array(256),
+      hardwareAcceleration: "prefer-hardware",
+      probe: {
+        decoded: new Uint8Array(256),
+        exact: false,
+        judgedCodes: 220,
+        lumaPath: "rgb",
+        maxError: 20,
+        mismatchedCodes: 218,
+      },
+      residualError: 0,
+      verdicts: [],
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const clip = await openPreviewClip({
+      choosePreviewDecoding: async (levels) => {
+        probed.push(levels);
+        return decoding;
+      },
+      tv: true,
+    });
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await settle();
+
+    expect(probed).toEqual(["tv"]);
+    expect(clip.source.getEntry(CLOCK.timeAt(0))?.map.samples).toMatchObject({
+      encoding: "preview8",
+      levels: "tv",
+      reservedMax: 31,
+    });
+    expect(describePreviewDecoding(decoding)).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
     clip.source.destroy();
   });
 
@@ -479,7 +522,11 @@ interface PreviewClipOptions {
   readonly times?: (index: number) => number;
   readonly openError?: Error;
   readonly onOpen?: (options: DepthPreviewTrackOptions | undefined) => void;
-  readonly choosePreviewDecoding?: () => Promise<DepthPreviewDecoding>;
+  readonly choosePreviewDecoding?: (
+    levels: DepthPreviewLevels,
+  ) => Promise<DepthPreviewDecoding>;
+  /** Writes the preview's manifest in TV range, codes 32 to 235. */
+  readonly tv?: boolean;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
   /** Decodes the preview through fake decoders that behave this way. */
   readonly decoder?: FakeDecoders;
@@ -502,6 +549,7 @@ async function probeThrough(decoder: FakeDecoders) {
 
   return () =>
     chooseDepthPreviewDecoding(
+      "full",
       async (_input, trackOptions) =>
         openFakeDepthPreviewTrack(
           ({ hardwareAcceleration }) => decoder(hardwareAcceleration),
@@ -525,7 +573,14 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     frames: { count: COUNT, exact: "exact/{index:06}.png" },
     height: HEIGHT,
     kind: "disparity_px",
-    preview: { file: "preview.mp4", range_px: [0, 100], reserved_max: 15 },
+    preview: options.tv
+      ? {
+          file: "preview.mp4",
+          levels: "tv",
+          range_px: [0, 100],
+          reserved_max: 31,
+        }
+      : { file: "preview.mp4", range_px: [0, 100], reserved_max: 15 },
     schema: "supervision.depth-manifest",
     storage: { format: "png16", no_depth: 0, scale: 256 },
     version: 1,

@@ -166,6 +166,28 @@ describe("depth readout", () => {
     expect(readDepthAt(preview, { x: 3, y: 0 })?.step).toBeCloseTo(step, 12);
   });
 
+  it("decodes TV-range preview codes and their step", () => {
+    const preview: DepthMap = {
+      height: 1,
+      kind: DepthMapKind.DisparityPx,
+      samples: {
+        encoding: "preview8",
+        levels: "tv",
+        range: { max: 63, min: 0 },
+        reservedMax: 31,
+        values: Uint8Array.from([16, 32, 235]),
+      },
+      width: 3,
+    };
+
+    expect(readDepthAt(preview, { x: 0, y: 0 })?.valid).toBe(false);
+    expect(readDepthAt(preview, { x: 1, y: 0 })?.disparityPx).toBe(0);
+    expect(readDepthAt(preview, { x: 2, y: 0 })).toMatchObject({
+      disparityPx: 63,
+      step: 63 / 203,
+    });
+  });
+
   it("scales confidence to 0..1", () => {
     expect(readDepthAt(disparityMap, { x: 2, y: 0 })?.confidence).toBeCloseTo(
       0.2,

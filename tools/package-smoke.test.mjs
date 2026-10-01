@@ -33,6 +33,7 @@ const expectedWebRuntimeExports = [
   "DEFAULT_NORMALIZATION_FRAME_RATE",
   "DepthColormap",
   "DepthMapKind",
+  "DepthPreviewLevels",
   "DepthQuantity",
   "DepthSampling",
   "DetectionBufferStatus",

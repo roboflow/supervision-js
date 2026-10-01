@@ -375,6 +375,7 @@ export {
 export {
   DepthColormap,
   DepthMapKind,
+  DepthPreviewLevels,
   DepthQuantity,
   DepthSampling,
   computeDepthPercentileRange,

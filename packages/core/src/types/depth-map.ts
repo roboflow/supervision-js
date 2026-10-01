@@ -59,6 +59,22 @@ export const DepthSampling = {
 
 export type DepthSampling = (typeof DepthSampling)[keyof typeof DepthSampling];
 
+/**
+ * The luma range a depth preview video's codes are written in.
+ *
+ * TV range is what browsers' hardware decoders return as written; a decoder
+ * may squeeze full range into TV range or move codes converting it to RGB.
+ */
+export const DepthPreviewLevels = {
+  /** Every code from 0 to 255; the top code is 255. */
+  Full: "full",
+  /** Limited range: black is 16 and the top code is 235. */
+  Tv: "tv",
+} as const;
+
+export type DepthPreviewLevels =
+  (typeof DepthPreviewLevels)[keyof typeof DepthPreviewLevels];
+
 /** Pinhole camera parameters that relate disparity to metric depth. */
 export interface DepthCamera {
   /** Focal length in pixels of the depth map. */
@@ -92,14 +108,17 @@ export interface ScaledDepthSamples {
 
 /**
  * Approximate 8-bit samples, as a preview video carries them. Codes up to
- * `reservedMax` are no depth; code `reservedMax + 1` is `range.min` and code
- * 255 is `range.max`, in even steps.
+ * `reservedMax` are no depth; code `reservedMax + 1` is `range.min` and the
+ * top code of `levels` (255, or 235 in TV range) is `range.max`, in even
+ * steps. Codes above the top code read as `range.max`.
  */
 export interface PreviewDepthSamples {
   readonly encoding: "preview8";
   readonly values: Uint8Array;
   readonly reservedMax: number;
   readonly range: DepthRange;
+  /** Defaults to full range. */
+  readonly levels?: DepthPreviewLevels;
 }
 
 /**
@@ -168,6 +187,8 @@ export interface DepthClipFrames {
 export interface DepthPreviewTrack {
   readonly file: string;
   readonly codec?: string;
+  /** The luma range the video's codes are written in. */
+  readonly levels: DepthPreviewLevels;
   /** Codes up to this value are no depth. */
   readonly reservedMax: number;
   /** The disparity the lowest and highest valid codes stand for. */

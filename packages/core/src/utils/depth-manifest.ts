@@ -1,5 +1,6 @@
 import {
   DepthMapKind,
+  DepthPreviewLevels,
   type DepthCamera,
   type DepthClipFrames,
   type DepthImageEntry,
@@ -11,8 +12,21 @@ import {
 
 export const DEPTH_MANIFEST_SCHEMA = "supervision.depth-manifest";
 
-/** The highest reserved preview code that still leaves two valid codes. */
-export const MAX_DEPTH_PREVIEW_RESERVED_CODE = 253;
+/** The code standing for the top of a preview's range, at each level. */
+const PREVIEW_TOP_CODES: Readonly<Record<DepthPreviewLevels, number>> = {
+  full: 255,
+  tv: 235,
+};
+/**
+ * The lowest reserved code at each level. TV black, 16, is written for no
+ * depth, and a decoder that converts to RGB returns every code below it as
+ * black too, so the reserved band must cover it.
+ */
+const PREVIEW_MIN_RESERVED_CODES: Readonly<Record<DepthPreviewLevels, number>> =
+  { full: 0, tv: 16 };
+const depthPreviewLevels: ReadonlySet<string> = new Set(
+  Object.values(DepthPreviewLevels),
+);
 
 const depthMapKinds: ReadonlySet<string> = new Set(Object.values(DepthMapKind));
 const FRAME_INDEX_TOKEN = /\{index(?::0(\d{1,2}))?\}/g;
@@ -143,10 +157,15 @@ export function validateDepthMap(map: DepthMap): void {
     if (!(samples.values instanceof Uint8Array)) {
       reject("samples.values must be a Uint8Array for preview8 samples");
     }
-    if (!isReservedPreviewCode(samples.reservedMax)) {
+    const levels = samples.levels ?? DepthPreviewLevels.Full;
+
+    if (!depthPreviewLevels.has(levels)) {
       reject(
-        `samples.reservedMax must be an integer from 0 to ${MAX_DEPTH_PREVIEW_RESERVED_CODE}`,
+        `samples.levels must be one of ${[...depthPreviewLevels].join(", ")}`,
       );
+    }
+    if (!isReservedPreviewCode(samples.reservedMax, levels)) {
+      reject(`samples.reservedMax must be ${describeReservedCodes(levels)}`);
     }
     if (!isRange(samples.range)) {
       reject("samples.range must have finite bounds with min < max");
@@ -276,15 +295,24 @@ function readFrameTimes(value: unknown, count: number): readonly number[] {
   return [...(times as readonly number[])];
 }
 
+/**
+ * A preview without `levels` predates TV range and is read as full range.
+ */
 function readPreview(value: unknown): DepthPreviewTrack {
   const preview = readObject(value, "preview");
   const file = readFileName(preview.file, "preview.file");
   const codec = readOptionalString(preview.codec, "preview.codec");
+  const levels = preview.levels ?? DepthPreviewLevels.Full;
   const reservedMax = preview.reserved_max;
 
-  if (!isReservedPreviewCode(reservedMax)) {
+  if (typeof levels !== "string" || !depthPreviewLevels.has(levels)) {
+    fail(`preview.levels must be one of ${[...depthPreviewLevels].join(", ")}`);
+  }
+  const previewLevels = levels as DepthPreviewLevels;
+
+  if (!isReservedPreviewCode(reservedMax, previewLevels)) {
     fail(
-      `preview.reserved_max must be an integer from 0 to ${MAX_DEPTH_PREVIEW_RESERVED_CODE}`,
+      `preview.reserved_max must be ${describeReservedCodes(previewLevels)}`,
     );
   }
   const range = readOptionalRange(preview.range_px, "preview.range_px");
@@ -296,9 +324,15 @@ function readPreview(value: unknown): DepthPreviewTrack {
   return {
     file,
     ...(codec === undefined ? {} : { codec }),
+    levels: previewLevels,
     reservedMax,
     range,
   };
+}
+
+/** The code that stands for the top of a preview's range: 255, or 235 in TV range. */
+export function depthPreviewTopCode(levels: DepthPreviewLevels = "full") {
+  return PREVIEW_TOP_CODES[levels];
 }
 
 function readFramePattern(value: unknown, path: string): string {
@@ -405,13 +439,21 @@ function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-function isReservedPreviewCode(value: unknown): value is number {
+/** Reserved codes must leave two valid ones below the top code. */
+function isReservedPreviewCode(
+  value: unknown,
+  levels: DepthPreviewLevels,
+): value is number {
   return (
     typeof value === "number" &&
     Number.isInteger(value) &&
-    value >= 0 &&
-    value <= MAX_DEPTH_PREVIEW_RESERVED_CODE
+    value >= PREVIEW_MIN_RESERVED_CODES[levels] &&
+    value <= PREVIEW_TOP_CODES[levels] - 2
   );
+}
+
+function describeReservedCodes(levels: DepthPreviewLevels) {
+  return `an integer from ${PREVIEW_MIN_RESERVED_CODES[levels]} to ${PREVIEW_TOP_CODES[levels] - 2} at ${levels} levels`;
 }
 
 function isRange(range: DepthRange | undefined): boolean {

@@ -4,7 +4,10 @@ import {
   type DepthReadout,
 } from "#types/depth-map";
 import type { Point } from "#types/detections";
-import { decodeDepthSample } from "#utils/depth-color-mapping";
+import {
+  decodeDepthSample,
+  depthPreviewSpan,
+} from "#utils/depth-color-mapping";
 
 /**
  * Reads the depth map pixel under a point.
@@ -41,7 +44,7 @@ export function readDepthAt(
   const step =
     samples.encoding === "scaled16"
       ? 1 / samples.scale
-      : (samples.range.max - samples.range.min) / (254 - samples.reservedMax);
+      : (samples.range.max - samples.range.min) / depthPreviewSpan(samples);
   const confidence = map.confidence?.[index];
   const readout: DepthReadout = {
     precision: samples.encoding === "scaled16" ? "exact" : "preview",
