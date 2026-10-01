@@ -78,10 +78,26 @@ session
 ```
 
 A clip manifest names one PNG per video frame, so its media must come with a
-frame index: the web video engine source. While the video plays, the session
-draws the manifest's 8-bit preview video, decoded ahead of the playhead, frame
-for frame; once playback rests, it draws the exact frame for the video frame
-on screen:
+frame index. A URL or file gets one the first time a clip asks: the session
+reads the file's packet table, the way the web video engine reads its own, and
+pairs each depth frame with the video frame of the same timestamp. While the
+video plays, the session draws the manifest's 8-bit preview video, decoded
+ahead of the playhead, frame for frame; once playback rests, it draws the
+exact frame for the video frame on screen:
+
+```ts
+import { annotationRenderers, createMediaSession } from "supervision";
+
+const session = await createMediaSession({
+  container,
+  media: "left.mp4",
+  depth: { manifest: "sgbm/depth.json" },
+  presentation: { renderers: [annotationRenderers.depth()] },
+});
+```
+
+The web video engine source plays the same manifest the same way, and keeps
+the video frames it has decoded, so a drag paints sooner:
 
 ```ts
 import {
@@ -166,12 +182,26 @@ A depth picture is one map drawn under every frame: `depth: { map }`, or a
 manifest with `image`. Depth video is a clip manifest (`frames`), one map per
 video frame.
 
-| Media                                                         | Depth picture                                            | Depth video                                                                                           |
-| ------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| A URL or file: the default path, through Mediabunny           | Yes                                                      | No, by design: playing depth decodes a second video beside the clip, which this path does not support |
-| Web video engine: `createWebVideoEngineMediaRendererSource()` | Yes                                                      | Yes                                                                                                   |
-| Still image                                                   | Yes                                                      | No video to pair it with                                                                              |
-| `MediaStream` (camera): `createMediaStreamRendererSource()`   | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                                                         |
+| Media                                                         | Depth picture                                            | Depth video                                                           |
+| ------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| A URL or file: the default path, through Mediabunny           | Yes                                                      | Yes. The first clip reads the file's packet table to index its frames |
+| A file converted with `normalize: { stream: true }`           | Yes                                                      | No: while it converts, not all of its frames are known                |
+| Web video engine: `createWebVideoEngineMediaRendererSource()` | Yes                                                      | Yes                                                                   |
+| Still image                                                   | Yes                                                      | No video to pair it with                                              |
+| `MediaStream` (camera): `createMediaStreamRendererSource()`   | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                         |
+
+Depth video draws the same frames on the default path and on the web video
+engine. What differs is how the video gets there:
+
+- On the default path the video and the depth preview both decode in the
+  page. On the engine the video decodes in the engine's worker.
+- The default path keeps no decoded video frames, so a drag waits for a
+  decode of the picture and of its preview at each stop.
+- Opening a clip on the default path waits for the packet table to be read.
+  For an MP4 with its index up front that is one small read; a fragmented MP4,
+  or a WebM without cues, reads every fragment's header first.
+- Frame stepping on the default path moves by the video's own timestamps, and
+  `session.frameClock` stays `null` there.
 
 ## Depth during playback
 
@@ -422,8 +452,10 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
 ## Limits
 
 - A clip manifest (`frames`) pairs one PNG with each video frame, so it needs
-  media with a frame index: `createWebVideoEngineMediaRendererSource()`. Other
-  media refuse it with a `RangeError`, and so does a clip whose frame count
+  media with a frame index: a URL or file, or
+  `createWebVideoEngineMediaRendererSource()`. A still image, a `MediaStream`
+  and a file still converting under `normalize: { stream: true }` refuse it
+  with a `RangeError` that says why, and so does a clip whose frame count
   differs from the video's without `frames.times_s`.
 - A clip without a `preview`, or on a browser that cannot decode it, draws
   no depth while it plays. With one, the preview's precision is what plays:
