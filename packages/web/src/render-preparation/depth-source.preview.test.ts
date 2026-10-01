@@ -710,6 +710,7 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     return new Response(Uint8Array.of(index));
   }) as unknown as typeof globalThis.fetch;
   const preparer = {
+    concurrency: 1,
     decodeConfidence: vi.fn(),
     decodeDepth: vi.fn(async (bytes: ArrayBuffer) => ({
       height: HEIGHT,

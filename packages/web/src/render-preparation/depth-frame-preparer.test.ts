@@ -164,6 +164,45 @@ describe("depth frame preparer", () => {
     expect(worker.terminate).not.toHaveBeenCalled();
   });
 
+  it("spreads decodes over a pool sized like the mask workers", async () => {
+    const workers: ReturnType<typeof createFakeWorker>[] = [];
+    const { bytes, samples } = await depthPng();
+    const preparer = createDepthFramePreparer({
+      maskFrame: { workerCount: 3 },
+      workerFactory: {
+        createWorker: () => {
+          const fake = createFakeWorker();
+
+          workers.push(fake);
+          return fake.worker as unknown as Worker;
+        },
+      },
+    });
+
+    expect(preparer.concurrency).toBe(3);
+    // One worker until it has answered, so a blocked worker costs one.
+    expect(workers).toHaveLength(1);
+    await preparer.decodeDepth(await bytes());
+
+    const files = await Promise.all([bytes(), bytes(), bytes(), bytes()]);
+    const decoded = await Promise.all(
+      files.map((file) => preparer.decodeDepth(file)),
+    );
+
+    expect(workers).toHaveLength(3);
+    for (const fake of workers) expect(fake.posts.length).toBeGreaterThan(0);
+    for (const map of decoded) expect(map.values).toEqual(samples);
+  });
+
+  it("decodes one at a time on the main thread", () => {
+    const preparer = createDepthFramePreparer({
+      maskFrame: { workerCount: 4 },
+      mode: RenderPreparationMode.MainThread,
+    });
+
+    expect(preparer.concurrency).toBe(1);
+  });
+
   it("decodes confidence planes and pads odd depth rows on the main thread", async () => {
     const preparer = createDepthFramePreparer({
       mode: RenderPreparationMode.MainThread,

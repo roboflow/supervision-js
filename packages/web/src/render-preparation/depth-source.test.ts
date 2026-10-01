@@ -446,6 +446,39 @@ describe("depth source from a clip manifest", () => {
     source.destroy();
   });
 
+  it("loads as many frames at once as the decode pool has workers, nearest first", async () => {
+    const server = clipServer();
+    const gate = createGate();
+    const preparer = server.preparer();
+    let inFlight = 0;
+    let most = 0;
+
+    Object.assign(preparer, { concurrency: 3 });
+    vi.mocked(preparer.decodeDepth).mockImplementation(async (bytes) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await gate.promise;
+      inFlight -= 1;
+      return {
+        height: CLIP_HEIGHT,
+        values: new Uint16Array(CLIP_WIDTH * CLIP_HEIGHT).fill(
+          new Uint8Array(bytes)[0] * 256,
+        ),
+        width: CLIP_WIDTH,
+      };
+    });
+    const source = await openClip(server);
+
+    source.getEntry(5);
+    await vi.waitFor(() => expect(server.fetchedFrames()).toEqual([5, 6, 4]));
+    gate.resolve();
+    await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
+    expect(server.fetchedFrames()).toEqual([5, 6, 4, 7, 3]);
+    expect(most).toBe(3);
+
+    source.destroy();
+  });
+
   it("stays within the clip at its ends", async () => {
     const server = clipServer();
     const source = await openClip(server);

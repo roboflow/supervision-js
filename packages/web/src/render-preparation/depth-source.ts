@@ -512,7 +512,7 @@ async function openDepthClip(
           },
     inFlightCount: loading.size,
     kind: RenderPreparationArtifactKind.ExactDepthFrame,
-    maxInFlightCount: 1,
+    maxInFlightCount: exactConcurrency(),
     maxPreparedCount: exactCapacityFrames,
     pendingCount: loading.size,
     prefetchCount: 2 * options.neighborFrameCount + 1,
@@ -718,18 +718,24 @@ async function openDepthClip(
    * loaded, as a step onto the mask window's paused margin does. A move stops
    * the frames not yet asked for; one already loading finishes and is kept.
    */
-  const loadAround = async (center: number, signal: AbortSignal) => {
-    await load(center);
+  const loadAround = (center: number, signal: AbortSignal) =>
+    loadInOrder(
+      [
+        center,
+        ...neighbourOrder(
+          center,
+          options.neighborFrameCount,
+          previewWindow?.heading() ?? lastStep,
+        ).filter((index) => index >= 0 && index < frames.count),
+      ],
+      load,
+      exactConcurrency(),
+      signal,
+    );
 
-    for (const index of neighbourOrder(
-      center,
-      options.neighborFrameCount,
-      previewWindow?.heading() ?? lastStep,
-    )) {
-      if (signal.aborted) return;
-      if (index >= 0 && index < frames.count) await load(index);
-    }
-  };
+  /** Loads run at once: one per decode worker, as the mask pool sizes them. */
+  const exactConcurrency = () =>
+    Math.max(1, context.preparer?.().concurrency ?? 1);
 
   /** Which way the frame on screen last moved, for a clip without a preview. */
   let lastStep: -1 | 0 | 1 = 0;
@@ -911,6 +917,32 @@ async function openDepthClip(
       cachedBytes = 0;
     },
   };
+}
+
+/**
+ * Runs `load` over `indices` with up to `concurrency` at once, starting them
+ * in order, so the first ones land first. An abort starts no more; loads
+ * already running finish.
+ */
+export async function loadInOrder(
+  indices: readonly number[],
+  load: (index: number) => Promise<void>,
+  concurrency: number,
+  signal: AbortSignal,
+): Promise<void> {
+  let next = 0;
+  const lane = async () => {
+    while (next < indices.length && !signal.aborted) {
+      await load(indices[next++]);
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.max(1, Math.min(concurrency, indices.length)) },
+      lane,
+    ),
+  );
 }
 
 /**

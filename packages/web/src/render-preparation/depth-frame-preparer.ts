@@ -1,5 +1,6 @@
 import { createDefaultRenderPreparationWorkerFactory } from "./default-render-preparation-worker";
 import { decodeDepthPreparationRequest } from "./depth-frame-decode";
+import { getBrowserMaskPreparationWorkerCount } from "./mask-preparation-worker-count";
 import {
   DepthPreparationWorkerMessageType,
   type DepthPreparationWorkerRequest,
@@ -33,6 +34,11 @@ export interface DepthDecodeOptions {
 }
 
 export interface DepthFramePreparer {
+  /**
+   * Decodes worth running at once: one per worker in the pool, sized as the
+   * mask workers are, or 1 on the main thread.
+   */
+  readonly concurrency: number;
   /** Decodes a 16-bit depth PNG. The bytes are the preparer's from here on. */
   decodeDepth(
     bytes: ArrayBuffer,
@@ -47,48 +53,86 @@ export interface DepthFramePreparer {
 }
 
 /**
- * Decodes depth and confidence PNGs in the render-preparation worker, the one
- * the session already uses for masks and heatmaps, or on the main thread when
- * the mode asks for it or `Auto` finds no working worker.
+ * Decodes depth and confidence PNGs in a pool of render-preparation workers,
+ * sized the way the mask pool is (`maskFrame.workerCount`, by default half
+ * the cores up to 4), or on the main thread when the mode asks for it or
+ * `Auto` finds no working worker. The first worker starts at once, so a
+ * factory that throws fails `Worker` mode here; the others start only when
+ * every running one is busy, so a still map never spawns a pool.
  *
- * Until the worker has answered once, `Auto` posts a copy of the bytes, so a
+ * Until a worker has answered once, `Auto` posts a copy of the bytes, so a
  * worker that fails to start (a CSP that blocks blob workers, say) leaves the
  * original to decode here. After that the bytes are transferred. Nothing ever
- * terminates the worker to cancel a decode: an aborted request's reply is
+ * terminates a worker to cancel a decode: an aborted request's reply is
  * dropped when it arrives.
  */
 export function createDepthFramePreparer(
   options: RenderPreparationOptions | undefined,
 ): DepthFramePreparer {
   const mode = options?.mode ?? RenderPreparationMode.Auto;
+  const poolSize = getBrowserMaskPreparationWorkerCount(
+    options?.maskFrame?.workerCount,
+  );
   let isDestroyed = false;
   let workerAnswered = false;
   let warnedFallback = false;
-  let rpc: WorkerRpcClient<
-    DepthPreparationWorkerRequest,
-    DepthPreparationWorkerResponse
-  > | null = null;
+  let factory: { createWorker(): Worker } | null = null;
+  let pool: PoolWorker[] | null = null;
+
+  const startWorker = (): PoolWorker => {
+    const worker: PoolWorker = {
+      busy: 0,
+      rpc: createWorkerRpcClient<
+        DepthPreparationWorkerRequest,
+        DepthPreparationWorkerResponse
+      >({
+        defaultErrorMessage: "Depth preparation worker failed.",
+        isResponse: isDepthResponse,
+        worker: factory!.createWorker(),
+      }),
+    };
+
+    pool!.push(worker);
+    return worker;
+  };
 
   if (mode !== RenderPreparationMode.MainThread) {
     try {
       if (!options?.workerFactory && typeof Worker === "undefined") {
         throw new Error("Depth preparation worker is unavailable.");
       }
-      const factory =
+      factory =
         options?.workerFactory ?? createDefaultRenderPreparationWorkerFactory();
-
-      rpc = createWorkerRpcClient<
-        DepthPreparationWorkerRequest,
-        DepthPreparationWorkerResponse
-      >({
-        defaultErrorMessage: "Depth preparation worker failed.",
-        isResponse: isDepthResponse,
-        worker: factory.createWorker(),
-      });
+      pool = [];
+      startWorker();
     } catch (error) {
+      pool = null;
       if (mode === RenderPreparationMode.Worker) throw error;
     }
   }
+
+  /** The least busy worker, starting another while all are busy and there is room. */
+  const pickWorker = (): PoolWorker | null => {
+    if (!pool || pool.length === 0) return null;
+
+    let least = pool[0];
+
+    for (const worker of pool) if (worker.busy < least.busy) least = worker;
+    if (least.busy > 0 && pool.length < poolSize && workerAnswered) {
+      try {
+        return startWorker();
+      } catch {
+        // A pool that cannot grow keeps the workers it has.
+      }
+    }
+
+    return least;
+  };
+
+  const abandonPool = () => {
+    for (const worker of pool ?? []) worker.rpc.destroy();
+    pool = null;
+  };
 
   const decode = async (
     bytes: ArrayBuffer,
@@ -114,8 +158,9 @@ export function createDepthFramePreparer(
       type: DepthPreparationWorkerMessageType.Decode,
     } as const;
     let response: DepthPreparationWorkerResponse | undefined;
+    const worker = pickWorker();
 
-    if (rpc) {
+    if (worker) {
       const transfer =
         mode === RenderPreparationMode.Worker || workerAnswered
           ? [bytes]
@@ -123,8 +168,12 @@ export function createDepthFramePreparer(
 
       const byteLength = bytes.byteLength;
 
+      worker.busy += 1;
       try {
-        response = await abortable(rpc.request(request, transfer), signal);
+        response = await abortable(
+          worker.rpc.request(request, transfer),
+          signal,
+        );
         workerAnswered = true;
       } catch (error) {
         if (
@@ -135,8 +184,7 @@ export function createDepthFramePreparer(
           throw error;
         }
         // A worker that broke stays broken; later decodes stay here.
-        rpc?.destroy();
-        rpc = null;
+        abandonPool();
         // Bytes the worker already took cannot be decoded here.
         if (bytes.byteLength !== byteLength) throw error;
         if (!warnedFallback) {
@@ -146,6 +194,8 @@ export function createDepthFramePreparer(
             error,
           );
         }
+      } finally {
+        worker.busy -= 1;
       }
     }
 
@@ -164,6 +214,10 @@ export function createDepthFramePreparer(
   };
 
   return {
+    get concurrency() {
+      return pool ? poolSize : 1;
+    },
+
     async decodeConfidence(bytes, decodeOptions = {}) {
       const response = await decode(bytes, 8, decodeOptions);
 
@@ -192,10 +246,18 @@ export function createDepthFramePreparer(
 
     destroy() {
       isDestroyed = true;
-      rpc?.destroy();
-      rpc = null;
+      abandonPool();
     },
   };
+}
+
+interface PoolWorker {
+  /** Requests posted and not yet answered. */
+  busy: number;
+  readonly rpc: WorkerRpcClient<
+    DepthPreparationWorkerRequest,
+    DepthPreparationWorkerResponse
+  >;
 }
 
 /** Rejects when the signal aborts; the work itself carries on unobserved. */
