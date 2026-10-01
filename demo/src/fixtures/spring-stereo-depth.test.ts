@@ -49,27 +49,7 @@ const layerFiles = manifests.flatMap(({ layer, manifest }) => {
 });
 
 describe("Spring stereo depth fixture", () => {
-  it("offers a ground-truth layer and a stereo matcher layer, opening on the matcher", () => {
-    expect(depth).toEqual({
-      defaultLayer: "sgbm",
-      layers: [
-        {
-          id: "ground-truth",
-          label: "Ground truth (Spring)",
-          manifest: "ground-truth/depth.json",
-          source: "ground_truth",
-        },
-        {
-          id: "sgbm",
-          label: "Stereo matcher (OpenCV SGBM)",
-          manifest: "sgbm/depth.json",
-          source: "prediction",
-        },
-      ],
-    });
-  });
-
-  it("opens from the catalog for depth alone, served from its own folder", () => {
+  it("opens on the matcher's depth alone, each layer served from its own folder", () => {
     const fixture = demoFixtureCatalog.find(
       ({ sampleName }) => sampleName === "spring_stereo_depth",
     );
@@ -81,12 +61,16 @@ describe("Spring stereo depth fixture", () => {
         layers: [
           {
             id: "ground-truth",
+            label: "Ground truth (Spring)",
             manifestSrc:
               "/fixtures/spring_stereo_depth/ground-truth/depth.json",
+            source: "ground_truth",
           },
           {
             id: "sgbm",
+            label: "Stereo matcher (OpenCV SGBM)",
             manifestSrc: "/fixtures/spring_stereo_depth/sgbm/depth.json",
+            source: "prediction",
           },
         ],
       },

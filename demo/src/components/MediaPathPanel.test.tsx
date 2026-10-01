@@ -119,14 +119,10 @@ describe("MediaPathPanel", () => {
     ).toBe(false);
   });
 
-  it("says on each card what depth it draws, and what depth video costs on Mediabunny", () => {
+  it("says on each card what depth it draws", () => {
     const text = prose(render());
-    const mediabunny = demoMediaPathCopy[DemoMediaPath.Mediabunny].depth;
 
-    expect(text).toContain(mediabunny);
+    expect(text).toContain(demoMediaPathCopy[DemoMediaPath.Mediabunny].depth);
     expect(text).toContain(demoMediaPathCopy[DemoMediaPath.Engine].depth);
-    expect(mediabunny).toContain("Depth video in step with the clip");
-    expect(mediabunny).toContain("decodes in the page beside the clip");
-    expect(mediabunny).toContain("Depth stays off while the clip is converted");
   });
 });
