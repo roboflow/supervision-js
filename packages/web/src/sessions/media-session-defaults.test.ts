@@ -33,6 +33,12 @@ describe("media session defaults", () => {
       selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
     });
     expect(defaults.renderPreparation).toMatchObject({
+      depth: {
+        exactNeighborFrameCount: 2,
+        exactSettleSeconds: 0.15,
+        previewPrefetchSeconds: 1,
+        previewRetainSeconds: 0.25,
+      },
       maskFrame: {
         maxCacheFrameCount: 240,
         maxPendingFrameCount: 24,

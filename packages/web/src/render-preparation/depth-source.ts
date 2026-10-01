@@ -42,6 +42,17 @@ const DEPTH_ASPECT_TOLERANCE = 0.01;
 const MEBIBYTE = 1024 * 1024;
 const DEFAULT_PREVIEW_PREFETCH_SECONDS = 1;
 const DEFAULT_PREVIEW_RETAIN_SECONDS = 0.25;
+/**
+ * Depth's timing defaults, the same for a file and a stream session: a depth
+ * clip pairs with the media's frames, so it is either all there or refused.
+ * The byte budgets are left out because they scale with each clip's size.
+ */
+export const DEFAULT_DEPTH_TIMING_OPTIONS = {
+  exactNeighborFrameCount: 2,
+  exactSettleSeconds: 0.15,
+  previewPrefetchSeconds: DEFAULT_PREVIEW_PREFETCH_SECONDS,
+  previewRetainSeconds: DEFAULT_PREVIEW_RETAIN_SECONDS,
+} as const satisfies RenderPreparationDepthOptions;
 /** The preview budget's floor: what a 1080p clip needs for a 1.35 s lead. */
 const MIN_DEFAULT_PREVIEW_CACHE_BYTES = 96 * MEBIBYTE;
 /** And its ceiling: 64 frames of 4K, about two seconds at 30 fps. */
