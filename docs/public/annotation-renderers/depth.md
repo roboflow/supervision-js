@@ -183,22 +183,58 @@ frame is presented. A frame whose preview has not been decoded
 yet draws no depth rather than another frame's. When the session's playback
 gate is on (the default), playback waits for the preview the way it waits for
 masks: it holds while the decoded lead in front of the playhead is short and
-resumes once it has caught up, and `maxWaitSeconds` bounds every wait.
-`renderPreparation.onDiagnostics` reports the preview window as a
-`depthFrame` artifact: frames held, the lead in seconds, the hold in force and
-`gateHoldCount`.
+resumes once it has caught up, and `maxWaitSeconds` bounds every wait. The
+picture never waits for depth to open: a manifest loads after the first frame
+is up, and until it has, the media plays without depth. Once it is open, a
+preview frame still downloading or decoding holds playback like a mask still
+cooking; an exact PNG never does, since it is drawn only at rest.
+
+How far ahead the preview decodes follows how the playhead moves, read the way
+the mask window reads it:
+
+- Playing, it leads by `previewPrefetchSeconds`, stretched by how many frames
+  each present moves above 1x. When every present moves the same number of
+  frames (a 30 fps clip at 4x or 8x on a 60 Hz display), only the frames
+  presents land on are copied out. On a looping clip the lead wraps, so the
+  first frames are decoded before playback gets back to them.
+- Dragged, it spends the same span both ways, three quarters of it the way the
+  hand is heading, as the web video engine's own scrub window does. Dragged
+  backwards, each run from a key frame keeps every frame up to the playhead,
+  so a backward drag decodes each group of pictures once instead of once per
+  move. Decoding follows the positions the hand asks for rather than the
+  frames that land behind it.
+- At rest it keeps a small margin, as the mask window does: one schedule
+  batch past the frame on screen (`maskFrame.scheduleBatchSize`, so three
+  frames on a renderer and seventeen in a session). A step backwards fills
+  behind. A step at rest waits only for its own frame, and an exact frame
+  already loaded is enough.
+
+While the page is hidden the preview decodes nothing and no exact frame is
+loaded; both pick up from the playhead when the page shows again.
+
+`renderPreparation.onDiagnostics` reports depth beside masks and polygons, in
+one report: the preview window as a `depthFrame` artifact (frames held, the
+lead in seconds, the hold in force and `gateHoldCount`) and the exact frames
+as an `exactDepthFrame` artifact (frames kept and loading). A session's
+activity text says "Waiting for depth" or "Catching depth up" when depth is
+what holds playback. `onFrame` and the renderer state carry
+`activeDepthFrameIndex` and `activeDepthPrecision`, and the frame timings
+report depth's draw as `depthMs`.
 
 When playback rests for 0.15 s, the exact PNG for the frame on screen is
 fetched and replaces the preview, then its neighbours are fetched for
-stepping. A preview value is within one preview step of the exact value, plus
-the video codec's error; `readDepthAt` reports `precision: "preview"` and the
-`step` for it.
+stepping, three in four the way the frame last moved. A preview value is
+within one preview step of the exact value, plus the video codec's error;
+`readDepthAt` reports `precision: "preview"` and the `step` for it.
 
-`renderPreparation.depth` sets the budgets. By default the session keeps about
-2.25 seconds of preview (twice the 1-second prefetch, plus a quarter second
-behind the playhead) at the clip's resolution, at least 96 MiB and at most
-512 MiB, and 128 MiB of exact frames, more for clips too large to hold the
-frame at rest and its neighbours twice:
+`renderPreparation.depth` sets the budgets, and
+`resolveMediaSessionDefaults()` reports the timing a session runs on. By
+default the session keeps about 2.25 seconds of preview (twice the 1-second
+prefetch, plus a quarter second behind the playhead) at the clip's resolution,
+at least 96 MiB and at most 512 MiB, and 128 MiB of exact frames, more for
+clips too large to hold the frame at rest and its neighbours twice. The gate's
+`requiredAheadSeconds` caps the lead a stop waits for, never how far depth
+decodes, as it does for masks:
 
 ```ts
 const session = await createMediaSession({
@@ -233,8 +269,8 @@ Some decoders hand frames back only once more input arrives or a flush asks
 for them. The session flushes a decoder that sits on every frame it was
 given, at the next key frame, so no frame is lost. Every wait on a decoder
 has a deadline (3 s for a support check or a flush that returns nothing, 5 s
-for the probe's first frame); downloading the preview never does, since a
-slow link is no fault. Where no decoder returns a frame of the probe, the
+for the probe's first frame) that runs only while the page is visible;
+downloading the preview never does, since a slow link is no fault. Where no decoder returns a frame of the probe, the
 preview is left off without being fetched, and a decoder that stops while
 playing is closed: the clip then draws exact depth while playback rests and
 none while it plays, and says why in the diagnostics `message` and once in
@@ -399,7 +435,12 @@ PNG that every tool opens; on a synthetic test scene it came out 6% (Up) to
   frames a second, so 8x of a 24 fps clip outran it), the playback gate
   stops playback until the decoded lead catches up, each stop bounded by
   `maxWaitSeconds`; with the gate off, frames the decoder has not reached
-  draw no depth.
+  draw no depth. Starting playback from rest at 4x or faster waits for the
+  lead the gate asks for, since the rest margin is shorter than it.
+- The preview decoder only moves forward from a key frame. A backward drag
+  decodes each group of pictures once, from its key frame; a jump far back
+  waits for that group. With the gate on, frames wait for their depth, so a
+  decoder that cannot keep up shows as a picture trailing the hand.
 - On WebGL a map whose width is odd goes up with one padding texel per row,
   padded by the worker while it decodes a manifest's PNG; WebGPU uploads the
   samples as they are.

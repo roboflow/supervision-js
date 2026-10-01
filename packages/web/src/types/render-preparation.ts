@@ -331,9 +331,13 @@ export interface RenderPreparationDepthOptions {
    */
   readonly maxPreviewCacheBytes?: number;
   /**
-   * How far ahead of the playhead the preview is decoded, in seconds of
-   * media. Defaults to 1. A playback gate asking for more lead at a fast rate
-   * raises it to twice that lead.
+   * How far ahead of the playhead the preview is decoded while playing, in
+   * seconds of media. Defaults to 1. Above 1x it stretches by how many frames
+   * each present moves, as the mask window's cooks spread over the frames
+   * presents land on; a drag spends the same span both ways, most of it the
+   * way the hand heads. At rest the preview keeps the mask window's paused
+   * margin instead, one `maskFrame.scheduleBatchSize` past the frame on
+   * screen.
    */
   readonly previewPrefetchSeconds?: number;
   /** Preview kept behind the playhead, in seconds of media. Defaults to 0.25. */

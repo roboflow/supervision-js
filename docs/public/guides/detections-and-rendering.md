@@ -42,6 +42,9 @@ both gates are about detections. They differ in which stage above they wait on.
   for **preparation**: whether the geometries that need rasterizing have become
   the ID-mask artifact that draws them. Masks and polygons take that step. The
   other geometries have nothing to rasterize, so this gate never waits on them.
+  A depth clip takes part too, though it is not detection data: the gate waits
+  for the frame's depth preview to be decoded, with the same thresholds and
+  bound. See [Depth maps](../annotation-renderers/depth.md#depth-during-playback).
 
 Both gates hold every frame on either kind of media source. A source the
 renderer pulls samples from waits between decoding and drawing. On a source
