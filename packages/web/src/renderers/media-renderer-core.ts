@@ -40,6 +40,7 @@ import {
 } from "#types/media-renderer";
 import { MediaInteractionMode } from "supervision-js-core";
 import {
+  RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
@@ -232,6 +233,32 @@ export async function createMediaRendererCore(
     mediaScene?.setDepthSource?.(next);
     depthSource?.destroy();
     depthSource = next;
+  };
+  /**
+   * A depth manifest given at creation loads once the first frame is up:
+   * the picture never waits on depth files, which can take minutes on a slow
+   * link, and the frame on screen redraws with depth when they arrive. A load
+   * that fails leaves the media playing without depth and says why.
+   */
+  const loadCreationDepthManifest = () => {
+    const depth = options.depth;
+
+    if (!depth || !("manifest" in depth) || depth.manifest === undefined) {
+      return;
+    }
+    applyDepth(depth).catch((error: unknown) => {
+      if (runtimeState.isDestroyed()) return;
+
+      const message = `Depth did not load, so the media plays without it: ${String(error)}`;
+
+      console.warn(message);
+      handleRenderPreparationDiagnostics({
+        artifacts: [],
+        executionMode: RenderPreparationExecutionMode.MainThread,
+        message,
+        workerStatus: RenderPreparationWorkerStatus.Disabled,
+      });
+    });
   };
   // A drag is a run of scrubs closed by the seek that lands it, the pairing the
   // transport already keeps for the producer.
@@ -1271,7 +1298,8 @@ export async function createMediaRendererCore(
     detectionTimeline.setTimelineContext?.(timelineContext);
     mediaScene.setTimelineContext?.(timelineContext);
     mediaScene.initializeMedia(mediaDimensions);
-    if (options.depth) {
+    if (options.depth && "map" in options.depth && options.depth.map) {
+      // A map in hand is checked at once and drawn under the first frame.
       await applyDepth(options.depth);
       if (runtimeState.isDestroyed()) return renderer;
     }
@@ -1361,6 +1389,7 @@ export async function createMediaRendererCore(
       if (runtimeState.isDestroyed() || runtimeState.isError()) return renderer;
       pushPresentationReady = true;
       runtimeState.setReady();
+      loadCreationDepthManifest();
 
       if (options.autoPlay ?? true) {
         // Opening exposes the writer even when autoplay awaits future detections.
@@ -1382,6 +1411,7 @@ export async function createMediaRendererCore(
 
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
+    loadCreationDepthManifest();
     const waitForSample = shouldGatePlayback
       ? (sample: DecodedVideoSample, signal: AbortSignal) =>
           holdForSampleReadiness(sample.timestamp, signal)

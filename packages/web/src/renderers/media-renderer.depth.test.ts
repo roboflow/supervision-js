@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   annotationRenderers,
+  MediaRendererPlaybackState,
   readDepthAt,
   type DepthMap,
 } from "supervision-js-core";
@@ -101,6 +102,8 @@ describe("media renderer depth", () => {
       renderers: [annotationRenderers.depth()],
     });
 
+    await vi.waitFor(() => expect(renderer.getActiveDepth?.()).not.toBeNull());
+
     const active = renderer.getActiveDepth?.();
 
     expect(active?.map.samples.values).toEqual(samples);
@@ -112,6 +115,55 @@ describe("media renderer depth", () => {
         { height: active!.mediaHeight, width: active!.mediaWidth },
       ),
     ).toMatchObject({ confidence: 2 / 255, disparityPx: 3, x: 2, y: 0 });
+
+    renderer.destroy();
+  });
+
+  it("shows the media without waiting for a manifest given at creation, and draws depth when it lands", async () => {
+    const manifestGate = createDeferred<void>();
+    const { samples } = await stubDepthServer(manifestGate.promise);
+    const renderer = await createRenderer(false, false, {
+      depth: { manifest: "https://example.test/depth/depth.json" },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    // Ready over the media's first frame while depth.json is still in flight.
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Ready,
+    );
+    expect(renderer.getActiveDepth?.()).toBeNull();
+
+    manifestGate.resolve();
+    await vi.waitFor(() =>
+      expect(renderer.getActiveDepth?.()?.map.samples.values).toEqual(samples),
+    );
+
+    renderer.destroy();
+  });
+
+  it("keeps the media up when a manifest given at creation fails, and says why", async () => {
+    await stubDepthServer();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onDiagnostics = vi.fn();
+    const renderer = await createRenderer(false, false, {
+      depth: { manifest: "https://example.test/missing.json" },
+      renderPreparation: { onDiagnostics },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+
+    const message =
+      "Depth did not load, so the media plays without it: Error: Unable to load depth manifest https://example.test/missing.json: 404";
+
+    expect(warn.mock.calls[0]?.[0]).toBe(message);
+    expect(onDiagnostics).toHaveBeenLastCalledWith(
+      expect.objectContaining({ artifacts: [], message }),
+    );
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Ready,
+    );
+    expect(renderer.getActiveDepth?.()).toBeNull();
 
     renderer.destroy();
   });
