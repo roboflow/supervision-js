@@ -23,7 +23,7 @@ import {
 import {
   DocsDepthRangeMode,
   createDocsDepthRenderer,
-  describeDepthColourRange,
+  resolveDepthColourRange,
   initialDocsDepthSettings,
   roundRange,
   type DocsDepthSettings,
@@ -237,7 +237,7 @@ export function DevDepthPlayground() {
   };
 
   const colourRange = useMemo(
-    () => describeDepthColourRange(depthMapFor(resolution), settings),
+    () => resolveDepthColourRange(depthMapFor(resolution), settings),
     [resolution, settings],
   );
 

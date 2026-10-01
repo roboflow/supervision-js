@@ -1,8 +1,14 @@
 import { useState, type ReactNode } from "react";
-import type { DepthColormap, DepthQuantity, DepthSampling } from "supervision";
+import {
+  depthColormapColors,
+  type DepthColormap,
+  type DepthQuantity,
+  type DepthSampling,
+} from "supervision";
 import {
   DocsDepthRangeMode,
   createDocsDepthSnippet,
+  type DocsDepthColourRange,
   type DocsDepthSettings,
 } from "../docs-depth";
 import "./depth-renderer-controls.css";
@@ -28,8 +34,8 @@ export function DepthRendererControls(props: {
   readonly onChange: (patch: Partial<DocsDepthSettings>) => void;
   readonly onLock: (quantity: DepthQuantity) => boolean;
   readonly canLock: boolean;
-  /** The note under the range control, from `describeDepthColourRange`. */
-  readonly colourRange: string;
+  /** What the legend under the range control labels its ends with. */
+  readonly colourRange: DocsDepthColourRange;
   /** Controls that choose what is shown, placed before the renderer's own. */
   readonly children?: ReactNode;
 }) {
@@ -106,7 +112,10 @@ export function DepthRendererControls(props: {
           </button>
         </div>
       ) : null}
-      <p className="depth-renderer-controls__note">{props.colourRange}</p>
+      <DepthColourLegend
+        colormap={settings.colormap}
+        range={props.colourRange}
+      />
       <PlaygroundSlider
         label="Opacity"
         onChange={(opacity) => onChange({ opacity })}
@@ -157,6 +166,44 @@ export function DepthRendererControls(props: {
           />
         </span>
       </label>
+    </div>
+  );
+}
+
+/**
+ * The colormap as the renderer draws it, far end on the left, with the value
+ * at each end. It keeps one height whatever the range says.
+ */
+function DepthColourLegend(props: {
+  readonly colormap: DepthColormap;
+  readonly range: DocsDepthColourRange;
+}) {
+  const { range } = props;
+
+  return (
+    <div className="depth-renderer-controls__legend">
+      <span
+        aria-hidden="true"
+        style={{
+          background: `linear-gradient(to right, ${depthColormapColors(props.colormap).join(", ")})`,
+        }}
+      />
+      {"message" in range ? (
+        <p>
+          <small>{range.message}</small>
+        </p>
+      ) : (
+        <p
+          aria-label={`Colours run from ${range.far} ${range.unit} (far) to ${range.near} ${range.unit} (near)`}
+        >
+          <small>
+            far {range.far} {range.unit}
+          </small>
+          <small>
+            near {range.near} {range.unit}
+          </small>
+        </p>
+      )}
     </div>
   );
 }

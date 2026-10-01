@@ -174,23 +174,32 @@ export function describeDepthReadout(
   };
 }
 
+/** What the colours span, or why that is not known yet. */
+export type DocsDepthColourRange =
+  | {
+      readonly near: number;
+      readonly far: number;
+      readonly unit: "px" | "m";
+    }
+  | { readonly message: string };
+
 /**
- * The span the colours cover, near end first, for the note under the range
- * control. `"clip"` reads the map's display range, converted to metres
- * through its camera when the quantity is depth; `"auto"` is the map's own
- * 2nd to 98th percentile.
+ * The values at the near (warm) and far ends of the colours, for the legend
+ * under the range control. `"clip"` reads the map's display range, converted
+ * to metres through its camera when the quantity is depth; `"auto"` is the
+ * map's own 2nd to 98th percentile.
  */
-export function describeDepthColourRange(
+export function resolveDepthColourRange(
   map: DepthMap | null,
   settings: DocsDepthSettings,
-): string {
+): DocsDepthColourRange {
   const unit = settings.quantity === "depth" ? "m" : "px";
   let range: DepthRange | null;
 
   if (settings.rangeMode === DocsDepthRangeMode.Manual) {
     range = settings.manualRange;
   } else if (!map) {
-    return "Colour range: shown once depth is on screen";
+    return { message: "Shown once depth is on screen" };
   } else if (
     settings.rangeMode === DocsDepthRangeMode.Auto ||
     !map.displayRange
@@ -208,12 +217,11 @@ export function describeDepthColourRange(
     range = map.displayRange;
   }
 
-  if (!range) return "Colour range: not enough valid samples";
+  if (!range) return { message: "Not enough valid samples" };
 
-  const near = settings.quantity === "depth" ? range.min : range.max;
-  const far = settings.quantity === "depth" ? range.max : range.min;
-
-  return `Colour range: near ${roundRange(near)} ${unit} (warm) to far ${roundRange(far)} ${unit}`;
+  return settings.quantity === "depth"
+    ? { far: roundRange(range.max), near: roundRange(range.min), unit }
+    : { far: roundRange(range.min), near: roundRange(range.max), unit };
 }
 
 /** Three decimals at most, as the range inputs and the snippet show them. */

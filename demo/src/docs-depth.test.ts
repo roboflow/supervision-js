@@ -6,7 +6,7 @@ import {
   DocsDepthRangeMode,
   createDocsDepthRenderer,
   createDocsDepthSnippet,
-  describeDepthColourRange,
+  resolveDepthColourRange,
   describeDepthReadout,
   initialDocsDepthSettings,
   type DocsDepthSettings,
@@ -158,7 +158,7 @@ describe("depth pointer readout", () => {
   });
 });
 
-describe("depth colour range note", () => {
+describe("depth colour legend", () => {
   /** Disparity 2 to 32 px of a 1346.8 px, 6.5 cm stereo rig, like Spring's. */
   const map: DepthMap = {
     camera: { baselineM: 0.065, fxPx: 1346.8013 },
@@ -173,37 +173,39 @@ describe("depth colour range note", () => {
     width: 100,
   };
 
-  it("reads the clip range, near end first, in the quantity's unit", () => {
-    expect(describeDepthColourRange(map, initialDocsDepthSettings)).toBe(
-      "Colour range: near 32 px (warm) to far 2 px",
-    );
+  it("reads the clip range, near end warm, in the quantity's unit", () => {
+    expect(resolveDepthColourRange(map, initialDocsDepthSettings)).toEqual({
+      far: 2,
+      near: 32,
+      unit: "px",
+    });
     expect(
-      describeDepthColourRange(map, {
+      resolveDepthColourRange(map, {
         ...initialDocsDepthSettings,
         quantity: "depth",
       }),
-    ).toBe("Colour range: near 2.736 m (warm) to far 43.771 m");
+    ).toEqual({ far: 43.771, near: 2.736, unit: "m" });
   });
 
   it("reads this frame's percentiles in auto, and the inputs in manual", () => {
     expect(
-      describeDepthColourRange(map, {
+      resolveDepthColourRange(map, {
         ...initialDocsDepthSettings,
         rangeMode: DocsDepthRangeMode.Auto,
       }),
-    ).toBe("Colour range: near 97 px (warm) to far 3 px");
+    ).toEqual({ far: 3, near: 97, unit: "px" });
     expect(
-      describeDepthColourRange(null, {
+      resolveDepthColourRange(null, {
         ...initialDocsDepthSettings,
         manualRange: { max: 20, min: 4 },
         rangeMode: DocsDepthRangeMode.Manual,
       }),
-    ).toBe("Colour range: near 20 px (warm) to far 4 px");
+    ).toEqual({ far: 4, near: 20, unit: "px" });
   });
 
   it("waits for depth on screen before describing a map's range", () => {
-    expect(describeDepthColourRange(null, initialDocsDepthSettings)).toBe(
-      "Colour range: shown once depth is on screen",
-    );
+    expect(resolveDepthColourRange(null, initialDocsDepthSettings)).toEqual({
+      message: "Shown once depth is on screen",
+    });
   });
 });

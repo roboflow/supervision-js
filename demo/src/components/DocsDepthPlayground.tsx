@@ -11,7 +11,7 @@ import {
 import {
   DocsDepthRangeMode,
   createDocsDepthRenderer,
-  describeDepthColourRange,
+  resolveDepthColourRange,
   initialDocsDepthSettings,
   roundRange,
   type DocsDepthSettings,
@@ -242,7 +242,7 @@ export function DocsDepthPlayground() {
         </p>
         <DepthRendererControls
           canLock={pointer.active !== null}
-          colourRange={describeDepthColourRange(shownMap, settings)}
+          colourRange={resolveDepthColourRange(shownMap, settings)}
           onChange={update}
           onLock={lockRange}
           settings={settings}
