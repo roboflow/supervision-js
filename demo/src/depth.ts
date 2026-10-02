@@ -182,18 +182,12 @@ export function resolveDepthColourRange(
     range = settings.manualRange;
   } else if (!map) {
     return { message: "Shown once depth is on screen" };
-  } else if (settings.rangeMode === DepthRangeMode.Auto || !map.displayRange) {
-    range = computeDepthPercentileRange(map, { quantity: settings.quantity });
-  } else if (settings.quantity === "depth" && map.camera) {
-    const focalBaseline = map.camera.fxPx * map.camera.baselineM;
-    const doffs = map.camera.doffsPx ?? 0;
-
-    range = {
-      max: focalBaseline / (map.displayRange.min + doffs),
-      min: focalBaseline / (map.displayRange.max + doffs),
-    };
   } else {
-    range = map.displayRange;
+    range =
+      (settings.rangeMode === DepthRangeMode.Clip
+        ? displayRangeIn(map, settings.quantity)
+        : null) ??
+      computeDepthPercentileRange(map, { quantity: settings.quantity });
   }
 
   if (!range) return { message: "Not enough valid samples" };
@@ -201,6 +195,79 @@ export function resolveDepthColourRange(
   return settings.quantity === "depth"
     ? { far: roundRange(range.max), near: roundRange(range.min), unit }
     : { far: roundRange(range.min), near: roundRange(range.max), unit };
+}
+
+/** The map's display range in the quantity's unit, through its camera for metres. */
+function displayRangeIn(
+  map: DepthMap,
+  quantity: DepthQuantity,
+): DepthRange | null {
+  if (!map.displayRange) return null;
+  if (quantity !== "depth" || !map.camera) return map.displayRange;
+
+  const focalBaseline = map.camera.fxPx * map.camera.baselineM;
+  const doffs = map.camera.doffsPx ?? 0;
+
+  return {
+    max: focalBaseline / (map.displayRange.min + doffs),
+    min: focalBaseline / (map.displayRange.max + doffs),
+  };
+}
+
+/**
+ * What a manual range is picked from: the clip's display range, or every
+ * value in the map when the clip has no usable one.
+ */
+export function depthMapSpan(
+  map: DepthMap,
+  quantity: DepthQuantity,
+): DepthRange | null {
+  const display = displayRangeIn(map, quantity);
+
+  return display &&
+    Number.isFinite(display.min) &&
+    Number.isFinite(display.max) &&
+    display.min < display.max
+    ? display
+    : computeDepthPercentileRange(map, { high: 1, low: 0, quantity });
+}
+
+/**
+ * The manual range slider's ends and step. A tenth of the span on each side
+ * lets either end be pulled past the clip's own range, and the manual range
+ * is held in full but never padded, so pushing a thumb to an end does not
+ * grow the track under it.
+ */
+export function depthRangeTrack(
+  span: DepthRange,
+  manual: DepthRange,
+): { readonly bounds: DepthRange; readonly step: number } {
+  const width =
+    span.max > span.min ? span.max - span.min : Math.abs(span.max) || 1;
+  const step = 10 ** (Math.floor(Math.log10(width)) - 2);
+  const pad = width / 10;
+  const low = Math.floor((span.min - pad) / step) * step;
+  const high = Math.ceil((span.max + pad) / step) * step;
+
+  return {
+    bounds: {
+      max: Math.max(roundToStep(high, step), manual.max),
+      min: Math.min(
+        span.min >= 0
+          ? Math.max(0, roundToStep(low, step))
+          : roundToStep(low, step),
+        manual.min,
+      ),
+    },
+    step,
+  };
+}
+
+/** Clears the float noise a multiple of a power-of-ten step picks up. */
+export function roundToStep(value: number, step: number) {
+  const decimals = Math.max(0, -Math.floor(Math.log10(step)));
+
+  return Number((Math.round(value / step) * step).toFixed(decimals));
 }
 
 export interface DepthReadoutView {

@@ -266,7 +266,7 @@ export function DocsDepthPlayground() {
             </div>
           </fieldset>
           <DepthControls
-            kit={playgroundKit}
+            kit={depthPlaygroundKit}
             onChange={(patch) =>
               setSettings((current) => ({ ...current, ...patch }))
             }
@@ -345,7 +345,7 @@ function DepthLiveCode({ settings }: { readonly settings: DepthSettings }) {
   );
 }
 
-const playgroundKit: DepthControlKit = {
+export const depthPlaygroundKit: DepthControlKit = {
   Choice: ({ disabled, label, onChange, options, tooltip, value }) => (
     <label className="docs-layer-playground__select" title={tooltip}>
       <strong>{label}</strong>

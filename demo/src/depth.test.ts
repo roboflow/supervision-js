@@ -9,6 +9,8 @@ import {
   createDepthLayerLoader,
   createDepthRenderer,
   createDepthSnippet,
+  depthMapSpan,
+  depthRangeTrack,
   describeDepthReadout,
   initialDepthSettings,
   lockDepthRange,
@@ -207,6 +209,49 @@ describe("depth colour legend", () => {
     expect(resolveDepthColourRange(null, initialDepthSettings)).toEqual({
       message: "Shown once depth is on screen",
     });
+  });
+});
+
+describe("the manual range slider's track", () => {
+  const map: DepthMap = {
+    camera: { baselineM: 0.065, fxPx: 1346.8013 },
+    displayRange: { max: 32, min: 2 },
+    height: 1,
+    kind: "disparity_px",
+    samples: {
+      encoding: "scaled16",
+      scale: 1,
+      values: Uint16Array.from({ length: 100 }, (_, i) => i + 1),
+    },
+    width: 100,
+  };
+
+  it("spans the clip's display range in the quantity's unit, or the whole map without one", () => {
+    expect(depthMapSpan(map, "disparity")).toEqual({ max: 32, min: 2 });
+    expect(depthMapSpan(map, "depth")?.max).toBeCloseTo(43.771, 3);
+    expect(
+      depthMapSpan({ ...map, displayRange: undefined }, "disparity"),
+    ).toEqual({ max: 99, min: 1 });
+  });
+
+  it("pads a tenth each side, stops at zero, and holds a manual range outside it", () => {
+    expect(depthRangeTrack({ max: 32, min: 2 }, { max: 20, min: 4 })).toEqual({
+      bounds: { max: 35, min: 0 },
+      step: 0.1,
+    });
+    expect(
+      depthRangeTrack({ max: 32, min: 2 }, { max: 50, min: 4 }).bounds,
+    ).toEqual({ max: 50, min: 0 });
+  });
+
+  it("does not grow when a thumb is pushed to an end", () => {
+    const first = depthRangeTrack({ max: 32, min: 2 }, { max: 20, min: 4 });
+    const pushed = depthRangeTrack(
+      { max: 32, min: 2 },
+      { max: first.bounds.max, min: first.bounds.min },
+    );
+
+    expect(pushed).toEqual(first);
   });
 });
 

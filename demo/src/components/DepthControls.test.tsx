@@ -8,9 +8,9 @@ import {
   type DepthSettings,
 } from "../depth";
 import type { DepthProbe, DepthProbeSnapshot } from "../hooks/depth-probe";
-import { DepthControls } from "./DepthControls";
+import { DepthControls, type DepthControlKit } from "./DepthControls";
 import { DepthStyleSection, depthStyleKit } from "./DepthStyleSection";
-import { DocsDepthPlayground } from "./DocsDepthPlayground";
+import { DocsDepthPlayground, depthPlaygroundKit } from "./DocsDepthPlayground";
 import { DEPTH_VIDEO_OFF_WHILE_CONVERTING } from "./media-path-copy";
 
 const map: DepthMap = {
@@ -123,6 +123,50 @@ describe("the depth controls", () => {
     );
     expect(styleControls(initialDepthSettings, noDepth)).toContain(
       "Shown once depth is on screen",
+    );
+  });
+});
+
+describe("the manual range slider", () => {
+  const manual: DepthSettings = {
+    ...initialDepthSettings,
+    manualRange: { max: 20, min: 4 },
+    rangeMode: DepthRangeMode.Manual,
+  };
+  const render = (kit: DepthControlKit, settings: DepthSettings) =>
+    renderToStaticMarkup(
+      <DepthControls
+        kit={kit}
+        onChange={() => {}}
+        probe={depthOnScreen}
+        settings={settings}
+      />,
+    );
+
+  it("shows two thumbs over the clip's range in both the Style panel and the docs playground", () => {
+    for (const kit of [depthStyleKit, depthPlaygroundKit]) {
+      const markup = render(kit, manual);
+      const thumbs = markup.match(/role="slider"/g) ?? [];
+
+      expect(thumbs).toHaveLength(2);
+      expect(markup).toMatch(/aria-label="Min \(px\)"[^>]*aria-valuemin="0"/);
+      expect(markup).toMatch(
+        /aria-label="Max \(px\)"[^>]*aria-valuemax="36.1"/,
+      );
+      expect(markup).toContain('value="4"');
+      expect(render(kit, initialDepthSettings)).not.toContain('role="slider"');
+    }
+  });
+
+  it("paints the picked values with the colormap, near end warm in either quantity", () => {
+    const [far, ...rest] = depthColormapColors("turbo");
+    const near = rest[rest.length - 1];
+
+    expect(render(depthStyleKit, manual)).toMatch(
+      new RegExp(`linear-gradient\\(to right, ${far} 0%, ${far} `),
+    );
+    expect(render(depthStyleKit, { ...manual, quantity: "depth" })).toMatch(
+      new RegExp(`linear-gradient\\(to right, ${near} 0%, ${near} `),
     );
   });
 });

@@ -1,15 +1,13 @@
 import { useRef, type ReactElement } from "react";
-import {
-  depthColormapColors,
-  type DepthColormap,
-  type DepthQuantity,
-} from "supervision";
+import { depthColormapColors, type DepthQuantity } from "supervision";
 import {
   DEFAULT_NO_DEPTH_COLOR,
   DepthRangeMode,
   changeDepthQuantity,
   changeDepthRangeMode,
   depthColormapOptions,
+  depthMapSpan,
+  depthRangeTrack,
   depthSamplingOptions,
   lockDepthRange,
   resolveDepthColourRange,
@@ -17,6 +15,7 @@ import {
   type DepthSettings,
 } from "../depth";
 import { useShownDepthMap, type DepthProbe } from "../hooks/depth-probe";
+import { RangeSlider } from "./RangeSlider";
 import "./depth-controls.css";
 
 interface DepthControlProps<Value> {
@@ -72,8 +71,19 @@ export function DepthControls({
     settings.noDepthColor ?? DEFAULT_NO_DEPTH_COLOR,
   );
   const unit = settings.quantity === "depth" ? "m" : "px";
+  /** What the slider spans before any depth has been on screen. */
+  const idleSpanRef = useRef(settings.manualRange);
   const lockRange = (quantity: DepthQuantity) =>
     lockDepthRange(shown.active?.map, quantity);
+  const manual = settings.rangeMode === DepthRangeMode.Manual;
+  const track = manual
+    ? depthRangeTrack(
+        (shown.lastMap && depthMapSpan(shown.lastMap, settings.quantity)) ??
+          idleSpanRef.current,
+        settings.manualRange,
+      )
+    : null;
+  const colors = depthColormapColors(settings.colormap);
 
   if (settings.noDepthColor !== null) {
     noDepthColorRef.current = settings.noDepthColor;
@@ -116,7 +126,25 @@ export function DepthControls({
         tooltip="Clip uses the manifest's display range, Auto this frame's 2nd to 98th percentile, and Manual a fixed min and max in the quantity's unit. Values outside the range take its end colours."
         value={settings.rangeMode}
       />
-      {settings.rangeMode === DepthRangeMode.Manual ? (
+      {track ? (
+        <RangeSlider
+          bounds={track.bounds}
+          colors={
+            settings.quantity === "depth" ? [...colors].reverse() : colors
+          }
+          disabled={disabled}
+          format={(value) => `${value} ${unit}`}
+          labels={{ max: `Max (${unit})`, min: `Min (${unit})` }}
+          onChange={(manualRange) => onChange({ manualRange })}
+          step={track.step}
+          value={settings.manualRange}
+        />
+      ) : null}
+      <DepthColourLegend
+        colors={colors}
+        range={resolveDepthColourRange(shown.lastMap, settings)}
+      />
+      {manual ? (
         <div className="depth-controls__range">
           <NumberField
             disabled={disabled}
@@ -147,10 +175,6 @@ export function DepthControls({
           </button>
         </div>
       ) : null}
-      <DepthColourLegend
-        colormap={settings.colormap}
-        range={resolveDepthColourRange(shown.lastMap, settings)}
-      />
       <Slider
         disabled={disabled}
         label="Opacity"
@@ -192,7 +216,7 @@ export function DepthControls({
 }
 
 function DepthColourLegend(props: {
-  readonly colormap: DepthColormap;
+  readonly colors: readonly string[];
   readonly range: DepthColourRange;
 }) {
   const { range } = props;
@@ -202,7 +226,7 @@ function DepthColourLegend(props: {
       <span
         aria-hidden="true"
         style={{
-          background: `linear-gradient(to right, ${depthColormapColors(props.colormap).join(", ")})`,
+          background: `linear-gradient(to right, ${props.colors.join(", ")})`,
         }}
       />
       {"message" in range ? (
