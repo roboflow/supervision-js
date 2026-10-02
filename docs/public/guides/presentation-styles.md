@@ -19,9 +19,9 @@ This keeps detections as semantic model output while the renderer owns the
 performance-sensitive drawing strategy.
 
 For focused, live examples, open
-[Annotation Renderers](../annotation-renderers.md). Each built-in renderer has a
-basketball fixture playground whose controls update both the scene and a
-minimal `setPresentation()` snippet.
+[Annotation Renderers](../annotation-renderers.md). Each renderer page with a
+playground runs it on a committed fixture, and its controls update both the
+scene and a minimal `setPresentation()` snippet.
 
 ## Start With Base Styles
 

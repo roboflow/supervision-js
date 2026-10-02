@@ -76,6 +76,7 @@ function MediaPathOption({
         <MediaPathFact label="Good at" value={copy.goodAt} />
         <MediaPathFact label="Costs" value={copy.costs} />
         <MediaPathFact label="Pick it when" value={copy.pickWhen} />
+        <MediaPathFact label="Depth" value={copy.depth} />
         <MediaPathFact label="Import" value={copy.imports} />
       </span>
     </button>

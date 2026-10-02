@@ -234,7 +234,11 @@ async function encodeCanvasAsWebM(
     quality: new Quality({ bitrate: IMAGE_MEDIA_BITRATE }),
   });
 
-  output.addVideoTrack(source);
+  // A WebM block states no duration of its own, so only the track's frame
+  // rate can say that the one frame lasts the image's whole duration.
+  output.addVideoTrack(source, {
+    frameRate: 1 / IMAGE_MEDIA_DURATION_SECONDS,
+  });
   await output.start();
   throwIfAborted(signal);
   await source.add(0, IMAGE_MEDIA_DURATION_SECONDS, { keyFrame: true });

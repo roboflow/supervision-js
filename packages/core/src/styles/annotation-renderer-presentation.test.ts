@@ -203,6 +203,50 @@ describe("annotation renderer presentation", () => {
     ).toThrow('Invalid heatmap renderer settings for "heatmap"');
   });
 
+  it("accepts the depth renderer's defaults and every documented option", () => {
+    const left = annotationRenderers.depth({ id: "depth-left", wipe: 0.5 });
+    const right = annotationRenderers.depth({
+      colormap: "cividis",
+      id: "depth-right",
+      noDepthColor: 0x202020,
+      opacity: 0.6,
+      quantity: "depth",
+      range: { max: 12, min: 0.5 },
+      sampling: "edge-aware",
+    });
+
+    expect(
+      resolveAnnotationRendererPresentation({
+        renderers: [annotationRenderers.depth()],
+      }).renderers,
+    ).toEqual([{ id: "depth", kind: "depth" }]);
+    expect(
+      resolveAnnotationRendererPresentation({ renderers: [left, right] })
+        .renderers,
+    ).toEqual([left, right]);
+  });
+
+  it.each([
+    { colormap: "jet" },
+    { quantity: "height" },
+    { sampling: "bilinear" },
+    { range: "fixed" },
+    { range: { max: 1, min: 1 } },
+    { opacity: Number.NaN },
+    { wipe: 1.5 },
+    { noDepthColor: 0x1000000 },
+  ])("rejects invalid depth setting %j", (settings) => {
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [
+          annotationRenderers.depth(
+            settings as Parameters<typeof annotationRenderers.depth>[0],
+          ),
+        ],
+      }),
+    ).toThrow('Invalid depth renderer settings for "depth"');
+  });
+
   it("keeps source-specific style overrides after renderer normalization", () => {
     const globalBoxStyle = new BaseBoxStyle({
       stroke: { color: 0x8b5cf6, width: 2 },

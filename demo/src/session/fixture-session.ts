@@ -2,6 +2,7 @@ import {
   DetectionFrameSelectionMode,
   MediaSessionMode,
   createMediaSession,
+  type MediaRendererDepthInput,
   type MediaSession,
   type MediaSessionDetectionOptions,
   type MediaSessionMedia,
@@ -16,6 +17,7 @@ import type {
 import {
   createDemoFixtureDetectionSource,
   createDemoFixtureMedia,
+  findDepthLayer,
   loadDemoFixtureDetectionManifest,
   resolveDemoFixturePlaybackSrc,
 } from "../fixtures/demo-fixtures";
@@ -60,29 +62,38 @@ export async function createFixtureSession(
   options: {
     readonly container: HTMLDivElement;
     readonly definition: DemoFixtureDefinition;
+    /** The depth layer to open with; the sample's default when absent. */
+    readonly depthLayerId?: string | null;
     readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
     readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
-  const manifest = await loadDemoFixtureDetectionManifest(options.definition);
-  const detectionSource = createDemoFixtureDetectionSource(
-    manifest,
-    options.definition,
-    options.fixtureFrameTransform,
-    options.fixtureDetectionSourceTransform,
-  );
+  const manifest =
+    options.definition.detectionsManifestSrc === null
+      ? null
+      : await loadDemoFixtureDetectionManifest(options.definition);
+  const detectionSource = manifest
+    ? createDemoFixtureDetectionSource(
+        manifest,
+        options.definition,
+        options.fixtureFrameTransform,
+        options.fixtureDetectionSourceTransform,
+      )
+    : null;
 
   if (!options.isActive()) {
-    detectionSource.destroy();
+    detectionSource?.destroy();
     throw new Error("Fixture session was canceled.");
   }
 
-  options.onFixtureSummary(detectionSource.fixtureSummary);
+  if (detectionSource) {
+    options.onFixtureSummary(detectionSource.fixtureSummary);
+  }
   options.onDetectionSourceState({
-    datasetId: detectionSource.datasetId,
+    datasetId: options.definition.datasetId,
     errorMessage: null,
-    sourceSummary: detectionSource.sourceSummary,
-    status: detectionSource.status,
+    sourceSummary: detectionSource?.sourceSummary ?? null,
+    status: detectionSource?.status ?? "no detections in this sample",
   });
 
   options.onMediaState({
@@ -92,32 +103,38 @@ export async function createFixtureSession(
 
   const presentation = options.presentation;
   const readPresentation = options.readPresentation ?? (() => presentation);
-  const baseDetections: MediaSessionDetectionOptions = {
-    buffer: {
-      // Fixture detections are chunk files fetched over the same link the
-      // video is read over, and a workbench whose presentation draws nothing
-      // draws none of them. The window it already holds stays loaded, so
-      // switching a layer back on annotates the frame on screen at once.
-      enabled: () => demoPresentationDrawsAnnotations(readPresentation()),
-    },
-    source: detectionSource.detectionSource,
-    sync: {
-      frameRate: manifest.inference?.frameRate ?? manifest.frameRate,
-      // A v2 fixture records each frame's real [mediaTime, endTime), so
-      // interval pairing is exact even on VFR sources; index-times-rate
-      // reconstruction stays only for v1 proxy fixtures that lack it.
-      selectionMode:
-        manifest.video.firstTimestamp === undefined
-          ? DetectionFrameSelectionMode.NearestFrameIndex
-          : DetectionFrameSelectionMode.Interval,
-    },
-  };
+  const baseDetections: MediaSessionDetectionOptions = !manifest
+    ? {}
+    : {
+        buffer: {
+          // Fixture detections are chunk files fetched over the same link the
+          // video is read over, and a workbench whose presentation draws nothing
+          // draws none of them. The window it already holds stays loaded, so
+          // switching a layer back on annotates the frame on screen at once.
+          enabled: () => demoPresentationDrawsAnnotations(readPresentation()),
+        },
+        source: detectionSource?.detectionSource,
+        sync: {
+          frameRate: manifest.inference?.frameRate ?? manifest.frameRate,
+          // A v2 fixture records each frame's real [mediaTime, endTime), so
+          // interval pairing is exact even on VFR sources; index-times-rate
+          // reconstruction stays only for v1 proxy fixtures that lack it.
+          selectionMode:
+            manifest.video.firstTimestamp === undefined
+              ? DetectionFrameSelectionMode.NearestFrameIndex
+              : DetectionFrameSelectionMode.Interval,
+        },
+      };
   const detections = applyDemoDetectionOptions(
     baseDetections,
     options.sessionOptions,
   );
 
-  recordFixtureDetectionSelection(options.pipeline, detections, manifest);
+  if (manifest) {
+    recordFixtureDetectionSelection(options.pipeline, detections, manifest);
+  } else {
+    recordNoFixtureDetections(options.pipeline);
+  }
   const renderer = applyDemoRendererOptions(
     createDemoRendererOptions(options),
     options.sessionOptions,
@@ -166,6 +183,11 @@ export async function createFixtureSession(
   try {
     const session = await createMediaSession({
       container: options.container,
+      depth: resolveFixtureDepth(
+        options.definition,
+        normalize !== undefined,
+        options.depthLayerId,
+      ),
       detections,
       media: await createFixtureSessionMedia({
         container: options.container,
@@ -187,9 +209,24 @@ export async function createFixtureSession(
 
     return session;
   } catch (error) {
-    detectionSource.destroy();
+    detectionSource?.destroy();
     throw error;
   }
+}
+
+/**
+ * The depth layer picked, or the sample's default. Clip depth pairs one PNG
+ * with each of the clip's own frames, and converting the clip first can
+ * change them, so a converted sample opens without it.
+ */
+export function resolveFixtureDepth(
+  definition: DemoFixtureDefinition,
+  converting: boolean,
+  layerId?: string | null,
+): MediaRendererDepthInput | undefined {
+  return definition.depth && !converting
+    ? { manifest: findDepthLayer(definition.depth, layerId).manifestSrc }
+    : undefined;
 }
 
 /**
@@ -370,6 +407,14 @@ function recordFixtureDetectionSelection(
       ? "Counting frames from the start is only needed when a sample records no times of its own."
       : "This sample records no per-detection times, so there is no stretch of time to pair against.",
   );
+}
+
+function recordNoFixtureDetections(pipeline: PipelineRecorder) {
+  const reason =
+    "This sample ships depth and no detections, so nothing is paired with a picture.";
+
+  pipeline.bypass(PipelineNodeId.DetectionsInterval, reason);
+  pipeline.bypass(PipelineNodeId.DetectionsNearestFrameIndex, reason);
 }
 
 function fileName(src: string) {

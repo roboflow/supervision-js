@@ -4,6 +4,7 @@ import {
   createDefaultAnnotationPresentation,
   createProjectedDetectionFrameSource,
   resolveAnnotationRendererPresentation,
+  type DepthAnnotationRenderer,
 } from "supervision-js-core";
 import {
   createBufferedDetectionTimeline,
@@ -39,12 +40,29 @@ import {
 } from "#types/media-renderer";
 import { MediaInteractionMode } from "supervision-js-core";
 import {
+  RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
   type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
+import {
+  openDepthSource,
+  validateDepthInput,
+  type DepthFrameProvider,
+} from "#render-preparation/depth/source";
+import {
+  createDepthFramePreparer,
+  type DepthFramePreparer,
+} from "#render-preparation/depth/frame-preparer";
+import {
+  createDepthPreviewLumaCopier,
+  type DepthPreviewLumaCopier,
+} from "#render-preparation/depth/preview-luma-copier";
+import type { MediaRendererDepthInput } from "#types/media-depth";
+import { createRenderPreparationReport } from "./render-preparation-report";
+
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import { createMediaFrameNavigation } from "./media-frame-navigation";
 import {
@@ -60,6 +78,8 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
+
+const DEPTH_DIAGNOSTICS_FAMILY = "depth";
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -120,6 +140,9 @@ export async function createMediaRendererCore(
       "playbackRate must be a finite number greater than zero.",
     );
   }
+  if (options.depth) {
+    validateDepthInput(options.depth);
+  }
   const defaultPresentation = createDefaultAnnotationPresentation();
   const resolvePresentation = (
     presentation: MediaRendererPresentation,
@@ -150,6 +173,106 @@ export async function createMediaRendererCore(
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
+  let mediaSize = { height: 0, width: 0 };
+  let depthSource: DepthFrameProvider | null = null;
+  let depthPreparer: DepthFramePreparer | undefined;
+  let depthLumaCopier: DepthPreviewLumaCopier | undefined;
+  let depthGeneration = 0;
+  let depthLoad: AbortController | undefined;
+  /** A later call supersedes one still loading, whose result is dropped. */
+  const applyDepth = async (input: MediaRendererDepthInput | null) => {
+    if (!mediaScene?.setDepthSource) {
+      throw new Error("Media renderer is not ready.");
+    }
+
+    const generation = ++depthGeneration;
+
+    depthLoad?.abort();
+    depthLoad = undefined;
+
+    let next: DepthFrameProvider | null = null;
+
+    if (input !== null) {
+      const load = new AbortController();
+
+      depthLoad = load;
+      try {
+        next = await openDepthSource(input, {
+          depth: options.renderPreparation?.depth,
+          display: options.renderPreparation?.maskFrame?.display,
+          scheduleBatchSize:
+            options.renderPreparation?.maskFrame?.scheduleBatchSize,
+          frameClock,
+          frameClockUnavailableReason,
+          readFrameClock,
+          media: mediaSize,
+          onDiagnostics: handleDepthDiagnostics,
+          padRowsForWebGl: mediaScene.rendererBackend !== "webgpu",
+          preparer: () =>
+            (depthPreparer ??= createDepthFramePreparer(
+              options.renderPreparation,
+            )),
+          previewLumaCopier: () =>
+            (depthLumaCopier ??= createDepthPreviewLumaCopier(
+              options.renderPreparation,
+            )),
+          signal: load.signal,
+        });
+      } catch (error) {
+        // Superseded or torn down: not an error.
+        if (generation !== depthGeneration || runtimeState.isDestroyed()) {
+          return;
+        }
+        throw error;
+      } finally {
+        if (depthLoad === load) depthLoad = undefined;
+      }
+    }
+
+    if (generation !== depthGeneration || runtimeState.isDestroyed()) {
+      next?.destroy();
+      return;
+    }
+
+    mediaScene?.setDepthSource?.(next);
+    depthSource?.destroy();
+    depthSource = next;
+    if (next === null) {
+      // So depth's last report does not stand for depth that is gone.
+      options.renderPreparation?.onDiagnostics?.(
+        renderPreparationReport.remove(DEPTH_DIAGNOSTICS_FAMILY) ?? {
+          artifacts: [],
+          executionMode: RenderPreparationExecutionMode.MainThread,
+          message: null,
+          workerStatus: RenderPreparationWorkerStatus.Disabled,
+        },
+      );
+    }
+  };
+  /**
+   * A depth manifest given at creation loads once the first frame is up: the
+   * picture never waits on depth files, which can take minutes on a slow link.
+   */
+  const loadCreationDepthManifest = () => {
+    const depth = options.depth;
+
+    if (!depth || !("manifest" in depth) || depth.manifest === undefined) {
+      return;
+    }
+    applyDepth(depth).catch((error: unknown) => {
+      if (runtimeState.isDestroyed()) return;
+
+      const message = `Depth did not load, so the media plays without it: ${String(error)}`;
+
+      console.warn(message);
+      handleDepthDiagnostics({
+        artifacts: [],
+        executionMode: RenderPreparationExecutionMode.MainThread,
+        message,
+        workerStatus: RenderPreparationWorkerStatus.Disabled,
+      });
+    });
+  };
   // A drag is a run of scrubs closed by the seek that lands it, the pairing the
   // transport already keeps for the producer.
   let isSeekGestureInFlight = false;
@@ -157,6 +280,7 @@ export async function createMediaRendererCore(
     mediaScene?.setPlaybackActive?.(
       runtimeState.isPlaybackActive() || isSeekGestureInFlight,
     );
+    mediaScene?.setScrubbing?.(isSeekGestureInFlight);
   };
   const endSeekGesture = () => {
     cancelPullScrubPreview();
@@ -196,6 +320,8 @@ export async function createMediaRendererCore(
     },
   });
   let frameClock: MediaRenderer["frameClock"] = null;
+  let readFrameClock: DecodedMediaSource["readFrameClock"];
+  let frameClockUnavailableReason: string | undefined;
   let frameNavigation:
     ReturnType<typeof createMediaFrameNavigation> | undefined;
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
@@ -281,7 +407,9 @@ export async function createMediaRendererCore(
     }
   };
 
-  const handleRenderPreparationDiagnostics = (
+  const renderPreparationReport = createRenderPreparationReport();
+  const reportRenderPreparation = (
+    family: string,
     diagnostics: RenderPreparationDiagnostics,
   ) => {
     if (
@@ -296,8 +424,19 @@ export async function createMediaRendererCore(
       );
     }
 
-    options.renderPreparation?.onDiagnostics?.(diagnostics);
+    options.renderPreparation?.onDiagnostics?.(
+      renderPreparationReport.update(family, diagnostics),
+    );
   };
+  const handleRenderPreparationDiagnostics = (
+    diagnostics: RenderPreparationDiagnostics,
+  ) =>
+    reportRenderPreparation(
+      diagnostics.artifacts[0]?.kind ?? "scene",
+      diagnostics,
+    );
+  const handleDepthDiagnostics = (diagnostics: RenderPreparationDiagnostics) =>
+    reportRenderPreparation(DEPTH_DIAGNOSTICS_FAMILY, diagnostics);
 
   const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
   const renderPreparationPlaybackGate = options.renderPreparation?.playbackGate;
@@ -581,6 +720,11 @@ export async function createMediaRendererCore(
     const presentedSample = mediaScene.presentSample(sample);
     runtimeState.recordPresentedSample(presentedSample);
     detectionTimeline?.prefetch(presentedSample.mediaTime);
+    // During a drag, depth decoding follows the hand's position, not the
+    // frames drawn.
+    if (!isSeekGestureInFlight) {
+      mediaScene.prefetchDepth?.(presentedSample.mediaTime);
+    }
   };
 
   const stopActiveIterator = () => {
@@ -742,9 +886,11 @@ export async function createMediaRendererCore(
     publishPlaybackActivity();
     if (transport) {
       transport.scrub(targetTime);
+      mediaScene?.prefetchDepth?.(targetTime);
       return;
     }
     pendingPullScrubTime = targetTime;
+    mediaScene?.prefetchDepth?.(targetTime);
     if (pullScrubReadInFlight) navigationVersion += 1;
     schedulePullScrubPreview();
   };
@@ -938,6 +1084,18 @@ export async function createMediaRendererCore(
       return detectionTimeline?.selectFrame(runtimeState.currentTime()) ?? null;
     },
 
+    async setDepth(depth) {
+      if (runtimeState.isDestroyed()) {
+        throw new Error("Media renderer has been destroyed.");
+      }
+
+      await applyDepth(depth);
+    },
+
+    getActiveDepth() {
+      return mediaScene?.getActiveDepth?.() ?? null;
+    },
+
     setSelectedDetection(selection) {
       if (runtimeState.isDestroyed()) {
         return null;
@@ -1033,6 +1191,11 @@ export async function createMediaRendererCore(
       destroyMediaInput();
       runtimeState.setSourceDestroyed();
       mediaScene?.destroy();
+      depthLoad?.abort();
+      depthSource?.destroy();
+      depthSource = null;
+      depthPreparer?.destroy();
+      depthLumaCopier?.destroy();
       detectionTimeline?.destroy();
     },
   };
@@ -1051,6 +1214,8 @@ export async function createMediaRendererCore(
 
     const mediaSource = await openRendererMediaSource(options, providers);
     frameClock = mediaSource.frameClock ?? null;
+    readFrameClock = mediaSource.readFrameClock;
+    frameClockUnavailableReason = mediaSource.frameClockUnavailableReason;
     mediaInput = mediaSource.input;
     sampleSink = mediaSource.sampleSink;
 
@@ -1115,6 +1280,7 @@ export async function createMediaRendererCore(
       : undefined;
 
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
+    mediaSize = mediaDimensions;
     mediaScene = await providers.createScene({
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
       backgroundColor: currentPresentation.backgroundColor,
@@ -1150,6 +1316,7 @@ export async function createMediaRendererCore(
       presentedFrames: protectedPresentedFrames?.source,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       heatmapRenderers: resolveHeatmapRenderers(currentPresentation),
+      depthRenderers: resolveDepthRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {
@@ -1169,6 +1336,11 @@ export async function createMediaRendererCore(
     detectionTimeline.setTimelineContext?.(timelineContext);
     mediaScene.setTimelineContext?.(timelineContext);
     mediaScene.initializeMedia(mediaDimensions);
+    if (options.depth && "map" in options.depth && options.depth.map) {
+      // A map in hand is checked at once and drawn under the first frame.
+      await applyDepth(options.depth);
+      if (runtimeState.isDestroyed()) return renderer;
+    }
     runtimeState.setSourceReady(metadata);
 
     if (presentedFrameChannel) {
@@ -1190,6 +1362,9 @@ export async function createMediaRendererCore(
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);
           detectionTimeline?.prefetch(currentTime);
+          // A drag reports the frames it lands on, which trail the hand;
+          // depth follows the hand's position.
+          if (!isSeekGestureInFlight) mediaScene?.prefetchDepth?.(currentTime);
         },
         waitForReadiness: shouldGatePlayback
           ? waitForPlaybackReadiness
@@ -1236,6 +1411,7 @@ export async function createMediaRendererCore(
         transport.setPlaybackRate(initialPlaybackRate);
       }
       detectionTimeline?.prefetch(metadata.firstTimestamp);
+      mediaScene.prefetchDepth?.(metadata.firstTimestamp);
       // Loading is not complete until the scene has accepted real media
       // pixels. A paused, non-autoplay source otherwise reports Ready over a
       // blank compositor because the producer's load settled before a frame
@@ -1253,6 +1429,7 @@ export async function createMediaRendererCore(
       if (runtimeState.isDestroyed() || runtimeState.isError()) return renderer;
       pushPresentationReady = true;
       runtimeState.setReady();
+      loadCreationDepthManifest();
 
       if (options.autoPlay ?? true) {
         // Opening exposes the writer even when autoplay awaits future detections.
@@ -1274,6 +1451,7 @@ export async function createMediaRendererCore(
 
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
+    loadCreationDepthManifest();
     const waitForSample = shouldGatePlayback
       ? (sample: DecodedVideoSample, signal: AbortSignal) =>
           holdForSampleReadiness(sample.timestamp, signal)
@@ -1441,6 +1619,15 @@ function resolveHeatmapRenderers(presentation: MediaRendererPresentation) {
   return (
     presentation.renderers?.filter((renderer) => renderer.kind === "heatmap") ??
     []
+  );
+}
+
+function resolveDepthRenderers(presentation: MediaRendererPresentation) {
+  return (
+    presentation.renderers?.filter(
+      (renderer): renderer is DepthAnnotationRenderer =>
+        renderer.kind === "depth",
+    ) ?? []
   );
 }
 

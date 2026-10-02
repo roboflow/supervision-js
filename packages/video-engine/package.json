@@ -19,6 +19,11 @@
       "import": "./dist/analysis.js",
       "default": "./dist/analysis.js"
     },
+    "./frame-index": {
+      "types": "./dist/frame-index.d.ts",
+      "import": "./dist/frame-index.js",
+      "default": "./dist/frame-index.js"
+    },
     "./worker": "./dist/engine.worker.js"
   },
   "files": [

@@ -1,0 +1,72 @@
+.range-slider {
+  --range-slider-thumb: 16px;
+
+  block-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding-inline: calc(var(--range-slider-thumb) / 2);
+  touch-action: none;
+  user-select: none;
+}
+
+.range-slider[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.range-slider__rail {
+  block-size: 8px;
+  flex: 1;
+  position: relative;
+}
+
+.range-slider__paint,
+.range-slider__shade {
+  inset-block: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.range-slider__paint {
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(23, 18, 36, 0.12);
+  inset-inline: 0;
+}
+
+/* Past a thumb the colour holds; the veil says the values there are clamped. */
+.range-slider__shade {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.range-slider__shade--low {
+  border-radius: 999px 0 0 999px;
+}
+
+.range-slider__shade--high {
+  border-radius: 0 999px 999px 0;
+}
+
+.range-slider__thumb {
+  background: #ffffff;
+  block-size: var(--range-slider-thumb);
+  border: 2px solid var(--violet);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(23, 18, 36, 0.28);
+  box-sizing: border-box;
+  inline-size: var(--range-slider-thumb);
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.range-slider__thumb:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}
+
+.range-slider:not([data-disabled]) .range-slider__thumb:hover {
+  box-shadow:
+    0 1px 3px rgba(23, 18, 36, 0.28),
+    0 0 0 4px color-mix(in srgb, var(--violet) 18%, transparent);
+}

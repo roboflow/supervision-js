@@ -68,6 +68,13 @@ Start here for normal application code:
   sources, composite sources, and appended frames all behave the same. A
   composite composes children that were each inferred at a different size, and
   every child is projected from its own space before composition
+- depth maps: `MediaSessionOptions.depth` (a `DepthMap`, or a `depth.json`
+  manifest the session fetches and decodes, for a still image or a clip over
+  video media), and the `depth` annotation renderer. Depth is its own channel
+  beside detections, never a `DetectionFrame` field, and a map is stretched
+  over the media rectangle rather than projected by `coordinateSpace`. Which
+  media draws which depth, and what plays, is in
+  [Depth maps](../annotation-renderers/depth.md#where-depth-works)
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
@@ -129,10 +136,10 @@ session.setPresentation({
 });
 ```
 
-The current built-ins are `box`, `box-corners`, `ellipse`, `heatmap`, `marker`, `mask`,
+The current built-ins are `box`, `box-corners`, `depth`, `ellipse`, `heatmap`, `marker`, `mask`,
 `maskHalo`, `orientedBox`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
 the multi-instance `region` renderer for asset overlays and current-frame media
-crops; `heatmap` also supports multiple instances with distinct ids;
+crops; `heatmap` and `depth` also support multiple instances with distinct ids;
 `annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list
 is authoritative: omitted built-ins are
@@ -150,8 +157,8 @@ renderer-owned media texture. Media crops may request exact mask coverage,
 which reuses the renderer's prepared GPU ID-mask artifact, or polygon coverage
 for canonical closed polygons. Asset transforms may use an
 explicit media- or screen-space size; screen-space assets stay the same visible
-size across differently sized detections and viewport zoom. Multiple region
-or heatmap descriptors may coexist when each has a unique `id`.
+size across differently sized detections and viewport zoom. Multiple region,
+heatmap, or depth descriptors may coexist when each has a unique `id`.
 Media sources may also request bounded `blur` or `pixelate` effects through
 `source.effect`; those semantic settings stay independent of the browser filter
 implementation and operate on the renderer-owned current frame.
@@ -225,6 +232,12 @@ not the first thing most users should reach for:
   one media item;
 - `session.setRenderQuality()` for runtime DPR/quality changes without
   rebuilding the media session;
+- `session.setDepth()` to swap or remove a depth map or manifest without
+  reopening the media, `renderer.getActiveDepth()` for the map on screen, `readDepthAt()`
+  for the stored value, disparity, metres, and confidence under a media point,
+  `computeDepthPercentileRange()` to lock a frame's automatic colour range,
+  `depthColormapColors()` for a legend in the renderer's own colours, and
+  `parseDepthManifest()` to validate the `depth.json` a producer writes;
 - cold detection stores for custom persistence and testing;
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;
@@ -376,6 +389,8 @@ These are implementation details, even when they are important to performance:
 - worker message protocols;
 - ID-mask artifact payloads;
 - shader palette formats;
+- packed depth textures, the depth colour-table texture, and how depth frames
+  are selected for a media time;
 - prepared render-window cache internals;
 - demo-only Roboflow or SAM3 request code;
 - React components or hooks in the browser package. The private experimental

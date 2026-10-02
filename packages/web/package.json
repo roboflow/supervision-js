@@ -61,6 +61,11 @@
       "import": "./dist/web-video-engine/analysis.js",
       "default": "./dist/web-video-engine/analysis.js"
     },
+    "#web-video-engine/frame-index": {
+      "types": "./dist/web-video-engine/frame-index.d.ts",
+      "import": "./dist/web-video-engine/frame-index.js",
+      "default": "./dist/web-video-engine/frame-index.js"
+    },
     "#editing/*": {
       "types": "./dist/editing/*.d.ts",
       "import": "./dist/editing/*.js"

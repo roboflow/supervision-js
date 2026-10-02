@@ -26,6 +26,10 @@ import type {
   PreviewOverlayData,
 } from "supervision-js-core";
 import type { MaskBrushPreviewOptions } from "../editing";
+import type {
+  ActiveDepthMap,
+  MediaRendererDepthInput,
+} from "#types/media-depth";
 
 export {
   MediaRendererFit,
@@ -87,6 +91,13 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    * is not zero. Defaults to `MediaTimeline` for backward compatibility.
    */
   readonly detectionTimelineOrigin?: DetectionTimelineOrigin;
+  /**
+   * Depth drawn by `depth` annotation renderers, separate from detection
+   * frames. A map whose aspect ratio differs from the media's puts the
+   * renderer in its error state. A manifest loads once the media's first
+   * frame is up; one that fails leaves the media playing without depth.
+   */
+  readonly depth?: MediaRendererDepthInput;
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly diagnostics?: MediaRendererDiagnosticsOptions;
@@ -209,6 +220,17 @@ export interface MediaRenderer extends MediaRendererStateController {
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
+  /**
+   * Replaces the depth that `depth` renderers draw, or removes it with
+   * `null`, and redraws the frame on screen. Rejects with a `RangeError` for a
+   * malformed map or one whose aspect ratio differs from the media's.
+   */
+  setDepth?(depth: MediaRendererDepthInput | null): Promise<void>;
+  /**
+   * The depth map on screen, with the media size it is stretched over, or
+   * null when no depth is drawn. Pass it to `readDepthAt` for a readout.
+   */
+  getActiveDepth?(): ActiveDepthMap | null;
   /**
    * Explicit renders issued under the render-on-change policy, which only a
    * media source that pushes presented frames runs under: the count moves when

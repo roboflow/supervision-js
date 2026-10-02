@@ -1419,8 +1419,10 @@ fieldset {
 }
 
 /* The tooltip target is sized here for a whole phrase: it wraps, and it drops
- * the widened hit area that would push it off the column edge. */
-.session-options .diagnostic-label {
+ * the widened hit area that would push it off the column edge. A control name
+ * with an explanation reads at the size of one without. */
+.session-options .diagnostic-label,
+.render-controls .diagnostic-label {
   max-width: 100%;
 }
 
@@ -1429,6 +1431,18 @@ fieldset {
   font-weight: 620;
   letter-spacing: 0;
   line-height: 14px;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
+  white-space: normal;
+}
+
+.render-controls .diagnostic-label__name {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
   margin: 0;
   overflow: visible;
   padding: 0;
@@ -1450,7 +1464,8 @@ fieldset {
 
 /* A tooltip wider than the group it opens in scrolls the whole inspector
  * sideways. */
-.session-options .diagnostic-label__tip {
+.session-options .diagnostic-label__tip,
+.render-controls .diagnostic-label__tip {
   width: 232px;
 }
 
@@ -3120,7 +3135,8 @@ fieldset {
 .render-control--toggle:has(input:disabled),
 .render-control-section__enable:has(input:disabled),
 .render-control-section__group:has(input:disabled),
-.class-style-card__visibility:has(input:disabled) {
+.class-style-card__visibility:has(input:disabled),
+.class-color-control:has(input:disabled) {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -3602,6 +3618,10 @@ fieldset {
   height: 26px;
   padding: 0;
   width: 100%;
+}
+
+.class-color-control input:disabled {
+  cursor: not-allowed;
 }
 
 .class-color-control input::-webkit-color-swatch-wrapper {
