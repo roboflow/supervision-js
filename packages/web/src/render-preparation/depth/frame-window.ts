@@ -39,7 +39,7 @@ const STEADY_STRIDE_SAMPLE_COUNT = 8;
 
 /** One pass over a frame source, from where it was started forward. */
 export interface DepthFrameRun<Frame> {
-  /** The next frame, or null once the source has ended or the run was cancelled. */
+  /** The next frame, or null once the run has ended or was cancelled. */
   next(): Promise<Frame | null>;
   cancel(): void;
 }
@@ -55,6 +55,8 @@ export interface DepthFrameSource<
   readonly frameCount: number;
   readonly randomAccess?: boolean;
   keyIndexAtOrBefore(index: number): number;
+  /** Why the last load of frame `index` failed, if it did. */
+  loadError?(index: number): unknown;
   decode(
     fromIndex: number,
     options: DepthPreviewDecodeOptions,
@@ -505,7 +507,10 @@ export function createDepthFrameWindow<
     if (missing === restartedFor) {
       restartsForSameFrame += 1;
       if (restartsForSameFrame >= MAX_RESTARTS_FOR_ONE_FRAME) {
-        fail(new Error(`The ${what} has no decodable frame ${missing}.`));
+        fail(
+          frames.loadError?.(missing) ??
+            new Error(`The ${what} has no decodable frame ${missing}.`),
+        );
         return;
       }
     } else {

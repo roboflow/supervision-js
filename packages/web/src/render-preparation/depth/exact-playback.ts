@@ -187,22 +187,34 @@ interface ExactDepthFrame {
  * start a run; a run loads up to `concurrency()` frames at once, in frame
  * order, and hands them over in that order, so the window sees one frame
  * after another while the worker pool decodes several.
+ *
+ * A frame that fails to load ends the run, so the window tries it again and
+ * gives up only on a frame that keeps failing.
  */
 function createExactFrameSource(options: {
   readonly frameCount: number;
   readonly load: (index: number, signal: AbortSignal) => Promise<DepthMap>;
   readonly concurrency: () => number;
 }): DepthFrameSource<ExactDepthFrame> {
+  const loadErrors = new Map<number, unknown>();
+
   return {
     frameCount: options.frameCount,
     randomAccess: true,
     keyIndexAtOrBefore: (index) => index,
+    loadError: (index) => loadErrors.get(index),
 
     decode(fromIndex, { keep } = {}): DepthFrameRun<ExactDepthFrame> {
       const abort = new AbortController();
       const queue: { index: number; map: Promise<DepthMap> }[] = [];
       let cursor = Math.max(0, fromIndex);
       let cancelled = false;
+
+      const cancel = () => {
+        cancelled = true;
+        queue.length = 0;
+        abort.abort();
+      };
 
       const fill = () => {
         let skipped = 0;
@@ -237,19 +249,26 @@ function createExactFrameSource(options: {
 
           if (!head || cancelled) return null;
 
-          const map = await head.map;
+          let map: DepthMap;
+
+          try {
+            map = await head.map;
+          } catch (error) {
+            if (!cancelled) {
+              loadErrors.set(head.index, error);
+              cancel();
+            }
+            return null;
+          }
 
           if (cancelled) return null;
+          loadErrors.delete(head.index);
           fill();
 
           return { index: head.index, map };
         },
 
-        cancel() {
-          cancelled = true;
-          queue.length = 0;
-          abort.abort();
-        },
+        cancel,
       };
     },
   };

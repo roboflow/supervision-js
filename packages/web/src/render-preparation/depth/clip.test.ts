@@ -571,10 +571,40 @@ describe("exact depth while playing", () => {
     clip.source.destroy();
   });
 
-  it("says why a clip without a preview plays without depth once an exact frame fails to load", async () => {
+  it("loads an exact frame again after it fails to load once", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const server = previewlessServer({ failing: { index: 3, times: 1 } });
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        depth: { previewPrefetchSeconds: 5 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: MEDIA,
+        openPreviewTrack: null,
+        preparer: server.preparer,
+      },
+    );
+
+    source.setPlaybackActive?.(true);
+    source.prefetch?.(CLOCK.timeAt(0));
+    await vi.waitFor(() =>
+      expect(drawnAs(source.getEntry(CLOCK.timeAt(3)))).toEqual({
+        frameIndex: 3,
+        precision: "exact",
+      }),
+    );
+    expect(server.fetchesOf(3)).toBe(2);
+    expect(warn).not.toHaveBeenCalled();
+    source.destroy();
+  });
+
+  it("says why a clip without a preview plays without depth once an exact frame keeps failing to load", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
-    const server = previewlessServer({ failOnce: 3 });
+    const server = previewlessServer({
+      failing: { index: 3, times: Number.POSITIVE_INFINITY },
+    });
     const source = await openDepthSource(
       { manifest: "https://example.test/clip/depth.json" },
       {
@@ -605,10 +635,14 @@ describe("exact depth while playing", () => {
 
 /**
  * A clip without a preview whose exact frames say which file they are.
- * `failOnce` answers its frame's first fetch with a 503.
+ * `failing` answers the first `times` fetches of its frame with a 503.
  */
-function previewlessServer(options: { readonly failOnce?: number } = {}) {
-  let failed = false;
+function previewlessServer(
+  options: {
+    readonly failing?: { readonly index: number; readonly times: number };
+  } = {},
+) {
+  const fetches = new Map<number, number>();
   const manifest = {
     display_range_px: [2, 60],
     frames: { count: COUNT, exact: "exact/{index:06}.png" },
@@ -627,9 +661,10 @@ function previewlessServer(options: { readonly failOnce?: number } = {}) {
     }
 
     const index = Number(/exact\/(\d+)\.png$/.exec(text)?.[1]);
+    const fetched = fetches.get(index) ?? 0;
 
-    if (index === options.failOnce && !failed) {
-      failed = true;
+    fetches.set(index, fetched + 1);
+    if (index === options.failing?.index && fetched < options.failing.times) {
       return new Response(null, { status: 503 });
     }
 
@@ -648,7 +683,11 @@ function previewlessServer(options: { readonly failOnce?: number } = {}) {
     destroy: vi.fn(),
   } as unknown as DepthFramePreparer;
 
-  return { fetch, preparer: () => preparer };
+  return {
+    fetch,
+    fetchesOf: (index: number) => fetches.get(index) ?? 0,
+    preparer: () => preparer,
+  };
 }
 
 describe("resolveDepthClipOptions", () => {
