@@ -3,7 +3,6 @@ import type { DepthPlaybackSource } from "#types/render-preparation";
 import { MAX_PRESENTED_FRAME_STRIDE } from "../playhead-motion";
 import type { DepthClipTiming } from "./clip-timing";
 import { exactMapBytes, mayLoadLater } from "./files";
-import { abortable } from "./frame-preparer";
 import {
   createDepthFrameWindow,
   type DepthFrameRun,
@@ -211,14 +210,7 @@ function createExactFrameSource(options: {
     for (;;) {
       const retry = retries.get(index);
 
-      if (retry) {
-        await abortable(
-          new Promise((resolve) =>
-            setTimeout(resolve, retry.at - performance.now()),
-          ),
-          signal,
-        );
-      }
+      if (retry) await waitUntil(retry.at, signal);
       try {
         const map = await options.load(index, signal);
 
@@ -308,4 +300,20 @@ function createExactFrameSource(options: {
       };
     },
   };
+}
+
+function waitUntil(at: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, at - performance.now());
+
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

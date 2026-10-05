@@ -700,6 +700,32 @@ describe("exact depth while playing", () => {
     source.destroy();
   });
 
+  it("leaves no timer behind once destroyed while an exact frame waits to load again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const server = previewlessServer({
+      failing: { index: 3, times: Number.POSITIVE_INFINITY },
+    });
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        depth: { previewPrefetchSeconds: 5 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: MEDIA,
+        openPreviewTrack: null,
+        preparer: server.preparer,
+      },
+    );
+
+    source.setPlaybackActive?.(true);
+    source.prefetch?.(CLOCK.timeAt(0));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(server.fetchesOf(3)).toBe(1);
+
+    source.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("says why a clip without a preview plays without depth once an exact frame keeps failing to load", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
