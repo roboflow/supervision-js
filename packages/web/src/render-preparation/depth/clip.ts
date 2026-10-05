@@ -86,7 +86,6 @@ export async function openDepthClip(
   let destroyed = false;
   let queuedPlayhead: number | null = null;
   let diagnosticsTimer: ReturnType<typeof setTimeout> | undefined;
-  let previewStopped: string | null = null;
   /** Which way the frame on screen last moved, for a clip without a preview. */
   let lastStep: -1 | 0 | 1 = 0;
   /**
@@ -149,7 +148,7 @@ export async function openDepthClip(
         ? RenderPreparationExecutionMode.Worker
         : RenderPreparationExecutionMode.MainThread,
       message:
-        previewStopped ??
+        previewWindow?.stopMessage ??
         exactWindow?.stopMessage ??
         unavailable ??
         preview?.message ??
@@ -188,12 +187,7 @@ export async function openDepthClip(
         frames: preview.reader,
         maxBytes: budgets.preview.maxCacheBytes,
         onChange: () => {
-          if (
-            previewWindow &&
-            previewWindow.failure !== null &&
-            previewStopped === null
-          ) {
-            previewStopped = `The depth preview stopped decoding, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: ${String(previewWindow.failure)}`;
+          if (previewWindow && previewWindow.failure !== null) {
             preview.reader.dispose();
           }
           scheduleDiagnostics();
@@ -204,7 +198,8 @@ export async function openDepthClip(
         pausedFrameCount: budgets.preview.pausedFrameCount,
         prefetchSeconds: budgets.preview.prefetchSeconds,
         retainSeconds: budgets.preview.retainSeconds,
-        stillDrawn: () => "playback shows no depth",
+        stillDrawn: () =>
+          "playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise",
         timeAt,
       })
     : null;
@@ -216,7 +211,8 @@ export async function openDepthClip(
           budgets,
           concurrency,
           exactFrameBytes,
-          hasPreview: previewWindow !== null,
+          hasPreview: () =>
+            previewWindow !== null && previewWindow.failure === null,
           load: (index, signal) => {
             const kept = atRest.get(index);
 

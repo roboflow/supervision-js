@@ -41,7 +41,11 @@ export interface ExactPlayback {
 
 export function createExactPlayback(options: {
   readonly source: Exclude<DepthPlaybackSource, "preview">;
-  readonly hasPreview: boolean;
+  /**
+   * Whether a preview can stand in for exact depth; false once its decoder
+   * stops.
+   */
+  readonly hasPreview: () => boolean;
   readonly timing: DepthClipTiming;
   readonly exactFrameBytes: number;
   readonly budgets: DepthClipOptions;
@@ -59,7 +63,7 @@ export function createExactPlayback(options: {
     frameCount: timing.frameCount,
     load: options.load,
   });
-  let drawn = source === "exact" || !hasPreview;
+  let drawn = source === "exact" || !hasPreview();
   /** Wall time before which "auto" does not try exact playback again. */
   let retryAt = 0;
   let backoffMs = EXACT_RETRY_START_MS;
@@ -76,7 +80,7 @@ export function createExactPlayback(options: {
     maxBytes: budgets.playback.maxExactCacheBytes,
     onChange: () => {
       // Exact frames that stop loading leave playback to the preview, for good.
-      if (frameWindow.failure !== null && drawn && hasPreview) {
+      if (frameWindow.failure !== null && drawn && hasPreview()) {
         drawn = false;
         retryAt = Number.POSITIVE_INFINITY;
       }
@@ -90,7 +94,7 @@ export function createExactPlayback(options: {
     prefetchSeconds: budgets.preview.prefetchSeconds,
     retainSeconds: budgets.preview.retainSeconds,
     stillDrawn: () =>
-      hasPreview
+      hasPreview()
         ? "playback draws the preview"
         : "playback shows depth only at rest",
     timeAt: timing.timeAt,
@@ -98,7 +102,10 @@ export function createExactPlayback(options: {
 
   const playsAt = (index: number): boolean => {
     if (frameWindow.failure !== null) return false;
-    if (source !== "auto" || !hasPreview) return true;
+    if (source !== "auto" || !hasPreview()) {
+      drawn = true;
+      return true;
+    }
 
     if (lastPlayed !== null && index !== lastPlayed) {
       const forward =
@@ -156,7 +163,7 @@ export function createExactPlayback(options: {
     playsAt,
     restart() {
       lastPlayed = null;
-      if (source === "auto" && hasPreview) drawn = false;
+      if (source === "auto" && hasPreview()) drawn = false;
     },
     window: frameWindow,
   };

@@ -416,6 +416,9 @@ describe("depth source from a clip with a preview", () => {
       expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
         "The depth preview stopped decoding, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: Error: The depth preview decoder returned no frame for 3 s of a flush.",
       );
+      expect(warn).toHaveBeenCalledWith(
+        onDiagnostics.mock.calls.at(-1)?.[0].message,
+      );
       await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
       clip.source.destroy();
     });
@@ -543,6 +546,29 @@ describe("exact depth while playing", () => {
       }),
     );
     source.destroy();
+  });
+
+  it('plays exact frames in "auto" once the preview decoder stops, as a clip without a preview does', async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const clip = await openPreviewClip({
+      decoder: () => "refusesConfig",
+      gatedExact: true,
+      playback: "auto",
+    });
+
+    clip.source.setPlaybackActive?.(true);
+    clip.source.prefetch?.(CLOCK.timeAt(0));
+    await clip.releaseExact(1);
+
+    expect(clip.disposed()).toBe(true);
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))).toEqual({
+      frameIndex: 0,
+      precision: "exact",
+    });
+    expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(1), OPEN)).toBe(
+      true,
+    );
+    clip.source.destroy();
   });
 
   it("says why a clip without a preview plays without depth once an exact frame fails to load", async () => {
