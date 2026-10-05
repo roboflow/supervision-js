@@ -424,11 +424,11 @@ describe("depth source from a clip with a preview", () => {
     });
 
     it.each([
-      ["the preview", "refusesConfig", /^The depth preview/],
-      ["exact depth", "silent", /^Exact depth/],
+      ["the preview", "refusesConfig", "auto", /^The depth preview/],
+      ["exact depth", "silent", "exact", /^Exact depth/],
     ] as const)(
       "says playback shows depth only at rest once the preview and exact depth both stop, %s first",
-      async (_first, behaviour, firstWarning) => {
+      async (_first, behaviour, playback, firstWarning) => {
         fakeTimers();
         const warn = vi
           .spyOn(console, "warn")
@@ -439,10 +439,14 @@ describe("depth source from a clip with a preview", () => {
           decoder: () => behaviour,
           failsExact: 1,
           onDiagnostics,
-          playback: "auto",
+          playback,
         });
 
         clip.source.setPlaybackActive?.(true);
+        clip.source.prefetch?.(CLOCK.timeAt(0));
+        // Past the longest wait before a failed exact frame is loaded again.
+        await vi.advanceTimersByTimeAsync(35_000);
+        // While "exact" plays, the preview decodes only once exact depth stops.
         clip.source.prefetch?.(CLOCK.timeAt(0));
         await vi.advanceTimersByTimeAsync(3500);
 
@@ -616,13 +620,13 @@ describe("exact depth while playing", () => {
     clip.source.destroy();
   });
 
-  it("loads an exact frame again after it fails to load once", async () => {
+  it("keeps exact playback through a network drop of a second", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const server = previewlessServer({ failing: { index: 3, times: 1 } });
+    const server = previewlessServer({ offlineMs: 1000 });
     const source = await openDepthSource(
       { manifest: "https://example.test/clip/depth.json" },
       {
-        depth: { previewPrefetchSeconds: 5 },
         fetch: server.fetch,
         frameClock: CLOCK,
         media: MEDIA,
@@ -633,18 +637,17 @@ describe("exact depth while playing", () => {
 
     source.setPlaybackActive?.(true);
     source.prefetch?.(CLOCK.timeAt(0));
-    await vi.waitFor(() =>
-      expect(drawnAs(source.getEntry(CLOCK.timeAt(3)))).toEqual({
-        frameIndex: 3,
-        precision: "exact",
-      }),
-    );
-    expect(server.fetchesOf(3)).toBe(2);
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(drawnAs(source.getEntry(CLOCK.timeAt(0)))).toEqual({
+      frameIndex: 0,
+      precision: "exact",
+    });
     expect(warn).not.toHaveBeenCalled();
     source.destroy();
   });
 
-  it("fetches an exact frame that keeps failing twice, though the playhead moves between the tries", async () => {
+  it("spaces out the fetches of an exact frame that keeps failing, however the playhead moves, then gives up on it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const server = previewlessServer({
@@ -661,19 +664,26 @@ describe("exact depth while playing", () => {
         preparer: server.preparer,
       },
     );
+    const play = async (seconds: number) => {
+      for (let step = 0; step < seconds * 50; step += 1) {
+        source.prefetch?.(CLOCK.timeAt(step % 3));
+        await vi.advanceTimersByTimeAsync(20);
+      }
+    };
 
     source.setPlaybackActive?.(true);
-    for (let step = 0; step < 30; step += 1) {
-      source.prefetch?.(CLOCK.timeAt(step % 3));
-      await vi.advanceTimersByTimeAsync(20);
-    }
+    await play(0.6);
+    expect(server.fetchesOf(3)).toBe(1);
 
-    expect(server.fetchesOf(3)).toBe(2);
+    // Waits of 1, 2, 4, 8 and 16 s between six fetches, then none.
+    await play(40);
+    expect(server.fetchesOf(3)).toBe(6);
     expect(warn).toHaveBeenCalledOnce();
     source.destroy();
   });
 
   it("says why a clip without a preview plays without depth once an exact frame keeps failing to load", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
     const server = previewlessServer({
@@ -694,14 +704,14 @@ describe("exact depth while playing", () => {
 
     source.setPlaybackActive?.(true);
     source.prefetch?.(CLOCK.timeAt(0));
-    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]?.[0]).toMatch(
       /^Exact depth stopped loading ahead, so playback shows depth only at rest: .*000003\.png: 503/,
     );
-    await vi.waitFor(() =>
-      expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
-        warn.mock.calls[0]?.[0],
-      ),
+    expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
+      warn.mock.calls[0]?.[0],
     );
     source.destroy();
   });
@@ -710,7 +720,8 @@ describe("exact depth while playing", () => {
 /**
  * A clip without a preview whose exact frames say which file they are.
  * `failing` answers the first `times` fetches of its frame with a 503, after
- * `delayMs`.
+ * `delayMs`; every exact fetch throws for the first `offlineMs`, as a dropped
+ * connection does.
  */
 function previewlessServer(
   options: {
@@ -719,9 +730,11 @@ function previewlessServer(
       readonly times: number;
       readonly delayMs?: number;
     };
+    readonly offlineMs?: number;
   } = {},
 ) {
   const fetches = new Map<number, number>();
+  const offlineUntil = performance.now() + (options.offlineMs ?? 0);
   const manifest = {
     display_range_px: [2, 60],
     frames: { count: COUNT, exact: "exact/{index:06}.png" },
@@ -743,6 +756,9 @@ function previewlessServer(
     const fetched = fetches.get(index) ?? 0;
 
     fetches.set(index, fetched + 1);
+    if (performance.now() < offlineUntil) {
+      throw new TypeError("Failed to fetch");
+    }
     if (index === options.failing?.index && fetched < options.failing.times) {
       await new Promise((resolve) =>
         setTimeout(resolve, options.failing?.delayMs ?? 0),

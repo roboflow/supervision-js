@@ -3,6 +3,7 @@ import type { DepthPlaybackSource } from "#types/render-preparation";
 import { MAX_PRESENTED_FRAME_STRIDE } from "../playhead-motion";
 import type { DepthClipTiming } from "./clip-timing";
 import { exactMapBytes } from "./files";
+import { abortable } from "./frame-preparer";
 import {
   createDepthFrameWindow,
   type DepthFrameRun,
@@ -15,7 +16,10 @@ import type { DepthClipOptions } from "./options";
 const EXACT_TAKEOVER_SHARE = 0.75;
 /** And the share below which it hands back to the preview. */
 const EXACT_HANDBACK_SHARE = 0.25;
-/** The first wait before exact playback is tried again; each hand-back doubles it. */
+/**
+ * The first wait before exact playback, or an exact frame that failed to
+ * load, is tried again; each hand-back or failure doubles it.
+ */
 const EXACT_RETRY_START_MS = 1000;
 const EXACT_RETRY_MAX_MS = 16_000;
 /** Exact playback this long without a hand-back earns the first wait back. */
@@ -176,12 +180,6 @@ export function createExactPlayback(options: {
  * otherwise walk to the end of the clip.
  */
 const MAX_SKIPPED_FRAMES = 64;
-/**
- * Failed loads of one frame that stop exact playback. The source counts them
- * because the window's restart limit starts over each time the playhead
- * moves, which would fetch a missing file for as long as playback runs.
- */
-const MAX_LOAD_FAILURES = 2;
 
 interface ExactDepthFrame {
   readonly index: number;
@@ -194,15 +192,46 @@ interface ExactDepthFrame {
  * order, and hands them over in that order, so the window sees one frame
  * after another while the worker pool decodes several.
  *
- * A frame that fails to load ends the run, so the window asks for it again;
- * one that fails again stops the window with its load error.
+ * A frame that fails to load is loaded again after a wait that doubles with
+ * each failure; one that fails after the longest wait stops the window with
+ * its load error. A run started over for the frame waits out what is left,
+ * so moving the playhead never fetches it sooner.
  */
 function createExactFrameSource(options: {
   readonly frameCount: number;
   readonly load: (index: number, signal: AbortSignal) => Promise<DepthMap>;
   readonly concurrency: () => number;
 }): DepthFrameSource<ExactDepthFrame> {
-  const failures = new Map<number, number>();
+  const retries = new Map<
+    number,
+    { readonly at: number; readonly waitMs: number }
+  >();
+
+  const load = async (index: number, signal: AbortSignal) => {
+    for (;;) {
+      const retry = retries.get(index);
+
+      if (retry) {
+        await abortable(
+          new Promise((resolve) =>
+            setTimeout(resolve, retry.at - performance.now()),
+          ),
+          signal,
+        );
+      }
+      try {
+        const map = await options.load(index, signal);
+
+        retries.delete(index);
+        return map;
+      } catch (error) {
+        const waitMs = retry ? retry.waitMs * 2 : EXACT_RETRY_START_MS;
+
+        if (signal.aborted || waitMs > EXACT_RETRY_MAX_MS) throw error;
+        retries.set(index, { at: performance.now() + waitMs, waitMs });
+      }
+    }
+  };
 
   return {
     frameCount: options.frameCount,
@@ -238,7 +267,7 @@ function createExactFrameSource(options: {
             continue;
           }
 
-          const map = options.load(index, abort.signal);
+          const map = load(index, abort.signal);
 
           // A run cancelled with loads in flight drops their answers.
           map.catch(() => undefined);
@@ -260,17 +289,10 @@ function createExactFrameSource(options: {
             map = await head.map;
           } catch (error) {
             if (cancelled) return null;
-
-            const failed = (failures.get(head.index) ?? 0) + 1;
-
-            if (failed >= MAX_LOAD_FAILURES) throw error;
-            failures.set(head.index, failed);
-            cancel();
-            return null;
+            throw error;
           }
 
           if (cancelled) return null;
-          failures.delete(head.index);
           fill();
 
           return { index: head.index, map };
