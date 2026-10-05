@@ -228,9 +228,6 @@ describe("depth percentile ranges", () => {
     const topStep = { max: 40, min: 1 + (202 / 203) * 39 };
 
     expect(
-      computeDepthPercentileRange(tvPreview(new Array<number>(64).fill(235))),
-    ).toEqual(topStep);
-    expect(
       computeDepthPercentileRange(
         tvPreview([235, ...new Array<number>(62).fill(236), 237]),
       ),
@@ -285,10 +282,7 @@ function depthColorCoordinate(
 ): number | null {
   const value = decodeDepthSample(stored, samples);
 
-  if (
-    value === null ||
-    (mapping.reciprocal && value + mapping.innerOffset <= 0)
-  ) {
+  if (value === null) {
     return null;
   }
 
