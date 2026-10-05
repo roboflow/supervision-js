@@ -186,6 +186,19 @@ describe("depth preview window", () => {
     expect(stored(window, 0, 30)).toEqual([0, 1]);
   });
 
+  it("leads by what its budget holds besides the frame the gate let through", async () => {
+    const { source, window } = setup({ maxBytes: FRAME_BYTES * 5 });
+
+    await window.waitForReady(0, thresholds(0.3), undefined);
+    window.setPlayhead(3);
+    await source.drain();
+
+    expect(source.starts).toEqual([0]);
+    expect(window.failure).toBeNull();
+    expect(stored(window, 0, 30)).toEqual([0, 3, 4, 5, 6]);
+    expect(window.needsPlaybackGateWait(3, thresholds(1, 1))).toBe(false);
+  });
+
   it("hands the next decoded frames over for uploading ahead", async () => {
     const { source, window } = setup({ prefetchSeconds: 0.5 });
 

@@ -311,11 +311,40 @@ export function createDepthFrameWindow<
   const dragging = () => scrubbing;
 
   /**
+   * The frame the gate last let through. It is presented a moment after the
+   * wait ends, by when the playhead may have moved on, as it does when seeks
+   * follow each other quickly; dropping it then would present it bare.
+   */
+  let released: number | null = null;
+
+  const waitedFor = (index: number) => {
+    if (index === released) return true;
+    for (const waiter of waiters) if (waiter.index === index) return true;
+
+    return false;
+  };
+
+  /**
+   * The budget in frames, less the frames the gate keeps away from the
+   * playhead: they hold their slots until it lets them go.
+   */
+  const roomFrames = () => {
+    let pinnedElsewhere = 0;
+
+    for (const index of entries.keys()) {
+      if (index !== playhead && waitedFor(index)) pinnedElsewhere += 1;
+    }
+
+    return Math.max(1, capacityFrames - pinnedElsewhere);
+  };
+
+  /**
    * What the window wants decoded. The budget goes first to the side the
    * playhead heads, so a full one never trades the next frames for the last.
    */
   const span = (): Span => {
     const heading = motion.heading();
+    const room = roomFrames();
 
     if (playing()) {
       // The lead stretches with how far presents move. Frames are skipped
@@ -323,7 +352,7 @@ export function createDepthFrameWindow<
       // cadence lands on any of them.
       const step = stride.uniform();
       const aheadFrames = Math.min(
-        capacityFrames,
+        room,
         Math.floor(
           offsetForSeconds(
             playhead,
@@ -336,7 +365,7 @@ export function createDepthFrameWindow<
         aheadLast: (aheadFrames - 1) * step,
         behind: Math.min(
           framesBehindFor(options.retainSeconds),
-          capacityFrames - aheadFrames,
+          room - aheadFrames,
         ),
         fillBehind: "no",
         stride: step,
@@ -360,23 +389,23 @@ export function createDepthFrameWindow<
         const fromKey =
           playhead - frames.keyIndexAtOrBefore(playhead - wantedBehind);
         const behind = Math.min(
-          fromKey + wantedAhead <= capacityFrames ? fromKey : wantedBehind,
-          capacityFrames - 1,
+          fromKey + wantedAhead <= room ? fromKey : wantedBehind,
+          room - 1,
         );
 
         return {
-          aheadLast: Math.min(wantedAhead, capacityFrames - behind) - 1,
+          aheadLast: Math.min(wantedAhead, room - behind) - 1,
           behind,
           fillBehind: "first",
           stride: 1,
         };
       }
 
-      const aheadFrames = Math.min(wantedAhead, capacityFrames);
+      const aheadFrames = Math.min(wantedAhead, room);
 
       return {
         aheadLast: aheadFrames - 1,
-        behind: Math.min(wantedBehind, capacityFrames - aheadFrames),
+        behind: Math.min(wantedBehind, room - aheadFrames),
         // Without a heading, frames behind would cost a run from an earlier
         // key frame for a hand that may never go there.
         fillBehind: "no",
@@ -385,7 +414,7 @@ export function createDepthFrameWindow<
     }
 
     const aheadFrames = Math.min(
-      capacityFrames,
+      room,
       pausedFrameCount,
       offsetForSeconds(playhead, Number.POSITIVE_INFINITY) + 1,
     );
@@ -394,25 +423,11 @@ export function createDepthFrameWindow<
       aheadLast: aheadFrames - 1,
       behind: Math.min(
         framesBehindFor(options.retainSeconds),
-        capacityFrames - aheadFrames,
+        room - aheadFrames,
       ),
       fillBehind: heading < 0 ? "first" : "no",
       stride: 1,
     };
-  };
-
-  /**
-   * The frame the gate last let through. It is presented a moment after the
-   * wait ends, by when the playhead may have moved on, as it does when seeks
-   * follow each other quickly; dropping it then would present it bare.
-   */
-  let released: number | null = null;
-
-  const waitedFor = (index: number) => {
-    if (index === released) return true;
-    for (const waiter of waiters) if (waiter.index === index) return true;
-
-    return false;
   };
 
   const inSpan = (index: number, wanted: Span = span()) => {
@@ -438,7 +453,7 @@ export function createDepthFrameWindow<
 
     return (
       offset > 0 &&
-      offset < capacityFrames * wanted.stride &&
+      offset < roomFrames() * wanted.stride &&
       offset % wanted.stride === 0
     );
   };
