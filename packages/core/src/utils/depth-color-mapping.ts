@@ -317,8 +317,9 @@ function histogramDepthCodes(map: DepthMap): DepthCodeHistogram {
 /**
  * Exact percentiles over the stored codes, taken by nearest rank and then
  * mapped through the monotonic conversion to the coloured quantity. A frame
- * whose chosen codes coincide is widened by one code, so the range stays
- * usable as an explicit range.
+ * whose chosen codes coincide, preview codes above the top one counting as
+ * the top one, is widened by one code, so the range stays usable as an
+ * explicit range.
  */
 function rangeFromHistogram(
   map: DepthMap,
@@ -327,12 +328,22 @@ function rangeFromHistogram(
   high: number,
   quantity: DepthQuantity | undefined,
 ): DepthRange {
+  const topCode =
+    map.samples.encoding === "scaled16"
+      ? histogram.counts.length - 1
+      : depthPreviewTopCode(map.samples.levels);
   const lastRank = histogram.valid - 1;
-  let lowCode = codeAtRank(histogram.counts, Math.round(low * lastRank));
-  let highCode = codeAtRank(histogram.counts, Math.round(high * lastRank));
+  let lowCode = Math.min(
+    topCode,
+    codeAtRank(histogram.counts, Math.round(low * lastRank)),
+  );
+  let highCode = Math.min(
+    topCode,
+    codeAtRank(histogram.counts, Math.round(high * lastRank)),
+  );
 
   if (lowCode === highCode) {
-    if (highCode < histogram.counts.length - 1) highCode += 1;
+    if (highCode < topCode) highCode += 1;
     else lowCode -= 1;
   }
 

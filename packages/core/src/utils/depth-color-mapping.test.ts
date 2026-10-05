@@ -192,6 +192,32 @@ describe("depth percentile ranges", () => {
     ).toEqual({ max: 513, min: 512 });
   });
 
+  it("widens a TV-range preview frame held at its top code below it, never above", () => {
+    const tvPreview = (codes: readonly number[]): DepthMap => ({
+      height: 1,
+      kind: DepthMapKind.DisparityPx,
+      samples: {
+        encoding: "preview8",
+        levels: "tv",
+        range: { max: 40, min: 1 },
+        reservedMax: 31,
+        values: Uint8Array.from(codes.flatMap((code) => [code, 0])),
+      },
+      width: codes.length * 2,
+    });
+    // Codes 32 to 235 step 39 / 203 apart; codes above 235 read as 40.
+    const topStep = { max: 40, min: 1 + (202 / 203) * 39 };
+
+    expect(
+      computeDepthPercentileRange(tvPreview(new Array<number>(64).fill(235))),
+    ).toEqual(topStep);
+    expect(
+      computeDepthPercentileRange(
+        tvPreview([235, ...new Array<number>(62).fill(236), 237]),
+      ),
+    ).toEqual(topStep);
+  });
+
   it("returns null when under 1 % of the samples hold depth", () => {
     const sparse = stridedMap([7, ...new Array<number>(199).fill(0)]);
 
