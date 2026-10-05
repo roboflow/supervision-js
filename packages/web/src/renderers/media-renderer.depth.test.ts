@@ -209,6 +209,26 @@ describe("media renderer depth", () => {
     renderer.destroy();
   });
 
+  it("drops the report of depth that did not load once a map replaces it", async () => {
+    await stubDepthServer();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onDiagnostics = vi.fn();
+    const renderer = await createRenderer(false, false, {
+      depth: { manifest: "https://example.test/missing.json" },
+      renderPreparation: { onDiagnostics },
+      renderers: [annotationRenderers.depth()],
+    });
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+    await renderer.setDepth?.({ map: depthMap() });
+
+    expect(onDiagnostics).toHaveBeenLastCalledWith(
+      expect.objectContaining({ artifacts: [], message: null }),
+    );
+
+    renderer.destroy();
+  });
+
   it("lets a later setDepth win over a manifest still loading", async () => {
     const manifestGate = createDeferred<void>();
     await stubDepthServer(manifestGate.promise);

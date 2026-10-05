@@ -89,7 +89,10 @@ describe("render preparation report", () => {
     report.update("depth", depth);
 
     expect(report.remove("depth")).toBe(masks);
-    expect(report.remove("maskFrame")).toBeNull();
+    expect(report.remove("maskFrame")).toMatchObject({
+      artifacts: [],
+      message: null,
+    });
     expect(report.remove("depth")).toBeNull();
   });
 });

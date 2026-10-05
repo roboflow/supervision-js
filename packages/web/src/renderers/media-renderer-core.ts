@@ -237,17 +237,12 @@ export async function createMediaRendererCore(
     mediaScene?.setDepthSource?.(next);
     depthSource?.destroy();
     depthSource = next;
-    if (next === null) {
-      // So depth's last report does not stand for depth that is gone.
-      options.renderPreparation?.onDiagnostics?.(
-        renderPreparationReport.remove(DEPTH_DIAGNOSTICS_FAMILY) ?? {
-          artifacts: [],
-          executionMode: RenderPreparationExecutionMode.MainThread,
-          message: null,
-          workerStatus: RenderPreparationWorkerStatus.Disabled,
-        },
-      );
-    }
+
+    // So the report of depth that is gone does not stand for what replaced
+    // it, which a still map never reports and a clip reports for itself.
+    const report = renderPreparationReport.remove(DEPTH_DIAGNOSTICS_FAMILY);
+
+    if (report) options.renderPreparation?.onDiagnostics?.(report);
   };
   /**
    * A depth manifest given at creation loads once the first frame is up: the

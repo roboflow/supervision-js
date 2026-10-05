@@ -1,4 +1,5 @@
 import {
+  RenderPreparationExecutionMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
@@ -22,7 +23,10 @@ export interface RenderPreparationReport {
     family: string,
     diagnostics: RenderPreparationDiagnostics,
   ): RenderPreparationDiagnostics;
-  /** Null when `family` was not reporting or no family is left. */
+  /**
+   * Returns the merged report of the families left, empty when none is, or
+   * null when `family` was not reporting.
+   */
   remove(family: string): RenderPreparationDiagnostics | null;
 }
 
@@ -38,7 +42,14 @@ export function createRenderPreparationReport(): RenderPreparationReport {
     },
     remove(family) {
       if (!reports.delete(family)) return null;
-      return merged();
+      return (
+        merged() ?? {
+          artifacts: [],
+          executionMode: RenderPreparationExecutionMode.MainThread,
+          message: null,
+          workerStatus: RenderPreparationWorkerStatus.Disabled,
+        }
+      );
     },
   };
 }
