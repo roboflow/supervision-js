@@ -423,7 +423,8 @@ void main(void) {
 
   vec2 depth = sampleValue(vUV);
 
-  if (depth.y < 0.5) {
+  // Depth from disparity at or below -doffsPx would be infinite or negative.
+  if (depth.y < 0.5 || (uReciprocal > 0.5 && depth.x + uInnerOffset <= 0.0)) {
     finalColor = premultiplyAlpha(uNoDepthColor * vColor);
     return;
   }
@@ -587,7 +588,12 @@ fn mainFragment(
 
   let depth = sampleValue(vUV);
 
-  if (depth.y < 0.5) {
+  // Depth from disparity at or below -doffsPx would be infinite or negative.
+  if (
+    depth.y < 0.5 ||
+    (depthUniforms.uReciprocal > 0.5 &&
+      depth.x + depthUniforms.uInnerOffset <= 0.0)
+  ) {
     return premultiplyAlpha(depthUniforms.uNoDepthColor * vColor);
   }
 

@@ -146,12 +146,17 @@ export function convertDepthValue(
 
 /**
  * Converts a range in the map kind's unit, swapping its bounds under a
- * reciprocal. Null when a bound has no finite image, such as zero disparity.
+ * reciprocal. Null when a bound has no image, such as disparity at or below
+ * `-doffsPx` for depth, which would be infinite or negative.
  */
 export function convertDepthRange(
   range: DepthRange,
   conversion: DepthValueConversion,
 ): DepthRange | null {
+  if (!hasConvertedValue(Math.min(range.min, range.max), conversion)) {
+    return null;
+  }
+
   const first = convertDepthValue(range.min, conversion);
   const second = convertDepthValue(range.max, conversion);
   const min = Math.min(first, second);
@@ -216,13 +221,14 @@ export function computeDepthPercentileRange(
     );
   }
 
-  const histogram = histogramDepthCodes(map);
+  const conversion = resolveDepthValueConversion(map, options.quantity);
+  const histogram = histogramDepthCodes(map, conversion);
 
   if (histogram.valid < histogram.sampled * MIN_VALID_SAMPLE_SHARE) {
     return null;
   }
 
-  return rangeFromHistogram(map, histogram, low, high, options.quantity);
+  return rangeFromHistogram(map, histogram, low, high, conversion);
 }
 
 /**
@@ -261,10 +267,10 @@ export function resolveDepthDisplayRange(
     return percentile;
   }
 
-  const histogram = histogramDepthCodes(map);
+  const histogram = histogramDepthCodes(map, conversion);
 
   return histogram.valid > 0
-    ? rangeFromHistogram(map, histogram, 0, 1, conversion.quantity)
+    ? rangeFromHistogram(map, histogram, 0, 1, conversion)
     : FALLBACK_RANGE;
 }
 
@@ -286,14 +292,31 @@ interface DepthCodeHistogram {
   readonly valid: number;
 }
 
-function histogramDepthCodes(map: DepthMap): DepthCodeHistogram {
+function histogramDepthCodes(
+  map: DepthMap,
+  conversion: DepthValueConversion,
+): DepthCodeHistogram {
   const { samples } = map;
   const values = samples.values;
   const counts = new Uint32Array(
     samples.encoding === "scaled16" ? 65_536 : 256,
   );
-  const firstValid =
+  let firstValid =
     samples.encoding === "scaled16" ? 1 : samples.reservedMax + 1;
+  let pastLast = counts.length;
+
+  // Decoded values never fall as codes rise, so the codes the conversion
+  // gives a value for start at one code.
+  while (firstValid < pastLast) {
+    const middle = (firstValid + pastLast) >> 1;
+
+    if (hasConvertedValue(decodeDepthSample(middle, samples)!, conversion)) {
+      pastLast = middle;
+    } else {
+      firstValid = middle + 1;
+    }
+  }
+
   let sampled = 0;
   let valid = 0;
 
@@ -326,7 +349,7 @@ function rangeFromHistogram(
   histogram: DepthCodeHistogram,
   low: number,
   high: number,
-  quantity: DepthQuantity | undefined,
+  conversion: DepthValueConversion,
 ): DepthRange {
   const topCode =
     map.samples.encoding === "scaled16"
@@ -347,7 +370,6 @@ function rangeFromHistogram(
     else lowCode -= 1;
   }
 
-  const conversion = resolveDepthValueConversion(map, quantity);
   const lowValue = decodeDepthSample(lowCode, map.samples) ?? 0;
   const highValue = decodeDepthSample(highCode, map.samples) ?? 0;
 
@@ -355,6 +377,15 @@ function rangeFromHistogram(
     convertDepthRange({ max: highValue, min: lowValue }, conversion) ??
     FALLBACK_RANGE
   );
+}
+
+/**
+ * Whether `value` converts to the coloured quantity: depth from disparity at
+ * or below `-doffsPx` would be infinite or negative, and `readDepthAt` gives
+ * it none.
+ */
+function hasConvertedValue(value: number, conversion: DepthValueConversion) {
+  return !conversion.reciprocal || value + conversion.innerOffset > 0;
 }
 
 function codeAtRank(counts: Uint32Array, rank: number): number {
