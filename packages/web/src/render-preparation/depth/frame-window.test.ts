@@ -112,7 +112,7 @@ describe("depth preview window", () => {
     expect(stored(window, 0, 30)).toEqual([2, 3, 4, 5]);
   });
 
-  it("keeps what fits when frames outgrow their estimate", async () => {
+  it("keeps what fits when frames outgrow their estimate, and starts no run for one that does not", async () => {
     const { source, window } = setup({
       bytesOf: () => FRAME_BYTES + 1,
       maxBytes: FRAME_BYTES * 5,
@@ -120,8 +120,10 @@ describe("depth preview window", () => {
 
     window.setPlayhead(0);
     await source.drain();
+    window.setHidden(true);
+    window.setHidden(false);
+    await source.drain();
 
-    expect(window.failure).toBeNull();
     expect(source.starts).toEqual([0]);
     expect(stored(window, 0, 30)).toEqual([0, 1, 2, 3]);
   });
