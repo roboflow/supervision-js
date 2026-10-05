@@ -1281,6 +1281,70 @@ describe("pixi interaction layer", () => {
     expect(editingEngine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
   });
 
+  it.each([false, true])(
+    "uses the composed label pick for the first gesture (drag: %s)",
+    (drag) => {
+      const onCommit = vi.fn();
+      const onSelect = vi.fn();
+      const editingEngine = createAnnotationEditingEngine({ onCommit });
+      const labelPoint = { x: 60, y: 60 };
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline(frame),
+        editingEngine,
+        interaction: { mode: MediaInteractionMode.PausedOnly, onSelect },
+        pickLabelDetectionAtPoint: () => ({
+          detection: frame.detections[0]!,
+          detectionIndex: 0,
+          frame,
+          mediaTime: frame.mediaTime,
+          point: labelPoint,
+          target: DetectionPickTarget.Label,
+        }),
+      });
+      const display = layer.createDisplay({
+        width: 120,
+        height: 80,
+      }) as FakeContainer;
+      layer.drawFrame(frame.mediaTime);
+      display.emit(
+        "pointerdown",
+        createPointerEvent(display, 60, 60, {
+          button: 0,
+          pointerId: 8,
+          timeStamp: 0,
+        }),
+      );
+      editingEngine.setCreationTool(null);
+      if (drag)
+        display.emit(
+          "pointermove",
+          createPointerEvent(display, 70, 70, { pointerId: 8, timeStamp: 16 }),
+        );
+      display.emit(
+        "pointerup",
+        createPointerEvent(display, drag ? 70 : 60, drag ? 70 : 60, {
+          button: 0,
+          pointerId: 8,
+          timeStamp: 32,
+        }),
+      );
+      display.emit("pointertap", createPointerEvent(display, 60, 60));
+      expect(layer.getState().selectedPick?.mediaTime).toBe(frame.mediaTime);
+      expect(onSelect).toHaveBeenCalledOnce();
+      expect(onCommit).toHaveBeenCalledTimes(drag ? 1 : 0);
+      if (drag)
+        expect(onCommit.mock.calls[0]?.[0].rect).toEqual({
+          x: 20,
+          y: 25,
+          width: 20,
+          height: 30,
+        });
+    },
+  );
+
   it("selects a detection before beginning a primary editing gesture", () => {
     const onSelect = vi.fn();
     const editingEngine = createAnnotationEditingEngine();

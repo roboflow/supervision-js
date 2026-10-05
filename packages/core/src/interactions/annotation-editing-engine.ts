@@ -69,6 +69,7 @@ export function createAnnotationEditingEngine(
   return {
     getState: () => state,
     setCreationTool(nextTool) {
+      if (nextTool === tool) return;
       if (gesture) cancel();
       tool = nextTool;
     },
@@ -162,11 +163,11 @@ export function createAnnotationEditingEngine(
           rect.height < 1 ||
           (duration < CLICK_CANCEL_MS && diagonal <= CLICK_CANCEL_DIAGONAL)
         ) {
-          cancel();
+          rejectCreation();
           return;
         }
         if (tool?.shouldCommit?.(rect) === false) {
-          cancel();
+          rejectCreation();
           return;
         }
         commit(preview, null);
@@ -175,7 +176,7 @@ export function createAnnotationEditingEngine(
       if (active.kind === "freehand") {
         const points = [...active.points, input.point];
         if (points.length < 2 || tool?.shouldCommit?.(points) === false) {
-          cancel();
+          rejectCreation();
           return;
         }
         commit(tool!.createDetection(points), null);
@@ -405,6 +406,12 @@ export function createAnnotationEditingEngine(
           : null),
       preview,
     });
+  }
+
+  function rejectCreation() {
+    const onRejected = tool?.onRejected;
+    cancel();
+    onRejected?.();
   }
 
   function cancel() {

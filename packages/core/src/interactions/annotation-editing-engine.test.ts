@@ -15,9 +15,72 @@ import {
   pickDetectionAtPoint,
   type Detection,
   type DetectionFrame,
+  type AnnotationCreationTool,
+  type Rect,
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it("keeps a move alive when the unchanged creation tool is synchronized", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const frame: DetectionFrame = {
+      mediaTime: 12.5,
+      detections: [
+        { id: "box", rect: { x: 20, y: 30, width: 10, height: 10 } },
+      ],
+    };
+    const pick = pickDetectionAtPoint(frame, { x: 20, y: 30 });
+    engine.pointerDown(
+      { point: { x: 20, y: 30 }, timestamp: 0, pointerId: 7 },
+      pick,
+    );
+    engine.setCreationTool(null);
+    engine.pointerMove({
+      point: { x: 30, y: 40 },
+      timestamp: 16,
+      pointerId: 7,
+    });
+    engine.pointerUp({ point: { x: 30, y: 40 }, timestamp: 32, pointerId: 7 });
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onCommit.mock.calls[0]?.[0].rect).toEqual({
+      x: 30,
+      y: 40,
+      width: 10,
+      height: 10,
+    });
+  });
+
+  it("reports rejected creation separately from explicit cancellation", () => {
+    const onRejected = vi.fn();
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const tool: AnnotationCreationTool = {
+      geometry: AnnotationGeometryKind.Box,
+      mode: "drag",
+      createDetection: (geometry) => ({ rect: geometry as Rect }),
+      onRejected,
+    };
+    engine.setCreationTool(tool);
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 0 });
+    engine.pointerUp({ point: { x: 10, y: 10 }, timestamp: 1 });
+    expect(onRejected).toHaveBeenCalledOnce();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 2 });
+    engine.keyDown("Escape");
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 3 });
+    engine.setCreationTool(null);
+    expect(onRejected).toHaveBeenCalledOnce();
+
+    engine.setCreationTool(tool);
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 10 });
+    engine.setCreationTool(tool);
+    engine.pointerMove({ point: { x: 50, y: 50 }, timestamp: 310 });
+    engine.pointerUp({ point: { x: 50, y: 50 }, timestamp: 400 });
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onRejected).toHaveBeenCalledOnce();
+  });
+
   it("moves a heatmap with its pickable rectangle", () => {
     const frame: DetectionFrame = {
       mediaTime: 0,
