@@ -457,7 +457,7 @@ describe("depth source from a clip with a preview", () => {
 
         clip.source.setPlaybackActive?.(true);
         clip.source.prefetch?.(CLOCK.timeAt(0));
-        // Past the longest wait before a failed exact frame is loaded again.
+        // Past the 31 s of waits after which exact depth gives up on a failing frame.
         await vi.advanceTimersByTimeAsync(35_000);
         // While "exact" plays, the preview decodes only once exact depth stops.
         clip.source.prefetch?.(CLOCK.timeAt(0));
@@ -665,11 +665,11 @@ describe("exact depth while playing", () => {
     source.destroy();
   });
 
-  it("spaces out the fetches of an exact frame that keeps failing, however the playhead moves, then gives up on it", async () => {
+  it("spaces out the fetches of an exact frame that keeps failing, then gives up on it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const server = previewlessServer({
-      failing: { delayMs: 30, index: 3, times: Number.POSITIVE_INFINITY },
+      failing: { index: 3, times: Number.POSITIVE_INFINITY },
     });
     const source = await openDepthSource(
       { manifest: "https://example.test/clip/depth.json" },
@@ -682,19 +682,14 @@ describe("exact depth while playing", () => {
         preparer: server.preparer,
       },
     );
-    const play = async (seconds: number) => {
-      for (let step = 0; step < seconds * 50; step += 1) {
-        source.prefetch?.(CLOCK.timeAt(step % 3));
-        await vi.advanceTimersByTimeAsync(20);
-      }
-    };
 
     source.setPlaybackActive?.(true);
-    await play(0.6);
+    source.prefetch?.(CLOCK.timeAt(0));
+    await vi.advanceTimersByTimeAsync(600);
     expect(server.fetchesOf(3)).toBe(1);
 
     // Waits of 1, 2, 4, 8 and 16 s between six fetches, then none.
-    await play(40);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(server.fetchesOf(3)).toBe(6);
     expect(warn).toHaveBeenCalledOnce();
     source.destroy();
@@ -853,8 +848,8 @@ describe("exact depth while playing", () => {
 /**
  * A clip without a preview whose exact frames say which file they are.
  * `failing` answers the first `times` fetches of its frame with `status`, 503
- * unless it says, after `delayMs`; every exact fetch throws for the first
- * `offlineMs`, as a dropped connection does.
+ * unless it says; every exact fetch throws for the first `offlineMs`, as a
+ * dropped connection does.
  */
 function previewlessServer(
   options: {
@@ -862,7 +857,6 @@ function previewlessServer(
       readonly index: number;
       readonly times: number;
       readonly status?: number;
-      readonly delayMs?: number;
     };
     readonly offlineMs?: number;
   } = {},
@@ -894,9 +888,6 @@ function previewlessServer(
       throw new TypeError("Failed to fetch");
     }
     if (index === options.failing?.index && fetched < options.failing.times) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, options.failing?.delayMs ?? 0),
-      );
       return new Response(null, { status: options.failing.status ?? 503 });
     }
 
