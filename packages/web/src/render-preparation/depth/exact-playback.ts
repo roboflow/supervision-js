@@ -2,7 +2,7 @@ import type { DepthMap } from "supervision-js-core";
 import type { DepthPlaybackSource } from "#types/render-preparation";
 import { MAX_PRESENTED_FRAME_STRIDE } from "../playhead-motion";
 import type { DepthClipTiming } from "./clip-timing";
-import { exactMapBytes } from "./files";
+import { exactMapBytes, mayLoadLater } from "./files";
 import { abortable } from "./frame-preparer";
 import {
   createDepthFrameWindow,
@@ -191,10 +191,11 @@ interface ExactDepthFrame {
  * order, and hands them over in that order, so the window sees one frame
  * after another while the worker pool decodes several.
  *
- * A frame that fails to load is loaded again after a wait that doubles with
- * each failure; one that fails after the longest wait stops the window with
- * its load error. A run started over for the frame waits out what is left,
- * so moving the playhead never fetches it sooner.
+ * A frame the network or its server fails to deliver is loaded again after a
+ * wait that doubles with each failure. Any other failure, or one after the
+ * longest wait, stops the window with its load error. A run started over for
+ * the frame waits out what is left, so moving the playhead never fetches it
+ * sooner.
  */
 function createExactFrameSource(options: {
   readonly frameCount: number;
@@ -226,7 +227,13 @@ function createExactFrameSource(options: {
       } catch (error) {
         const waitMs = retry ? retry.waitMs * 2 : EXACT_RETRY_START_MS;
 
-        if (signal.aborted || waitMs > EXACT_RETRY_MAX_MS) throw error;
+        if (
+          signal.aborted ||
+          !mayLoadLater(error) ||
+          waitMs > EXACT_RETRY_MAX_MS
+        ) {
+          throw error;
+        }
         retries.set(index, { at: performance.now() + waitMs, waitMs });
       }
     }

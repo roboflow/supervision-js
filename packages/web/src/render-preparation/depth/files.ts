@@ -193,20 +193,45 @@ export function displayDecimation(
   );
 }
 
+const passingFetchFailures = new WeakSet<object>();
+
+/**
+ * Whether a later fetch of the file `error` failed to load may get past it:
+ * the network failed, or the server answered 408, 429 or 5xx.
+ */
+export function mayLoadLater(error: unknown): boolean {
+  return error instanceof Error && passingFetchFailures.has(error);
+}
+
 async function fetchBytes(
   fetchFile: typeof globalThis.fetch,
   url: string,
   signal: AbortSignal | undefined,
 ): Promise<ArrayBuffer> {
-  const response = await fetchFile(url, { signal });
+  try {
+    const response = await fetchFile(url, { signal });
 
-  if (!response.ok) {
-    throw new Error(
-      `Unable to load depth image ${url}: ${response.status} ${response.statusText}`.trim(),
-    );
+    if (!response.ok) {
+      const error = new Error(
+        `Unable to load depth image ${url}: ${response.status} ${response.statusText}`.trim(),
+      );
+
+      if (
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500
+      ) {
+        passingFetchFailures.add(error);
+      }
+      throw error;
+    }
+
+    return await response.arrayBuffer();
+  } catch (error) {
+    // Fetching and reading a body fail with a TypeError when the network does.
+    if (error instanceof TypeError) passingFetchFailures.add(error);
+    throw error;
   }
-
-  return response.arrayBuffer();
 }
 
 function assertImageSize(

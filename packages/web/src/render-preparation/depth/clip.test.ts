@@ -737,19 +737,48 @@ describe("exact depth while playing", () => {
     expect(source.getFrameStatus?.(CLOCK.timeAt(0))?.prepared).toBe(false);
     source.destroy();
   });
+
+  it("stops exact playback at once on a frame no later fetch can load", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const server = previewlessServer({
+      failing: { index: 3, status: 404, times: Number.POSITIVE_INFINITY },
+    });
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        depth: { previewPrefetchSeconds: 5 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: MEDIA,
+        openPreviewTrack: null,
+        preparer: server.preparer,
+      },
+    );
+
+    source.setPlaybackActive?.(true);
+    source.prefetch?.(CLOCK.timeAt(0));
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+
+    expect(warn.mock.calls[0]?.[0]).toMatch(
+      /^Exact depth stopped loading ahead, so playback shows depth only at rest: .*000003\.png: 404/,
+    );
+    expect(server.fetchesOf(3)).toBe(1);
+    source.destroy();
+  });
 });
 
 /**
  * A clip without a preview whose exact frames say which file they are.
- * `failing` answers the first `times` fetches of its frame with a 503, after
- * `delayMs`; every exact fetch throws for the first `offlineMs`, as a dropped
- * connection does.
+ * `failing` answers the first `times` fetches of its frame with `status`, 503
+ * unless it says, after `delayMs`; every exact fetch throws for the first
+ * `offlineMs`, as a dropped connection does.
  */
 function previewlessServer(
   options: {
     readonly failing?: {
       readonly index: number;
       readonly times: number;
+      readonly status?: number;
       readonly delayMs?: number;
     };
     readonly offlineMs?: number;
@@ -785,7 +814,7 @@ function previewlessServer(
       await new Promise((resolve) =>
         setTimeout(resolve, options.failing?.delayMs ?? 0),
       );
-      return new Response(null, { status: 503 });
+      return new Response(null, { status: options.failing.status ?? 503 });
     }
 
     return new Response(Uint8Array.of(index));
