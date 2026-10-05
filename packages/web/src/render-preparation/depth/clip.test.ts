@@ -154,6 +154,17 @@ describe("depth source from a clip with a preview", () => {
     clip.source.destroy();
   });
 
+  it("leaves no timer behind once destroyed with a playback gate wait pending", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const clip = await openPreviewClip({ gated: true, onDiagnostics: vi.fn() });
+
+    clip.source.setPlaybackActive?.(true);
+    void clip.source.waitForReady!(CLOCK.timeAt(0), OPEN);
+    await vi.advanceTimersByTimeAsync(400);
+    clip.source.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("decodes no preview while the page is hidden", async () => {
     const page = new EventTarget() as EventTarget & {
       visibilityState: DocumentVisibilityState;

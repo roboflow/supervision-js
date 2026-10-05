@@ -162,7 +162,9 @@ export async function openDepthClip(
 
   /** A busy window changes every frame; hosts hear about it a few times a second. */
   function scheduleDiagnostics() {
-    if (diagnosticsTimer !== undefined || !context.onDiagnostics) return;
+    if (destroyed || diagnosticsTimer !== undefined || !context.onDiagnostics) {
+      return;
+    }
     diagnosticsTimer = setTimeout(reportDiagnostics, DIAGNOSTICS_INTERVAL_MS);
   }
 
