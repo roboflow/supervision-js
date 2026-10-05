@@ -414,7 +414,7 @@ describe("depth source from a clip with a preview", () => {
       expect(warn).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(200);
       expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
-        "The depth preview stopped decoding, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: Error: The depth preview decoder returned no frame for 3 s of a flush.",
+        "The depth preview stopped decoding, so playback shows depth only at rest: Error: The depth preview decoder returned no frame for 3 s of a flush.",
       );
       expect(warn).toHaveBeenCalledWith(
         onDiagnostics.mock.calls.at(-1)?.[0].message,
@@ -586,7 +586,7 @@ describe("exact depth while playing", () => {
   });
 
   it('plays exact frames in "auto" once the preview decoder stops, as a clip without a preview does', async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const clip = await openPreviewClip({
       decoder: () => "refusesConfig",
       gatedExact: true,
@@ -596,6 +596,11 @@ describe("exact depth while playing", () => {
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(0));
     await vi.waitFor(() => expect(clip.disposed()).toBe(true));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^The depth preview stopped decoding, so playback draws exact depth where it keeps up and depth at rest otherwise: /,
+      ),
+    );
     expect(clip.source.getEntry(CLOCK.timeAt(0))).toBeNull();
 
     const changed = vi.fn();

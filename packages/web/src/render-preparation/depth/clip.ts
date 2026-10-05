@@ -200,9 +200,9 @@ export async function openDepthClip(
         prefetchSeconds: budgets.preview.prefetchSeconds,
         retainSeconds: budgets.preview.retainSeconds,
         stillDrawn: (): string =>
-          exactWindow !== null && exactWindow.failure !== null
+          exactWindow === null || exactWindow.failure !== null
             ? "playback shows depth only at rest"
-            : "playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise",
+            : "playback draws exact depth where it keeps up and depth at rest otherwise",
         timeAt,
       })
     : null;
