@@ -360,6 +360,21 @@ describe("depth preview window", () => {
     expect(stored(window, 30, 40)).toEqual([30, 31, 32, 33, 34]);
   });
 
+  it("does not take a run the hidden page cancelled for a frame its decoder never produces", async () => {
+    const { source, window } = setup({ gated: true });
+
+    window.setPlayhead(3);
+    for (let shown = 0; shown < 3; shown += 1) {
+      window.setHidden(true);
+      window.setHidden(false);
+      await source.drain();
+    }
+    await source.release(1);
+
+    expect(window.failure).toBeNull();
+    expect(window.getEntry(3)).not.toBeNull();
+  });
+
   it("decodes a frame the gate waits on before anything else", async () => {
     const { source, window } = setup({ keyEvery: 10, prefetchSeconds: 0.5 });
 

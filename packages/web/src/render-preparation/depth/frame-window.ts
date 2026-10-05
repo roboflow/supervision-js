@@ -824,8 +824,10 @@ export function createDepthFrameWindow<
       }
       // A decoder working for a page nobody sees can be reclaimed by the
       // browser, and its deadlines would run out on a clock nobody watches.
+      // The run cancelled here did not miss its frame, so it is not counted.
       active?.run.cancel();
       active = null;
+      restartedFor = -1;
       wake();
     },
 
