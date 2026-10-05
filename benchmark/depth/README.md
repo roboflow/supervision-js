@@ -18,6 +18,9 @@ renderers, which is read back byte for byte (on WebGPU with
 `copyTextureToBuffer`). The shader's output is 8 bits, so each draw colours a
 window of 256 codes with an identity colour table; 256 draws show every code.
 A pass means every code came back exactly and "no depth" was painted as such.
+One more map is coloured as depth through a camera with a negative
+`doffsPx`; it passes when "no depth" is painted exactly where `readDepthAt`
+gives no distance, disparity at or below `-doffsPx`.
 The runner writes `results/latest-gpu.{json,md}` (`latest-firefox` for
 Firefox, which reports over the benchmark's dev server); `--query=backends=webgl`
 narrows a run and `--port` moves the server off 5187. Safari is manual: start

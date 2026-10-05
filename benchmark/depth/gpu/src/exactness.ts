@@ -1,4 +1,9 @@
-import type { DepthMap, DepthPreviewLevels } from "supervision-js-core";
+import {
+  DepthQuantity,
+  readDepthAt,
+  type DepthMap,
+  type DepthPreviewLevels,
+} from "supervision-js-core";
 import { createDepthDraw, createLut } from "./depth-draw";
 import type { BenchBackend } from "./pixi-backend";
 
@@ -73,6 +78,7 @@ export async function runExactnessProbe(
         "r8 TV-range preview codes, 256x4",
         previewMap(256, 4, "tv"),
       ),
+      await probeNoDistance(backend, lut),
     );
   } finally {
     lut.destroy();
@@ -178,6 +184,82 @@ async function probe(
     pass: mismatches === 0 && verified.size === new Set(values).size,
     passes,
     texelsChecked: texelCount * passes,
+    textureWidth,
+    width: map.width,
+  };
+}
+
+/**
+ * Proves that, coloured as depth, the shader paints no depth exactly where
+ * `readDepthAt` gives no distance. With a negative `doffsPx`, disparity at or
+ * below `-doffsPx` has none, and every code above it paints a colour.
+ */
+async function probeNoDistance(
+  backend: BenchBackend,
+  lut: ReturnType<typeof createLut>,
+): Promise<ExactnessCase> {
+  const map: DepthMap = {
+    ...scaledMap(64, 2, (i) => i % 64),
+    camera: { baselineM: 0.1, doffsPx: -5, fxPx: 1000 },
+  };
+  const draw = createDepthDraw(
+    backend,
+    { height: map.height, width: map.width },
+    1,
+  );
+  const values = map.samples.values;
+  const verified = new Set<number>();
+  const firstMismatches: string[] = [];
+  let mismatches = 0;
+  let textureWidth: number;
+
+  try {
+    draw.draw(map, lut, {
+      noDepthColor: NO_DEPTH_COLOR,
+      quantity: DepthQuantity.Depth,
+      range: { max: 100, min: 1 },
+    });
+    textureWidth = draw.ring.acquire(map).textureWidth;
+
+    const pixels = await backend.readPixels(draw.target);
+
+    for (let i = 0; i < values.length; i += 1) {
+      const x = i % map.width;
+      const y = Math.floor(i / map.width);
+      const pixel = Array.from(pixels.subarray(i * 4, i * 4 + 4));
+      const hasDistance = readDepthAt(map, { x, y })?.depthM !== undefined;
+      // The colour table has no blue, so only "no depth" paints any.
+      const matches = hasDistance
+        ? pixel[2] === 0 && pixel[3] === 255
+        : pixel.join(",") === "0,0,255,255";
+
+      if (matches) {
+        verified.add(values[i]);
+        continue;
+      }
+      mismatches += 1;
+      if (firstMismatches.length < 5) {
+        firstMismatches.push(
+          `texel (${x}, ${y}) stored ${values[i]}: expected ${hasDistance ? "a colour" : "no depth"}, got ${pixel.join(",")}`,
+        );
+      }
+    }
+  } finally {
+    draw.destroy();
+  }
+
+  return {
+    backend: backend.description.rendererName,
+    codesInMap: new Set(values).size,
+    codesVerified: verified.size,
+    encoding: map.samples.encoding,
+    firstMismatches,
+    height: map.height,
+    mismatches,
+    name: "rg8 no distance at or below -doffsPx, 64x2",
+    pass: mismatches === 0 && verified.size === new Set(values).size,
+    passes: 1,
+    texelsChecked: values.length,
     textureWidth,
     width: map.width,
   };

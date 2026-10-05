@@ -109,7 +109,7 @@ describe("depth colour mapping", () => {
     expect([toDisparity.lo, toDisparity.hi]).toEqual([5, 80]);
   });
 
-  it("colours no depth where disparity is at or below -doffsPx, as readDepthAt reads none", () => {
+  it("leaves disparity at or below -doffsPx out of a depth range", () => {
     // Z = 100 / (d - 5): 10 px is 20 m, 40 px is 100 / 35 m.
     const map = scaledMap(
       DepthMapKind.DisparityPx,
@@ -119,17 +119,10 @@ describe("depth colour mapping", () => {
         displayRange: { max: 60, min: 1 },
       },
     );
-    const explicit = resolveDepthColorMapping(map, {
-      quantity: DepthQuantity.Depth,
-      range: { max: 100, min: 1 },
-    });
     const clip = resolveDepthColorMapping(map, {
       quantity: DepthQuantity.Depth,
     });
 
-    expect(depthColorCoordinate(2, map.samples, explicit)).toBeNull();
-    expect(depthColorCoordinate(5, map.samples, explicit)).toBeNull();
-    expect(depthColorCoordinate(10, map.samples, explicit)).not.toBeNull();
     // A display range reaching below 5 px has no image, so it falls back to
     // the percentiles of the pixels that have depth.
     expect([clip.lo, clip.hi]).toEqual([100 / 35, 20]);

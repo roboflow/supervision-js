@@ -13,6 +13,7 @@ import {
   resolveDepthColorMapping,
   type DepthAnnotationRenderer,
   type DepthMap,
+  type DepthQuantity,
   type DepthRange,
 } from "supervision-js-core";
 import {
@@ -40,7 +41,11 @@ export interface DepthDraw {
   draw(
     map: DepthMap,
     lut: TextureSource,
-    options: { readonly range: DepthRange; readonly noDepthColor?: number },
+    options: {
+      readonly range: DepthRange;
+      readonly noDepthColor?: number;
+      readonly quantity?: DepthQuantity;
+    },
   ): void;
   destroy(): void;
 }
@@ -87,6 +92,7 @@ export function createDepthDraw(
         id: "benchmark",
         kind: "depth",
         noDepthColor: options.noDepthColor ?? null,
+        quantity: options.quantity,
         range: options.range,
         sampling: "auto",
       };
