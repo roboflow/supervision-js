@@ -142,7 +142,9 @@ reloading or re-uploading it:
 - `quantity`: `"disparity"` (default) colours inverse depth, which spends
   colour on near detail the way stereo measures it. `"depth"` colours metres
   and needs metric data or a `camera`; without one the renderer colours
-  disparity and warns once.
+  disparity and warns once. A metric map without a `camera` has no pixels of
+  disparity, so its disparity is inverse depth in 1/m, the unit its `range`
+  takes too.
 - `range`: `"clip"` (default) uses the map's `displayRange`, `"auto"` uses this
   frame's own 2nd to 98th percentile, and `{ min, max }` fixes the range in the
   quantity's unit. Values outside the range clamp to its ends. `"clip"` behaves
