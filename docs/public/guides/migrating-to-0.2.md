@@ -6,10 +6,10 @@ summary: Update playback gates, playback feedback, and interaction highlights fr
 
 # Migrating to 0.2
 
-Upgrade to `0.2.4` with:
+Upgrade to `0.2.5` with:
 
 ```sh
-npm install supervision@0.2.4
+npm install supervision@0.2.5
 ```
 
 The engine remains a subpath of `supervision`; do not add a separate engine or
