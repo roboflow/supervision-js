@@ -119,7 +119,8 @@ export interface DepthAnnotationRenderer extends BaseAnnotationRenderer {
    * pixels of disparity, or metres of depth. Without a camera, a metric
    * map's disparity is inverse depth in 1/m; relative inverse depth keeps
    * its own unit. Values outside clamp to the ends.
-   * Defaults to `"clip"`, which behaves as `"auto"` for a map without one.
+   * Defaults to `"clip"`, which behaves as `"auto"` for a map without a
+   * display range.
    */
   readonly range?: "clip" | "auto" | DepthRange;
   /** Overall alpha from 0 to 1. Defaults to 1. */
