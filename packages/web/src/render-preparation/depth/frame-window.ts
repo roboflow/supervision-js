@@ -196,6 +196,8 @@ interface Span {
   readonly stride: number;
   /** Whether frames behind the playhead are decoded, before those ahead. */
   readonly fillBehind: "no" | "first";
+  /** The budget in frames, less the ones the gate holds elsewhere. */
+  readonly room: number;
 }
 
 /**
@@ -374,6 +376,7 @@ export function createDepthFrameWindow<
           room - aheadFrames,
         ),
         fillBehind: "no",
+        room,
         stride: step,
       };
     }
@@ -403,6 +406,7 @@ export function createDepthFrameWindow<
           aheadLast: Math.min(wantedAhead, room - behind) - 1,
           behind,
           fillBehind: "first",
+          room,
           stride: 1,
         };
       }
@@ -415,6 +419,7 @@ export function createDepthFrameWindow<
         // Without a heading, frames behind would cost a run from an earlier
         // key frame for a hand that may never go there.
         fillBehind: "no",
+        room,
         stride: 1,
       };
     }
@@ -432,6 +437,7 @@ export function createDepthFrameWindow<
         room - aheadFrames,
       ),
       fillBehind: heading < 0 ? "first" : "no",
+      room,
       stride: 1,
     };
   };
@@ -459,7 +465,7 @@ export function createDepthFrameWindow<
 
     return (
       offset > 0 &&
-      offset < roomFrames() * wanted.stride &&
+      offset < wanted.room * wanted.stride &&
       offset % wanted.stride === 0
     );
   };
