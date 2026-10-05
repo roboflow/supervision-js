@@ -422,6 +422,38 @@ describe("depth source from a clip with a preview", () => {
       await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
       clip.source.destroy();
     });
+
+    it.each([
+      ["the preview", "refusesConfig", /^The depth preview/],
+      ["exact depth", "silent", /^Exact depth/],
+    ] as const)(
+      "says playback shows depth only at rest once the preview and exact depth both stop, %s first",
+      async (_first, behaviour, firstWarning) => {
+        fakeTimers();
+        const warn = vi
+          .spyOn(console, "warn")
+          .mockImplementation(() => undefined);
+        const onDiagnostics =
+          vi.fn<(d: RenderPreparationDiagnostics) => void>();
+        const clip = await openPreviewClip({
+          decoder: () => behaviour,
+          failsExact: 1,
+          onDiagnostics,
+          playback: "auto",
+        });
+
+        clip.source.setPlaybackActive?.(true);
+        clip.source.prefetch?.(CLOCK.timeAt(0));
+        await vi.advanceTimersByTimeAsync(3500);
+
+        expect(warn).toHaveBeenCalledTimes(2);
+        expect(warn.mock.calls[0]?.[0]).toMatch(firstWarning);
+        expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toMatch(
+          /^The depth preview stopped decoding, so playback shows depth only at rest: .+ Exact depth stopped loading ahead, so playback shows depth only at rest: .+000001\.png: 503$/,
+        );
+        clip.source.destroy();
+      },
+    );
   });
 });
 
@@ -814,6 +846,8 @@ interface PreviewClipOptions {
   readonly playback?: DepthPlaybackSource;
   /** Holds every exact frame's decode until released. */
   readonly gatedExact?: boolean;
+  /** Answers every fetch of this exact frame with a 503. */
+  readonly failsExact?: number;
 }
 
 type FakeDecoders = (
@@ -879,6 +913,9 @@ async function openPreviewClip(options: PreviewClipOptions = {}) {
     const index = Number(/exact\/(\d+)\.png$/.exec(text)?.[1]);
 
     fetched.push(index);
+    if (index === options.failsExact) {
+      return new Response(null, { status: 503 });
+    }
     return new Response(Uint8Array.of(index));
   }) as unknown as typeof globalThis.fetch;
   let exactAllowance = 0;

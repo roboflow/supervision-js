@@ -148,10 +148,11 @@ export async function openDepthClip(
         ? RenderPreparationExecutionMode.Worker
         : RenderPreparationExecutionMode.MainThread,
       message:
-        previewWindow?.stopMessage ??
-        exactWindow?.stopMessage ??
-        unavailable ??
-        preview?.message ??
+        [previewWindow?.stopMessage, exactWindow?.stopMessage]
+          .filter((stop) => stop != null)
+          .join(" ") ||
+        unavailable ||
+        preview?.message ||
         null,
       workerStatus: offMainThread
         ? RenderPreparationWorkerStatus.Ready
@@ -198,8 +199,10 @@ export async function openDepthClip(
         pausedFrameCount: budgets.preview.pausedFrameCount,
         prefetchSeconds: budgets.preview.prefetchSeconds,
         retainSeconds: budgets.preview.retainSeconds,
-        stillDrawn: () =>
-          "playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise",
+        stillDrawn: (): string =>
+          exactWindow !== null && exactWindow.failure !== null
+            ? "playback shows depth only at rest"
+            : "playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise",
         timeAt,
       })
     : null;
