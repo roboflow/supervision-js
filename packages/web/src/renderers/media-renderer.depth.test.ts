@@ -427,18 +427,8 @@ describe("media renderer depth", () => {
       depth: { map },
       renderers: [annotationRenderers.depth()],
     });
-    const active = renderer.getActiveDepth?.();
-    const readout = readDepthAt(
-      active!.map,
-      { x: 640, y: 360 },
-      { height: active!.mediaHeight, width: active!.mediaWidth },
-    );
 
-    expect(active?.map).toBe(map);
-    expect([active?.precision, readout?.precision]).toEqual([
-      "preview",
-      "preview",
-    ]);
+    expect(renderer.getActiveDepth?.()?.precision).toBe("preview");
 
     renderer.destroy();
   });

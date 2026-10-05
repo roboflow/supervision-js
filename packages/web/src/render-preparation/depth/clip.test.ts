@@ -853,7 +853,6 @@ describe("resolveDepthClipOptions", () => {
       playback: { maxExactCacheBytes: 96 * MIB },
       preview: {
         maxCacheBytes: 96 * MIB,
-        pausedFrameCount: 3,
         prefetchSeconds: 1,
       },
     });

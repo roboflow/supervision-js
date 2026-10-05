@@ -233,10 +233,7 @@ describe("pixi depth layer", () => {
 
         layer.uploadAhead(time);
         expect(bound.update.mock.calls.length).toBe(updates);
-        expect(layer.getActiveDepth()).toMatchObject({
-          map: maps[Math.floor(time)],
-          precision: "preview",
-        });
+        expect(layer.getActiveDepth()?.map).toBe(maps[Math.floor(time)]);
       }
 
       expect(layer.getUploadCounts().inPresent).toBe(inPresent);

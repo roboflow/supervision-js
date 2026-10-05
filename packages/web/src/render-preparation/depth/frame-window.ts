@@ -39,7 +39,7 @@ const STEADY_STRIDE_SAMPLE_COUNT = 8;
 
 /** One pass over a frame source, from where it was started forward. */
 export interface DepthFrameRun<Frame> {
-  /** The next frame, or null once the run has ended or was cancelled. */
+  /** The next frame, or null once the source has ended or the run was cancelled. */
   next(): Promise<Frame | null>;
   cancel(): void;
 }
@@ -90,10 +90,7 @@ export interface DepthFrameWindowOptions<
   readonly precision?: "exact" | "preview";
   /** What playback draws once the window stops, for its stop message. */
   readonly stillDrawn: () => string;
-  /**
-   * Budget for decoded frames, in bytes. The frame at the playhead and the
-   * ones the gate waits on or just let through are kept even over it.
-   */
+  /** Budget for decoded frames, in bytes. */
   readonly maxBytes: number;
   /**
    * How far ahead of the playhead to decode while playing, in seconds of
@@ -317,34 +314,6 @@ export function createDepthFrameWindow<
   const dragging = () => scrubbing;
 
   /**
-   * The frame the gate last let through. It is presented a moment after the
-   * wait ends, by when the playhead may have moved on, as it does when seeks
-   * follow each other quickly; dropping it then would present it bare.
-   */
-  let released: number | null = null;
-
-  const waitedFor = (index: number) => {
-    if (index === released) return true;
-    for (const waiter of waiters) if (waiter.index === index) return true;
-
-    return false;
-  };
-
-  /**
-   * The budget in frames, less the frames the gate keeps away from the
-   * playhead: they hold their slots until it lets them go.
-   */
-  const roomFrames = () => {
-    let pinnedElsewhere = 0;
-
-    for (const index of entries.keys()) {
-      if (index !== playhead && waitedFor(index)) pinnedElsewhere += 1;
-    }
-
-    return Math.max(1, capacityFrames - pinnedElsewhere);
-  };
-
-  /**
    * What the window wants decoded. The budget goes first to the side the
    * playhead heads, so a full one never trades the next frames for the last.
    */
@@ -438,6 +407,34 @@ export function createDepthFrameWindow<
       room,
       stride: 1,
     };
+  };
+
+  /**
+   * The frame the gate last let through. It is presented a moment after the
+   * wait ends, by when the playhead may have moved on, as it does when seeks
+   * follow each other quickly; dropping it then would present it bare.
+   */
+  let released: number | null = null;
+
+  const waitedFor = (index: number) => {
+    if (index === released) return true;
+    for (const waiter of waiters) if (waiter.index === index) return true;
+
+    return false;
+  };
+
+  /**
+   * The budget in frames, less the frames the gate keeps away from the
+   * playhead: they hold their slots until it lets them go.
+   */
+  const roomFrames = () => {
+    let pinnedElsewhere = 0;
+
+    for (const index of entries.keys()) {
+      if (index !== playhead && waitedFor(index)) pinnedElsewhere += 1;
+    }
+
+    return Math.max(1, capacityFrames - pinnedElsewhere);
   };
 
   const inSpan = (index: number, wanted: Span = span()) => {
