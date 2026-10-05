@@ -45,9 +45,7 @@ function previewSource(
   extra: Partial<DepthFrameProvider> = {},
 ): DepthFrameProvider {
   const entry = (index: number): DepthFrameEntry | null =>
-    maps[index]
-      ? { frameIndex: index, map: maps[index], precision: "preview" }
-      : null;
+    maps[index] ? { frameIndex: index, map: maps[index] } : null;
 
   return {
     destroy: vi.fn(),
@@ -64,7 +62,6 @@ function twoFrameSource(first: DepthMap, second: DepthMap): DepthFrameProvider {
   const entry = (map: DepthMap, frameIndex: number): DepthFrameEntry => ({
     frameIndex,
     map,
-    precision: "exact",
   });
 
   return {
@@ -236,7 +233,10 @@ describe("pixi depth layer", () => {
 
         layer.uploadAhead(time);
         expect(bound.update.mock.calls.length).toBe(updates);
-        expect(layer.getActiveDepth()?.map).toBe(maps[Math.floor(time)]);
+        expect(layer.getActiveDepth()).toMatchObject({
+          map: maps[Math.floor(time)],
+          precision: "preview",
+        });
       }
 
       expect(layer.getUploadCounts().inPresent).toBe(inPresent);

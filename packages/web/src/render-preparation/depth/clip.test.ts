@@ -63,7 +63,7 @@ describe("depth source from a clip with a preview", () => {
 
     const drawn = clip.source.getEntry(CLOCK.timeAt(3) + 0.25);
 
-    expect(drawn).toMatchObject({ frameIndex: 3, precision: "preview" });
+    expect(drawnAs(drawn)).toEqual({ frameIndex: 3, precision: "preview" });
     expect(previewCode(drawn)).toBe(code(3));
     // Never a neighbour's depth for a frame not decoded yet.
     expect(clip.source.getEntry(CLOCK.timeAt(9))).toBeNull();
@@ -80,16 +80,18 @@ describe("depth source from a clip with a preview", () => {
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(2));
     await settle();
-    expect(clip.source.getEntry(CLOCK.timeAt(2))?.precision).toBe("preview");
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(2)))?.precision).toBe(
+      "preview",
+    );
 
     clip.source.setPlaybackActive?.(false);
     // Until the exact frame lands, the frame's own preview stays.
-    expect(clip.source.getEntry(CLOCK.timeAt(2))).toMatchObject({
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(2)))).toEqual({
       frameIndex: 2,
       precision: "preview",
     });
     await vi.waitFor(() =>
-      expect(clip.source.getEntry(CLOCK.timeAt(2))).toMatchObject({
+      expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(2)))).toEqual({
         frameIndex: 2,
         precision: "exact",
       }),
@@ -97,7 +99,9 @@ describe("depth source from a clip with a preview", () => {
     expect(changed).toHaveBeenCalled();
 
     clip.source.setPlaybackActive?.(true);
-    expect(clip.source.getEntry(CLOCK.timeAt(2))?.precision).toBe("preview");
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(2)))?.precision).toBe(
+      "preview",
+    );
     clip.source.destroy();
   });
 
@@ -168,7 +172,9 @@ describe("depth source from a clip with a preview", () => {
     page.visibilityState = "visible";
     page.dispatchEvent(new Event("visibilitychange"));
     await settle();
-    expect(clip.source.getEntry(CLOCK.timeAt(0))?.precision).toBe("preview");
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))?.precision).toBe(
+      "preview",
+    );
     clip.source.destroy();
     vi.unstubAllGlobals();
   });
@@ -336,7 +342,7 @@ describe("depth source from a clip with a preview", () => {
 
       clip.source.setPlaybackActive?.(false);
       await advance(200);
-      expect(clip.source.getEntry(CLOCK.timeAt(1))).toMatchObject({
+      expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(1)))).toEqual({
         frameIndex: 1,
         precision: "exact",
       });
@@ -443,11 +449,11 @@ describe("exact depth while playing", () => {
     await clip.releaseExact(1);
     await wait;
 
-    expect(clip.source.getEntry(CLOCK.timeAt(0))).toMatchObject({
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))).toEqual({
       frameIndex: 0,
       precision: "exact",
     });
-    expect(clip.source.getEntry(CLOCK.timeAt(1))).toMatchObject({
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(1)))).toEqual({
       frameIndex: 1,
       precision: "exact",
     });
@@ -463,23 +469,25 @@ describe("exact depth while playing", () => {
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(0));
     await settle();
-    expect(clip.source.getEntry(CLOCK.timeAt(0))?.precision).toBe("preview");
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))?.precision).toBe(
+      "preview",
+    );
 
     // Five seconds ahead is wanted; four in a row is past three quarters.
     await clip.releaseExact(4);
-    expect(clip.source.getEntry(CLOCK.timeAt(0))).toMatchObject({
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))).toEqual({
       frameIndex: 0,
       precision: "exact",
     });
     expect(
       clip.source
         .getUpcomingEntries?.(CLOCK.timeAt(0), 2)
-        .map((entry) => entry.precision),
+        .map((entry) => drawnAs(entry)?.precision),
     ).toEqual(["exact", "exact"]);
 
     // At frame 3 only one second is loaded ahead, under a quarter of five.
     clip.source.prefetch?.(CLOCK.timeAt(3));
-    expect(clip.source.getEntry(CLOCK.timeAt(3))).toMatchObject({
+    expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(3)))).toEqual({
       frameIndex: 3,
       precision: "preview",
     });
@@ -492,17 +500,23 @@ describe("exact depth while playing", () => {
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(0));
     await vi.waitFor(() =>
-      expect(clip.source.getEntry(CLOCK.timeAt(0))?.precision).toBe("exact"),
+      expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))?.precision).toBe(
+        "exact",
+      ),
     );
 
     // Nine frames on is a seek, not a present.
     const landed = clip.source.getEntry(CLOCK.timeAt(9));
 
-    expect(landed === null || landed.precision === "preview").toBe(true);
+    expect(landed === null || drawnAs(landed)?.precision === "preview").toBe(
+      true,
+    );
     expect(landed?.frameIndex ?? 9).toBe(9);
     clip.source.prefetch?.(CLOCK.timeAt(9));
     await vi.waitFor(() =>
-      expect(clip.source.getEntry(CLOCK.timeAt(9))?.precision).toBe("exact"),
+      expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(9)))?.precision).toBe(
+        "exact",
+      ),
     );
     clip.source.destroy();
   });
@@ -523,7 +537,7 @@ describe("exact depth while playing", () => {
     source.setPlaybackActive?.(true);
     source.prefetch?.(CLOCK.timeAt(2));
     await vi.waitFor(() =>
-      expect(source.getEntry(CLOCK.timeAt(2))).toMatchObject({
+      expect(drawnAs(source.getEntry(CLOCK.timeAt(2)))).toEqual({
         frameIndex: 2,
         precision: "exact",
       }),
@@ -640,6 +654,17 @@ describe("resolveDepthClipOptions", () => {
 /** Preview code a frame's luma is filled with: says which frame it is. */
 function code(index: number) {
   return 16 + index * 10;
+}
+
+/** Which frame an entry draws, and whether its map is exact or a preview. */
+function drawnAs(entry: ReturnType<DepthFrameProvider["getEntry"]>) {
+  return entry
+    ? {
+        frameIndex: entry.frameIndex,
+        precision:
+          entry.map.samples.encoding === "scaled16" ? "exact" : "preview",
+      }
+    : null;
 }
 
 function previewCode(entry: ReturnType<DepthFrameProvider["getEntry"]>) {

@@ -29,7 +29,12 @@ function previewMap(): DepthMap {
   return {
     height: 18,
     kind: "disparity_px",
-    samples: { encoding: "scaled16", scale: 256, values: new Uint16Array(576) },
+    samples: {
+      encoding: "preview8",
+      range: { max: 64, min: 1 },
+      reservedMax: 0,
+      values: new Uint8Array(576),
+    },
     width: 32,
   };
 }
@@ -61,7 +66,7 @@ function createPreviewProvider() {
   };
   const entry = (index: number): DepthFrameEntry | null =>
     index <= state.decodedThrough
-      ? { frameIndex: index, map: maps[index], precision: "preview" }
+      ? { frameIndex: index, map: maps[index] }
       : null;
   const provider: DepthFrameProvider = {
     destroy: vi.fn(),

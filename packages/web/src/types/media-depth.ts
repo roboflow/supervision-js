@@ -47,7 +47,10 @@ export interface ActiveDepthMap {
   readonly frameIndex: number | null;
   /** Media time the map was drawn for, in seconds. */
   readonly mediaTime: number;
-  /** `"preview"` while an approximate 8-bit map stands in for the exact one. */
+  /**
+   * `"preview"` for a map of 8-bit `preview8` codes, such as a clip's preview
+   * frame, as `readDepthAt` reports it.
+   */
   readonly precision: "exact" | "preview";
   /** Media size the map is stretched over, the coordinate space for readouts. */
   readonly mediaWidth: number;

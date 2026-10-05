@@ -892,9 +892,7 @@ describe("push-presented Pixi scene", () => {
       destroy: vi.fn(),
       getEntry(mediaTime) {
         asked.push(mediaTime);
-        return mediaTime < 2
-          ? { frameIndex: 0, map, precision: "exact" }
-          : null;
+        return mediaTime < 2 ? { frameIndex: 0, map } : null;
       },
     });
 

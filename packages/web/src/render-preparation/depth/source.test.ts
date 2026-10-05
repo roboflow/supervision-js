@@ -313,7 +313,7 @@ describe("depth source from a clip manifest", () => {
     await vi.advanceTimersByTimeAsync(1);
     await vi.waitFor(() => expect(redraw).toHaveBeenCalledTimes(1));
     expect(drawnFrame(source, 5.2)).toEqual({ file: 5, frameIndex: 5 });
-    expect(source.getEntry(5.2)).toMatchObject({ precision: "exact" });
+    expect(source.getEntry(5.2)?.map.samples.encoding).toBe("scaled16");
 
     await vi.waitFor(() => expect(server.fetchedFrames()).toHaveLength(5));
     expect(server.fetchedFrames()).toEqual([5, 6, 4, 7, 3]);

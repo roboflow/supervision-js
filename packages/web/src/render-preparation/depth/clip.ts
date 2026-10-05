@@ -107,15 +107,11 @@ export async function openDepthClip(
   const concurrency = () => Math.max(1, context.preparer?.().concurrency ?? 1);
   const playing = () => active && !scrubbing;
 
-  const entryOf = (
-    index: number,
-    map: DepthMap,
-    precision: DepthFrameEntry["precision"],
-  ) => {
+  const entryOf = (index: number, map: DepthMap) => {
     let entry = entries.get(map);
 
     if (!entry) {
-      entry = { frameIndex: index, map, precision };
+      entry = { frameIndex: index, map };
       entries.set(map, entry);
     }
 
@@ -257,19 +253,19 @@ export async function openDepthClip(
   const exactEntry = (index: number) => {
     const entry = exactWindow?.getEntry(index);
 
-    return entry ? entryOf(index, entry.map, "exact") : null;
+    return entry ? entryOf(index, entry.map) : null;
   };
 
   const previewEntry = (index: number) => {
     const entry = previewWindow?.getEntry(index);
 
-    return entry ? entryOf(index, entry.map, "preview") : null;
+    return entry ? entryOf(index, entry.map) : null;
   };
 
   const restEntry = (index: number) => {
     const map = atRest.get(index);
 
-    return map ? entryOf(index, map, "exact") : null;
+    return map ? entryOf(index, map) : null;
   };
 
   const moveWindows = (index: number) => {
@@ -389,7 +385,7 @@ export async function openDepthClip(
       const from = exact ? exactWindow : previewWindow;
 
       return (from?.upcoming(index, count, skip) ?? []).map((entry) =>
-        entryOf(entry.index, entry.map, exact ? "exact" : "preview"),
+        entryOf(entry.index, entry.map),
       );
     },
 

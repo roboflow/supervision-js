@@ -128,6 +128,10 @@ session.setPresentation({
 });
 ```
 
+A map's `samples` may also be 8-bit `preview8` codes, as a clip's preview
+carries them; `readDepthAt` and `getActiveDepth()` then report
+`precision: "preview"`.
+
 Every option is presentation, so changing one recolours the map without
 reloading or re-uploading it:
 

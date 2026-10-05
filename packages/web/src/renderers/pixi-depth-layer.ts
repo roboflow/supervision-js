@@ -357,7 +357,8 @@ export function createPixiDepthLayer(options: {
         mediaHeight: height,
         mediaTime,
         mediaWidth: width,
-        precision: entry.precision,
+        precision:
+          entry.map.samples.encoding === "scaled16" ? "exact" : "preview",
       };
     },
 
@@ -448,7 +449,7 @@ export function createPixiDepthLayer(options: {
     },
 
     getContentKey(): string {
-      return active ? `${identify(active.map)}:${active.precision}` : "none";
+      return active ? String(identify(active.map)) : "none";
     },
 
     destroy() {

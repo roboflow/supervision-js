@@ -25,7 +25,6 @@ import type { DepthPreviewLumaCopier } from "./preview-luma";
 export interface DepthFrameEntry {
   readonly map: DepthMap;
   readonly frameIndex: number | null;
-  readonly precision: "exact" | "preview";
 }
 
 /** What the depth layer reads to find the map for a media time. */
@@ -213,7 +212,7 @@ function isMapInput(
 }
 
 function createStillDepthSource(map: DepthMap): DepthFrameProvider {
-  const entry: DepthFrameEntry = { frameIndex: null, map, precision: "exact" };
+  const entry: DepthFrameEntry = { frameIndex: null, map };
 
   return {
     destroy: () => undefined,

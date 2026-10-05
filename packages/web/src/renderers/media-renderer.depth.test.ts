@@ -391,6 +391,38 @@ describe("media renderer depth", () => {
     renderer.destroy();
   });
 
+  it("reports a still map of preview codes as preview, as readDepthAt does", async () => {
+    const map: DepthMap = {
+      height: 18,
+      kind: "disparity_px",
+      samples: {
+        encoding: "preview8",
+        range: { max: 64, min: 1 },
+        reservedMax: 0,
+        values: new Uint8Array(32 * 18).fill(128),
+      },
+      width: 32,
+    };
+    const renderer = await createRenderer(false, false, {
+      depth: { map },
+      renderers: [annotationRenderers.depth()],
+    });
+    const active = renderer.getActiveDepth?.();
+    const readout = readDepthAt(
+      active!.map,
+      { x: 640, y: 360 },
+      { height: active!.mediaHeight, width: active!.mediaWidth },
+    );
+
+    expect(active?.map).toBe(map);
+    expect([active?.precision, readout?.precision]).toEqual([
+      "preview",
+      "preview",
+    ]);
+
+    renderer.destroy();
+  });
+
   it("replaces and removes depth without reopening the media", async () => {
     const renderer = await createRenderer(false, false, {
       renderers: [annotationRenderers.depth()],
