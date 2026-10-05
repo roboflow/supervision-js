@@ -307,18 +307,14 @@ function histogramDepthCodes(
   );
   let firstValid =
     samples.encoding === "scaled16" ? 1 : samples.reservedMax + 1;
-  let pastLast = counts.length;
 
   // Decoded values never fall as codes rise, so the codes the conversion
   // gives a value for start at one code.
-  while (firstValid < pastLast) {
-    const middle = (firstValid + pastLast) >> 1;
-
-    if (hasConvertedValue(decodeDepthSample(middle, samples)!, conversion)) {
-      pastLast = middle;
-    } else {
-      firstValid = middle + 1;
-    }
+  while (
+    firstValid < counts.length &&
+    !hasConvertedValue(decodeDepthSample(firstValid, samples)!, conversion)
+  ) {
+    firstValid += 1;
   }
 
   let sampled = 0;
