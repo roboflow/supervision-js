@@ -112,6 +112,20 @@ describe("depth preview window", () => {
     expect(stored(window, 0, 30)).toEqual([2, 3, 4, 5]);
   });
 
+  it("keeps what fits when frames outgrow their estimate", async () => {
+    const { source, window } = setup({
+      bytesOf: () => FRAME_BYTES + 1,
+      maxBytes: FRAME_BYTES * 5,
+    });
+
+    window.setPlayhead(0);
+    await source.drain();
+
+    expect(window.failure).toBeNull();
+    expect(source.starts).toEqual([0]);
+    expect(stored(window, 0, 30)).toEqual([0, 1, 2, 3]);
+  });
+
   it("asks for a frame not decoded yet to wait, and a short lead to wait until the resume lead", async () => {
     const { source, window } = setup({ gated: true, prefetchSeconds: 1 });
 
@@ -440,6 +454,7 @@ interface SetupOptions {
   readonly frameCount?: number;
   readonly keyEvery?: number;
   readonly maxBytes?: number;
+  readonly bytesOf?: () => number;
   readonly prefetchSeconds?: number;
   readonly retainSeconds?: number;
   /** Frames come out only as the test releases them. */
@@ -457,6 +472,7 @@ interface SetupOptions {
 function setup(options: SetupOptions = {}) {
   const source = new FakeFrames(options);
   const window = createDepthFrameWindow({
+    bytesOf: options.bytesOf,
     createMap: (frame) =>
       ({
         height: frame.height,
