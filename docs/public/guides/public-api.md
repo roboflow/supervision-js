@@ -351,6 +351,16 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
 
+Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
+keeps a selection drag alive when the engine is already in Select mode. To
+abort a gesture explicitly, call `engine.cancel()`.
+
+Creation tools may provide `onRejected()` to handle a completed drag or
+freehand stroke that produced no committed detection. The engine calls it
+after returning to idle. Escape, tool changes, and explicit cancellation do
+not call it, so hosts can clear selection on an empty drawing click without
+interpreting every cancellation as a click.
+
 The generated API reference has a separate Editing module for this entrypoint.
 
 `Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
