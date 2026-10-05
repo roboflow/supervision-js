@@ -88,7 +88,10 @@ export interface DepthFrameWindowOptions<
   readonly bytesOf?: (frame: Frame) => number;
   /** Names the frames in errors and warnings. Defaults to "preview". */
   readonly precision?: "exact" | "preview";
-  /** Budget for decoded frames, in bytes. */
+  /**
+   * Budget for decoded frames, in bytes. The frame at the playhead and the
+   * ones the gate waits on or just let through are kept even over it.
+   */
   readonly maxBytes: number;
   /**
    * How far ahead of the playhead to decode while playing, in seconds of
@@ -207,7 +210,9 @@ interface Span {
  *
  * A frame the playback gate waits on is decoded before anything else. When
  * the budget is short, frames the window no longer wants go first, then the
- * ones farthest the other way from where the playhead heads.
+ * ones farthest the other way from where the playhead heads. The frame at the
+ * playhead and the ones the gate waits on or just let through stay, over the
+ * budget if they must, so a budget under one frame still plays depth.
  */
 export function createDepthFrameWindow<
   Frame extends { readonly index: number } = DepthPreviewLumaFrame,
@@ -507,43 +512,51 @@ export function createDepthFrameWindow<
     heldBytes -= entry.bytes;
   };
 
-  const makeRoom = (bytes: number) => {
+  const pinned = (index: number) => index === playhead || waitedFor(index);
+
+  /**
+   * Frees `bytes` for frame `target`, dropping only frames the budget gives
+   * up before it. A pinned target gets its room, over the budget if it must.
+   */
+  const makeRoom = (bytes: number, target: number) => {
     const wanted = span();
 
     for (const index of [...entries.keys()]) {
       if (!keepable(index, wanted) && !waitedFor(index)) drop(index);
     }
 
-    if (heldBytes + bytes <= options.maxBytes) return true;
+    const fits = () => heldBytes + bytes <= options.maxBytes;
+
+    if (fits()) return true;
 
     const backwards = wanted.fillBehind === "first";
+    const rank = (index: number) => {
+      // On a looping clip a frame behind is also a lap ahead; it is
+      // whichever way is nearer.
+      const offset = forwardOffset(playhead, index);
+      const isBehind =
+        index < playhead && (offset < 0 || playhead - index < offset);
+
+      return {
+        distance: isBehind ? playhead - index : offset,
+        index,
+        keptLonger: isBehind === backwards,
+      };
+    };
+    const goesFirst = (a: ReturnType<typeof rank>, b: typeof a) =>
+      Number(a.keptLonger) - Number(b.keptLonger) || b.distance - a.distance;
+    const incoming = pinned(target) ? null : rank(target);
     const order = [...entries.keys()]
-      .filter((index) => index !== playhead && !waitedFor(index))
-      .map((index) => {
-        // On a looping clip a frame behind is also a lap ahead; it is
-        // whichever way is nearer.
-        const offset = forwardOffset(playhead, index);
-        const isBehind =
-          index < playhead && (offset < 0 || playhead - index < offset);
+      .filter((index) => !pinned(index))
+      .map(rank)
+      .sort(goesFirst);
 
-        return {
-          distance: isBehind ? playhead - index : offset,
-          index,
-          keptLonger: isBehind === backwards,
-        };
-      })
-      .sort(
-        (a, b) =>
-          Number(a.keptLonger) - Number(b.keptLonger) ||
-          b.distance - a.distance,
-      );
-
-    for (const { index } of order) {
-      if (heldBytes + bytes <= options.maxBytes) break;
-      drop(index);
+    for (const held of order) {
+      if (fits() || (incoming && goesFirst(held, incoming) >= 0)) break;
+      drop(held.index);
     }
 
-    return heldBytes + bytes <= options.maxBytes;
+    return fits() || incoming === null;
   };
 
   const startRun = (target: number) => {
@@ -603,7 +616,13 @@ export function createDepthFrameWindow<
 
     const target = nextTarget();
 
-    if (target !== null && !runServes(target)) restartFor(target);
+    if (
+      target !== null &&
+      !runServes(target) &&
+      makeRoom(options.frameBytes, target)
+    ) {
+      restartFor(target);
+    }
     wake();
     void pump();
   };
@@ -621,7 +640,7 @@ export function createDepthFrameWindow<
       while (!destroyed && failure === null) {
         const target = hidden || !placed ? null : nextTarget();
 
-        if (target === null) {
+        if (target === null || !makeRoom(options.frameBytes, target)) {
           await idle();
           continue;
         }
@@ -629,7 +648,7 @@ export function createDepthFrameWindow<
 
         const current = active;
 
-        if (!current || !makeRoom(options.frameBytes)) {
+        if (!current) {
           await idle();
           continue;
         }
@@ -653,8 +672,9 @@ export function createDepthFrameWindow<
         }
 
         current.next = Math.max(current.next, frame.index + 1);
-        if (!keep(frame.index)) continue;
-        makeRoom(options.frameBytes);
+        if (!keep(frame.index) || !makeRoom(options.frameBytes, frame.index)) {
+          continue;
+        }
 
         const map = options.createMap(frame);
         const bytes =

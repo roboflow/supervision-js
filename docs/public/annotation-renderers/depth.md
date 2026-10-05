@@ -251,15 +251,15 @@ preview value is within one preview step of the exact value, plus the video
 codec's error; `readDepthAt` reports `precision: "preview"` and the `step`
 for it.
 
-`renderPreparation.depth` sets the budgets, and
-By default a session keeps about 2.25 seconds of preview (twice the 1-second
-prefetch, plus a quarter second behind the playhead) at the clip's resolution,
-at least 96 MiB and at most 512 MiB, the same span of exact frames for
-playback within the same bounds (`maxExactPlaybackCacheBytes`), and 128 MiB of
-exact frames at rest, more for clips too large to hold the frame at rest and
-its neighbours twice. The gate's
-`requiredAheadSeconds` caps the lead a stop waits for, never how far depth
-decodes, as it does for masks:
+`renderPreparation.depth` sets the budgets. By default a session keeps about
+2.25 seconds of preview (twice the 1-second prefetch, plus a quarter second
+behind the playhead) at the clip's resolution, at least 96 MiB and at most
+512 MiB, the same span of exact frames for playback within the same bounds
+(`maxExactPlaybackCacheBytes`), and 128 MiB of exact frames at rest, more for
+clips too large to hold the frame at rest and its neighbours twice. A budget
+under one frame still holds the frame on screen, so depth plays one decoded
+frame at a time. The gate's `requiredAheadSeconds` caps the lead a stop waits
+for, never how far depth decodes, as it does for masks:
 
 ```ts
 const session = await createMediaSession({

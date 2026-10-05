@@ -341,14 +341,16 @@ export interface RenderPreparationDepthOptions {
    * Exact frames loaded ahead for playback, in bytes. Defaults to room for
    * twice `previewPrefetchSeconds` plus a quarter second of exact frames, at
    * least 96 MiB and at most 512 MiB; a shorter budget lowers the lead exact
-   * playback reaches.
+   * playback reaches. A budget under one frame still holds the frame on
+   * screen.
    */
   readonly maxExactPlaybackCacheBytes?: number;
   /**
    * Decoded preview frames kept, in bytes. Defaults to room for twice
    * `previewPrefetchSeconds` plus a quarter second of the clip, at least
    * 96 MiB and at most 512 MiB. A budget shorter than the playback gate's lead
-   * lowers the lead the gate waits for.
+   * lowers the lead the gate waits for; one under one frame still holds the
+   * frame on screen.
    */
   readonly maxPreviewCacheBytes?: number;
   /**
