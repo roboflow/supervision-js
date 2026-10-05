@@ -399,9 +399,10 @@ With a `camera`, disparity converts to metres as
 `fxPx * baselineM / (disparity + doffsPx)`. Where `disparity + doffsPx` is not
 positive there are no metres: the readout has no `depthM`, and
 `quantity: "depth"` paints the pixel as one without depth.
-`computeDepthPercentileRange(map)` returns the range `"auto"` would use for
-that map; pass it back as `range: { min, max }` to keep colours still while
-the view changes.
+`computeDepthPercentileRange(map, { quantity })`, given the renderer's
+`quantity`, returns the range `"auto"` would use for that map; pass it back as
+`range: { min, max }` to keep colours still while the view changes. Without
+`quantity` it answers for `"disparity"`.
 
 `depthColormapColors(colormap, stops)` returns CSS colours from the same table
 the renderer draws with, far end first, so a legend matches the picture:

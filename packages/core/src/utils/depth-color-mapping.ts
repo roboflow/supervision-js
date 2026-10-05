@@ -59,6 +59,10 @@ export interface DepthColorMapping extends DepthValueConversion {
 }
 
 export interface DepthPercentileRangeOptions {
+  /**
+   * The renderer's quantity, whose unit the range is in. Defaults to
+   * `"disparity"`.
+   */
   readonly quantity?: DepthQuantity;
   /** Lower percentile from 0 to 1. Defaults to 0.02. */
   readonly low?: number;
