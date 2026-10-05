@@ -718,6 +718,10 @@ describe("exact depth while playing", () => {
     expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
       warn.mock.calls[0]?.[0],
     );
+    // The exact frames loaded before the stop are not offered either.
+    expect(source.getEntry(CLOCK.timeAt(0))).toBeNull();
+    expect(source.getUpcomingEntries?.(CLOCK.timeAt(0), 2)).toEqual([]);
+    expect(source.getFrameStatus?.(CLOCK.timeAt(0))?.prepared).toBe(false);
     source.destroy();
   });
 });

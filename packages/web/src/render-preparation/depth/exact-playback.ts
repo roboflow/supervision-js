@@ -83,8 +83,7 @@ export function createExactPlayback(options: {
     frames,
     maxBytes: budgets.playback.maxExactCacheBytes,
     onChange: () => {
-      // Exact frames that stop loading leave playback to the preview, for good.
-      if (frameWindow.failure !== null && drawn && hasPreview()) {
+      if (frameWindow.failure !== null && drawn) {
         drawn = false;
         retryAt = Number.POSITIVE_INFINITY;
       }
