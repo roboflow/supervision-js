@@ -590,9 +590,15 @@ describe("exact depth while playing", () => {
 
     clip.source.setPlaybackActive?.(true);
     clip.source.prefetch?.(CLOCK.timeAt(0));
+    await vi.waitFor(() => expect(clip.disposed()).toBe(true));
+    expect(clip.source.getEntry(CLOCK.timeAt(0))).toBeNull();
+
+    const changed = vi.fn();
+
+    clip.source.subscribe?.(changed);
     await clip.releaseExact(1);
 
-    expect(clip.disposed()).toBe(true);
+    expect(changed).toHaveBeenCalled();
     expect(drawnAs(clip.source.getEntry(CLOCK.timeAt(0)))).toEqual({
       frameIndex: 0,
       precision: "exact",
@@ -600,6 +606,12 @@ describe("exact depth while playing", () => {
     expect(clip.source.needsPlaybackGateWait?.(CLOCK.timeAt(1), OPEN)).toBe(
       true,
     );
+    await clip.releaseExact(1);
+    expect(
+      clip.source
+        .getUpcomingEntries?.(CLOCK.timeAt(0), 1)
+        .map((entry) => drawnAs(entry)),
+    ).toEqual([{ frameIndex: 1, precision: "exact" }]);
     clip.source.destroy();
   });
 
