@@ -82,10 +82,7 @@ export function createExactPlayback(options: {
     frames,
     maxBytes: budgets.playback.maxExactCacheBytes,
     onChange: () => {
-      if (frameWindow.failure !== null && drawn) {
-        drawn = false;
-        retryAt = Number.POSITIVE_INFINITY;
-      }
+      if (frameWindow.failure !== null) drawn = false;
       options.onChange();
     },
     onFrame: (index) => {
