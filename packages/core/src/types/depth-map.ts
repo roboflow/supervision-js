@@ -179,7 +179,10 @@ export interface DepthClipFrames {
   readonly timesS?: readonly number[];
 }
 
-/** An 8-bit preview video of a clip's depth. */
+/**
+ * An 8-bit preview video of a clip's depth. Only a `disparity_px` clip may
+ * have one.
+ */
 export interface DepthPreviewTrack {
   readonly file: string;
   readonly codec?: string;

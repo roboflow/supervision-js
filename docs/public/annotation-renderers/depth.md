@@ -442,13 +442,14 @@ a stored 0 is no depth. A scale of 256 keeps 1/256-pixel disparity steps up to
 its name for disparity. `image.confidence_file` names an optional 8-bit
 grayscale PNG of the same size, 0 to 255 per pixel, which readouts report as
 `confidence` from 0 to 1. A clip manifest replaces `image` with `frames` (a
-frame count and an `exact/{index:06}.png` pattern) and may add an 8-bit
-`preview` video. Its `levels` is `"tv"` (codes 16 to 235) or `"full"` (0 to
-255, the default when `levels` is missing). Preview code `c` above the
-reserved codes `T` stands for `lo + (c - T - 1) / (top - T - 1) * (hi - lo)`
-of its `range_px`, where `top` is 235 in TV range and 255 in full range; a
-code above `top` reads as `hi`. In TV range `T` is at least 16, the code
-written for no depth.
+frame count and an `exact/{index:06}.png` pattern) and, for `disparity_px`
+only, may add an 8-bit `preview` video: `parseDepthManifest` refuses a
+manifest of another kind that has one. Its `levels` is `"tv"` (codes
+16 to 235) or `"full"` (0 to 255, the default when `levels` is missing).
+Preview code `c` above the reserved codes `T` stands for
+`lo + (c - T - 1) / (top - T - 1) * (hi - lo)` of its `range_px`, where `top`
+is 235 in TV range and 255 in full range; a code above `top` reads as `hi`.
+In TV range `T` is at least 16, the code written for no depth.
 
 ### Writing the preview video
 
