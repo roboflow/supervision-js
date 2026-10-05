@@ -323,6 +323,19 @@ describe("depth source from a clip with a preview", () => {
     clip.source.destroy();
   });
 
+  it('says playback draws exact depth in "auto" when the preview cannot open', async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const clip = await openPreviewClip({
+      openError: new Error("no H.264 decoder"),
+      playback: "auto",
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      "The depth preview https://example.test/clip/preview.mp4 is off, so playback draws exact depth where it keeps up and depth at rest otherwise: it did not open: Error: no H.264 decoder",
+    );
+    clip.source.destroy();
+  });
+
   describe("on decoders that misbehave", () => {
     const fakeTimers = () =>
       vi.useFakeTimers({
@@ -371,7 +384,7 @@ describe("depth source from a clip with a preview", () => {
       expect(onOpen).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledOnce();
       expect(warn.mock.calls[0]?.[0]).toBe(
-        `The depth preview https://example.test/clip/preview.mp4 is off, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: no decoder in this browser returned a frame of the probe clip (prefer-software: ${stall}; prefer-hardware: ${stall}).`,
+        `The depth preview https://example.test/clip/preview.mp4 is off, so playback shows depth only at rest: no decoder in this browser returned a frame of the probe clip (prefer-software: ${stall}; prefer-hardware: ${stall}).`,
       );
       await expectExactAtRestOnly(clip, vi.advanceTimersByTimeAsync);
       await vi.advanceTimersByTimeAsync(200);

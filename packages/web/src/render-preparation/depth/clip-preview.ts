@@ -59,7 +59,11 @@ export async function openClipPreview(
       ? chooseDefaultPreviewDecoding
       : context.choosePreviewDecoding;
   const unavailable = (reason: string): ClipPreview => {
-    const message = `The depth preview ${url} is off, so playback draws exact depth where it keeps up (playback auto or exact) and depth at rest otherwise: ${reason}`;
+    const message = `The depth preview ${url} is off, so ${
+      context.depth?.playback === "preview"
+        ? "playback shows depth only at rest"
+        : "playback draws exact depth where it keeps up and depth at rest otherwise"
+    }: ${reason}`;
 
     console.warn(message);
     return { preview: null, unavailable: message };
