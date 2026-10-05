@@ -59,7 +59,7 @@ export function resolveDepthClipOptions(
 ): DepthClipOptions {
   const prefetchSeconds = Math.max(
     0,
-    options.previewPrefetchSeconds ?? DEFAULT_PREFETCH_SECONDS,
+    ignoreNaN(options.previewPrefetchSeconds) ?? DEFAULT_PREFETCH_SECONDS,
   );
   const frameRate =
     Number.isFinite(clip.frameRate) && clip.frameRate > 0 ? clip.frameRate : 30;
@@ -83,7 +83,7 @@ export function resolveDepthClipOptions(
     },
     playback: {
       maxExactCacheBytes:
-        options.maxExactPlaybackCacheBytes ??
+        ignoreNaN(options.maxExactPlaybackCacheBytes) ??
         windowBudget(clip.exactFrameBytes),
       source:
         options.playback === "exact" || options.playback === "preview"
@@ -92,7 +92,8 @@ export function resolveDepthClipOptions(
     },
     preview: {
       maxCacheBytes:
-        options.maxPreviewCacheBytes ?? windowBudget(clip.previewFrameBytes),
+        ignoreNaN(options.maxPreviewCacheBytes) ??
+        windowBudget(clip.previewFrameBytes),
       // The mask window's paused margin, and never fewer than the neighbours
       // a step reaches.
       pausedFrameCount: Math.max(
@@ -109,4 +110,8 @@ export function resolveDepthClipOptions(
       retainSeconds: RETAIN_SECONDS,
     },
   };
+}
+
+function ignoreNaN(value: number | undefined) {
+  return Number.isNaN(value) ? undefined : value;
 }

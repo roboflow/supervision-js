@@ -605,6 +605,26 @@ describe("resolveDepthClipOptions", () => {
     });
   });
 
+  it("takes a NaN setting as unset", () => {
+    expect(
+      resolveDepthClipOptions(
+        { exactFrameBytes: 10, frameRate: 30, previewFrameBytes: 10 },
+        {
+          maxExactPlaybackCacheBytes: Number.NaN,
+          maxPreviewCacheBytes: Number.NaN,
+          previewPrefetchSeconds: Number.NaN,
+        },
+      ),
+    ).toMatchObject({
+      playback: { maxExactCacheBytes: 96 * MIB },
+      preview: {
+        maxCacheBytes: 96 * MIB,
+        pausedFrameCount: 3,
+        prefetchSeconds: 1,
+      },
+    });
+  });
+
   it("keeps at rest what the mask window keeps, one schedule batch past the frame", () => {
     const clip = { exactFrameBytes: 10, frameRate: 30, previewFrameBytes: 10 };
 
