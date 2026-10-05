@@ -544,10 +544,45 @@ describe("exact depth while playing", () => {
     );
     source.destroy();
   });
+
+  it("says why a clip without a preview plays without depth once an exact frame fails to load", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
+    const server = previewlessServer({ failOnce: 3 });
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        depth: { previewPrefetchSeconds: 5 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: MEDIA,
+        onDiagnostics,
+        openPreviewTrack: null,
+        preparer: server.preparer,
+      },
+    );
+
+    source.setPlaybackActive?.(true);
+    source.prefetch?.(CLOCK.timeAt(0));
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+    expect(warn.mock.calls[0]?.[0]).toMatch(
+      /^Exact depth stopped loading ahead, so playback shows depth only at rest: .*000003\.png: 503/,
+    );
+    await vi.waitFor(() =>
+      expect(onDiagnostics.mock.calls.at(-1)?.[0].message).toBe(
+        warn.mock.calls[0]?.[0],
+      ),
+    );
+    source.destroy();
+  });
 });
 
-/** A clip without a preview whose exact frames say which file they are. */
-function previewlessServer() {
+/**
+ * A clip without a preview whose exact frames say which file they are.
+ * `failOnce` answers its frame's first fetch with a 503.
+ */
+function previewlessServer(options: { readonly failOnce?: number } = {}) {
+  let failed = false;
   const manifest = {
     display_range_px: [2, 60],
     frames: { count: COUNT, exact: "exact/{index:06}.png" },
@@ -565,9 +600,14 @@ function previewlessServer() {
       return new Response(JSON.stringify(manifest));
     }
 
-    return new Response(
-      Uint8Array.of(Number(/exact\/(\d+)\.png$/.exec(text)?.[1])),
-    );
+    const index = Number(/exact\/(\d+)\.png$/.exec(text)?.[1]);
+
+    if (index === options.failOnce && !failed) {
+      failed = true;
+      return new Response(null, { status: 503 });
+    }
+
+    return new Response(Uint8Array.of(index));
   }) as unknown as typeof globalThis.fetch;
   const preparer = {
     concurrency: 2,

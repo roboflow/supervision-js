@@ -88,6 +88,8 @@ export interface DepthFrameWindowOptions<
   readonly bytesOf?: (frame: Frame) => number;
   /** Names the frames in errors and warnings. Defaults to "preview". */
   readonly precision?: "exact" | "preview";
+  /** What playback draws once the window stops, for its warning. */
+  readonly stillDrawn: () => string;
   /**
    * Budget for decoded frames, in bytes. The frame at the playhead and the
    * ones the gate waits on or just let through are kept even over it.
@@ -165,6 +167,8 @@ export interface DepthFrameWindow {
   wantedLeadSeconds(index: number): number;
   /** The decoder failed; the window stops waiting and decoding. */
   readonly failure: unknown;
+  /** The warning the window gave when it stopped, or null. */
+  readonly stopMessage: string | null;
   destroy(): void;
 }
 
@@ -244,6 +248,7 @@ export function createDepthFrameWindow<
   let progress = 0;
   let gateHoldCount = 0;
   let failure: unknown = null;
+  let stopMessage: string | null = null;
   let destroyed = false;
   /** The frame the last restart was for, and how often it was restarted for. */
   let restartedFor = -1;
@@ -594,11 +599,12 @@ export function createDepthFrameWindow<
     failure ??= error;
     active?.run.cancel();
     active = null;
-    console.warn(
+    stopMessage = `${
       options.precision === "exact"
-        ? `Exact depth stopped loading ahead, so playback draws the preview: ${String(error)}`
-        : `The depth preview stopped decoding, so playback shows no depth: ${String(error)}`,
-    );
+        ? "Exact depth stopped loading ahead"
+        : "The depth preview stopped decoding"
+    }, so ${options.stillDrawn()}: ${String(error)}`;
+    console.warn(stopMessage);
     changed();
   };
 
@@ -768,6 +774,10 @@ export function createDepthFrameWindow<
   return {
     get failure() {
       return failure;
+    },
+
+    get stopMessage() {
+      return stopMessage;
     },
 
     getEntry(index) {

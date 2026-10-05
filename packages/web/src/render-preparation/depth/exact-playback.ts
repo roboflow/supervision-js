@@ -89,6 +89,10 @@ export function createExactPlayback(options: {
     precision: "exact",
     prefetchSeconds: budgets.preview.prefetchSeconds,
     retainSeconds: budgets.preview.retainSeconds,
+    stillDrawn: () =>
+      hasPreview
+        ? "playback draws the preview"
+        : "playback shows depth only at rest",
     timeAt: timing.timeAt,
   });
 

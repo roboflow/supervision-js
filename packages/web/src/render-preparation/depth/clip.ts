@@ -148,7 +148,12 @@ export async function openDepthClip(
       executionMode: offMainThread
         ? RenderPreparationExecutionMode.Worker
         : RenderPreparationExecutionMode.MainThread,
-      message: previewStopped ?? unavailable ?? preview?.message ?? null,
+      message:
+        previewStopped ??
+        exactWindow?.stopMessage ??
+        unavailable ??
+        preview?.message ??
+        null,
       workerStatus: offMainThread
         ? RenderPreparationWorkerStatus.Ready
         : RenderPreparationWorkerStatus.Disabled,
@@ -199,6 +204,7 @@ export async function openDepthClip(
         pausedFrameCount: budgets.preview.pausedFrameCount,
         prefetchSeconds: budgets.preview.prefetchSeconds,
         retainSeconds: budgets.preview.retainSeconds,
+        stillDrawn: () => "playback shows no depth",
         timeAt,
       })
     : null;

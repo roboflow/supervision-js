@@ -477,6 +477,7 @@ function setup(options: SetupOptions = {}) {
     pausedFrameCount: options.pausedFrameCount ?? 3,
     prefetchSeconds: options.prefetchSeconds ?? 1,
     retainSeconds: options.retainSeconds ?? 0,
+    stillDrawn: () => "playback shows no depth",
     timeAt: (index) => index / FPS,
   });
 

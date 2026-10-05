@@ -328,8 +328,9 @@ preview without counting against exact depth, and a drag always draws the
 preview. Either way the depth drawn is
 the frame on screen's own, never a neighbour's, and `readDepthAt` and
 `getActiveDepth()` say `precision: "exact"` when it is exact. Exact frames
-that fail to load hand playback to the preview for good, with a console
-warning.
+that fail to load hand playback to the preview for good, or leave a clip
+without a preview with depth only at rest; a console warning and the
+diagnostics `message` say so.
 
 The diagnostics add a second `depthFrame` artifact with `precision: "exact"`
 for the frames loaded for playback.
