@@ -627,25 +627,6 @@ export function createDepthFrameWindow<
     (frames.randomAccess === true ||
       frames.keyIndexAtOrBefore(target) <= active.next);
 
-  /**
-   * A run that can start anywhere loads the frames a seek forward skips
-   * before the one it lands on, so the next pass starts there. A seek moves
-   * farther than two presents can.
-   */
-  const cancelRunBehindSeek = (from: number, to: number) => {
-    if (
-      frames.randomAccess !== true ||
-      to - from <= 2 * MAX_PRESENTED_FRAME_STRIDE ||
-      active === null ||
-      active.next >= to
-    ) {
-      return;
-    }
-    active.run.cancel();
-    active = null;
-    restartedFor = -1;
-  };
-
   const wake = () => {
     const resolve = wakePump;
 
@@ -822,7 +803,6 @@ export function createDepthFrameWindow<
       if (next !== playhead) {
         restartedFor = -1;
       }
-      cancelRunBehindSeek(playhead, next);
       playhead = next;
       placed = true;
       follow();
@@ -906,7 +886,6 @@ export function createDepthFrameWindow<
       if (playing() || !placed || !inSpan(frame)) {
         // Playback is held at the frame it is about to present, which is
         // where decoding leads from.
-        cancelRunBehindSeek(playhead, frame);
         playhead = frame;
         placed = true;
       }

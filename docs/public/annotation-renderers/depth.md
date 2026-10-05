@@ -336,14 +336,9 @@ preview without counting against exact depth, and a drag always draws the
 preview. Either way the depth drawn is
 the frame on screen's own, never a neighbour's, and `readDepthAt` and
 `getActiveDepth()` say `precision: "exact"` when it is exact. An exact frame
-the network or its server fails to deliver, as on a dropped connection or an
-answer of 408, 429 or 5xx, is loaded again after 1 s, waiting twice as long
-after each failure up to 16 s; meanwhile the exact frames after it wait too,
-unless a seek moves playback past it. Any other failure, such as a missing
-file or a PNG that does not decode, or one after the 16 s wait, hands
-playback to the preview for good, or leaves a clip without a preview with
-depth only at rest, and a console warning and the diagnostics `message` say
-so with that load's error.
+that fails to load is loaded once more. One that fails twice hands playback
+to the preview for good, or leaves a clip without a preview with depth only
+at rest, and a console warning and the diagnostics `message` say so.
 
 The diagnostics add a second `depthFrame` artifact with `precision: "exact"`
 for the frames loaded for playback.
