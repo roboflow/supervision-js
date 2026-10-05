@@ -176,6 +176,12 @@ export function createExactPlayback(options: {
  * otherwise walk to the end of the clip.
  */
 const MAX_SKIPPED_FRAMES = 64;
+/**
+ * Failed loads of one frame that stop exact playback. The source counts them
+ * because the window's restart limit starts over each time the playhead
+ * moves, which would fetch a missing file for as long as playback runs.
+ */
+const MAX_LOAD_FAILURES = 2;
 
 interface ExactDepthFrame {
   readonly index: number;
@@ -188,21 +194,20 @@ interface ExactDepthFrame {
  * order, and hands them over in that order, so the window sees one frame
  * after another while the worker pool decodes several.
  *
- * A frame that fails to load ends the run, so the window tries it again and
- * gives up only on a frame that keeps failing.
+ * A frame that fails to load ends the run, so the window asks for it again;
+ * one that fails again stops the window with its load error.
  */
 function createExactFrameSource(options: {
   readonly frameCount: number;
   readonly load: (index: number, signal: AbortSignal) => Promise<DepthMap>;
   readonly concurrency: () => number;
 }): DepthFrameSource<ExactDepthFrame> {
-  const loadErrors = new Map<number, unknown>();
+  const failures = new Map<number, number>();
 
   return {
     frameCount: options.frameCount,
     randomAccess: true,
     keyIndexAtOrBefore: (index) => index,
-    loadError: (index) => loadErrors.get(index),
 
     decode(fromIndex, { keep } = {}): DepthFrameRun<ExactDepthFrame> {
       const abort = new AbortController();
@@ -254,15 +259,18 @@ function createExactFrameSource(options: {
           try {
             map = await head.map;
           } catch (error) {
-            if (!cancelled) {
-              loadErrors.set(head.index, error);
-              cancel();
-            }
+            if (cancelled) return null;
+
+            const failed = (failures.get(head.index) ?? 0) + 1;
+
+            if (failed >= MAX_LOAD_FAILURES) throw error;
+            failures.set(head.index, failed);
+            cancel();
             return null;
           }
 
           if (cancelled) return null;
-          loadErrors.delete(head.index);
+          failures.delete(head.index);
           fill();
 
           return { index: head.index, map };

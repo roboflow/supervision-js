@@ -55,8 +55,6 @@ export interface DepthFrameSource<
   readonly frameCount: number;
   readonly randomAccess?: boolean;
   keyIndexAtOrBefore(index: number): number;
-  /** Why the last load of frame `index` failed, if it did. */
-  loadError?(index: number): unknown;
   decode(
     fromIndex: number,
     options: DepthPreviewDecodeOptions,
@@ -512,10 +510,7 @@ export function createDepthFrameWindow<
     if (missing === restartedFor) {
       restartsForSameFrame += 1;
       if (restartsForSameFrame >= MAX_RESTARTS_FOR_ONE_FRAME) {
-        fail(
-          frames.loadError?.(missing) ??
-            new Error(`The ${what} has no decodable frame ${missing}.`),
-        );
+        fail(new Error(`The ${what} has no decodable frame ${missing}.`));
         return;
       }
     } else {

@@ -460,6 +460,7 @@ describe("depth source from a clip with a preview", () => {
 describe("exact depth while playing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('plays exact frames loaded ahead in "exact", and holds playback for them', async () => {
@@ -643,6 +644,35 @@ describe("exact depth while playing", () => {
     source.destroy();
   });
 
+  it("fetches an exact frame that keeps failing twice, though the playhead moves between the tries", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const server = previewlessServer({
+      failing: { delayMs: 30, index: 3, times: Number.POSITIVE_INFINITY },
+    });
+    const source = await openDepthSource(
+      { manifest: "https://example.test/clip/depth.json" },
+      {
+        depth: { previewPrefetchSeconds: 5 },
+        fetch: server.fetch,
+        frameClock: CLOCK,
+        media: MEDIA,
+        openPreviewTrack: null,
+        preparer: server.preparer,
+      },
+    );
+
+    source.setPlaybackActive?.(true);
+    for (let step = 0; step < 30; step += 1) {
+      source.prefetch?.(CLOCK.timeAt(step % 3));
+      await vi.advanceTimersByTimeAsync(20);
+    }
+
+    expect(server.fetchesOf(3)).toBe(2);
+    expect(warn).toHaveBeenCalledOnce();
+    source.destroy();
+  });
+
   it("says why a clip without a preview plays without depth once an exact frame keeps failing to load", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const onDiagnostics = vi.fn<(d: RenderPreparationDiagnostics) => void>();
@@ -679,11 +709,16 @@ describe("exact depth while playing", () => {
 
 /**
  * A clip without a preview whose exact frames say which file they are.
- * `failing` answers the first `times` fetches of its frame with a 503.
+ * `failing` answers the first `times` fetches of its frame with a 503, after
+ * `delayMs`.
  */
 function previewlessServer(
   options: {
-    readonly failing?: { readonly index: number; readonly times: number };
+    readonly failing?: {
+      readonly index: number;
+      readonly times: number;
+      readonly delayMs?: number;
+    };
   } = {},
 ) {
   const fetches = new Map<number, number>();
@@ -709,6 +744,9 @@ function previewlessServer(
 
     fetches.set(index, fetched + 1);
     if (index === options.failing?.index && fetched < options.failing.times) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, options.failing?.delayMs ?? 0),
+      );
       return new Response(null, { status: 503 });
     }
 
