@@ -48,14 +48,20 @@ each layer was computed.
 
 A producer's `depth.json` and 16-bit PNG load with `depth: { manifest }`. The
 session fetches the PNG, decodes it in its render-preparation worker, and
-draws it; relative file names resolve against the manifest's URL:
+draws it; relative file names resolve against the manifest's URL. A still
+image opens through `createImageUrlMediaSource()`, since a URL string is read
+as video:
 
 ```ts
-import { annotationRenderers, createMediaSession } from "supervision";
+import {
+  annotationRenderers,
+  createImageUrlMediaSource,
+  createMediaSession,
+} from "supervision";
 
 const session = await createMediaSession({
   container,
-  media: "left.png",
+  media: createImageUrlMediaSource("left.png"),
   depth: { manifest: "depth/depth.json" },
   presentation: { renderers: [annotationRenderers.depth()] },
 });
@@ -169,13 +175,13 @@ A depth picture is one map drawn under every frame: `depth: { map }`, or a
 manifest with `image`. Depth video is a clip manifest (`frames`), one map per
 video frame.
 
-| Media                                                         | Depth picture                                            | Depth video                                                           |
-| ------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------- |
-| A URL or file: the default path, through Mediabunny           | Yes                                                      | Yes. The first clip reads the file's packet table to index its frames |
-| A file converted with `normalize: { stream: true }`           | Yes                                                      | No: while it converts, not all of its frames are known                |
-| Web video engine: `createWebVideoEngineMediaRendererSource()` | Yes                                                      | Yes                                                                   |
-| Still image                                                   | Yes                                                      | No video to pair it with                                              |
-| `MediaStream` (camera): `createMediaStreamRendererSource()`   | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                         |
+| Media                                                                          | Depth picture                                            | Depth video                                                           |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| A URL or file: the default path, through Mediabunny                            | Yes                                                      | Yes. The first clip reads the file's packet table to index its frames |
+| A file converted with `normalize: { stream: true }`                            | Yes                                                      | No: while it converts, not all of its frames are known                |
+| Web video engine: `createWebVideoEngineMediaRendererSource()`                  | Yes                                                      | Yes                                                                   |
+| Still image: `createImageUrlMediaSource()` or `createStaticImageMediaSource()` | Yes                                                      | No video to pair it with                                              |
+| `MediaStream` (camera): `createMediaStreamRendererSource()`                    | Yes, the same map under every frame, not matched to them | No; live depth with timestamps is future work                         |
 
 Media that cannot pair a clip refuses its manifest with a `RangeError` that
 says why, and so does a clip whose frame count differs from the video's
