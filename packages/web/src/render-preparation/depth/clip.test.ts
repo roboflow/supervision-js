@@ -700,6 +700,63 @@ describe("exact depth while playing", () => {
     source.destroy();
   });
 
+  it.each([
+    [
+      "a prefetch",
+      (source: DepthFrameProvider) => source.prefetch?.(CLOCK.timeAt(9)),
+    ],
+    [
+      "the playback gate",
+      (source: DepthFrameProvider) =>
+        void source.waitForReady?.(CLOCK.timeAt(9), OPEN),
+    ],
+  ])(
+    "loads the frame a seek through %s lands on past an exact frame waiting to load again, which keeps its wait",
+    async (_through, seek) => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "clearTimeout", "performance"],
+      });
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const server = previewlessServer({
+        failing: { index: 3, times: Number.POSITIVE_INFINITY },
+      });
+      const source = await openDepthSource(
+        { manifest: "https://example.test/clip/depth.json" },
+        {
+          depth: { previewPrefetchSeconds: 5 },
+          fetch: server.fetch,
+          frameClock: CLOCK,
+          media: MEDIA,
+          openPreviewTrack: null,
+          preparer: server.preparer,
+        },
+      );
+
+      source.setPlaybackActive?.(true);
+      source.prefetch?.(CLOCK.timeAt(0));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(server.fetchesOf(3)).toBe(1);
+
+      seek(source);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(drawnAs(source.getEntry(CLOCK.timeAt(9)))).toEqual({
+        frameIndex: 9,
+        precision: "exact",
+      });
+
+      // Wanted again, frame 3 is fetched once its 1 s wait is up.
+      source.prefetch?.(CLOCK.timeAt(0));
+      await vi.advanceTimersByTimeAsync(700);
+      expect(server.fetchesOf(3)).toBe(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(server.fetchesOf(3)).toBe(2);
+      expect(warn).not.toHaveBeenCalled();
+      source.destroy();
+    },
+  );
+
   it("leaves no timer behind once destroyed while an exact frame waits to load again", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const server = previewlessServer({
