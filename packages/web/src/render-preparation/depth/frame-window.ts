@@ -220,7 +220,7 @@ interface Span {
  * the budget is short, frames the window no longer wants go first, then the
  * ones farthest the other way from where the playhead heads. The frame at the
  * playhead and the ones the gate waits on or just let through stay, over the
- * budget if they must, so a budget under one frame still plays depth.
+ * budget if they must.
  */
 export function createDepthFrameWindow<
   Frame extends { readonly index: number } = DepthPreviewLumaFrame,

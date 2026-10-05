@@ -116,9 +116,9 @@ export interface DepthAnnotationRenderer extends BaseAnnotationRenderer {
   /**
    * `"clip"` uses the map's own display range, `"auto"` the frame's 2nd to
    * 98th percentile, and `{ min, max }` a fixed range in the quantity's unit:
-   * pixels of disparity, or metres of depth. A metric map without a camera
-   * has no pixels, so its disparity is inverse depth in 1/m; relative
-   * inverse depth keeps its own unit. Values outside clamp to the ends.
+   * pixels of disparity, or metres of depth. Without a camera, a metric
+   * map's disparity is inverse depth in 1/m; relative inverse depth keeps
+   * its own unit. Values outside clamp to the ends.
    * Defaults to `"clip"`, which behaves as `"auto"` for a map without one.
    */
   readonly range?: "clip" | "auto" | DepthRange;
