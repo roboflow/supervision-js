@@ -310,44 +310,10 @@ function SessionOptionControls({
           )}
         />
         <ControlSubheading>Until the masks are drawn</ControlSubheading>
-        <ToggleControl
-          checked={waitingForMasks}
-          label="Playback gate enabled"
-          libraryDefault={formatOptionFlag(
-            libraryPreparationGate?.enabled ?? false,
-          )}
-          onChange={(checked) => onUpdate("preparationGateEnabled", checked)}
-          optionPath="renderPreparation.playbackGate.enabled"
-          origin={readDemoOptionOrigin(
-            options.preparationGateEnabled,
-            waitingForMasks,
-            libraryPreparationGate?.enabled ?? false,
-          )}
-          tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
-        />
-        <SegmentedControl
-          label="Quality"
-          libraryDefault="Adaptive"
-          onChange={(value) => onUpdate("preparationGateQuality", value)}
-          optionPath="renderPreparation.playbackGate.quality"
-          origin={readDemoOptionOrigin(
-            options.preparationGateQuality,
-            options.preparationGateQuality ??
-              preparationGate?.quality ??
-              "adaptive",
-            "adaptive",
-          )}
-          options={[
-            { label: "Adaptive", value: "adaptive" },
-            { label: "Fine", value: "fine" },
-          ]}
-          tooltip="Adaptive accepts smaller mask previews during fast movement. Fine waits for masks at the full display-fitted resolution, which can increase CPU usage and buffering. The max-wait bound still applies. `renderer.renderPreparation.playbackGate.quality`, default Adaptive."
-          value={
-            options.preparationGateQuality ??
-            preparationGate?.quality ??
-            "adaptive"
-          }
-        />
+        <ControlNote>
+          The mask playback gate and mask presentation quality are in Style →
+          Quality.
+        </ControlNote>
         <SliderControl
           label="Mask max wait seconds"
           libraryDefault={formatOptionSeconds(
@@ -573,23 +539,6 @@ function SessionOptionControls({
           value={options.maskWorkerCount ?? maskFrame?.workerCount}
         />
         <NumberControl
-          label="Preview scale"
-          libraryDefault="0.25"
-          max={1}
-          min={0.01}
-          onChange={(value) => onUpdate("maskPreviewScale", value)}
-          optionPath="maskFrame.previewScale"
-          origin={readDemoOptionOrigin(
-            options.maskPreviewScale,
-            options.maskPreviewScale ?? maskFrame?.previewScale ?? 0.25,
-            0.25,
-          )}
-          placeholder="0.25"
-          step={0.05}
-          tooltip="Masks shown during fast movement use this fraction of the display-fitted width cap, bounded by native mask dimensions. Raise it for sharper previews at greater CPU and memory cost; 1 keeps the full fitted resolution. The visible frame refines when motion stops. `renderer.renderPreparation.maskFrame.previewScale`, default 0.25."
-          value={options.maskPreviewScale ?? maskFrame?.previewScale}
-        />
-        <NumberControl
           label="Prefetch frame count"
           libraryDefault={formatOptionCount(
             libraryMaskFrame?.prefetchFrameCount,
@@ -626,6 +575,31 @@ function SessionOptionControls({
           value={
             options.maskMaxCacheFrameCount ?? maskFrame?.maxCacheFrameCount
           }
+        />
+        <NumberControl
+          label="Max cache bytes (MiB)"
+          libraryDefault="auto"
+          min={16}
+          onChange={(value) =>
+            onUpdate(
+              "maskMaxCacheBytes",
+              value === undefined
+                ? undefined
+                : Math.floor(Math.max(16, value) * BYTES_PER_MEBIBYTE),
+            )
+          }
+          optionPath="maskFrame.maxCacheBytes"
+          origin={readDemoOptionOrigin(
+            options.maskMaxCacheBytes,
+            options.maskMaxCacheBytes ?? maskFrame?.maxCacheBytes,
+            libraryMaskFrame?.maxCacheBytes,
+          )}
+          placeholder="auto"
+          step={16}
+          tooltip="Memory reserved for cached mask rasters, in MiB. This budget and Max cache frame count both limit retention. Empty uses 64 MiB per reported GB of device memory, clamped to 256 MiB–1 GiB, or 256 MiB when unavailable. An explicit budget has a 16 MiB minimum. The active mask stays until replaced; this is not a limit on total browser memory. `renderer.renderPreparation.maskFrame.maxCacheBytes`."
+          value={toMebibytes(
+            options.maskMaxCacheBytes ?? maskFrame?.maxCacheBytes,
+          )}
         />
         <NumberControl
           label="Max pending frame count"

@@ -17,6 +17,7 @@ import {
   describeMissingSupport,
   optionSupported,
   resolveDemoSessionConfiguration,
+  type DemoSessionOptions,
 } from "../session/session-options";
 
 const NO_CONVERSION_ON_AN_UPLOAD = "An upload cannot be converted first.";
@@ -72,7 +73,7 @@ const uploadConfiguration = resolveDemoSessionConfiguration({
   renderer,
 });
 
-/** Every option the library resolves a value for, whoever supplied it. */
+/** Resolved library options shown in the Session panel. */
 const LIBRARY_RESOLVED_OPTIONS = [
   "mode",
   "detections.autoRefresh",
@@ -80,8 +81,6 @@ const LIBRARY_RESOLVED_OPTIONS = [
   "detections.playbackGate.enabled",
   "detections.playbackGate.maxWaitSeconds",
   "detections.playbackGate.requiredAheadSeconds",
-  "renderPreparation.playbackGate.enabled",
-  "renderPreparation.playbackGate.quality",
   "renderPreparation.playbackGate.maxWaitSeconds",
   "renderPreparation.playbackGate.stopBelowWallSeconds",
   "renderPreparation.playbackGate.resumeMarginWallSeconds",
@@ -91,8 +90,8 @@ const LIBRARY_RESOLVED_OPTIONS = [
   "buffer.refreshIntervalSeconds",
   "renderPreparation.mode",
   "maskFrame.workerCount",
-  "maskFrame.previewScale",
   "maskFrame.prefetchFrameCount",
+  "maskFrame.maxCacheBytes",
   "maskFrame.maxCacheFrameCount",
   "maskFrame.maxPendingFrameCount",
   "maskFrame.scheduleBatchSize",
@@ -122,6 +121,7 @@ interface ControlProps {
   readonly label?: string;
   readonly libraryDefault?: string;
   readonly optionPath?: string;
+  readonly onChange?: (value: number | undefined) => void;
   readonly origin?: string;
   readonly title?: string;
   readonly tooltip?: string;
@@ -130,12 +130,14 @@ interface ControlProps {
 
 function renderPanel(
   panelConfiguration = configuration,
+  options: DemoSessionOptions = {},
+  onChange: (updated: DemoSessionOptions) => void = () => {},
 ): ReactElement<ControlProps>[] {
   return collect(
     SessionOptionsPanel.type({
       configuration: panelConfiguration,
-      onChange: () => {},
-      options: {},
+      onChange,
+      options,
       playbackGateReach: PlaybackGateReach.EveryFrame,
     }),
   );
@@ -218,6 +220,32 @@ function collect(
 }
 
 describe("SessionOptionsPanel", () => {
+  it("converts the MiB cache control to bytes and clears back to automatic", () => {
+    const options: DemoSessionOptions = {
+      loop: false,
+      preparationGateEnabled: false,
+      preparationGateQuality: "fine",
+    };
+    let updated: DemoSessionOptions | undefined;
+    const control = renderPanel(configuration, options, (value) => {
+      updated = value;
+    }).find((node) => node.props.optionPath === "maskFrame.maxCacheBytes");
+
+    expect(control).toBeDefined();
+    control!.props.onChange!(96);
+    expect(updated).toEqual({
+      ...options,
+      maskMaxCacheBytes: 96 * 1024 * 1024,
+    });
+    control!.props.onChange!(8);
+    expect(updated).toEqual({
+      ...options,
+      maskMaxCacheBytes: 16 * 1024 * 1024,
+    });
+    control!.props.onChange!(undefined);
+    expect(updated).toEqual({ ...options, maskMaxCacheBytes: undefined });
+  });
+
   it("explains every option it offers", () => {
     const controls = renderControls();
 

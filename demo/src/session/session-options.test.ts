@@ -140,11 +140,16 @@ describe("demo session options", () => {
           playbackGate: { enabled: true, maxWaitSeconds: 0.5 },
         },
       },
-      { maskPreviewScale: 0.5, preparationGateQuality: "fine" },
+      {
+        maskMaxCacheBytes: 96 * 1024 * 1024,
+        maskPreviewScale: 0.5,
+        preparationGateQuality: "fine",
+      },
     );
 
     expect(renderer.renderPreparation?.maskFrame).toEqual({
       ...baseRenderer.renderPreparation?.maskFrame,
+      maxCacheBytes: 96 * 1024 * 1024,
       previewScale: 0.5,
     });
     expect(renderer.renderPreparation?.playbackGate).toEqual({

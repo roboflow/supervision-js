@@ -80,6 +80,7 @@ export interface DemoSessionOptions {
   readonly fit?: MediaRendererFit;
   readonly interactionMode?: MediaInteractionMode;
   readonly loop?: boolean;
+  readonly maskMaxCacheBytes?: number;
   readonly maskMaxCacheFrameCount?: number;
   readonly maskMaxPendingFrameCount?: number;
   readonly maskPrefetchFrameCount?: number;
@@ -318,6 +319,7 @@ export function applyDemoRendererOptions(
   options: DemoSessionOptions,
 ): MediaSessionRendererOptions {
   const maskFrame = definedOnly({
+    maxCacheBytes: options.maskMaxCacheBytes,
     maxCacheFrameCount: options.maskMaxCacheFrameCount,
     maxPendingFrameCount: options.maskMaxPendingFrameCount,
     prefetchFrameCount: options.maskPrefetchFrameCount,

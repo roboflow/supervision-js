@@ -7,6 +7,7 @@ import {
 import {
   formatOptionCount,
   formatOptionFlag,
+  formatOptionMebibytes,
   formatOptionSeconds,
 } from "./option-format";
 import { formatDemoRenderQualityValue } from "./render-quality";
@@ -144,6 +145,12 @@ export function listDemoLibraryDepartures(options: {
     why: "Whether the picture is held until the frame's masks have been drawn.",
   });
   compare(departures, {
+    library: libraryPreparationGate?.quality ?? "adaptive",
+    setting: "Mask presentation quality",
+    value: preparationGate?.quality ?? "adaptive",
+    why: "Which mask resolution the enabled playback gate waits for.",
+  });
+  compare(departures, {
     library: formatOptionSeconds(libraryPreparationGate?.maxWaitSeconds),
     setting: "Mask max wait",
     value: formatOptionSeconds(preparationGate?.maxWaitSeconds),
@@ -186,6 +193,24 @@ export function listDemoLibraryDepartures(options: {
     setting: "Refresh interval",
     value: formatOptionSeconds(buffer.refreshIntervalSeconds),
     why: "How often annotations already loaded are read again.",
+  });
+  compare(departures, {
+    library: String(libraryMaskFrame?.previewScale ?? 0.25),
+    setting: "Mask preview scale",
+    value: String(maskFrame?.previewScale ?? 0.25),
+    why: "The fitted mask width used during rapid movement.",
+  });
+  compare(departures, {
+    library:
+      libraryMaskFrame?.maxCacheBytes === undefined
+        ? "automatic"
+        : formatOptionMebibytes(libraryMaskFrame.maxCacheBytes / (1024 * 1024)),
+    setting: "Mask cache budget",
+    value:
+      maskFrame?.maxCacheBytes === undefined
+        ? "automatic"
+        : formatOptionMebibytes(maskFrame.maxCacheBytes / (1024 * 1024)),
+    why: "How much memory cached mask rasters may retain.",
   });
   compare(departures, {
     library: formatOptionCount(libraryMaskFrame?.prefetchFrameCount),
