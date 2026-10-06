@@ -16,6 +16,7 @@ import {
   copySortedDetectionFrames,
   detectionFrameOverlapsRange,
   selectDetectionFrame,
+  validateDetectionFrames,
 } from "#utils/detection-frames";
 
 const DEFAULT_BUFFER_AHEAD_SECONDS = 10;
@@ -105,19 +106,10 @@ export function createBufferedDetectionTimeline(
   let state = createIdleDetectionBufferState();
   let destroyed = false;
   let loadId = 0;
-  /* The snapshot last handed out for each frame identity within the current
-     source version.
-
-     A frame that leaves the window and comes back used to be copied afresh, so
-     a consumer keying work on frame identity saw a new object for the same
-     unchanged frame and redid the work: measured at 9731 mask rasters thrown
-     away in a 14 s scrub, every one identical to what replaced it. The reuse
-     path already promises "same version, same identity, same object" for
-     frames still in the window; this extends that promise across the window's
-     edge. It is reset when the source version changes, which is the signal the
-     buffer already trusts to mean the content did, and it is capped so a
-     source that appends without versioning cannot grow it without bound. */
+  /* Unchanged frames retain their snapshot identity after leaving the hot
+     window. The source's change journal invalidates remembered revisions. */
   const snapshotByIdentity = new Map<string, DetectionFrame>();
+  let snapshotSourceVersion: number | null = null;
   let bufferedSourceVersion: number | null = null;
   let bufferedVersionRange: {
     readonly startTime: number;
@@ -165,6 +157,47 @@ export function createBufferedDetectionTimeline(
         Math.max(version, options.source.getVersion?.(range) ?? 0),
       0,
     );
+  };
+  const synchronizeSnapshotMemo = () => {
+    const sourceVersion = getSourceVersion();
+
+    if (snapshotSourceVersion === sourceVersion) {
+      return;
+    }
+
+    const frames = [...snapshotByIdentity.values()];
+    const changes =
+      snapshotSourceVersion === null || frames.length === 0
+        ? undefined
+        : options.source.getChangesSince?.(snapshotSourceVersion, [
+            {
+              startTime: Math.min(...frames.map((frame) => frame.mediaTime)),
+              endTime: Math.max(
+                ...frames.map(
+                  (frame) =>
+                    frame.endTime ??
+                    frame.mediaTime +
+                      Number.EPSILON * Math.max(1, Math.abs(frame.mediaTime)),
+                ),
+              ),
+            },
+          ]);
+
+    if (!changes || changes.requiresReload) {
+      snapshotByIdentity.clear();
+    } else {
+      for (const frame of frames) {
+        if (
+          changes.ranges.some((range) =>
+            detectionFrameOverlapsRange(frame, range.startTime, range.endTime),
+          )
+        ) {
+          snapshotByIdentity.delete(getDetectionFrameIdentity(frame));
+        }
+      }
+    }
+
+    snapshotSourceVersion = sourceVersion;
   };
   const isLoadingEnabled = () =>
     typeof options.enabled === "function"
@@ -241,19 +274,12 @@ export function createBufferedDetectionTimeline(
         const committedSourceVersion = getSourceVersion(sourceRanges);
         const loadedFrames = frameRanges.flat();
 
-        if (bufferedSourceVersion !== committedSourceVersion) {
-          snapshotByIdentity.clear();
-        }
-
-        buffer =
-          bufferedSourceVersion !== null &&
-          bufferedSourceVersion === committedSourceVersion
-            ? reuseBufferedFrameSnapshots(
-                buffer,
-                loadedFrames,
-                snapshotByIdentity,
-              )
-            : copySortedDetectionFrames(loadedFrames);
+        synchronizeSnapshotMemo();
+        buffer = reuseBufferedFrameSnapshots(
+          bufferedSourceVersion === committedSourceVersion ? buffer : [],
+          loadedFrames,
+          snapshotByIdentity,
+        );
 
         for (const frame of buffer) {
           rememberSnapshot(snapshotByIdentity, frame);
@@ -602,6 +628,8 @@ export function createBufferedDetectionTimeline(
       listeners.clear();
       pendingPrefetch = undefined;
       buffer = [];
+      snapshotByIdentity.clear();
+      snapshotSourceVersion = null;
       bufferedSourceVersion = null;
       bufferedVersionRange = null;
       state = {
@@ -720,11 +748,14 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      buffer = mergeIncrementalFrames(
-        buffer,
+      const changedFrames = copySortedDetectionFrames(
         changedFrameRanges.flat(),
-        changedRanges,
       );
+      synchronizeSnapshotMemo();
+      buffer = mergeIncrementalFrames(buffer, changedFrames, changedRanges);
+      for (const frame of buffer) {
+        rememberSnapshot(snapshotByIdentity, frame);
+      }
       bufferedSourceVersion = changes.version;
       state = {
         ...state,
@@ -1232,11 +1263,6 @@ function reuseBufferedFrameSnapshots(
   loadedFrames: readonly DetectionFrame[],
   snapshots: ReadonlyMap<string, DetectionFrame>,
 ) {
-  /* Not validated here. Every caller reaches this through the source's own
-     loadFrames, which returns copySortedDetectionFrames output, and that
-     validates the same array before returning it. A second pass walks every
-     detection, keypoint and polygon point again to reach the same verdict. */
-
   const currentFramesByIdentity = new Map(
     currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
   );
@@ -1244,12 +1270,15 @@ function reuseBufferedFrameSnapshots(
   return loadedFrames
     .map((frame) => {
       const identity = getDetectionFrameIdentity(frame);
+      const existing =
+        currentFramesByIdentity.get(identity) ?? snapshots.get(identity);
 
-      return (
-        currentFramesByIdentity.get(identity) ??
-        snapshots.get(identity) ??
-        copyDetectionFrame(frame)
-      );
+      if (existing) {
+        return existing;
+      }
+
+      validateDetectionFrames([frame]);
+      return copyDetectionFrame(frame);
     })
     .sort(compareDetectionFrames);
 }

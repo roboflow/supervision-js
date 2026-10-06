@@ -33,6 +33,45 @@ const frames: DetectionFrame[] = [
 ];
 
 describe("buffered detection timeline", () => {
+  it("validates an unknown custom-source frame first loaded into a later window", async () => {
+    const sourceFrames: DetectionFrame[] = [
+      { detections: [], frameIndex: 0, mediaTime: 0 },
+      {
+        detections: [
+          {
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2.5,
+              width: 2,
+            },
+          },
+        ],
+        frameIndex: 150,
+        mediaTime: 15,
+      },
+    ];
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0,
+      source: {
+        loadFrames: async (startTime, endTime) =>
+          sourceFrames.filter(
+            (frame) =>
+              frame.mediaTime >= startTime && frame.mediaTime <= endTime,
+          ),
+      },
+    });
+
+    try {
+      await timeline.prepare(0);
+      await expect(timeline.prepare(15)).rejects.toThrow("mask.height");
+      expect(timeline.getState().status).toBe(DetectionBufferStatus.Error);
+    } finally {
+      timeline.destroy();
+    }
+  });
+
   it("loads a warm window and selects frames synchronously from the hot buffer", async () => {
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 2,
