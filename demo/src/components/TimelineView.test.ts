@@ -19,7 +19,9 @@ import {
 
 interface TimelineInputBoundary {
   onChange(event: ChangeEvent<HTMLInputElement>): void;
+  onKeyUp(): void;
   onLostPointerCapture(event: PointerEvent<HTMLInputElement>): void;
+  onPointerCancel(event: PointerEvent<HTMLInputElement>): void;
   onPointerDown(event: PointerEvent<HTMLInputElement>): void;
   onPointerMove(event: PointerEvent<HTMLInputElement>): void;
   onPointerUp(event: PointerEvent<HTMLInputElement>): void;
@@ -79,19 +81,22 @@ function changeEvent(value: number, timeStamp?: number) {
 }
 
 describe("TimelineView range input gestures", () => {
-  it("commits a quick click once and ignores the native change that follows pointerup", () => {
+  it("previews a click on pointerdown, commits once and ignores the native release change", () => {
     const onScrub = vi.fn();
     const onSeek = vi.fn();
     const input = renderTimelineInput({ onScrub, onSeek });
     const element = inputElement();
 
     input.onPointerDown(pointerEvent(element, 82, 1));
+    expect(onScrub).toHaveBeenCalledOnce();
+    expect(onScrub).toHaveBeenCalledWith(72);
+    expect(onSeek).not.toHaveBeenCalled();
     input.onPointerUp(pointerEvent(element, 82, 0));
     input.onLostPointerCapture(pointerEvent(element, 82, 0));
     input.onChange(changeEvent(72));
 
     expect(element.setPointerCapture).toHaveBeenCalledOnce();
-    expect(onScrub).not.toHaveBeenCalled();
+    expect(onScrub).toHaveBeenCalledOnce();
     expect(onSeek).toHaveBeenCalledOnce();
     expect(onSeek).toHaveBeenCalledWith(72);
   });
@@ -105,8 +110,7 @@ describe("TimelineView range input gestures", () => {
     input.onPointerUp(pointerEvent(element, 82, 0));
     input.onChange(changeEvent(12));
 
-    expect(onScrub).toHaveBeenCalledOnce();
-    expect(onScrub).toHaveBeenCalledWith(12);
+    expect(onScrub.mock.calls).toEqual([[72], [12]]);
   });
 
   it("leaves no drag open when the release's own change lands on another value", () => {
@@ -121,7 +125,7 @@ describe("TimelineView range input gestures", () => {
     // The native range puts its thumb two frames short near the track's end.
     input.onChange(changeEvent(83, 2202));
 
-    expect(onScrub.mock.calls).toEqual([[85]]);
+    expect(onScrub.mock.calls).toEqual([[15], [85]]);
     expect(onSeek).toHaveBeenCalledOnce();
     expect(onSeek).toHaveBeenCalledWith(85);
 
@@ -144,9 +148,55 @@ describe("TimelineView range input gestures", () => {
     input.onPointerUp(pointerEvent(element, 78, 0));
     input.onChange(changeEvent(68));
 
-    expect(onScrub.mock.calls).toEqual([[35], [68]]);
+    expect(onScrub.mock.calls).toEqual([[15], [35], [68]]);
     expect(onSeek).toHaveBeenCalledOnce();
     expect(onSeek).toHaveBeenCalledWith(68);
+  });
+
+  it("keeps a held click open without publishing the same position twice", () => {
+    const onScrub = vi.fn();
+    const onSeek = vi.fn();
+    const input = renderTimelineInput({ onScrub, onSeek });
+    const element = inputElement();
+
+    input.onPointerDown(pointerEvent(element, 82, 1, 1000));
+    input.onChange(changeEvent(71.5, 1100));
+    input.onPointerMove(pointerEvent(element, 82, 1, 1700));
+    expect(onScrub.mock.calls).toEqual([[72]]);
+    expect(onSeek).not.toHaveBeenCalled();
+
+    input.onPointerUp(pointerEvent(element, 82, 0, 2200));
+    input.onLostPointerCapture(pointerEvent(element, 82, 0, 2201));
+    input.onChange(changeEvent(71.5, 2202));
+    expect(onScrub.mock.calls).toEqual([[72]]);
+    expect(onSeek.mock.calls).toEqual([[72]]);
+  });
+
+  it("releases a canceled pointer's preview once when capture is also lost", () => {
+    const onScrub = vi.fn();
+    const onSeek = vi.fn();
+    const input = renderTimelineInput({ onScrub, onSeek });
+    const element = inputElement();
+
+    input.onPointerDown(pointerEvent(element, 82, 1, 1000));
+    input.onPointerCancel(pointerEvent(element, 82, 0, 1500));
+    input.onLostPointerCapture(pointerEvent(element, 82, 0, 1501));
+
+    expect(onScrub.mock.calls).toEqual([[72]]);
+    expect(onSeek.mock.calls).toEqual([[72]]);
+  });
+
+  it("still commits a keyboard change once when the key is released", () => {
+    const onScrub = vi.fn();
+    const onSeek = vi.fn();
+    const input = renderTimelineInput({ onScrub, onSeek });
+
+    input.onChange(changeEvent(12));
+    input.onKeyUp();
+    input.onKeyUp();
+
+    expect(onScrub.mock.calls).toEqual([[12]]);
+    expect(onSeek.mock.calls).toEqual([[12]]);
   });
 });
 
