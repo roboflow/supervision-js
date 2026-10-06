@@ -68,6 +68,7 @@ import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { queryMaxTextureSize } from "./depth-textures";
 import { createPixiDepthLayer } from "./pixi-depth-layer";
 import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
+import { installPixiBatchTextureBindings } from "./pixi-batch-texture-bindings";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
@@ -575,6 +576,10 @@ export async function createPixiMediaScene(
     preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
+  const destroyBatchTextureBindings = installPixiBatchTextureBindings(
+    pixi,
+    app.renderer,
+  );
 
   const rendererCanvas = app.canvas;
   rendererCanvas.style.display = "block";
@@ -1757,6 +1762,7 @@ export async function createPixiMediaScene(
       // one. A frame that arrives after this still has to be closed, or it pins
       // a decoder buffer in a producer that outlives the scene.
       frameChannel?.onPresentedFrame((presented) => presented.frame.close());
+      destroyBatchTextureBindings();
       mediaCompositor?.destroy();
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
