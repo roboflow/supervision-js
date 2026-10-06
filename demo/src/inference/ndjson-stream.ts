@@ -4,12 +4,14 @@ export async function* readNdjsonStream(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let reachedEof = false;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
 
       if (done) {
+        reachedEof = true;
         break;
       }
 
@@ -32,6 +34,13 @@ export async function* readNdjsonStream(
       yield JSON.parse(buffer) as unknown;
     }
   } finally {
+    if (!reachedEof) {
+      try {
+        await reader.cancel();
+      } catch {
+        // Cleanup must not replace a parsing, read, or consumer error.
+      }
+    }
     reader.releaseLock();
   }
 }
