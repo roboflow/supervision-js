@@ -43,12 +43,8 @@ export function createIdMaskFrame(
     return undefined;
   }
 
-  /* Floored because every downstream index is an array offset. A fractional
-     height makes `new Int32Array(h)` one entry short and leaves the axis map
-     with a hole, which the raster walk reads as `undefined` and skips, dropping
-     a detection rather than smearing it. No producer in this repository emits
-     one, and nothing between a detection source and here checks, so the floor
-     is the cheap guarantee. */
+  /* Pixel-grid dimensions use integer parts throughout allocation and RLE
+     traversal. */
   const maskWidth = Math.floor(
     Math.max(...instructions.map(({ mask }) => mask.width)),
   );
@@ -140,8 +136,8 @@ function writeMaskRuns(
   detectionMaskId: number,
 ) {
   const counts = decodeCompressedRleCounts(mask.counts);
-  const maskWidth = mask.width;
-  const maskHeight = mask.height;
+  const maskWidth = Math.floor(mask.width);
+  const maskHeight = Math.floor(mask.height);
   let maskOffset = 0;
 
   for (let index = 0; index < counts.length; index += 1) {
@@ -188,8 +184,8 @@ function writeScaledMaskRuns(
   detectionMaskId: number,
 ) {
   const counts = decodeCompressedRleCounts(mask.counts);
-  const maskWidth = mask.width;
-  const maskHeight = mask.height;
+  const maskWidth = Math.floor(mask.width);
+  const maskHeight = Math.floor(mask.height);
   let maskOffset = 0;
 
   const stride = axes.stride;
@@ -246,13 +242,9 @@ function resolveRasterWidth(maskWidth: number, maxWidth: number | undefined) {
 }
 
 /**
- * A stroke is measured in texels of the raster it is drawn on, so a coarser
- * raster measures it in coarser texels. A stroke of a texel or more keeps at
- * least one, the thinnest line the shader can draw; a narrower one keeps its
- * own width, which the shader draws as an inner boundary at any scale. The
- * ceiling is the widest neighbourhood the shaders scan, so a wider stroke would
- * be drawn at the ceiling anyway and every layer drawing the same annotation
- * has to arrive at the same width.
+ * Converts a source-grid stroke width into raster texels. Fractional widths
+ * let coverage shaders draw a border within a texel. The ceiling bounds the
+ * neighbourhood the shaders scan.
  */
 export function resolveIdMaskStrokeTexels(
   strokeWidth: number,
@@ -261,10 +253,7 @@ export function resolveIdMaskStrokeTexels(
 ) {
   const scale = maskWidth > 0 ? rasterWidth / maskWidth : 1;
 
-  return Math.min(
-    Math.max(strokeWidth * scale, Math.min(strokeWidth, 1)),
-    MAX_ID_MASK_STROKE_WIDTH,
-  );
+  return Math.min(strokeWidth * scale, MAX_ID_MASK_STROKE_WIDTH);
 }
 
 interface ScaledMaskAxes {
