@@ -131,6 +131,29 @@ describe("demo session options", () => {
     expect(renderer.renderPreparation?.mode).toBe(RenderPreparationMode.Worker);
   });
 
+  it("applies mask preview and gate quality without changing the display or wait bound", () => {
+    const renderer = applyDemoRendererOptions(
+      {
+        ...baseRenderer,
+        renderPreparation: {
+          ...baseRenderer.renderPreparation,
+          playbackGate: { enabled: true, maxWaitSeconds: 0.5 },
+        },
+      },
+      { maskPreviewScale: 0.5, preparationGateQuality: "fine" },
+    );
+
+    expect(renderer.renderPreparation?.maskFrame).toEqual({
+      ...baseRenderer.renderPreparation?.maskFrame,
+      previewScale: 0.5,
+    });
+    expect(renderer.renderPreparation?.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 0.5,
+      quality: "fine",
+    });
+  });
+
   it("reads an explicitly unset playback gate apart from an absent choice", () => {
     expect(applyDemoSessionPlaybackGate(true, { playbackGate: "unset" })).toBe(
       undefined,

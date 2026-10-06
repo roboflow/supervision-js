@@ -12,6 +12,7 @@ import {
   type MediaSessionNormalizationOptions,
   type MediaSessionRendererOptions,
   type ResolvedMediaSessionDefaults,
+  type RenderPreparationPlaybackGateOptions,
 } from "supervision";
 import type {
   SourceResidencyConfig,
@@ -82,6 +83,7 @@ export interface DemoSessionOptions {
   readonly maskMaxCacheFrameCount?: number;
   readonly maskMaxPendingFrameCount?: number;
   readonly maskPrefetchFrameCount?: number;
+  readonly maskPreviewScale?: number;
   readonly maskScanIntervalSeconds?: number;
   readonly maskScheduleBatchSize?: number;
   readonly maskWorkerCount?: number;
@@ -105,6 +107,7 @@ export interface DemoSessionOptions {
   readonly prefer2d?: boolean;
   readonly preparationGateEnabled?: boolean;
   readonly preparationGateMaxWaitSeconds?: number;
+  readonly preparationGateQuality?: RenderPreparationPlaybackGateOptions["quality"];
   readonly preparationGateRequiredAheadSeconds?: number;
   readonly preparationGateResumeMarginWallSeconds?: number;
   readonly preparationGateStopBelowWallSeconds?: number;
@@ -318,6 +321,7 @@ export function applyDemoRendererOptions(
     maxCacheFrameCount: options.maskMaxCacheFrameCount,
     maxPendingFrameCount: options.maskMaxPendingFrameCount,
     prefetchFrameCount: options.maskPrefetchFrameCount,
+    previewScale: options.maskPreviewScale,
     scanIntervalSeconds: options.maskScanIntervalSeconds,
     scheduleBatchSize: options.maskScheduleBatchSize,
     workerCount: options.maskWorkerCount,
@@ -325,6 +329,7 @@ export function applyDemoRendererOptions(
   const preparationGate = definedOnly({
     enabled: options.preparationGateEnabled,
     maxWaitSeconds: options.preparationGateMaxWaitSeconds,
+    quality: options.preparationGateQuality,
     requiredAheadSeconds: options.preparationGateRequiredAheadSeconds,
     resumeMarginWallSeconds: options.preparationGateResumeMarginWallSeconds,
     stopBelowWallSeconds: options.preparationGateStopBelowWallSeconds,

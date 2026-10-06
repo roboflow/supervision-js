@@ -325,6 +325,29 @@ function SessionOptionControls({
           )}
           tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
         />
+        <SegmentedControl
+          label="Quality"
+          libraryDefault="Adaptive"
+          onChange={(value) => onUpdate("preparationGateQuality", value)}
+          optionPath="renderPreparation.playbackGate.quality"
+          origin={readDemoOptionOrigin(
+            options.preparationGateQuality,
+            options.preparationGateQuality ??
+              preparationGate?.quality ??
+              "adaptive",
+            "adaptive",
+          )}
+          options={[
+            { label: "Adaptive", value: "adaptive" },
+            { label: "Fine", value: "fine" },
+          ]}
+          tooltip="Adaptive accepts smaller mask previews during fast movement. Fine waits for masks at the full display-fitted resolution, which can increase CPU usage and buffering. The max-wait bound still applies. `renderer.renderPreparation.playbackGate.quality`, default Adaptive."
+          value={
+            options.preparationGateQuality ??
+            preparationGate?.quality ??
+            "adaptive"
+          }
+        />
         <SliderControl
           label="Mask max wait seconds"
           libraryDefault={formatOptionSeconds(
@@ -341,7 +364,7 @@ function SessionOptionControls({
             libraryPreparationGate?.maxWaitSeconds,
           )}
           step={0.25}
-          tooltip="How long one mask-preparation wait may freeze the picture before the gate gives up and lets frames through without masks. It can hold again after preparation makes progress. `renderer.renderPreparation.playbackGate.maxWaitSeconds`, default 2s."
+          tooltip="How long one mask-preparation wait may freeze the picture before the gate gives up and lets frames through with available masks. It can hold again after preparation makes progress. `renderer.renderPreparation.playbackGate.maxWaitSeconds`, default 2s."
           value={
             options.preparationGateMaxWaitSeconds ??
             preparationGate?.maxWaitSeconds ??
@@ -550,6 +573,23 @@ function SessionOptionControls({
           value={options.maskWorkerCount ?? maskFrame?.workerCount}
         />
         <NumberControl
+          label="Preview scale"
+          libraryDefault="0.25"
+          max={1}
+          min={0.01}
+          onChange={(value) => onUpdate("maskPreviewScale", value)}
+          optionPath="maskFrame.previewScale"
+          origin={readDemoOptionOrigin(
+            options.maskPreviewScale,
+            options.maskPreviewScale ?? maskFrame?.previewScale ?? 0.25,
+            0.25,
+          )}
+          placeholder="0.25"
+          step={0.05}
+          tooltip="Masks shown during fast movement use this fraction of the display-fitted width cap, bounded by native mask dimensions. Raise it for sharper previews at greater CPU and memory cost; 1 keeps the full fitted resolution. The visible frame refines when motion stops. `renderer.renderPreparation.maskFrame.previewScale`, default 0.25."
+          value={options.maskPreviewScale ?? maskFrame?.previewScale}
+        />
+        <NumberControl
           label="Prefetch frame count"
           libraryDefault={formatOptionCount(
             libraryMaskFrame?.prefetchFrameCount,
@@ -582,7 +622,7 @@ function SessionOptionControls({
             libraryMaskFrame?.maxCacheFrameCount,
           )}
           step={1}
-          tooltip="How many drawn masks are held in memory before the oldest are dropped. Set it under the prefetch count and masks the playhead is about to reach get thrown out and drawn a second time. Set it over, and all it costs is memory. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 8 seconds' worth for a file and 5 for a stream."
+          tooltip="How many prepared mask frames may stay cached. This count and the byte budget both limit retention; frames farthest from the playhead are dropped first. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 90 seconds' worth for a file and 5 for a stream."
           value={
             options.maskMaxCacheFrameCount ?? maskFrame?.maxCacheFrameCount
           }
@@ -775,7 +815,7 @@ function SessionOptionControls({
           optionPath="previewWidth"
           placeholder="auto"
           step={16}
-          tooltip="How wide those coarse frames are, in pixels. Wider is sharper while you drag and fewer of them fit in memory. `previewWidth`; empty follows the box the picture is shown in and never goes past 320."
+          tooltip="How wide those coarse frames are, in pixels. Wider is sharper while you drag and fewer of them fit in memory. `previewWidth`; empty uses at most 320 pixels across. Display-box decoding also limits it to the picture's rendered size."
           value={options.previewWidth ?? engine.previewWidth}
         />
         <NumberControl
