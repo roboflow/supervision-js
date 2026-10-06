@@ -1,8 +1,15 @@
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import {
+  createElement,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { MediaSessionMode } from "supervision";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { QualityControls } from "./QualityControls";
+import { RenderControls } from "./RenderControls";
+import { defaultDemoPresentationSettings } from "../presentation/demo-presentation";
 import {
   DemoEngineSource,
   DemoMediaPath,
@@ -10,6 +17,27 @@ import {
   resolveDemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
+
+const { sections } = vi.hoisted(() => ({
+  sections: new Map<string, ReactNode>(),
+}));
+
+vi.mock("./InspectorControls", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./InspectorControls")>();
+  return {
+    ...original,
+    ControlSection: ({
+      children,
+      title,
+    }: {
+      readonly children: ReactNode;
+      readonly title: string;
+    }) => {
+      sections.set(title, children);
+      return null;
+    },
+  };
+});
 
 const configuration = resolveDemoSessionConfiguration({
   detections: { frames: [] },
@@ -54,23 +82,28 @@ function findControlOrNull(
   return findControlOrNull(node.props.children, path);
 }
 
-describe("QualityControls", () => {
-  it("keeps the mask gate disabled when Fine is selected", () => {
+describe("RenderControls", () => {
+  it("keeps the mask gate disabled when Fine is selected in Segmentation", () => {
     let options: DemoSessionOptions = {
       loop: false,
       preparationGateEnabled: false,
     };
-    const render = () =>
-      QualityControls.type({
-        configuration,
-        disabled: false,
-        onChange: () => {},
-        onSessionOptionsChange: (updated) => {
-          options = updated;
-        },
-        quality: 1.5,
-        sessionOptions: options,
-      });
+    const render = () => {
+      sections.clear();
+      renderToStaticMarkup(
+        createElement(RenderControls, {
+          classNames: [],
+          configuration,
+          onChange: () => {},
+          onSessionOptionsChange: (updated) => {
+            options = updated;
+          },
+          sessionOptions: options,
+          settings: defaultDemoPresentationSettings,
+        }),
+      );
+      return sections.get("Segmentation");
+    };
 
     findControl(render(), "renderPreparation.playbackGate.quality").props
       .onChange!("fine");

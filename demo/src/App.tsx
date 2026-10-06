@@ -297,12 +297,9 @@ function DemoApp() {
         }
         qualityControls={
           <QualityControls
-            configuration={demo.sessionConfiguration}
             disabled={!demo.canUseRenderer}
             onChange={demo.setRenderQuality}
-            onSessionOptionsChange={demo.setSessionOptions}
             quality={demo.renderQuality}
-            sessionOptions={demo.sessionOptions}
           />
         }
         pipelinePanel={
@@ -354,7 +351,10 @@ function DemoApp() {
           <RenderControls
             availability={demo.presentationAvailability}
             classNames={styleClassNames}
+            configuration={demo.sessionConfiguration}
             onChange={demo.setPresentationSettings}
+            onSessionOptionsChange={demo.setSessionOptions}
+            sessionOptions={demo.sessionOptions}
             settings={demo.presentationSettings}
           />
         }

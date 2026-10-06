@@ -312,7 +312,7 @@ function SessionOptionControls({
         <ControlSubheading>Until the masks are drawn</ControlSubheading>
         <ControlNote>
           The mask playback gate and mask presentation quality are in Style →
-          Quality.
+          Segmentation.
         </ControlNote>
         <SliderControl
           label="Mask max wait seconds"
