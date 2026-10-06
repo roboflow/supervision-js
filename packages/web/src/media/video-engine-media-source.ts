@@ -105,10 +105,16 @@ export async function openWebVideoEngineMediaSource(
     const { WebVideoEngine, displayBoxResolution, FrameTimeline } =
       await importEngineEntry();
     const { display, frameDecodeStrategy, ...engineOptions } = options;
+    const decodeStrategy =
+      engineOptions.decodeStrategy ??
+      (display ? displayBoxResolution(display) : undefined);
     engine = new WebVideoEngine({
-      decodeStrategy: display ? displayBoxResolution(display) : undefined,
-      previewWidth: framesPreviewWidth(display),
+      previewWidth:
+        decodeStrategy?.kind === "displayBox"
+          ? undefined
+          : framesPreviewWidth(display),
       ...engineOptions,
+      decodeStrategy,
       presentation: "frames",
     });
     const openedEngine = engine;
@@ -124,7 +130,10 @@ export async function openWebVideoEngineMediaSource(
 
     return {
       engine: openedEngine,
-      setDisplay: (display) => openedEngine.setDisplay(display),
+      setDisplay:
+        decodeStrategy?.kind === "displayBox"
+          ? (display) => openedEngine.setDisplay(display)
+          : undefined,
       frameClock: createMediaFrameClock(FrameTimeline.from(snapshot.timeline)),
       input: {
         dispose() {

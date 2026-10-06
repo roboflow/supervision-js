@@ -34,16 +34,18 @@ export function readDemoDisplayBox(
   }
 
   const box = container.getBoundingClientRect();
+  const boxWidth = container.clientWidth || box.width;
+  const boxHeight = container.clientHeight || box.height;
 
-  if (!(box.width > 0) || !(box.height > 0)) {
+  if (!(boxWidth > 0) || !(boxHeight > 0)) {
     return undefined;
   }
 
   const devicePixelRatio = globalThis.devicePixelRatio || 1;
 
   return {
-    boxWidth: box.width,
-    boxHeight: box.height,
+    boxWidth,
+    boxHeight,
     devicePixelRatio,
     maxDevicePixelRatio: getDemoMaxDevicePixelRatio(renderQuality),
   };
