@@ -120,22 +120,35 @@ function createSample(
 }
 
 function getDimensions(source: StaticImageSource | HostFrameSource) {
-  if ("width" in source && "height" in source) {
-    const width = Number(source.width);
-    const height = Number(source.height);
-    if (width > 0 && height > 0) return { width, height };
-  }
+  let width = 0;
+  let height = 0;
 
   if (
     typeof HTMLImageElement !== "undefined" &&
     source instanceof HTMLImageElement
   ) {
-    return { width: source.naturalWidth, height: source.naturalHeight };
+    width = source.naturalWidth;
+    height = source.naturalHeight;
+  } else if ("width" in source && "height" in source) {
+    width = Number(source.width);
+    height = Number(source.height);
+  } else if ("displayWidth" in source && "displayHeight" in source) {
+    width = source.displayWidth;
+    height = source.displayHeight;
+  }
+
+  if (
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width > 0 &&
+    height > 0
+  ) {
+    return { width, height };
   }
 
   throw new MediaSourceError(
     MediaErrorKind.Unreadable,
-    "Static image source dimensions must be greater than zero.",
+    "Static image source dimensions must be finite and greater than zero.",
   );
 }
 

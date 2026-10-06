@@ -547,6 +547,28 @@ test("clean consumer resolves and exercises the oriented-box annotation renderer
   assert.equal(output.trim(), "function function 4 orientedBox");
 });
 
+test("clean consumer opens static sources with intrinsic and display dimensions", () => {
+  // Contract doubles exercise the installed export without requiring browser
+  // constructors. Native decoding and drawing still need a real browser.
+  const output = run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      [
+        'import { createStaticImageMediaSource } from "supervision";',
+        "globalThis.HTMLImageElement = class { width = 160; height = 90; naturalWidth = 1920; naturalHeight = 1080; complete = true; };",
+        "const image = await createStaticImageMediaSource(new HTMLImageElement()).open();",
+        "const frame = await createStaticImageMediaSource({ displayWidth: 1080, displayHeight: 1920 }).open();",
+        "console.log(image.metadata.primaryVideoWidth, image.metadata.primaryVideoHeight, frame.metadata.primaryVideoWidth, frame.metadata.primaryVideoHeight);",
+      ].join("\n"),
+    ],
+    consumerDir,
+  );
+
+  assert.equal(output.trim(), "1920 1080 1080 1920");
+});
+
 test("clean consumer resolves the three video engine subpaths", () => {
   const output = run(
     process.execPath,
