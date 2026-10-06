@@ -60,6 +60,7 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -150,6 +151,7 @@ export async function createMediaRendererCore(
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
+  let presentationDisplay: MediaRendererDisplay | undefined;
   // A drag is a run of scrubs closed by the seek that lands it, the pairing the
   // transport already keeps for the producer.
   let isSeekGestureInFlight = false;
@@ -1145,6 +1147,19 @@ export async function createMediaRendererCore(
           runtimeState.recordPresentationUpdate(presentedSample);
         }
       },
+      onDisplayChange(display) {
+        presentationDisplay = display;
+        if (pushPresentationReady && renderer.setDisplay) {
+          void renderer.setDisplay(display).catch((error: unknown) => {
+            if (
+              !runtimeState.isDestroyed() &&
+              !(error instanceof Error && error.name === "AbortError")
+            ) {
+              runtimeState.setRenderError(error);
+            }
+          });
+        }
+      },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
       presentedFrames: protectedPresentedFrames?.source,
@@ -1253,6 +1268,15 @@ export async function createMediaRendererCore(
       if (runtimeState.isDestroyed() || runtimeState.isError()) return renderer;
       pushPresentationReady = true;
       runtimeState.setReady();
+      if (presentationDisplay && renderer.setDisplay) {
+        await renderer
+          .setDisplay(presentationDisplay)
+          .catch((error: unknown) => {
+            if (!(error instanceof Error && error.name === "AbortError")) {
+              throw error;
+            }
+          });
+      }
 
       if (options.autoPlay ?? true) {
         // Opening exposes the writer even when autoplay awaits future detections.

@@ -64,7 +64,7 @@ export enum RenderPreparationArtifactFrameStatus {
  * apart, and describing the second as missing media is wrong on any source.
  */
 export enum RenderPreparationGateHoldReason {
-  /** The frame about to be presented has no artifact yet. */
+  /** The frame about to be presented lacks the required raster quality. */
   ActiveFrameUnprepared = "activeFrameUnprepared",
   /** That frame is ready, and the prepared lead in front of it is short. */
   LeadBelowRequirement = "leadBelowRequirement",
@@ -109,14 +109,23 @@ export interface RenderPreparationMaskFrameOptions {
     readonly maxDevicePixelRatio?: number;
   };
   /**
+   * Scale of the display-fitted width cap for previews during rapid movement.
+   * Default: 0.25. Rasters never exceed native mask dimensions.
+   * Positive values up to 1 are accepted; invalid values use the default.
+   * A value of 1 keeps the full display-fitted resolution during motion.
+   * Once motion settles, the visible frame uses the full fitted resolution.
+   * Without a display box, masks keep their native resolution.
+   */
+  readonly previewScale?: number;
+  /**
    * Maximum number of prepared mask frames retained in memory.
    */
   readonly maxCacheFrameCount?: number;
   /**
    * Ceiling in bytes for prepared mask rasters held in memory, charged per
    * frame from its raster. Bounds memory where `maxCacheFrameCount` bounds a
-   * count; whichever is reached first evicts. Default: 96 MB per GB of device
-   * memory as Chrome reports it (at most 8), so 768 MB on a typical laptop.
+   * count; whichever is reached first evicts. Default: 64 MiB per reported GB
+   * of device memory, clamped to 256 MiB–1 GiB; 256 MiB when unavailable.
    */
   readonly maxCacheBytes?: number;
   /**
@@ -167,6 +176,16 @@ export interface RenderPreparationPlaybackGateOptions {
    * off. A renderer created directly leaves it off.
    */
   readonly enabled?: boolean;
+  /**
+   * Raster quality required by an enabled gate. Default: "adaptive", which
+   * accepts smaller previews during rapid movement. "fine" waits for the full
+   * display-fitted raster and prepares its lead at that quality. An enabled
+   * fine gate overrides `maskFrame.previewScale` during playback, scrubbing,
+   * and seeking. This can increase CPU work and buffering.
+   * `maxWaitSeconds` still bounds the wait; on expiry, playback may use a
+   * preview or omit an unfinished artifact.
+   */
+  readonly quality?: "adaptive" | "fine";
   /**
    * How long an enabled gate holds the picture for artifacts that are not
    * prepared, before it gives up and lets the frames through without them.
@@ -277,6 +296,7 @@ export interface RenderPreparationArtifactDiagnostics {
    * so N frames here do not cover N frame durations of playback, and the two
    * numbers diverge by design. Deriving one from the other is wrong in both
    * directions.
+   * With playback gate quality "fine", only fine rasters count as prepared.
    */
   readonly preparedAheadFrameCount?: number;
   /**

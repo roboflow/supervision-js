@@ -520,7 +520,11 @@ describe("pixi region layer", () => {
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
-      detectionTimeline: createTimeline(headFrame),
+      detectionTimeline: createTimeline(headFrame, (mediaTime) =>
+        mediaTime < 2
+          ? headFrame
+          : { detections: [], frameIndex: 2, mediaTime: 2 },
+      ),
       getActiveRegionMaskCoverage: () =>
         ({
           frame: {
@@ -573,6 +577,17 @@ describe("pixi region layer", () => {
     ]);
     expect(mask.position.set).toHaveBeenCalledWith(100, 40);
     expect(mask.scale.set).toHaveBeenCalledWith(70, 60);
+
+    expect(layer.drawFrame(2).activeDetectionIndexes).toEqual([]);
+    expect(mask.shader.resources.uTexture).toBe(idMaskTexture.source);
+    layer.releaseMaskTexture(idMaskTexture as never);
+
+    expect(mask.shader.resources.uTexture).not.toBe(idMaskTexture.source);
+    expect(mask.shader.resources.uSampler).not.toBe(idMaskTexture.source.style);
+    layer.drawFrame(1);
+    expect(mask.shader.resources.uTexture).toBe(idMaskTexture.source);
+    expect(mask.visible).toBe(true);
+    layer.destroy();
   });
 
   it("keeps one display across frames for a stable tracker identity", async () => {

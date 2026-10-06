@@ -27,15 +27,13 @@ import {
 import { canReuseMaskStyleArtifacts } from "supervision-js-core";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 
-/* A raster a quarter as wide is a sixteenth of the bytes and a fraction of the
-   cook. During a fling the eye cannot read mask edges and the cache is what
-   matters (every eviction is a re-cook); the moment the playhead settles the
-   frame on screen is re-cooked at full width and swapped in place. */
+/* Rapid playhead movement uses smaller mask rasters. Once the playhead
+   rests, the visible frame is upgraded to its full raster width. */
 export enum PreparedRasterTier {
   Coarse = "coarse",
   Fine = "fine",
 }
-const COARSE_RASTER_DIVISOR = 4;
+const DEFAULT_MASK_PREVIEW_SCALE = 0.25;
 /* A step wider than this many frame strides is fast playback, not a scrub. */
 const FAST_PLAYHEAD_STRIDES = 3.5;
 /* How long without a playhead step before the frame on screen is owed its
@@ -105,6 +103,10 @@ export enum PreparedRenderFrameMaskStatus {
 
 export interface PreparedRenderWindow {
   getFrame(mediaTime: number): PreparedRenderFrame | undefined;
+  /** Revision of the prepared artifact, including replacements at the same time. */
+  getArtifactRevision(mediaTime: number): number;
+  /** Recooks the active frame and its targets after the display raster size changes. */
+  invalidateRasterSize(): void;
   /**
    * Whether this window's artifact for a media time is cooked, scheduling
    * nothing. True when there is nothing to cook: no style, no frame there.
@@ -190,6 +192,16 @@ export function createPreparedRenderWindow(options: {
   readonly resolveMaxRasterWidth?: () => number | undefined;
 }): PreparedRenderWindow {
   const maskFrameOptions = options.renderPreparation?.maskFrame;
+  const requestedPreviewScale = maskFrameOptions?.previewScale;
+  const previewScale =
+    requestedPreviewScale !== undefined &&
+    Number.isFinite(requestedPreviewScale) &&
+    requestedPreviewScale > 0 &&
+    requestedPreviewScale <= 1
+      ? requestedPreviewScale
+      : DEFAULT_MASK_PREVIEW_SCALE;
+  const requiresFineGate =
+    options.renderPreparation?.playbackGate?.quality === "fine";
   const maxMaskFrameCacheSize = Math.max(
     1,
     Math.floor(
@@ -205,12 +217,16 @@ export function createPreparedRenderWindow(options: {
      charged per frame from the raster the cook produced, so it needs no guess
      about raster size up front. Default mirrors the engine's frame cache:
      per GB of device memory, clamped. */
+  const requestedMaskFrameCacheBytes =
+    options.maxMaskFrameCacheBytes ??
+    maskFrameOptions?.maxCacheBytes ??
+    DEFAULT_MASK_FRAME_CACHE_BYTES;
   const maxMaskFrameCacheBytes = Math.max(
     16 * 1024 * 1024,
     Math.floor(
-      options.maxMaskFrameCacheBytes ??
-        maskFrameOptions?.maxCacheBytes ??
-        DEFAULT_MASK_FRAME_CACHE_BYTES,
+      Number.isNaN(requestedMaskFrameCacheBytes)
+        ? DEFAULT_MASK_FRAME_CACHE_BYTES
+        : requestedMaskFrameCacheBytes,
     ),
   );
   let preparedMaskBytes = 0;
@@ -219,6 +235,7 @@ export function createPreparedRenderWindow(options: {
   function chargeMaskFrame(
     key: string,
     maskFrame: { width: number; height: number; kind: PreparedMaskFrameKind },
+    tier: PreparedRasterTier,
   ) {
     /* An id-mask frame is one byte per pixel on the CPU (the id plane) and,
        once drawn, one byte per pixel again as an R8 texture the layer keeps
@@ -229,6 +246,11 @@ export function createPreparedRenderWindow(options: {
     const bytes = Math.max(1, maskFrame.width * maskFrame.height * perPixel);
     preparedMaskBytesByKey.set(key, bytes);
     preparedMaskBytes += bytes;
+    largestMaskFrameBytesByTier.set(
+      tier,
+      Math.max(largestMaskFrameBytesByTier.get(tier) ?? 0, bytes),
+    );
+    return bytes;
   }
 
   function releaseMaskFrame(key: string) {
@@ -270,6 +292,7 @@ export function createPreparedRenderWindow(options: {
   let lastPreparedBufferSignature: string | null = null;
   let lastPreparedWindowMediaTime: number | null = null;
   let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
+  let requestedPreparedTargetFrames: readonly DetectionFrame[] = [];
   let lastPreparedTargetFrames: readonly DetectionFrame[] = [];
   const timeline = createPreparedWindowTimeline();
   let activeMaskFrame: {
@@ -291,12 +314,16 @@ export function createPreparedRenderWindow(options: {
   let isDestroyed = false;
   let generation = 0;
   let preparationProgress = 0;
+  let nextArtifactRevision = 0;
+  const artifactRevisions = new WeakMap<PreparedMaskFrame, number>();
+  const largestMaskFrameBytesByTier = new Map<PreparedRasterTier, number>();
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
   /** Keys whose prepared raster is the coarse tier and owed a fine cook once settled. */
   const coarseMaskFrameKeys = new Set<string>();
   const pendingMaskFrames = new Map<string, PendingMaskFrame>();
   const queuedMaskFrameKeys: string[] = [];
   const inFlightMaskFrames = new Set<PendingMaskFrame>();
+  const fineUpgradeRequests = new Set<PendingMaskFrame>();
   const emptyMaskFrameKeys = new Set<string>();
   // Detection frames are immutable snapshots. A new object at an existing
   // timeline key therefore represents a source revision for that artifact.
@@ -327,20 +354,30 @@ export function createPreparedRenderWindow(options: {
     }
 
     observeMaskFrame(frame, key);
+    const tier = scheduleOptions.tier ?? getRequestedRasterTier();
     if (emptyMaskFrameKeys.has(key)) {
       return false;
     }
     if (preparedMaskFrames.has(key)) {
       const owedFine =
-        coarseMaskFrameKeys.has(key) &&
-        (scheduleOptions.tier === PreparedRasterTier.Fine ||
-          (isPlayheadSettled && !isPlayheadFast));
+        coarseMaskFrameKeys.has(key) && tier === PreparedRasterTier.Fine;
       if (!owedFine) {
         return false;
       }
     }
 
-    if (pendingMaskFrames.has(key)) {
+    const pending = pendingMaskFrames.get(key);
+    if (pending) {
+      if (
+        tier === PreparedRasterTier.Fine &&
+        pending.tier === PreparedRasterTier.Coarse
+      ) {
+        if (inFlightMaskFrames.has(pending)) {
+          fineUpgradeRequests.add(pending);
+        } else {
+          pendingMaskFrames.set(key, { ...pending, tier });
+        }
+      }
       if (isActiveFrame) {
         pruneStaleQueuedMaskFrames(mediaTime, key);
         promotePendingMaskFrame(key, mediaTime);
@@ -371,11 +408,7 @@ export function createPreparedRenderWindow(options: {
       key,
       maskStyle,
       mediaTime,
-      tier:
-        scheduleOptions.tier ??
-        (isPlayheadSettled && !isPlayheadFast
-          ? PreparedRasterTier.Fine
-          : PreparedRasterTier.Coarse),
+      tier,
     });
 
     if (isActiveFrame) {
@@ -461,6 +494,7 @@ export function createPreparedRenderWindow(options: {
         })
         .then((maskFrame) => {
           inFlightMaskFrames.delete(job);
+          const upgradeToFine = fineUpgradeRequests.delete(job);
           const pendingJob = pendingMaskFrames.get(key);
 
           if (pendingJob === job) {
@@ -496,21 +530,46 @@ export function createPreparedRenderWindow(options: {
             previous.close();
           }
           preparedMaskFrames.set(key, maskFrame);
-          chargeMaskFrame(key, maskFrame);
-          if (job.tier === PreparedRasterTier.Coarse) {
+          artifactRevisions.set(maskFrame, ++nextArtifactRevision);
+          const bytes = chargeMaskFrame(key, maskFrame, job.tier);
+          if (
+            job.tier === PreparedRasterTier.Coarse &&
+            maskFrameNeedsRasterSizeChange(
+              key,
+              maskFrame,
+              PreparedRasterTier.Fine,
+            )
+          ) {
             coarseMaskFrameKeys.add(key);
           } else {
             coarseMaskFrameKeys.delete(key);
+            if (job.tier === PreparedRasterTier.Coarse) {
+              largestMaskFrameBytesByTier.set(
+                PreparedRasterTier.Fine,
+                Math.max(
+                  largestMaskFrameBytesByTier.get(PreparedRasterTier.Fine) ?? 0,
+                  bytes,
+                ),
+              );
+            }
           }
+          refreshPreparedTargetFrames();
           preparationProgress += 1;
           evictPreparedMaskFrames();
           options.onMaskFramePrepared?.(maskFrame);
+          if (upgradeToFine && activeMaskFrame?.key === key) {
+            scheduleMaskFrame(job.frame, job.mediaTime, {
+              priority: PreparedRenderSchedulePriority.Active,
+              tier: PreparedRasterTier.Fine,
+            });
+          }
           schedulePreparedTargetBatch();
           emitDiagnostics();
           pumpMaskFrameQueue();
         })
         .catch((error: unknown) => {
           inFlightMaskFrames.delete(job);
+          fineUpgradeRequests.delete(job);
           const pendingJob = pendingMaskFrames.get(key);
 
           if (pendingJob === job) {
@@ -618,7 +677,7 @@ export function createPreparedRenderWindow(options: {
     for (let index = queuedMaskFrameKeys.length - 1; index >= 0; index -= 1) {
       const key = queuedMaskFrameKeys[index];
 
-      if (!key || targetKeys.has(key)) {
+      if (!key || targetKeys.has(key) || key === activeMaskFrame?.key) {
         continue;
       }
 
@@ -730,7 +789,7 @@ export function createPreparedRenderWindow(options: {
 
     const targetFrameCount = getPrefetchFrameCount();
 
-    lastPreparedTargetFrames = selectPresentedTargetFrames({
+    requestedPreparedTargetFrames = selectPresentedTargetFrames({
       stride: getPresentedFrameStride(),
       targetFrameCount,
       windowFrames: lastPreparedWindowFrames,
@@ -738,11 +797,13 @@ export function createPreparedRenderWindow(options: {
 
     if (
       detectionFrame &&
-      !lastPreparedTargetFrames.some((frame) => getFrameKey(frame) === frameKey)
+      !requestedPreparedTargetFrames.some(
+        (frame) => getFrameKey(frame) === frameKey,
+      )
     ) {
-      lastPreparedTargetFrames = [
+      requestedPreparedTargetFrames = [
         detectionFrame,
-        ...lastPreparedTargetFrames,
+        ...requestedPreparedTargetFrames,
       ].slice(0, targetFrameCount);
     }
 
@@ -779,6 +840,8 @@ export function createPreparedRenderWindow(options: {
       return;
     }
 
+    refreshPreparedTargetFrames();
+
     /* A wait held at the gate does not ask again until it is let through, so
        the hold is what has to keep preparation running. */
     if (!isPlayheadSettled && !batchOptions.force && getGateHold() === null) {
@@ -806,8 +869,101 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
+  /** Keeps warming and gate lead inside the prefix the cache can retain. */
+  function refreshPreparedTargetFrames() {
+    const targets: DetectionFrame[] = [];
+    // The active frame can leave the previous target prefix between scans.
+    const activeKey = activeMaskFrame?.key;
+    let bytes = activeKey ? getRequiredMaskFrameBytes(activeKey) : 0;
+    let cacheFrameCount =
+      activeKey && !emptyMaskFrameKeys.has(activeKey) ? 1 : 0;
+
+    for (const frame of requestedPreparedTargetFrames) {
+      const key = getFrameKey(frame);
+      const isActive = key === activeKey;
+      const empty = emptyMaskFrameKeys.has(key);
+      const frameBytes = getRequiredMaskFrameBytes(key);
+
+      if (
+        !isActive &&
+        !empty &&
+        (cacheFrameCount >= maxMaskFrameCacheSize ||
+          bytes + frameBytes > maxMaskFrameCacheBytes)
+      ) {
+        break;
+      }
+
+      targets.push(frame);
+      if (!isActive) {
+        bytes += frameBytes;
+        if (!empty) cacheFrameCount += 1;
+      }
+    }
+
+    lastPreparedTargetFrames = targets;
+    dropQueuedMaskFramesBeyondTargets();
+  }
+
+  function getRequiredMaskFrameBytes(key: string) {
+    if (emptyMaskFrameKeys.has(key)) return 0;
+    const pending = pendingMaskFrames.get(key);
+    const tier =
+      pending && fineUpgradeRequests.has(pending)
+        ? PreparedRasterTier.Fine
+        : (pending?.tier ?? getRequestedRasterTier());
+    const estimatedBytes = largestMaskFrameBytesByTier.get(tier) ?? 0;
+    const heldBytes = preparedMaskBytesByKey.get(key);
+    return heldBytes === undefined
+      ? estimatedBytes
+      : coarseMaskFrameKeys.has(key) && tier === PreparedRasterTier.Fine
+        ? Math.max(heldBytes, estimatedBytes)
+        : heldBytes;
+  }
+
   return {
     getFrame,
+
+    getArtifactRevision(mediaTime) {
+      const frame = options.detectionTimeline.selectFrame(mediaTime);
+      const artifact = frame && preparedMaskFrames.get(getFrameKey(frame));
+      return artifact ? (artifactRevisions.get(artifact) ?? 0) : 0;
+    },
+
+    invalidateRasterSize() {
+      if (isDestroyed) return;
+      if (
+        pendingMaskFrames.size === 0 &&
+        inFlightMaskFrames.size === 0 &&
+        ![...preparedMaskFrames].some(([key, frame]) =>
+          maskFrameNeedsRasterSizeChange(key, frame),
+        )
+      ) {
+        return;
+      }
+      const active = activeMaskFrame;
+      const pending = active ? pendingMaskFrames.get(active.key) : undefined;
+      const preserveFine =
+        active &&
+        ((preparedMaskFrames.has(active.key) &&
+          !coarseMaskFrameKeys.has(active.key)) ||
+          pending?.tier === PreparedRasterTier.Fine ||
+          (pending && fineUpgradeRequests.has(pending)));
+      clearPreparedMaskFrames();
+      if (active) {
+        getFrame(active.mediaTime, { forcePreparedWindow: true });
+        if (preserveFine) {
+          const frame = options.detectionTimeline.selectFrame(active.mediaTime);
+          if (frame) {
+            scheduleMaskFrame(frame, active.mediaTime, {
+              priority: PreparedRenderSchedulePriority.Active,
+              tier: PreparedRasterTier.Fine,
+            });
+          }
+        } else if (isPlayheadFast && settleTimer === undefined) {
+          armSettleTimer();
+        }
+      }
+    },
 
     getPreparationProgress() {
       return preparationProgress;
@@ -895,7 +1051,15 @@ export function createPreparedRenderWindow(options: {
         readinessWaiters.add(checkReady);
         activeReadinessWaits.add(activeWait);
         signal?.addEventListener("abort", abandonWait);
-        emitDiagnostics();
+        try {
+          if (requiresFineGate) {
+            getFrame(mediaTime, { forcePreparedWindow: true });
+          }
+          emitDiagnostics();
+        } catch (error) {
+          endWait();
+          reject(error);
+        }
       });
     },
 
@@ -974,8 +1138,8 @@ export function createPreparedRenderWindow(options: {
 
     const key = getFrameKey(detectionFrame);
 
-    observePresentedFrameStride(key);
-    observePlayheadStep(detectionFrame.mediaTime);
+    const presentedFrameStride = observePresentedFrameStride(key);
+    observePlayheadStep(detectionFrame.mediaTime, presentedFrameStride);
     setActiveMaskFrame({
       key,
       mediaTime: detectionFrame.mediaTime,
@@ -1047,8 +1211,46 @@ export function createPreparedRenderWindow(options: {
     if (tier === PreparedRasterTier.Fine || fine === undefined) {
       return fine;
     }
-    // rows stay a multiple of four so the R8 upload is not paid in four channels
-    return Math.max(64, Math.ceil(fine / COARSE_RASTER_DIVISOR / 4) * 4);
+    // Align previews for one-channel uploads without exceeding the fitted width.
+    return Math.min(
+      fine,
+      Math.max(64, Math.ceil((fine * previewScale) / 4) * 4),
+    );
+  }
+
+  function getRequestedRasterTier() {
+    return isPlayheadFast &&
+      previewScale < 1 &&
+      !(
+        requiresFineGate &&
+        (activeReadinessWaits.size > 0 ||
+          (isPlaybackActive &&
+            options.renderPreparation?.playbackGate?.enabled === true))
+      )
+      ? PreparedRasterTier.Coarse
+      : PreparedRasterTier.Fine;
+  }
+
+  function maskFrameNeedsRasterSizeChange(
+    key: string,
+    frame: PreparedMaskFrame,
+    tier = coarseMaskFrameKeys.has(key)
+      ? PreparedRasterTier.Coarse
+      : PreparedRasterTier.Fine,
+  ) {
+    const maxWidth = resolveRasterWidthFor(tier);
+    const sourceWidth =
+      frame.kind === PreparedMaskFrameKind.IdMask
+        ? frame.sourceWidth
+        : frame.width;
+    const width =
+      maxWidth !== undefined && maxWidth > 0
+        ? Math.min(sourceWidth, Math.max(1, Math.floor(maxWidth)))
+        : sourceWidth;
+
+    return frame.kind === PreparedMaskFrameKind.IdMask
+      ? frame.width !== width
+      : frame.idMaskPlane !== undefined && frame.idMaskPlane.width !== width;
   }
 
   function evictPreparedMaskFrames() {
@@ -1126,7 +1328,9 @@ export function createPreparedRenderWindow(options: {
     lastPreparedBufferSignature = null;
     lastPreparedWindowMediaTime = null;
     lastPreparedWindowFrames = [];
+    requestedPreparedTargetFrames = [];
     lastPreparedTargetFrames = [];
+    largestMaskFrameBytesByTier.clear();
 
     if (scheduledQueuePump) {
       cancelScheduledPreparationTask(scheduledQueuePump);
@@ -1134,6 +1338,7 @@ export function createPreparedRenderWindow(options: {
     }
 
     pendingMaskFrames.clear();
+    fineUpgradeRequests.clear();
     queuedMaskFrameKeys.length = 0;
     emptyMaskFrameKeys.clear();
     observedMaskFrames.clear();
@@ -1225,10 +1430,15 @@ export function createPreparedRenderWindow(options: {
    * Whether the frame about to be presented is itself ready is a separate
    * question, asked separately.
    */
-  function getPreparedAheadDiagnosticsFor(frameRef: {
-    readonly key: string;
-    readonly mediaTime: number;
-  }) {
+  function getPreparedAheadDiagnosticsFor(
+    frameRef: {
+      readonly key: string;
+      readonly mediaTime: number;
+    },
+    requireFine = requiresFineGate &&
+      (options.renderPreparation?.playbackGate?.enabled === true ||
+        activeReadinessWaits.size > 0),
+  ) {
     const targetFrameIndex = lastPreparedTargetFrames.findIndex(
       (frame) => getFrameKey(frame) === frameRef.key,
     );
@@ -1251,7 +1461,11 @@ export function createPreparedRenderWindow(options: {
     for (const frame of frames.slice(activeFrameIndex)) {
       const key = getFrameKey(frame);
 
-      if (preparedMaskFrames.has(key) || emptyMaskFrameKeys.has(key)) {
+      if (
+        emptyMaskFrameKeys.has(key) ||
+        (preparedMaskFrames.has(key) &&
+          !(requireFine && coarseMaskFrameKeys.has(key)))
+      ) {
         frameCount += 1;
         latestPreparedTime = frame.mediaTime;
         continue;
@@ -1376,7 +1590,10 @@ export function createPreparedRenderWindow(options: {
       getCacheReachableAheadSeconds(frameRef),
     );
 
-    if (activeStatus === PreparedRenderFrameMaskStatus.Pending) {
+    if (
+      activeStatus === PreparedRenderFrameMaskStatus.Pending ||
+      (requiresFineGate && coarseMaskFrameKeys.has(frameRef.key))
+    ) {
       return {
         reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
         requiredAheadSeconds: requiredLeadSeconds,
@@ -1388,7 +1605,8 @@ export function createPreparedRenderWindow(options: {
     }
 
     if (
-      getPreparedAheadDiagnosticsFor(frameRef).seconds >= requiredLeadSeconds
+      getPreparedAheadDiagnosticsFor(frameRef, requiresFineGate).seconds >=
+      requiredLeadSeconds
     ) {
       return null;
     }
@@ -1462,12 +1680,26 @@ export function createPreparedRenderWindow(options: {
       return;
     }
 
-    const previousIndex = lastPreparedWindowFrames.findIndex(
+    let previousIndex = lastPreparedWindowFrames.findIndex(
       (frame) => getFrameKey(frame) === previousKey,
     );
-    const nextIndex = lastPreparedWindowFrames.findIndex(
+    let nextIndex = lastPreparedWindowFrames.findIndex(
       (frame) => getFrameKey(frame) === nextKey,
     );
+
+    if (previousIndex < 0 || nextIndex < 0) {
+      // Reverse steps can leave the prepared window while both frames remain
+      // in the detection buffer.
+      const bufferedFrames = getBufferedDetectionTimelineFrameSnapshot(
+        options.detectionTimeline,
+      );
+      previousIndex = bufferedFrames.findIndex(
+        (frame) => getFrameKey(frame) === previousKey,
+      );
+      nextIndex = bufferedFrames.findIndex(
+        (frame) => getFrameKey(frame) === nextKey,
+      );
+    }
 
     if (previousIndex < 0 || nextIndex < 0) {
       return;
@@ -1475,17 +1707,17 @@ export function createPreparedRenderWindow(options: {
 
     const stride = nextIndex - previousIndex;
 
-    if (stride <= 0 || stride > MAX_PRESENTED_FRAME_STRIDE) {
-      return;
+    if (stride > 0 && stride <= MAX_PRESENTED_FRAME_STRIDE) {
+      presentedFrameStrideSamples.push(stride);
+
+      if (
+        presentedFrameStrideSamples.length > PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
+      ) {
+        presentedFrameStrideSamples.shift();
+      }
     }
 
-    presentedFrameStrideSamples.push(stride);
-
-    if (
-      presentedFrameStrideSamples.length > PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
-    ) {
-      presentedFrameStrideSamples.shift();
-    }
+    return stride;
   }
 
   /**
@@ -1493,7 +1725,7 @@ export function createPreparedRenderWindow(options: {
    * can lead, and one jump on its own is a seek that lands. A run of jumps is a
    * drag, and the frames a prefetch picks for it are frames it has gone past.
    */
-  function observePlayheadStep(mediaTime: number) {
+  function observePlayheadStep(mediaTime: number, frameStride?: number) {
     const previousMediaTime = previousActiveFrameMediaTime;
 
     previousActiveFrameMediaTime = mediaTime;
@@ -1511,22 +1743,23 @@ export function createPreparedRenderWindow(options: {
     const stride = getFrameStrideSeconds();
 
     const isWideStep =
-      stride > 0 && Math.abs(advance) > stride * FAST_PLAYHEAD_STRIDES;
+      frameStride === undefined
+        ? stride > 0 && Math.abs(advance) > stride * FAST_PLAYHEAD_STRIDES
+        : Math.abs(frameStride) > FAST_PLAYHEAD_STRIDES;
     consecutiveWideStepCount = isWideStep ? consecutiveWideStepCount + 1 : 0;
     isPlayheadFast = consecutiveWideStepCount >= DRAGGED_PLAYHEAD_JUMP_COUNT;
 
     if (advance > 0 && advance <= getSettledPlayheadAdvanceSeconds()) {
       consecutivePlayheadJumpCount = 0;
       isPlayheadSettled = true;
-      return;
+    } else {
+      consecutivePlayheadJumpCount += 1;
+      isPlayheadSettled =
+        consecutivePlayheadJumpCount < DRAGGED_PLAYHEAD_JUMP_COUNT;
     }
-
-    consecutivePlayheadJumpCount += 1;
-    isPlayheadSettled =
-      consecutivePlayheadJumpCount < DRAGGED_PLAYHEAD_JUMP_COUNT;
     /* Only a coarse cook owes a fine one, so only a fling or fast playback
        needs the timer. A step that settles cooks fine on its own. */
-    if (!isPlayheadSettled || isPlayheadFast) {
+    if (isPlayheadFast) {
       armSettleTimer();
     }
   }
@@ -1575,6 +1808,8 @@ export function createPreparedRenderWindow(options: {
    * a seek, and the narrowest of those repeats is what the cooks follow, so
    * jitter costs cooks rather than coverage. A paused playhead presents every
    * frame it lands on, whatever it was doing before it stopped.
+   * Keeping the intervening source frames lets the cache survive a change in
+   * cadence phase without cooking nearby frames again.
    */
   function getPresentedFrameStride() {
     if (
@@ -1584,7 +1819,19 @@ export function createPreparedRenderWindow(options: {
       return 1;
     }
 
-    return Math.min(...presentedFrameStrideSamples);
+    const stride = Math.min(...presentedFrameStrideSamples);
+    const sourceFrameSpan = Math.min(
+      lastPreparedWindowFrames.length,
+      Math.max(0, (getPrefetchFrameCount() - 1) * stride + 1),
+    );
+    const largestKnownFrameBytes = Math.max(
+      largestMaskFrameBytesByTier.get(PreparedRasterTier.Fine) ?? 0,
+      largestMaskFrameBytesByTier.get(PreparedRasterTier.Coarse) ?? 0,
+    );
+    return sourceFrameSpan <= maxMaskFrameCacheSize &&
+      sourceFrameSpan * largestKnownFrameBytes <= maxMaskFrameCacheBytes
+      ? stride
+      : 1;
   }
 
   function getPrefetchFrameCount() {

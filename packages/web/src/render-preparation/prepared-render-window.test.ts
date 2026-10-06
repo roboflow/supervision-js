@@ -686,7 +686,7 @@ describe("prepared render window", () => {
       renderWindow.getFrame(0);
       await flushMaskPreparationTimers(4);
 
-      expect(onMaskFrameEvicted).toHaveBeenCalledWith("2:0.08");
+      expect(onMaskFrameEvicted).not.toHaveBeenCalled();
       expect(onDiagnostics).toHaveBeenLastCalledWith(
         expect.objectContaining({
           artifacts: [
@@ -698,7 +698,7 @@ describe("prepared render window", () => {
               window: {
                 availableFrameCount: 4,
                 refillThresholdFrameCount: 2,
-                targetFrameCount: 3,
+                targetFrameCount: 2,
               },
             }),
           ],

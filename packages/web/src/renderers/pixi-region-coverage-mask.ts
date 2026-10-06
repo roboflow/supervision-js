@@ -48,6 +48,7 @@ export interface PixiRegionCoverageMaskArtifact {
 export interface PixiRegionCoverageMask {
   readonly display: RegionCoverageMaskMesh;
   readonly effect: PixiAlphaMask;
+  releaseTexture(source: PixiImageSource): void;
   render(options: {
     readonly artifact: PixiRegionCoverageMaskArtifact;
     readonly coverage: PreparedRegionMaskCoverageEntry;
@@ -122,8 +123,15 @@ export function createPixiRegionCoverageMask(options: {
     display,
     effect,
 
+    releaseTexture(source) {
+      if (shader.resources.uTexture !== source) return;
+      bindTexture(placeholderSource);
+      display.visible = false;
+    },
+
     render(renderOptions) {
       bindTexture(renderOptions.artifact.texture.source);
+      display.visible = true;
       uniforms.uniforms.uCrop = new Float32Array([
         renderOptions.crop.x,
         renderOptions.crop.y,

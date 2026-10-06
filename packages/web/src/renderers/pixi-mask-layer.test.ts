@@ -9,6 +9,7 @@ import type { RenderPreparationMaskFrameOptions } from "#types/render-preparatio
 import { BaseMaskStyle } from "supervision-js-core";
 
 const preparedWindow = vi.hoisted(() => ({
+  invalidateRasterSize: vi.fn(),
   frame: undefined as
     | {
         detectionFrame: { detections: never[]; mediaTime: number };
@@ -37,7 +38,9 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
     preparedWindow.options = options;
     return {
       destroy: vi.fn(),
+      getArtifactRevision: vi.fn(() => 0),
       getFrame: vi.fn(() => preparedWindow.frame),
+      invalidateRasterSize: preparedWindow.invalidateRasterSize,
       isArtifactPrepared: vi.fn(
         () => preparedWindow.frame?.maskStatus === "prepared",
       ),
@@ -56,6 +59,7 @@ import {
 import type { IdMaskDisplayBox } from "#renderers/pixi-mask-layer";
 
 beforeEach(() => {
+  preparedWindow.invalidateRasterSize.mockClear();
   preparedWindow.frame = undefined;
   preparedWindow.options = undefined;
 });
@@ -441,6 +445,71 @@ describe("pixi mask layer", () => {
     expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
   });
 
+  it("rebuilds the raster at the latest cap after rapid 1 to 2 to 1 changes", () => {
+    const display = {
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1,
+    };
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display,
+    });
+    layer.createSprite({ width: 1920, height: 1080 });
+
+    layer.setRasterDisplay({ ...display, maxDevicePixelRatio: 2 });
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(1280);
+    layer.setRasterDisplay(display);
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(640);
+    expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses fractional caps and rebuilds only when the fitted pixel width changes", () => {
+    const display = {
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1.25,
+    };
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display,
+    });
+    layer.createSprite({ width: 1920, height: 1080 });
+
+    layer.setRasterDisplay({ ...display, boxHeight: 400 });
+    expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
+    layer.setRasterDisplay({ ...display, boxWidth: 320, boxHeight: 180 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(400);
+    expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledOnce();
+  });
+
+  it("forwards changed raster caps above the video width because mask grids can be larger", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display: {
+        boxWidth: 640,
+        boxHeight: 360,
+        devicePixelRatio: 4,
+        maxDevicePixelRatio: 4,
+      },
+    });
+    layer.createSprite({ width: 1920, height: 1080 });
+
+    layer.setRasterDisplay({
+      boxWidth: 800,
+      boxHeight: 450,
+      devicePixelRatio: 4,
+      maxDevicePixelRatio: 4,
+    });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(3200);
+    expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledOnce();
+  });
+
   it("leaves a layer with no display box at the detections' own resolution", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
@@ -452,8 +521,15 @@ describe("pixi mask layer", () => {
     });
 
     layer.createSprite({ height: 2016, width: 1504 });
+    layer.setRasterDisplay({
+      boxWidth: 100,
+      boxHeight: 100,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1,
+    });
 
     expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
+    expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
   });
 
   it("leaves a polygon frame at the size its geometry was rasterized to", () => {

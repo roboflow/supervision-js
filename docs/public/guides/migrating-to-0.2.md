@@ -93,8 +93,8 @@ drag, use `scrubToFrame()` or `scrubToTime()` while the pointer moves, then one
 `moveToTime()` on release. A later scrub settles the earlier one as
 `{ status: "superseded" }`, rather than rejecting it.
 
-The web video engine source exposes `setDisplay()`, which rejects unless the
-source uses a display-box decode strategy (configured with `display`). Other
+The web video engine source exposes `setDisplay()` when the source uses a
+display-box decode strategy (configured with `display`). Other
 media sources may omit the method. Send the current CSS box and device pixel ratio
 through that existing session or renderer; do not rebuild the session or source
 on every layout change. Calls superseded by a newer size reject with

@@ -51,8 +51,7 @@ Start here for normal application code:
   `null`;
 - optional `session.setDisplay()` / `renderer.setDisplay()` to resize existing
   push-presented output without recreating the source or session. Web video
-  engine sources expose it but reject calls unless configured with a
-  display-box decode strategy;
+  engine sources expose it when configured with a display-box decode strategy;
 - media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
   playback rate, and current-presentation `refresh`;
 - `session.captureFrame()` when a host needs an encoded JPEG `Blob` for the
@@ -224,14 +223,18 @@ not the first thing most users should reach for:
   draft annotations, review overlays, or other app-owned detection streams over
   one media item;
 - `session.setRenderQuality()` for runtime DPR/quality changes without
-  rebuilding the media session;
+  rebuilding the media session. The renderer synchronizes the canvas,
+  display-sized masks, and display-box video output when quality or container
+  dimensions change. Native and capped video strategies, and masks configured
+  without a display box, keep their own resolution policy;
 - cold detection stores for custom persistence and testing;
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;
 - interaction and picking options;
 - polygons, oriented boxes, polylines, keypoints, shared class-color helpers,
   and visibility controls;
-- render-preparation diagnostics and worker options.
+- render-preparation diagnostics, worker options, mask preview scale, and
+  optional fine-quality playback gating.
 - ordered detection post-processing, bounded out-of-order buffering, tracking
   diagnostics, in-place derived detection updates, optional raw-copy
   preservation, and worker options.

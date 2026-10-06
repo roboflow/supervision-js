@@ -137,6 +137,32 @@ describe("prepared annotation window", () => {
     expect(window.getSnapshot().frames[0]).toMatchObject({ prepared: false });
   });
 
+  it("moves the token when a prepared artifact is replaced at the same frame", () => {
+    const revisions = new Map([
+      [0, 1],
+      [0.1, 2],
+    ]);
+    const masks: PreparedAnnotationLayer = {
+      getArtifactRevision: (mediaTime) => revisions.get(mediaTime) ?? 0,
+      isArtifactPrepared: () => true,
+    };
+    const window = createPreparedAnnotationWindow({
+      detectionTimeline,
+      getLayers: () => [masks],
+      getPlayheadMediaTime: () => 0,
+    });
+    const preparedFrame = window.getPreparedFrame(0);
+    const coarseToken = window.getReadinessToken(0);
+    const otherToken = window.getReadinessToken(0.1);
+
+    revisions.set(0, 3);
+
+    expect(window.getPreparedFrame(0)).toBe(preparedFrame);
+    expect(window.getSnapshot().playheadPrepared).toBe(true);
+    expect(window.getReadinessToken(0)).not.toBe(coarseToken);
+    expect(window.getReadinessToken(0.1)).toBe(otherToken);
+  });
+
   it("updates a revised frame's token and retains unrelated tokens after incremental writes", async () => {
     const source = createWritableDetectionFrameSource({
       datasetId: "readiness-revision",

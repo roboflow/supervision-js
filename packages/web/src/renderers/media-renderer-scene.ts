@@ -49,6 +49,7 @@ import type {
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
 import type { PresentedFrameSource } from "./presented-frame-channel";
 import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-window";
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
@@ -88,6 +89,8 @@ export interface MediaRendererSceneOptions {
   readonly previewOverlay: (() => PreviewOverlayData | null) | undefined;
   /** Propagates renderer-owned asynchronous visual changes into runtime state. */
   readonly onPresentationUpdate?: (sample: PresentedMediaSample) => void;
+  /** Propagates the fitted display and pixel ratio to the decoder. */
+  readonly onDisplayChange?: (display: MediaRendererDisplay) => void;
   /**
    * Present plane of a media source that decides for itself which frame is on
    * screen. Given one, the scene presents what the producer announces instead
