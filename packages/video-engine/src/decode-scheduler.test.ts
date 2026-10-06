@@ -378,6 +378,7 @@ function setup(
   opts: {
     keyframes?: number[];
     frames?: number[];
+    track?: ScrubTrackInfo;
     now?: () => number;
     cache?: FrameCache;
     gateDecode?: (timestampS: number) => Promise<void>;
@@ -391,7 +392,7 @@ function setup(
   const cache = opts.cache ?? makeCache();
   const disposed = vi.fn();
   const source: DecodeSourceHandle = {
-    track: TRACK,
+    track: opts.track ?? TRACK,
     sink,
     keyframeProbe: probe,
     dispose: async () => {
@@ -1098,23 +1099,208 @@ describe("DecodeScheduler", () => {
     });
 
     it("pausing runs a keyframe sweep into the preview tier", async () => {
-      const { scheduler, cache } = setup({ keyframes: [0, 2, 4, 6, 8] });
+      const { scheduler, sink, cache } = setup({
+        keyframes: [0, 2, 4, 6, 8],
+        frames: [6],
+      });
       await scheduler.open();
       await scheduler.whenSettled();
       const previewFillsBefore = scheduler.getStats().decode.prefetchPreview;
 
-      // Pause with the playhead near the seed: the detach drops to Idle and
-      // runs a keyframe preview sweep around the current position.
-      scheduler.attachPlay(0);
+      scheduler.attachPlay(6);
+      scheduler.next();
+      await tick();
       scheduler.detachPlay();
       await scheduler.whenSettled();
 
-      // The sweep ran and fed the preview tier (whether or not the slots
-      // were already warm), and the tier holds coarse keyframes.
-      expect(scheduler.getStats().decode.prefetchPreview).toBeGreaterThan(
-        previewFillsBefore,
+      expect(scheduler.getStats().decode.prefetchPreview).toBe(
+        previewFillsBefore + 1,
       );
-      expect(cache.stats.previewSize).toBeGreaterThanOrEqual(1);
+      expect(sink.atTimestampsCalls).toEqual([2, 4, 8]);
+      expect(cache.stats.previewTimestampsMs).toContain(8000);
+      await scheduler.close();
+    });
+
+    it("repeated pauses do not decode already resident preview targets", async () => {
+      const { scheduler, sink } = setup();
+      const batches = vi.spyOn(sink, "canvasesAtTimestamps");
+      await scheduler.open();
+      await scheduler.whenSettled();
+
+      for (let pause = 0; pause < 3; pause++) {
+        scheduler.attachPlay(0);
+        scheduler.detachPlay();
+        await scheduler.whenSettled();
+      }
+
+      expect(batches).toHaveBeenCalledOnce();
+      expect(sink.atTimestampsCalls).toEqual([2, 4]);
+      expect(scheduler.getStats().decode.prefetchPreview).toBe(2);
+      await scheduler.close();
+    });
+
+    it("refills evicted and cleared previews, preserving other resident targets", async () => {
+      const cache = new FrameCache({
+        exactWidth: 320,
+        exactHeight: 180,
+        previewWidth: 160,
+        exactBudgetBytes: 64 * 1024 * 1024,
+        previewCapacity: 4,
+        bucketMs: 33,
+      });
+      const { scheduler, sink } = setup({ cache });
+      const batches = vi.spyOn(sink, "canvasesAtTimestamps");
+      await scheduler.open();
+      await scheduler.whenSettled();
+      cache.putPreview(6000, SRC, 320, 180);
+      cache.putPreview(8000, SRC, 320, 180);
+      expect(cache.stats.previewTimestampsMs).not.toContain(0);
+      expect(cache.stats.exactTimestampsMs).toContain(0);
+
+      scheduler.detachPlay();
+      await scheduler.whenSettled();
+      expect(sink.atTimestampsCalls).toEqual([2, 4, 0]);
+      expect(cache.stats.previewTimestampsMs).toEqual(
+        expect.arrayContaining([0, 2000, 4000]),
+      );
+
+      scheduler.detachPlay();
+      await scheduler.whenSettled();
+      expect(batches).toHaveBeenCalledTimes(2);
+
+      cache.clear();
+      scheduler.detachPlay();
+      await scheduler.whenSettled();
+      expect(sink.atTimestampsCalls).toEqual([2, 4, 0, 0, 2, 4]);
+      expect(batches).toHaveBeenCalledTimes(3);
+      await scheduler.close();
+    });
+
+    it.each([0.0002, 0.0000005])(
+      "a different VFR frame %ss away in the same preview bucket still decodes",
+      async (gapS) => {
+        const neighborS = 1.0002;
+        const targetS = neighborS + gapS;
+        const tickRate = 10_000_000;
+        const timeline = FrameTimeline.from({
+          tickRate,
+          ticks: Float64Array.of(
+            0,
+            Math.round(neighborS * tickRate),
+            Math.round(targetS * tickRate),
+          ),
+          lastDurationTicks: tickRate,
+        });
+        const cache = makeCache();
+        cache.putPreview(neighborS * 1000, SRC, 320, 180);
+        const { scheduler, sink } = setup({
+          track: { ...TRACK, timeline, durationS: asSec(2) },
+          keyframes: [0, timeline.timeAt(2)],
+          cache,
+        });
+
+        await scheduler.open();
+        await scheduler.whenSettled();
+        expect(sink.atTimestampsCalls).toEqual([timeline.timeAt(2)]);
+        await scheduler.close();
+      },
+    );
+
+    it.each([
+      ["rounded", 10_004_999],
+      ["truncated", 10_004_999],
+      ["truncated", 5020],
+    ])(
+      "recognizes a resident preview with a %s microsecond timestamp at %i ticks",
+      async (rounding, targetTicks) => {
+        const timeline = FrameTimeline.from({
+          tickRate: 10_000_000,
+          ticks: Float64Array.of(0, targetTicks),
+          lastDurationTicks: 10_000_000,
+        });
+        const targetS = timeline.timeAt(1);
+        const decodedS =
+          (rounding === "rounded"
+            ? Math.round(targetS * 1e6)
+            : Math.trunc(targetS * 1e6)) / 1e6;
+        const cache = makeCache();
+        cache.putPreview(decodedS * 1000, SRC, 320, 180);
+        const { scheduler, sink } = setup({
+          track: { ...TRACK, timeline, durationS: asSec(2) },
+          keyframes: [0, targetS],
+          cache,
+        });
+
+        await scheduler.open();
+        await scheduler.whenSettled();
+        expect(sink.atTimestampsCalls).toEqual([]);
+        expect(cache.stats.previewTimestampsMs).toContain(decodedS * 1000);
+        await scheduler.close();
+      },
+    );
+
+    it("a cancelled preview decode closes its late sample without caching it", async () => {
+      let release!: () => void;
+      let entered!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const decoding = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const swept: FakeVideoSample[] = [];
+      const batches: number[][] = [];
+      let holdFirst = true;
+      const cache = makeCache();
+      const source: SampleSourceHandle = {
+        track: TRACK,
+        keyframeProbe: new FakeKeyframeProbe([0, 2, 4]),
+        sampleSink: {
+          async getSample(timestamp) {
+            return new FakeVideoSample(timestamp);
+          },
+          async *samples() {},
+          async *samplesAtTimestamps(timestamps) {
+            const batch = [...timestamps];
+            batches.push(batch);
+            for (const timestamp of batch) {
+              const sample = new FakeVideoSample(timestamp);
+              swept.push(sample);
+              if (holdFirst) {
+                holdFirst = false;
+                entered();
+                await blocked;
+              }
+              yield sample;
+            }
+          },
+        },
+        dispose: async () => undefined,
+      };
+      const scheduler = new DecodeScheduler({ source, cache });
+      scheduler.subscribe((frame) => {
+        if (frame.kind === "sample") frame.sample.close();
+      });
+      await scheduler.open();
+      await decoding;
+      scheduler.attachPlay(0);
+      await scheduler.whenSettled();
+      release();
+      await tick();
+
+      expect(swept[0].closeCount).toBe(1);
+      expect(swept[0].drawCount).toBe(0);
+      expect(cache.stats.previewTimestampsMs).toEqual([0]);
+
+      scheduler.detachPlay();
+      await scheduler.whenSettled();
+      expect(batches).toEqual([
+        [2, 4],
+        [2, 4],
+      ]);
+      expect(cache.stats.previewTimestampsMs).toEqual([0, 2000, 4000]);
+      for (const sample of swept) expect(sample.closeCount).toBe(1);
+      await scheduler.close();
     });
 
     it("a short-GOP sweep decodes a bounded batch nearest the playhead", async () => {
@@ -1126,7 +1312,7 @@ describe("DecodeScheduler", () => {
       await scheduler.whenSettled();
 
       expect(sink.atTimestampsCalls).toEqual([
-        0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75,
+        0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75,
       ]);
     });
 
@@ -1549,13 +1735,12 @@ describe("DecodeScheduler", () => {
     });
 
     it("the idle prefetch plan lists the keyframe targets it would decode", async () => {
-      const { scheduler } = setup({ keyframes: [0, 2, 4, 6, 8] });
+      const { scheduler, cache } = setup({ keyframes: [0, 2, 4, 6, 8] });
       await scheduler.open();
       await scheduler.whenSettled();
 
-      // Position 0, idle: the discovered keyframes inside the sweep span,
-      // each its own target. A lo/hi band here would claim 0..4s solid
-      // and could not represent a hole between them.
+      expect(scheduler.getStats().prefetch).toBeNull();
+      cache.clear();
       expect(scheduler.getStats().prefetch?.targetsMs).toEqual([0, 2000, 4000]);
     });
 
