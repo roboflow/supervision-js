@@ -55,6 +55,8 @@ export interface AnnotationCreationTool {
   readonly minVertices?: number;
   readonly mode?: "drag" | "multiClick" | "freehand";
   readonly shouldCommit?: (geometry: Rect | readonly Point[]) => boolean;
+  /** Called when a completed creation gesture is rejected, never on cancel(). */
+  readonly onRejected?: () => void;
 }
 
 export interface AnnotationEditingState {
