@@ -281,6 +281,8 @@ export async function normalizeMediaProgressively(
       mimeType,
       rendererSource: createMediabunnyMediaRendererSource({
         formats: [WEBM],
+        frameClockUnavailableReason:
+          "the media is still being converted, so not all of its frames are known yet. Normalize without stream: true, or open the converted file once conversion completes.",
         metadata: {
           duration: inputMetadata.duration,
         },

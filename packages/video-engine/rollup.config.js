@@ -138,6 +138,7 @@ const workerConfig = {
 const packageConfig = {
   input: {
     analysis: "src/analysis.ts",
+    "frame-index": "src/frame-index.ts",
     index: "src/index.ts",
   },
   external(source) {

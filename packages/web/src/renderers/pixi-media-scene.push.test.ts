@@ -6,6 +6,7 @@ import {
   createIdleDetectionBufferState,
   RegionRendererRegionKind,
   RegionRendererSourceKind,
+  type DepthMap,
   type DetectionFrame,
 } from "supervision-js-core";
 
@@ -310,12 +311,41 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class Mesh {
+    alpha = 1;
+    destroy = vi.fn();
+    removeFromParent = vi.fn();
+    shader: unknown;
+    visible = true;
+
+    constructor(options: { shader: unknown }) {
+      this.shader = options.shader;
+    }
+  }
+
+  class Destroyable {
+    destroy = vi.fn();
+    style = {};
+  }
+
+  class UniformGroup {
+    uniforms: Record<string, unknown> = {};
+    update = vi.fn();
+  }
+
+  const Shader = {
+    from: (options: { resources: Record<string, unknown> }) => ({
+      destroy: vi.fn(),
+      resources: { ...options.resources },
+    }),
+  };
+
   return {
     AlphaMask: Stub,
     Application,
     Assets: { load: vi.fn(), unload: vi.fn() },
     BlurFilter: Stub,
-    BufferImageSource: Stub,
+    BufferImageSource: Destroyable,
     CanvasSource,
     ColorMatrixFilter,
     Container,
@@ -323,16 +353,16 @@ vi.mock("pixi.js", () => {
     ExternalSource,
     Filter: Stub,
     Graphics,
-    ImageSource: Stub,
-    Mesh: Stub,
-    MeshGeometry: Stub,
+    ImageSource: Destroyable,
+    Mesh,
+    MeshGeometry: Destroyable,
     PrepareSystem: Stub,
     Rectangle,
-    Shader: Stub,
+    Shader,
     Sprite,
     Text: Stub,
     Texture,
-    UniformGroup: Stub,
+    UniformGroup,
     extensions: { add: vi.fn() },
   };
 });
@@ -672,6 +702,7 @@ describe("push-presented Pixi scene", () => {
     // path fills leave every per-layer cost unmeasured for the whole session.
     expect(presented[0].renderTimings).toEqual({
       boxMs: expect.any(Number),
+      depthMs: expect.any(Number),
       fitMs: expect.any(Number),
       focusMs: expect.any(Number),
       interactionMs: expect.any(Number),
@@ -845,6 +876,113 @@ describe("push-presented Pixi scene", () => {
     scene.setPresentation(changePresentationField(applied, field), 2);
 
     expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
+  });
+
+  it("draws depth from the presented timestamp alone, and none where it has none", async () => {
+    const map = createDepthMap();
+    const asked: number[] = [];
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry(mediaTime) {
+        asked.push(mediaTime);
+        return mediaTime < 2 ? { frameIndex: 0, map } : null;
+      },
+    });
+
+    channel.present(presentedFrame(1000));
+    expect(scene.getActiveDepth?.()).toMatchObject({ map, mediaTime: 1 });
+
+    channel.present(presentedFrame(4250));
+    expect(asked).toEqual([1, 4.25]);
+    expect(scene.getActiveDepth?.()).toBeNull();
+  });
+
+  it("renders a clip's exact frame once when it lands, then holds at zero renders while paused", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const channel = createChannel();
+    const { openDepthSource } =
+      await import("#render-preparation/depth/source");
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    const decodeDepth = vi.fn(async () => ({
+      height: 24,
+      values: new Uint16Array(32 * 24).fill(2560),
+      width: 32,
+    }));
+    const source = await openDepthSource(
+      {
+        manifest: {
+          frames: { count: 10, exact: "exact/{index:06}.png" },
+          height: 24,
+          kind: "disparity_px",
+          schema: "supervision.depth-manifest",
+          storage: { format: "png16", noDepth: 0, scale: 256 },
+          version: 1,
+          width: 32,
+        },
+        baseUrl: "https://example.test/clip/",
+      },
+      {
+        fetch: (async () =>
+          new Response(new Uint8Array(4))) as unknown as typeof fetch,
+        frameClock: {
+          duration: 10,
+          durationAt: () => 1,
+          endTimestamp: 10,
+          firstTimestamp: 0,
+          frameCount: 10,
+          indexAtOrBefore: (time: number) =>
+            Math.min(9, Math.max(0, Math.floor(time))),
+          timeAt: (index: number) => index,
+        },
+        media: { height: 240, width: 320 },
+        preparer: () => ({
+          concurrency: 1,
+          decodeConfidence: vi.fn(),
+          decodeDepth,
+          destroy: vi.fn(),
+        }),
+      },
+    );
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setPlaybackActive?.(false);
+    scene.setDepthSource?.(source);
+    channel.present(presentedFrame(3000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+    const presented = scene.getRenderCount?.() ?? 0;
+
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.waitFor(() =>
+      expect(scene.getActiveDepth?.()).toMatchObject({
+        frameIndex: 3,
+        precision: "exact",
+      }),
+    );
+    expect(scene.getRenderCount?.()).toBe(presented + 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(scene.getRenderCount?.()).toBe(presented + 1);
+
+    // Playing hides it at once; it is never drawn over the next frames.
+    scene.setPlaybackActive?.(true);
+    expect(scene.getActiveDepth?.()).toBeNull();
+    expect(scene.getRenderCount?.()).toBe(presented + 2);
+    channel.present(presentedFrame(4000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+
+    source.destroy();
+    vi.useRealTimers();
   });
 
   it("renders a display adjustment once, and a repeat of it never", async () => {
@@ -1154,6 +1292,19 @@ function stubAnimationFrames() {
         callback();
       }
     },
+  };
+}
+
+function createDepthMap(): DepthMap {
+  return {
+    height: 24,
+    kind: "disparity_px",
+    samples: {
+      encoding: "scaled16",
+      scale: 256,
+      values: new Uint16Array(32 * 24).fill(2560),
+    },
+    width: 32,
   };
 }
 

@@ -74,4 +74,11 @@ export interface DecodedMediaSource {
   readonly engine?: PresentedFrameChannel;
   /** Exact timing when the source already owns a presentation frame index. */
   readonly frameClock?: MediaFrameClock;
+  /**
+   * Reads the frame index on first call and reuses it after, for a source
+   * that can read one but does not keep it.
+   */
+  readonly readFrameClock?: () => Promise<MediaFrameClock>;
+  /** Why this source has no frame index, for whatever asked for one. */
+  readonly frameClockUnavailableReason?: string;
 }

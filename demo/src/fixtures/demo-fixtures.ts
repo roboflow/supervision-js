@@ -11,9 +11,10 @@ import {
 import { SourceKind } from "supervision/web-video-engine";
 import { delayDetectionFetch } from "../diagnostics/slow-work";
 import type { DisplayBoxResolutionOptions } from "supervision/web-video-engine";
-import type {
-  DemoPresentationAvailability,
-  DemoPresentationLayerSetting,
+import {
+  demoPresentationLayerSettings,
+  type DemoPresentationAvailability,
+  type DemoPresentationLayerSetting,
 } from "../presentation/demo-presentation";
 import type { DemoEngineOptions } from "../session/session-options";
 
@@ -85,11 +86,36 @@ interface DemoFixtureMeta {
   };
   readonly presentation?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
+  readonly depth?: unknown;
+}
+
+export const DemoFixtureDepthSource = {
+  GroundTruth: "ground_truth",
+  Prediction: "prediction",
+} as const;
+
+export type DemoFixtureDepthSource =
+  (typeof DemoFixtureDepthSource)[keyof typeof DemoFixtureDepthSource];
+
+/** One depth map sequence a fixture ships, described by its own depth.json. */
+export interface DemoFixtureDepthLayer {
+  readonly id: string;
+  readonly label: string;
+  /** The layer's depth.json, relative to the fixture folder. */
+  readonly manifest: string;
+  readonly source: DemoFixtureDepthSource;
+}
+
+/** The `depth` block of a fixture.meta.json. */
+export interface DemoFixtureDepth {
+  readonly defaultLayer: string;
+  readonly layers: readonly DemoFixtureDepthLayer[];
 }
 
 export interface DemoFixturePresentationDefaults {
   readonly boxesEnabled?: boolean;
   readonly confidenceThreshold?: number;
+  readonly depthEnabled?: boolean;
   readonly focusEnabled?: boolean;
   readonly heatmapsEnabled?: boolean;
   readonly keypointsEnabled?: boolean;
@@ -102,7 +128,9 @@ export interface DemoFixturePresentationDefaults {
 export interface DemoFixtureDefinition {
   readonly basePath: string;
   readonly datasetId: string;
-  readonly detectionsManifestSrc: string;
+  /** Null for a fixture that ships depth and no detections. */
+  readonly detectionsManifestSrc: string | null;
+  readonly depth: DemoFixtureDepthDefinition | null;
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
@@ -115,6 +143,100 @@ export interface DemoFixtureDefinition {
   /** Declared detection-timeline transcode, or null when the fixture has none. */
   readonly proxyVideoSrc: string | null;
   readonly videoSrc: string;
+}
+
+export interface DemoFixtureDepthDefinition {
+  readonly defaultLayer: string;
+  readonly layers: readonly (DemoFixtureDepthLayer & {
+    readonly manifestSrc: string;
+  })[];
+}
+
+/** The layer with that id, or the fixture's default layer. */
+export function findDepthLayer(
+  depth: DemoFixtureDepthDefinition,
+  id: string | null | undefined,
+) {
+  return (
+    depth.layers.find((layer) => layer.id === id) ??
+    depth.layers.find((layer) => layer.id === depth.defaultLayer)!
+  );
+}
+
+const depthLayerSources: readonly string[] = Object.values(
+  DemoFixtureDepthSource,
+);
+
+export function parseDemoFixtureDepth(value: unknown): DemoFixtureDepth {
+  const fail = (message: string): never => {
+    throw new Error(`fixture.meta.json depth: ${message}`);
+  };
+
+  if (typeof value !== "object" || value === null) fail("must be an object");
+
+  const block = value as Record<string, unknown>;
+
+  if (!Array.isArray(block.layers) || block.layers.length === 0) {
+    fail("layers must be a non-empty array");
+  }
+
+  const ids = new Set<string>();
+  const layers = (block.layers as unknown[]).map((entry, index) => {
+    const layer = (
+      typeof entry === "object" && entry !== null ? entry : {}
+    ) as Record<string, unknown>;
+    const at = `layers[${index}]`;
+
+    if (typeof layer.id !== "string" || layer.id === "") {
+      fail(`${at}.id must be a non-empty string`);
+    }
+    if (ids.has(layer.id as string)) fail(`${at}.id "${layer.id}" repeats`);
+    ids.add(layer.id as string);
+    if (typeof layer.label !== "string" || layer.label === "") {
+      fail(`${at}.label must be a non-empty string`);
+    }
+    if (
+      typeof layer.manifest !== "string" ||
+      !layer.manifest.endsWith(".json") ||
+      layer.manifest.startsWith("/") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(layer.manifest) ||
+      layer.manifest.split("/").includes("..")
+    ) {
+      fail(`${at}.manifest must be a .json path inside the fixture folder`);
+    }
+    if (!depthLayerSources.includes(layer.source as string)) {
+      fail(`${at}.source must be one of ${depthLayerSources.join(", ")}`);
+    }
+
+    return {
+      id: layer.id as string,
+      label: layer.label as string,
+      manifest: layer.manifest as string,
+      source: layer.source as DemoFixtureDepthSource,
+    };
+  });
+
+  if (typeof block.defaultLayer !== "string" || !ids.has(block.defaultLayer)) {
+    fail("defaultLayer must name one of the layers");
+  }
+
+  return { defaultLayer: block.defaultLayer as string, layers };
+}
+
+/** A depth.json names its frames relative to itself, so its folder is served unhashed. */
+function resolveFixtureDepth(
+  depth: DemoFixtureDepth,
+  basePath: string,
+): DemoFixtureDepthDefinition {
+  const folder = basePath.split("/").pop();
+
+  return {
+    defaultLayer: depth.defaultLayer,
+    layers: depth.layers.map((layer) => ({
+      ...layer,
+      manifestSrc: `${import.meta.env.BASE_URL}fixtures/${folder}/${layer.manifest}`,
+    })),
+  };
 }
 
 /** Layers that draw nothing unless the detections carry the matching geometry. */
@@ -158,6 +280,30 @@ export function resolveDemoFixtureAvailability(
   }
 
   return availability;
+}
+
+export function resolveDemoFixtureDataLayers(
+  availability: DemoPresentationAvailability | undefined,
+  data: { readonly depth: boolean; readonly detections: boolean },
+): DemoPresentationAvailability {
+  const narrowed: DemoPresentationAvailability = { ...availability };
+
+  if (!data.depth) narrowed.depthEnabled = false;
+  if (!data.detections) {
+    for (const layer of demoPresentationLayerSettings) {
+      if (layer !== "depthEnabled") narrowed[layer] = false;
+    }
+  }
+
+  return narrowed;
+}
+
+/** Depth video pairs with the clip's own frames, so a converted clip draws none. */
+export function resolveDemoDepthReach(
+  availability: DemoPresentationAvailability | undefined,
+  depthPlays: boolean,
+): DemoPresentationAvailability | undefined {
+  return depthPlays ? availability : { ...availability, depthEnabled: false };
 }
 
 /** Every committed fixture that can be loaded by a focused documentation view. */
@@ -267,6 +413,10 @@ export type DemoFixtureDetectionSourceTransform = (
 export async function loadDemoFixtureDetectionManifest(
   definition: DemoFixtureDefinition = defaultDemoFixture,
 ): Promise<DemoFixtureDetectionManifest> {
+  if (definition.detectionsManifestSrc === null) {
+    throw new Error(`Fixture ${definition.sampleName} has no detections.`);
+  }
+
   const response = await fetch(definition.detectionsManifestSrc);
 
   if (!response.ok) {
@@ -312,7 +462,7 @@ export function createDemoFixtureDetectionSource(
 ): DemoFixtureDetectionSource {
   const detectionSpace = resolveDemoFixtureDetectionSpace(manifest);
   const chunkedDetectionSource = createChunkedDetectionFrameSource({
-    baseUrl: definition.detectionsManifestSrc,
+    baseUrl: definition.detectionsManifestSrc ?? undefined,
     fetchChunk: async (chunk) => {
       const loaded = await fetchDemoFixtureDetectionChunk(
         chunk,
@@ -480,13 +630,28 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
       const proxyPath = meta.media.proxyFile
         ? normalizeFixturePath(basePath, meta.media.proxyFile)
         : null;
-      const detectionsManifestSrc = fixtureManifestUrls[manifestPath];
+      const detectionsManifestSrc = fixtureManifestUrls[manifestPath] ?? null;
       const videoSrc = fixtureMediaUrls[mediaPath];
       const proxyVideoSrc = proxyPath ? fixtureMediaUrls[proxyPath] : null;
+      let depth: DemoFixtureDepthDefinition | null = null;
 
-      if (!detectionsManifestSrc || !videoSrc) {
+      if (meta.depth !== undefined) {
+        try {
+          depth = resolveFixtureDepth(
+            parseDemoFixtureDepth(meta.depth),
+            basePath,
+          );
+        } catch (error) {
+          console.warn(
+            `Skipping demo fixture ${meta.sampleName}: ${error instanceof Error ? error.message : String(error)}.`,
+          );
+          return [];
+        }
+      }
+
+      if ((!detectionsManifestSrc && !depth) || !videoSrc) {
         console.warn(
-          `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${manifestPath} and ${mediaPath}.`,
+          `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${mediaPath} and ${manifestPath} or a depth block.`,
         );
         return [];
       }
@@ -502,15 +667,22 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
         {
           basePath,
           datasetId: meta.datasetId,
+          depth,
           detectionsManifestSrc,
           displayName: meta.displayName,
           inferenceLabel: meta.inferenceLabel,
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
           presentationDefaults: meta.presentation,
-          presentationAvailability: resolveDemoFixtureAvailability(
-            meta.presentationAvailability,
-            fixtureManifests[manifestPath]?.geometry,
+          presentationAvailability: resolveDemoFixtureDataLayers(
+            resolveDemoFixtureAvailability(
+              meta.presentationAvailability,
+              fixtureManifests[manifestPath]?.geometry,
+            ),
+            {
+              depth: depth !== null,
+              detections: detectionsManifestSrc !== null,
+            },
           ),
           proxyVideoSrc: proxyVideoSrc ?? null,
           sampleName: meta.sampleName,

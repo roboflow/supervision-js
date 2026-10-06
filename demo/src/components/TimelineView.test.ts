@@ -60,18 +60,21 @@ function pointerEvent(
   currentTarget: HTMLInputElement,
   clientX: number,
   buttons: number,
+  timeStamp?: number,
 ) {
   return {
     buttons,
     clientX,
     currentTarget,
     pointerId: 7,
+    timeStamp,
   } as PointerEvent<HTMLInputElement>;
 }
 
-function changeEvent(value: number) {
+function changeEvent(value: number, timeStamp?: number) {
   return {
     currentTarget: { value: String(value) },
+    timeStamp,
   } as ChangeEvent<HTMLInputElement>;
 }
 
@@ -104,6 +107,29 @@ describe("TimelineView range input gestures", () => {
 
     expect(onScrub).toHaveBeenCalledOnce();
     expect(onScrub).toHaveBeenCalledWith(12);
+  });
+
+  it("leaves no drag open when the release's own change lands on another value", () => {
+    const onScrub = vi.fn();
+    const onSeek = vi.fn();
+    const input = renderTimelineInput({ onScrub, onSeek });
+    const element = inputElement();
+
+    input.onPointerDown(pointerEvent(element, 25, 1, 1000));
+    input.onPointerMove(pointerEvent(element, 95, 1, 1600));
+    input.onPointerUp(pointerEvent(element, 95, 0, 2200));
+    // The native range puts its thumb two frames short near the track's end.
+    input.onChange(changeEvent(83, 2202));
+
+    expect(onScrub.mock.calls).toEqual([[85]]);
+    expect(onSeek).toHaveBeenCalledOnce();
+    expect(onSeek).toHaveBeenCalledWith(85);
+
+    // A change long after the release is someone else's, and still scrubs.
+    input.onPointerDown(pointerEvent(element, 25, 1, 5000));
+    input.onPointerUp(pointerEvent(element, 25, 0, 5100));
+    input.onChange(changeEvent(40, 9000));
+    expect(onScrub).toHaveBeenLastCalledWith(40);
   });
 
   it("publishes each new drag position and commits only the terminal one", () => {

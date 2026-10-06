@@ -6,6 +6,7 @@ import {
 } from "#types/media-renderer";
 import {
   RenderPreparationArtifactFrameStatus,
+  RenderPreparationArtifactKind,
   RenderPreparationGateHoldReason,
   type RenderPreparationArtifactDiagnostics,
   type RenderPreparationDiagnostics,
@@ -141,6 +142,27 @@ export function createMediaSessionStateSnapshot({
   }
 
   for (const artifact of renderPreparation?.artifacts ?? []) {
+    if (artifact.kind === RenderPreparationArtifactKind.ExactDepthFrame) {
+      // Exact depth loads while the frame rests, its preview or no depth
+      // drawn meanwhile; it never holds playback or the picture.
+      if (artifact.pendingCount > 0) {
+        activities.push(
+          createActivity({
+            artifactKind: artifact.kind,
+            detail: null,
+            kind: MediaSessionActivityKind.RenderPreparing,
+            label: "Loading exact depth",
+            pendingCount: artifact.pendingCount,
+            preparedCount: artifact.preparedCount,
+            progress: 0,
+            status: MediaSessionActivityStatus.Running,
+          }),
+        );
+      }
+      continue;
+    }
+
+    const words = describeArtifactKind(artifact.kind);
     const totalCount = artifact.pendingCount + artifact.preparedCount;
     const activeFrameIsPending =
       artifact.activeFrame?.status ===
@@ -177,9 +199,9 @@ export function createMediaSessionStateSnapshot({
         detail: leadHold
           ? `Starting again at ${leadHold.requiredAheadSeconds.toFixed(
               1,
-            )}s of masks ready`
+            )}s of ${words.ready} ready`
           : holdingPlayback && waitingForFrame
-            ? "The masks for this frame are not drawn yet"
+            ? `${words.subject} for this frame ${words.notDrawn}`
             : activeFrameIsPending
               ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
                   3,
@@ -187,10 +209,10 @@ export function createMediaSessionStateSnapshot({
               : null,
         kind: MediaSessionActivityKind.RenderPreparing,
         label: leadHold
-          ? "Catching the masks up"
+          ? `Catching ${words.object} up`
           : waitingForFrame
             ? holdingPlayback
-              ? "Waiting for the masks"
+              ? `Waiting for ${words.object}`
               : "Preparing active render artifact"
             : "Preparing render artifacts",
         pendingCount: artifact.pendingCount,
@@ -212,7 +234,7 @@ export function createMediaSessionStateSnapshot({
       createActivity({
         detail: "The video is playing without them",
         kind: MediaSessionActivityKind.RenderPreparationAbandoned,
-        label: "Masks could not keep up",
+        label: `${abandonedSubject(renderPreparation)} could not keep up`,
         status: MediaSessionActivityStatus.Waiting,
       }),
     );
@@ -351,4 +373,37 @@ function resolveSessionStatus(
   }
 
   return MediaSessionStatus.Ready;
+}
+
+/** Polygons are named as masks, which is what a viewer sees. */
+function describeArtifactKind(kind: RenderPreparationArtifactKind) {
+  return kind === RenderPreparationArtifactKind.DepthFrame
+    ? {
+        notDrawn: "is not decoded yet",
+        object: "depth",
+        ready: "depth",
+        subject: "The depth",
+      }
+    : {
+        notDrawn: "are not drawn yet",
+        object: "the masks",
+        ready: "masks",
+        subject: "The masks",
+      };
+}
+
+function abandonedSubject(
+  renderPreparation: RenderPreparationDiagnostics | null,
+) {
+  const kinds = new Set(
+    (renderPreparation?.artifacts ?? []).map((artifact) => artifact.kind),
+  );
+  const depth = kinds.has(RenderPreparationArtifactKind.DepthFrame);
+  const masks =
+    kinds.has(RenderPreparationArtifactKind.MaskFrame) ||
+    kinds.has(RenderPreparationArtifactKind.PolygonFrame);
+
+  if (depth && masks) return "Masks and depth";
+
+  return depth ? "Depth" : "Masks";
 }

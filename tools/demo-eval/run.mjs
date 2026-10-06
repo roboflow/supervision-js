@@ -33,6 +33,11 @@ import {
   runFocus,
   runPlayhead,
 } from "./scenarios-guards.mjs";
+import {
+  depthDetail,
+  runDepthBackDrag,
+  runDepthDrag,
+} from "./scenarios-depth.mjs";
 import { layersDetail, runLayers } from "./scenarios-layers.mjs";
 import { runThrottle, throttleDetail } from "./scenarios-throttle.mjs";
 import {
@@ -56,6 +61,8 @@ const SCENARIOS = [
   "playhead",
   "backscrub",
   "focus",
+  "depth-drag",
+  "depth-backdrag",
   "battery",
 ];
 const GUARD_SCENARIOS = new Set([
@@ -185,6 +192,8 @@ async function measure(pass) {
       playhead: runPlayhead,
       backscrub: runBackscrub,
       focus: runFocus,
+      "depth-drag": runDepthDrag,
+      "depth-backdrag": runDepthBackDrag,
     };
     try {
       for (const name of demoScenarios) {
@@ -586,6 +595,9 @@ function commits(source) {
 function detail(name, scenario) {
   if (GUARD_SCENARIOS.has(name)) {
     return guardDetail(name, scenario, field);
+  }
+  if (name === "depth-drag" || name === "depth-backdrag") {
+    return depthDetail(scenario, field);
   }
   if (name === "sync") {
     return [

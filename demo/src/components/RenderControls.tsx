@@ -1,8 +1,10 @@
 import { memo, useState, type CSSProperties } from "react";
 import {
+  ColorControl,
   ControlSection,
   SegmentedControl,
   SliderControl,
+  toHexColor,
   ToggleControl,
 } from "./InspectorControls";
 import {
@@ -12,6 +14,7 @@ import {
   MaskRenderMode,
 } from "supervision";
 import { DemoEvalHook } from "../eval-hooks";
+import { DepthStyleSection, type WorkbenchDepth } from "./DepthStyleSection";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
@@ -27,11 +30,13 @@ enum RenderControlsTab {
 export const RenderControls = memo(function RenderControls({
   availability,
   classNames,
+  depth,
   onChange,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
   readonly classNames: readonly string[];
+  readonly depth: WorkbenchDepth;
   readonly onChange: (settings: DemoPresentationSettings) => void;
   readonly settings: DemoPresentationSettings;
 }) {
@@ -103,6 +108,7 @@ export const RenderControls = memo(function RenderControls({
       {activeTab === RenderControlsTab.Global ? (
         <GlobalRenderControls
           availability={availability}
+          depth={depth}
           onChange={updateSettings}
           onPatch={patchSettings}
           settings={settings}
@@ -122,11 +128,13 @@ export const RenderControls = memo(function RenderControls({
 
 function GlobalRenderControls({
   availability,
+  depth,
   onChange,
   onPatch,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
+  readonly depth: WorkbenchDepth;
   readonly onChange: <Key extends keyof DemoPresentationSettings>(
     key: Key,
     value: DemoPresentationSettings[Key],
@@ -138,6 +146,10 @@ function GlobalRenderControls({
   const segmentationUnavailable =
     availability?.masksEnabled === false &&
     availability?.polygonsEnabled === false;
+  // The sample's depth stays switched on across a path that cannot play it,
+  // and a ticked switch would say it is drawn there.
+  const depthDrawn =
+    settings.depthEnabled && availability?.depthEnabled !== false;
 
   return (
     <div className="render-controls__panel render-controls__panel--global">
@@ -162,6 +174,13 @@ function GlobalRenderControls({
             disabled={availability?.heatmapsEnabled === false}
             label="Heatmap"
             onChange={(checked) => onChange("heatmapsEnabled", checked)}
+          />
+          <ToggleControl
+            checked={depthDrawn}
+            disabled={availability?.depthEnabled === false}
+            label="Depth"
+            tooltip="A sample's depth clip: exact depth while playing when it keeps up, 8-bit preview depth otherwise, and exact depth once playback rests."
+            onChange={(checked) => onChange("depthEnabled", checked)}
           />
           <ToggleControl
             checked={settings.polygonsEnabled}
@@ -347,6 +366,17 @@ function GlobalRenderControls({
           valueLabel={formatPercent(settings.polygonFillAlpha)}
         />
       </ControlSection>
+
+      <DepthStyleSection
+        available={availability?.depthEnabled !== false}
+        depth={depth}
+        enabled={depthDrawn}
+        onChange={(patch) =>
+          onChange("depthStyle", { ...settings.depthStyle, ...patch })
+        }
+        onToggleEnabled={(checked) => onChange("depthEnabled", checked)}
+        settings={settings.depthStyle}
+      />
 
       <ControlSection
         enabled={settings.polylinesEnabled}
@@ -723,40 +753,10 @@ function SubLayerToggle({
   );
 }
 
-function ColorControl({
-  disabled = false,
-  label,
-  onChange,
-  value,
-}: {
-  readonly disabled?: boolean;
-  readonly label: string;
-  readonly onChange: (value: number) => void;
-  readonly value: number;
-}) {
-  return (
-    <label className="class-color-control">
-      <span>{label}</span>
-      <input
-        disabled={disabled}
-        onChange={(event) =>
-          onChange(Number.parseInt(event.currentTarget.value.slice(1), 16))
-        }
-        type="color"
-        value={toHexColor(value)}
-      />
-    </label>
-  );
-}
-
 type ClassColorStyle = CSSProperties & {
   readonly "--class-color": string;
 };
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
-}
-
-function toHexColor(color: number) {
-  return `#${color.toString(16).padStart(6, "0").slice(-6)}`;
 }

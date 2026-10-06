@@ -29,6 +29,7 @@ import type { OrientedBoxStyle } from "supervision-js-core";
 import type { PercentageBarStyle } from "supervision-js-core";
 import type {
   RegionAnnotationRenderer,
+  DepthAnnotationRenderer,
   HeatmapAnnotationRenderer,
   PolygonStyle,
   PolylineStyle,
@@ -47,6 +48,8 @@ import type {
   ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
+import type { DepthFrameProvider } from "#render-preparation/depth/source";
+import type { ActiveDepthMap } from "#types/media-depth";
 import type { PresentedFrameSource } from "./presented-frame-channel";
 import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-window";
 
@@ -76,6 +79,7 @@ export interface MediaRendererSceneOptions {
   readonly keypointStyle: KeypointStyle | null | undefined;
   readonly regionRenderers: readonly RegionAnnotationRenderer[];
   readonly heatmapRenderers?: readonly HeatmapAnnotationRenderer[];
+  readonly depthRenderers?: readonly DepthAnnotationRenderer[];
   readonly interaction: MediaInteractionOptions | undefined;
   readonly interactionStyle: InteractionStyle | null | undefined;
   readonly canInteract: () => boolean;
@@ -137,6 +141,8 @@ export interface MediaRendererScene {
    * again.
    */
   setPlaybackActive?(active: boolean): void;
+  /** While a drag holds the playhead, work ahead of it follows the hand. */
+  setScrubbing?(scrubbing: boolean): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   /**
@@ -189,6 +195,11 @@ export interface MediaRendererScene {
     selection: DetectionSelectionOptions | null,
     mediaTime: number,
   ): DetectionPickResult | null;
+  /** Redraws the frame on screen with the new depth; null removes it. */
+  setDepthSource?(source: DepthFrameProvider | null): void;
+  getActiveDepth?(): ActiveDepthMap | null;
+  /** Called on every playhead move, never from inside a present. */
+  prefetchDepth?(mediaTime: number): void;
   destroy(): void;
 }
 

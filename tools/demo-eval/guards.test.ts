@@ -10,6 +10,7 @@ import {
   summariseDrag,
 } from "./scenarios-guards.mjs";
 import { judgeCadence } from "./scenarios.mjs";
+import { judgeDepthDrag, summariseDepthDrag } from "./scenarios-depth.mjs";
 
 /* Every guard is checked twice: once against numbers a healthy player
  * produces, and once against the signature of the defect it exists for. A gate
@@ -599,3 +600,109 @@ describe("the keypoint fixture's cadence", () => {
 function round(value: number) {
   return Math.round(value * 10000) / 10000;
 }
+
+interface DepthDragSampleOptions {
+  /** Frames the picture moves per sample. */
+  framesPerSample?: number;
+  /** Samples a frame stays on screen before the picture moves on. */
+  holdSamples?: number;
+  /** How far the picture trails the thumb, in frames. */
+  behindFrames?: number;
+  /** Samples a frame shows before its depth is drawn. */
+  depthAfterSamples?: number;
+  /** Depth is drawn for the frame before the one on screen. */
+  staleDepth?: boolean;
+}
+
+/* A drag across 120 frames of a 24 fps clip at 16ms a sample, from a probe
+ * shaped like the one the depth scenarios install. */
+function buildDepthProbe({
+  framesPerSample = 1,
+  holdSamples = 1,
+  behindFrames = 1,
+  depthAfterSamples = 0,
+  staleDepth = false,
+}: DepthDragSampleOptions = {}) {
+  const downAt = 1000;
+  const samples = [];
+  const count = 90;
+  let frame = 10;
+  let shownSince = 0;
+
+  for (let index = 0; index < count; index += 1) {
+    const thumb = 10 + index * framesPerSample + behindFrames;
+    if (index > 0 && index % holdSamples === 0) {
+      frame = Math.max(frame, thumb - behindFrames);
+      shownSince = index;
+    }
+    const hasDepth = index - shownSince >= depthAfterSamples;
+    samples.push({
+      at: downAt + index * 16,
+      scrubValue: thumb / 24,
+      presentedTime: frame / 24,
+      frame,
+      depthFrame: hasDepth ? (staleDepth ? frame - 1 : frame) : null,
+      depthIndex: hasDepth ? frame : null,
+      precision: hasDepth ? "preview" : null,
+    });
+  }
+  const upAt = downAt + (count - 1) * 16;
+  samples.push(
+    {
+      at: upAt + 30,
+      scrubValue: samples.at(-1).scrubValue,
+      presentedTime: frame / 24,
+      frame,
+      depthFrame: frame,
+      depthIndex: frame,
+      precision: "preview",
+    },
+    {
+      at: upAt + 200,
+      scrubValue: samples.at(-1).scrubValue,
+      presentedTime: frame / 24,
+      frame,
+      depthFrame: frame,
+      depthIndex: frame,
+      precision: "exact",
+    },
+  );
+  return { downAt, upAt, samples, configures: 6 };
+}
+
+describe("dragging the depth clip", () => {
+  const judge = (options: DepthDragSampleOptions, direction = "forward") =>
+    judgeDepthDrag({
+      direction,
+      ...summariseDepthDrag(buildDepthProbe(options)),
+    });
+
+  it("passes a drag whose every frame arrives with its depth and keeps up", () => {
+    expect(judge({})).toEqual([]);
+    expect(judge({}, "backward")).toEqual([]);
+  });
+
+  it("fails a picture held back for depth, as decoder restarts on every move did", () => {
+    const failures = judge({ holdSamples: 12, behindFrames: 6 }, "backward");
+
+    expect(failures.join("\n")).toMatch(
+      /depth-backdrag: the screen held one frame/,
+    );
+    expect(failures.join("\n")).toMatch(/of the page's animation frames/);
+  });
+
+  it("fails frames shown without their depth, and depth that arrives late", () => {
+    expect(judge({ depthAfterSamples: 100 }).join("\n")).toMatch(
+      /never drew their depth/,
+    );
+    expect(judge({ depthAfterSamples: 9, holdSamples: 12 }).join("\n")).toMatch(
+      /waited .*ms for their depth at p95/,
+    );
+  });
+
+  it("fails depth drawn for another frame, whatever else holds", () => {
+    expect(judge({ staleDepth: true }).join("\n")).toMatch(
+      /depth for another frame was drawn/,
+    );
+  });
+});

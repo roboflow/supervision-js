@@ -6,6 +6,7 @@ children:
   - ./annotation-renderers/box-corners.md
   - ./annotation-renderers/masks.md
   - ./annotation-renderers/heatmaps.md
+  - ./annotation-renderers/depth.md
   - ./annotation-renderers/mask-halo.md
   - ./annotation-renderers/markers.md
   - ./annotation-renderers/percentage-bar.md
@@ -47,6 +48,7 @@ fixture's committed semantic data rather than inventing geometry at runtime.
 - [Box corners](./annotation-renderers/box-corners.md)
 - [Masks](./annotation-renderers/masks.md)
 - [Heatmaps](./annotation-renderers/heatmaps.md)
+- [Depth maps](./annotation-renderers/depth.md)
 - [Mask Halo](./annotation-renderers/mask-halo.md)
 - [Markers](./annotation-renderers/markers.md)
 - [Percentage Bar](./annotation-renderers/percentage-bar.md)

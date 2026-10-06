@@ -135,6 +135,9 @@ describe("createMediaStreamRendererSource", () => {
     await fakeVideo.present(1.25);
     const decoded = await opening;
 
+    expect(decoded.frameClockUnavailableReason).toMatch(
+      /^a live stream has no end/,
+    );
     expect(decoded.metadata).toMatchObject({
       audioTrackCount: 1,
       duration: null,

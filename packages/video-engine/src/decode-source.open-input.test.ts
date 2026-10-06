@@ -29,6 +29,11 @@ interface FakeTrackConfig {
   containerUnreadable?: boolean;
   otherTrackCount?: number;
   packetCount?: number;
+  /** A WebM block that states no duration reads as zero. Every other packet
+   *  lasts 1/30 s. */
+  lastPacketDuration?: number;
+  /** The track end the container's metadata states. */
+  statedDurationS?: number | null;
 }
 
 /** A whole multiple of both 30fps and every origin these tests use, so the fake
@@ -58,8 +63,17 @@ class FakeVideoTrack {
   getTimeResolution(): Promise<number> {
     return Promise.resolve(TICK_RATE);
   }
+  /** Where mediabunny measures a track to: the end of its last packet. */
   computeDuration(): Promise<number> {
-    return Promise.resolve(5);
+    const count = trackConfig.packetCount ?? 5;
+    return Promise.resolve(
+      trackConfig.firstTimestamp +
+        (count - 1) / 30 +
+        (trackConfig.lastPacketDuration ?? 1 / 30),
+    );
+  }
+  getDurationFromMetadata(): Promise<number | null> {
+    return Promise.resolve(trackConfig.statedDurationS ?? null);
   }
   computePacketStats(): Promise<{ averagePacketRate: number }> {
     return Promise.resolve({ averagePacketRate: 30 });
@@ -116,7 +130,10 @@ vi.mock("mediabunny", () => {
         for (const step of [...Array(count).keys()].reverse()) {
           yield {
             timestamp: trackConfig.firstTimestamp + step / 30,
-            duration: 1 / 30,
+            duration:
+              step === count - 1
+                ? (trackConfig.lastPacketDuration ?? 1 / 30)
+                : 1 / 30,
           };
         }
       }
@@ -251,6 +268,70 @@ describe("openInput frame timeline", () => {
 
     expect(firstTimestampS).toBe(timeline.timeAt(0));
   });
+
+  it.each([
+    {
+      last: "a last frame without a duration",
+      packetCount: 3,
+      lastPacketDuration: 0,
+      statedDurationS: 0.2,
+      endTicks: 120,
+      durationS: 0.2,
+    },
+    {
+      last: "a lone frame without a duration",
+      packetCount: 1,
+      lastPacketDuration: 0,
+      statedDurationS: 1,
+      endTicks: TICK_RATE,
+      durationS: 1,
+    },
+    {
+      last: "a last frame without a duration, and no stated end,",
+      packetCount: 3,
+      lastPacketDuration: 0,
+      statedDurationS: null,
+      endTicks: 60,
+      durationS: 0.1,
+    },
+    {
+      last: "a last frame without a duration, and a stated end no later than its start,",
+      packetCount: 3,
+      lastPacketDuration: 0,
+      statedDurationS: 2 / 30,
+      endTicks: 60,
+      durationS: 0.1,
+    },
+    {
+      last: "a last frame with its own duration",
+      packetCount: 3,
+      lastPacketDuration: undefined,
+      statedDurationS: 0.5,
+      endTicks: 60,
+      durationS: 0.1,
+    },
+  ])(
+    "$last ends at its own end, else the container's stated end, else one frame on",
+    async ({
+      packetCount,
+      lastPacketDuration,
+      statedDurationS,
+      endTicks,
+      durationS,
+    }) => {
+      trackConfig = {
+        canDecode: true,
+        firstTimestamp: 0,
+        lastPacketDuration,
+        packetCount,
+        statedDurationS,
+      };
+      const { track } = await openDecodeSource({ source: SOURCE });
+
+      expect(track.timeline.endTicksAt(packetCount - 1)).toBe(endTicks);
+      expect(track.durationS).toBe(durationS);
+    },
+  );
 });
 
 describe("openInput rotation", () => {

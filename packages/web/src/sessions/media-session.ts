@@ -185,6 +185,7 @@ export async function createMediaSession(
       boxCornerStyle: initialPresentation.boxCornerStyle,
       ellipseStyle: initialPresentation.ellipseStyle,
       container: options.container,
+      depth: options.depth,
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
@@ -505,6 +506,17 @@ export async function createMediaSession(
         renderer.setPresentation(
           resolveRendererPresentation(currentPresentation),
         );
+      },
+
+      async setDepth(depth) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+        if (!renderer.setDepth) {
+          throw new Error("This renderer does not draw depth.");
+        }
+
+        await renderer.setDepth(depth);
       },
 
       setRenderQuality(quality) {

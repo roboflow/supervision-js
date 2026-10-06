@@ -83,7 +83,10 @@ export enum MediaSourceStatus {
 export interface MediaFrameRenderTimings {
   readonly totalMs: number;
   readonly mediaUploadMs: number;
+  /** Masks and heatmaps. */
   readonly maskMs: number;
+  /** Depth layer, including uploading any map not uploaded ahead of the frame. */
+  readonly depthMs: number;
   readonly boxMs: number;
   readonly focusMs: number;
   readonly interactionMs: number;

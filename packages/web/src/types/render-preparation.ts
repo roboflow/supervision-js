@@ -43,6 +43,13 @@ export enum RenderPreparationArtifactKind {
   MaskFrame = "maskFrame",
   /** Frame-level ID-mask artifact rasterized from semantic polygons. */
   PolygonFrame = "polygonFrame",
+  /** A clip's 8-bit preview depth, decoded ahead of playback. */
+  DepthFrame = "depthFrame",
+  /**
+   * A clip's exact 16-bit depth, loaded for the frame at rest and its
+   * neighbours: `preparedCount` frames kept, `pendingCount` loading.
+   */
+  ExactDepthFrame = "exactDepthFrame",
 }
 
 /**
@@ -100,7 +107,9 @@ export interface RenderPreparationMaskFrameOptions {
    * The box the host paints prepared masks into, in CSS pixels, with the pixel
    * ratio it paints them at. A mask frame's id raster is then capped to the
    * size that box can show; absent, it is cooked at the detections' own
-   * resolution.
+   * resolution. Exact depth frames the box cannot show at least twice over
+   * go up to the GPU decimated by that whole factor; readouts still read every
+   * sample.
    */
   readonly display?: {
     readonly boxHeight: number;
@@ -251,8 +260,15 @@ export interface RenderPreparationArtifactWindowDiagnostics {
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
   readonly gateHold?: RenderPreparationGateHoldDiagnostics | null;
+  /** Times this family held the playback gate since it opened. Only depth reports it. */
+  readonly gateHoldCount?: number;
   readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
+  /**
+   * A `DepthFrame` window's depth: `"preview"` for the preview video,
+   * `"exact"` for exact frames loaded ahead for playback.
+   */
+  readonly precision?: "exact" | "preview";
   readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
@@ -296,12 +312,65 @@ export interface RenderPreparationDiagnostics {
 }
 
 /**
+ * Which depth a clip draws while playback runs.
+ *
+ * - `"preview"`: the 8-bit preview video, decoded ahead of the playhead.
+ * - `"exact"`: the exact 16-bit PNGs, loaded ahead of the playhead; the
+ *   playback gate holds for them. A clip whose exact frames stop loading
+ *   falls back to its preview.
+ * - `"auto"` (the default): the exact PNGs while they keep up, the preview
+ *   otherwise. Exact depth takes over once its lead reaches three quarters
+ *   of what it loads ahead, and hands back when the lead falls under a
+ *   quarter or a frame is missing, waiting longer each time before it tries
+ *   again. A clip without a preview plays exact depth.
+ *
+ * Whichever is drawn is the depth of the frame on screen;
+ * `getActiveDepth().precision` says which.
+ */
+export type DepthPlaybackSource = "auto" | "exact" | "preview";
+
+/**
+ * Memory and timing for a depth clip. Every byte budget defaults to a size
+ * that scales with the clip's resolution, so a 4K clip keeps as many seconds
+ * as a 720p one, within a ceiling.
+ */
+export interface RenderPreparationDepthOptions {
+  /** Defaults to `"auto"`. See {@link DepthPlaybackSource}. */
+  readonly playback?: DepthPlaybackSource;
+  /**
+   * Exact frames loaded ahead for playback, in bytes. Defaults to room for
+   * twice `previewPrefetchSeconds` plus a quarter second of exact frames, at
+   * least 96 MiB and at most 512 MiB; a shorter budget lowers the lead exact
+   * playback reaches. A budget under one frame still holds the frame on
+   * screen.
+   */
+  readonly maxExactPlaybackCacheBytes?: number;
+  /**
+   * Decoded preview frames kept, in bytes. Defaults to room for twice
+   * `previewPrefetchSeconds` plus a quarter second of the clip, at least
+   * 96 MiB and at most 512 MiB. A budget shorter than the playback gate's lead
+   * lowers the lead the gate waits for; one under one frame still holds the
+   * frame on screen.
+   */
+  readonly maxPreviewCacheBytes?: number;
+  /**
+   * How far ahead of the playhead the preview, and exact frames when they
+   * play, are decoded while playing, in seconds of media. Defaults to 1.
+   * Above 1x it stretches by how many frames each present moves; a drag
+   * spends the same span both ways, most of it the way the hand heads.
+   */
+  readonly previewPrefetchSeconds?: number;
+}
+
+/**
  * Render-preparation configuration.
  *
  * Most applications can use the session defaults. Tune this when dense masks,
  * long videos, worker policy, or playback gating need explicit behavior.
  */
 export interface RenderPreparationOptions {
+  /** Budgets and timing for depth clips. */
+  readonly depth?: RenderPreparationDepthOptions;
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;

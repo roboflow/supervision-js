@@ -440,6 +440,10 @@ describe("normalizeMedia", () => {
     const source = await normalized.rendererSource.open();
 
     expect(source.metadata.duration).toBe(1.25);
+    expect(source.readFrameClock).toBeUndefined();
+    expect(source.frameClockUnavailableReason).toMatch(
+      /^the media is still being converted/,
+    );
     expect(source.metadata.estimatedFrameCount).toBe(30);
     expect(source.metadata.estimatedFrameRate).toBe(24);
     expect(
