@@ -11,6 +11,7 @@ import {
   encodeCompressedRleCounts,
   FocusTargetMode,
   MediaInteractionMode,
+  PlaybackGateReach,
 } from "supervision-js-core";
 import type {
   AnnotationEditingEngine,
@@ -38,6 +39,7 @@ import type {
 import type { MediaRendererPresentation } from "#types/media-renderer";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
 import { MediaRendererFit } from "#types/media-renderer";
+import { createMediaRendererRuntimeState } from "./media-renderer-state";
 
 const pixiMock = vi.hoisted(() => ({
   graphics: [] as {
@@ -1142,6 +1144,94 @@ describe("the prepared annotation window under push presentation", () => {
 
     expect(scene.getPreparedAnnotationWindow?.()).toBeNull();
   });
+
+  it.each([false, true])(
+    "updates a pulled frame's mask readout after preparation without another present when timings are %s",
+    async (timings) => {
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const detectionTimeline = createTimeline(maskedFrames);
+      await detectionTimeline.prepare(1);
+      const onFrame = vi.fn();
+      const state = createMediaRendererRuntimeState({
+        fit: MediaRendererFit.Contain,
+        getDetectionBufferState: () => detectionTimeline.getState(),
+        getPlaybackGateReach: () => PlaybackGateReach.Off,
+        onFrame,
+        playbackRate: 1,
+      });
+      const onPresentationUpdate = vi.fn((sample: PresentedMediaSample) =>
+        state.recordPresentationUpdate(sample),
+      );
+      const scene = await createPixiMediaScene(
+        createSceneOptions({
+          detectionTimeline,
+          diagnostics: timings ? { frameTimings: true } : undefined,
+          maskStyle: paintedMaskStyle,
+          onPresentationUpdate,
+          renderPreparation: {
+            maskFrame: { prefetchFrameCount: 0 },
+            workerFactory: createSelectiveWorkerFactory(["0:1", "1:1.0333"]),
+          },
+        }),
+      );
+      try {
+        scene.initializeMedia({ height: 240, width: 320 });
+        expect(onPresentationUpdate).not.toHaveBeenCalled();
+
+        for (const [index, timestamp] of [1, 1.0333].entries()) {
+          onPresentationUpdate.mockClear();
+          const close = vi.fn();
+          const presented = scene.presentSample({
+            close,
+            draw: vi.fn(),
+            duration: 1 / 30,
+            timestamp,
+          });
+          expect(onPresentationUpdate).not.toHaveBeenCalled();
+          expect(close).toHaveBeenCalledOnce();
+          expect(presented).toMatchObject({
+            drawnMaskFrameTime: null,
+            mediaTime: timestamp,
+            presentedFrameSerial: index + 1,
+          });
+          state.recordPresentedSample(presented);
+          state.recordPlayheadTime(timestamp + 0.02);
+          state.setScrubbing(true);
+
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(1);
+
+          expect(
+            pixiMock.meshes.find(
+              (mesh) => "maskUniforms" in mesh.shader.resources,
+            )?.visible,
+            `prepared mask at ${timestamp}`,
+          ).toBe(true);
+          expect(onPresentationUpdate).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              activeDetectionFrameTime: timestamp,
+              drawnMaskFrameTime: timestamp,
+              mediaTime: timestamp,
+              presentedFrameSerial: index + 1,
+            }),
+          );
+          expect(state.snapshot()).toMatchObject({
+            currentTime: timestamp + 0.02,
+            drawnMaskFrameTime: timestamp,
+            presentedFrames: index + 1,
+            presentedTime: timestamp,
+            scrubbing: true,
+          });
+          expect(onFrame).toHaveBeenCalledTimes(index + 1);
+          expect(pixiMock.render).not.toHaveBeenCalled();
+        }
+        expect(scene.getRenderCount?.()).toBeNull();
+      } finally {
+        scene.destroy();
+        detectionTimeline.destroy();
+      }
+    },
+  );
 
   it.each([false, true])(
     "leaves pull overlay drawing to the ticker when timings are %s",

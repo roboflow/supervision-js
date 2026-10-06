@@ -1201,6 +1201,7 @@ export async function createPixiMediaScene(
         throw new Error("Pixi media scene has not been initialized.");
       }
 
+      isPresenting = true;
       try {
         currentMediaTime = sample.timestamp;
         hasPresentedSample = true;
@@ -1257,6 +1258,7 @@ export async function createPixiMediaScene(
           },
         };
       } finally {
+        isPresenting = false;
         sample.close();
       }
     },
@@ -2320,16 +2322,17 @@ export async function createPixiMediaScene(
 
   /** Redraws the frame on screen whether or not its readiness moved. */
   function redrawAnnotationsNow(forceRender = false) {
-    if (isPresenting || isDestroyed) {
+    if (isPresenting || isDestroyed || !hasPresentedSample) {
       return;
     }
 
     const { boxState, regionState } = drawAnnotationFrame(currentMediaTime);
 
-    if (!frameChannel) return;
-    const signature = describeSceneRender();
-    if (forceRender) renderScheduler.render(signature);
-    else if (!renderScheduler.renderOnChange(signature)) return;
+    if (frameChannel) {
+      const signature = describeSceneRender();
+      if (forceRender) renderScheduler.render(signature);
+      else if (!renderScheduler.renderOnChange(signature)) return;
+    }
 
     options.onPresentationUpdate?.(
       createPresentedSampleState(currentMediaTime, boxState, regionState),
