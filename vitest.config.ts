@@ -27,6 +27,13 @@ export default defineConfig({
         ),
       },
       {
+        find: /^#web-video-engine\/frame-index$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/frame-index.ts",
+        ),
+      },
+      {
         find: /^supervision\/web-video-engine$/,
         replacement: path.resolve(
           rootDir,
@@ -69,7 +76,7 @@ export default defineConfig({
         replacement: `${coreSource("styles")}/$1.ts`,
       },
       {
-        find: /^#types\/(annotation-renderer|box-corner-style|box-style|detection-timeline|detections|editing|ellipse-style|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-halo-style|mask-style|marker-style|media|media-rendering|paint-style|percentage-bar-style|polygon-style|polyline-style|post-processing|session-lifecycle|shape-style|style|viewport)$/,
+        find: /^#types\/(annotation-renderer|box-corner-style|box-style|depth-map|detection-timeline|detections|editing|ellipse-style|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-halo-style|mask-style|marker-style|media|media-rendering|paint-style|percentage-bar-style|polygon-style|polyline-style|post-processing|session-lifecycle|shape-style|style|viewport)$/,
         replacement: `${coreSource("types")}/$1.ts`,
       },
       {

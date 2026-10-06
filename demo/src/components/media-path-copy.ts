@@ -1,7 +1,12 @@
 import { DemoMediaPath } from "../session/session-options";
 
+export const DEPTH_VIDEO_OFF_WHILE_CONVERTING =
+  "Depth video pairs a depth frame with each of the clip's own frames, and converting the clip first can change those frames, so depth stays off while conversion is on. Turn conversion off to see depth.";
+
 /** What one media path is, in the terms someone choosing between them needs. */
 export interface DemoMediaPathCopy {
+  /** What depth it draws. */
+  readonly depth: string;
   /** What you import to get it. */
   readonly imports: string;
   readonly label: string;
@@ -17,6 +22,8 @@ export interface DemoMediaPathCopy {
 
 export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
   [DemoMediaPath.Mediabunny]: {
+    depth:
+      "Depth video in step with the clip, as on the Web video engine: exact depth while it plays when it keeps up, 8-bit preview depth otherwise, and exact depth once it rests. The preview decodes in the page beside the clip, so a drag waits for both at each stop. Depth stays off while the clip is converted first.",
     costs:
       "Every jump decodes forward from the nearest keyframe and keeps nothing, so dragging the playhead waits for a decode at each stop.",
     goodAt:
@@ -30,6 +37,8 @@ export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
       "The library is handed the clip's address and reads and decodes it itself. This is what createMediaSession does with a URL and no source of your own.",
   },
   [DemoMediaPath.Engine]: {
+    depth:
+      "Depth video in step with the clip, exact or 8-bit preview depth while it plays and exact depth once it rests, and still depth pictures too.",
     costs:
       "Memory for the frames it keeps, and it reads the file itself, so the library's conversion step never runs on this path.",
     goodAt:

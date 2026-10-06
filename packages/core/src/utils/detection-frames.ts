@@ -32,7 +32,7 @@ type IndexedDetectionFrame = DetectionFrame & { readonly frameIndex: number };
  * Selection by identity carries none of this, which is why it lives in its own
  * function and not in a smaller number here.
  */
-const PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS = 0.0005;
+export const PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS = 0.0005;
 
 /**
  * Validates and orders a window without copying it. The frames stay the

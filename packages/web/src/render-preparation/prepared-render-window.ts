@@ -5,6 +5,12 @@ import {
 import { getBrowserMaskPreparationWorkerCount } from "#render-preparation/mask-preparation-worker-count";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import {
+  createPlayheadMotion,
+  createPresentedFrameStride,
+  getPausedPreparedWindowFrameCount,
+  MAX_PRESENTED_FRAME_STRIDE,
+} from "#render-preparation/playhead-motion";
+import {
   createPreparedWindowTimeline,
   type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-window-timeline";
@@ -36,6 +42,7 @@ export enum PreparedRasterTier {
 const DEFAULT_MASK_PREVIEW_SCALE = 0.5;
 /* A step wider than this many frame strides is fast playback, not a scrub. */
 const FAST_PLAYHEAD_STRIDES = 3.5;
+const FAST_PLAYHEAD_STEP_COUNT = 2;
 /* How long without a playhead step before the frame on screen is owed its
    fine cook. */
 const SETTLE_AFTER_MS = 150;
@@ -61,14 +68,9 @@ const DEFAULT_MASK_FRAME_CACHE_BYTES = Math.min(
 );
 const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
-const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
+export const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 const PREPARED_WINDOW_REFILL_RATIO = 5 / 7;
-/** One cook per four frames, the top of the playback-rate ladder on 60Hz. */
-const MAX_PRESENTED_FRAME_STRIDE = 4;
-/** A jump that repeats. One on its own is a seek, and it lands somewhere. */
-const DRAGGED_PLAYHEAD_JUMP_COUNT = 2;
-const PRESENTED_FRAME_STRIDE_SAMPLE_COUNT = 4;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
 
@@ -300,10 +302,9 @@ export function createPreparedRenderWindow(options: {
     readonly mediaTime: number;
   } | null = null;
   let activeMaskFrameSignature: string | null = null;
-  const presentedFrameStrideSamples: number[] = [];
+  const presentedFrameStride = createPresentedFrameStride();
+  const playheadMotion = createPlayheadMotion();
   let previousActiveFrameMediaTime: number | null = null;
-  let consecutivePlayheadJumpCount = 0;
-  let isPlayheadSettled = true;
   /* A step wider than a few frame strides is fast playback; its cooks go
      coarse so the prefetch window stays cheap and small. */
   let isPlayheadFast = false;
@@ -844,7 +845,11 @@ export function createPreparedRenderWindow(options: {
 
     /* A wait held at the gate does not ask again until it is let through, so
        the hold is what has to keep preparation running. */
-    if (!isPlayheadSettled && !batchOptions.force && getGateHold() === null) {
+    if (
+      !playheadMotion.settled &&
+      !batchOptions.force &&
+      getGateHold() === null
+    ) {
       return;
     }
 
@@ -1071,8 +1076,7 @@ export function createPreparedRenderWindow(options: {
       isPlaybackActive = active;
       /* Whichever way this goes, the gesture that was moving the playhead is
          over, and the window may lead it again. */
-      consecutivePlayheadJumpCount = 0;
-      isPlayheadSettled = true;
+      playheadMotion.endGesture();
       rescanPreparedWindow();
 
       if (!active) {
@@ -1138,8 +1142,8 @@ export function createPreparedRenderWindow(options: {
 
     const key = getFrameKey(detectionFrame);
 
-    const presentedFrameStride = observePresentedFrameStride(key);
-    observePlayheadStep(detectionFrame.mediaTime, presentedFrameStride);
+    const frameStride = observePresentedFrameStride(key);
+    observePlayheadStep(detectionFrame.mediaTime, frameStride);
     setActiveMaskFrame({
       key,
       mediaTime: detectionFrame.mediaTime,
@@ -1706,17 +1710,7 @@ export function createPreparedRenderWindow(options: {
     }
 
     const stride = nextIndex - previousIndex;
-
-    if (stride > 0 && stride <= MAX_PRESENTED_FRAME_STRIDE) {
-      presentedFrameStrideSamples.push(stride);
-
-      if (
-        presentedFrameStrideSamples.length > PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
-      ) {
-        presentedFrameStrideSamples.shift();
-      }
-    }
-
+    presentedFrameStride.observe(stride);
     return stride;
   }
 
@@ -1726,6 +1720,7 @@ export function createPreparedRenderWindow(options: {
    * drag, and the frames a prefetch picks for it are frames it has gone past.
    */
   function observePlayheadStep(mediaTime: number, frameStride?: number) {
+    playheadMotion.observe(mediaTime, getSettledPlayheadAdvanceSeconds());
     const previousMediaTime = previousActiveFrameMediaTime;
 
     previousActiveFrameMediaTime = mediaTime;
@@ -1747,16 +1742,7 @@ export function createPreparedRenderWindow(options: {
         ? stride > 0 && Math.abs(advance) > stride * FAST_PLAYHEAD_STRIDES
         : Math.abs(frameStride) > FAST_PLAYHEAD_STRIDES;
     consecutiveWideStepCount = isWideStep ? consecutiveWideStepCount + 1 : 0;
-    isPlayheadFast = consecutiveWideStepCount >= DRAGGED_PLAYHEAD_JUMP_COUNT;
-
-    if (advance > 0 && advance <= getSettledPlayheadAdvanceSeconds()) {
-      consecutivePlayheadJumpCount = 0;
-      isPlayheadSettled = true;
-    } else {
-      consecutivePlayheadJumpCount += 1;
-      isPlayheadSettled =
-        consecutivePlayheadJumpCount < DRAGGED_PLAYHEAD_JUMP_COUNT;
-    }
+    isPlayheadFast = consecutiveWideStepCount >= FAST_PLAYHEAD_STEP_COUNT;
     /* Only a coarse cook owes a fine one, so only a fling or fast playback
        needs the timer. A step that settles cooks fine on its own. */
     if (isPlayheadFast) {
@@ -1812,14 +1798,9 @@ export function createPreparedRenderWindow(options: {
    * cadence phase without cooking nearby frames again.
    */
   function getPresentedFrameStride() {
-    if (
-      !isPlaybackActive ||
-      presentedFrameStrideSamples.length < PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
-    ) {
-      return 1;
-    }
+    if (!isPlaybackActive) return 1;
 
-    const stride = Math.min(...presentedFrameStrideSamples);
+    const stride = presentedFrameStride.narrowest();
     const sourceFrameSpan = Math.min(
       lastPreparedWindowFrames.length,
       Math.max(0, (getPrefetchFrameCount() - 1) * stride + 1),
@@ -1946,18 +1927,6 @@ function getPreparationError(error: unknown) {
   return error instanceof Error
     ? error
     : new Error("Unable to prepare mask frame.");
-}
-
-/**
- * The playhead's own frame plus one schedule batch ahead. A batch is the most
- * this window commits to in one pass, so a resting playhead holds a single pass
- * of work, and a step forward still lands on a frame already cooked.
- */
-function getPausedPreparedWindowFrameCount(options: {
-  readonly prefetchFrameCount: number;
-  readonly scheduleBatchSize: number;
-}) {
-  return Math.min(options.prefetchFrameCount, options.scheduleBatchSize + 1);
 }
 
 /**

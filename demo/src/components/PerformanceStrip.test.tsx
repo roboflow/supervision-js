@@ -112,6 +112,7 @@ function rendererState(
 function timings(totalMs: number): MediaFrameRenderTimings {
   return {
     boxMs: 0,
+    depthMs: 0,
     fitMs: 0,
     focusMs: 0,
     interactionMs: 0,

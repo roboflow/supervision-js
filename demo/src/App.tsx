@@ -13,6 +13,7 @@ import { DemoShell } from "./components/DemoShell";
 import { EngineDiagnostics } from "./components/EngineDiagnostics";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
+import { DocsDepthPlayground } from "./components/DocsDepthPlayground";
 import { DocsHeatmapPlayground } from "./components/DocsHeatmapPlayground";
 import { DocsTrackingPostProcessorPlayground } from "./components/DocsTrackingPostProcessorPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
@@ -22,6 +23,10 @@ import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
+import { DepthReadoutPanel } from "./components/DepthReadoutPanel";
+import type { WorkbenchDepth } from "./components/DepthStyleSection";
+import { DEPTH_VIDEO_OFF_WHILE_CONVERTING } from "./components/media-path-copy";
+import { createDepthProbe } from "./hooks/depth-probe";
 import { useViewportOverlay } from "./hooks/useViewportOverlay";
 import { selectViewportSessionState } from "./components/viewport-overlay";
 import { SelectionPanel } from "./components/SelectionPanel";
@@ -77,6 +82,14 @@ export function App() {
     return (
       <EmbeddedPlaygroundFrame>
         <DocsHeatmapPlayground />
+      </EmbeddedPlaygroundFrame>
+    );
+  }
+
+  if (embeddedView === "depth") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsDepthPlayground />
       </EmbeddedPlaygroundFrame>
     );
   }
@@ -218,6 +231,48 @@ function DemoApp() {
     const fixture = resolveDemoFixture(demo.sampleFixtureId);
     return { id: fixture.sampleName, label: fixture.displayName };
   }, [demo.sampleFixtureId, demo.sourceMode]);
+  const [depthProbe] = useState(() => createDepthProbe(demo.getRenderer));
+  const depthLayers = useMemo(
+    () =>
+      demo.sourceMode === DemoSourceMode.Fixture
+        ? (resolveDemoFixture(demo.sampleFixtureId).depth?.layers ?? [])
+        : [],
+    [demo.sampleFixtureId, demo.sourceMode],
+  );
+  const depthBlocked =
+    depthLayers.length > 0 &&
+    demo.presentationAvailability?.depthEnabled === false;
+  const depthShown =
+    demo.presentationSettings.depthEnabled &&
+    demo.presentationAvailability?.depthEnabled !== false;
+  const workbenchDepth = useMemo<WorkbenchDepth>(
+    () => ({
+      blockedReason: depthBlocked ? DEPTH_VIDEO_OFF_WHILE_CONVERTING : null,
+      layerId: demo.depthLayerId,
+      layerLoad: demo.depthLayerLoad,
+      layers: depthLayers,
+      onLayerChange: demo.setDepthLayer,
+      probe: depthProbe,
+    }),
+    [
+      demo.depthLayerId,
+      demo.depthLayerLoad,
+      demo.setDepthLayer,
+      depthBlocked,
+      depthLayers,
+      depthProbe,
+    ],
+  );
+  const depthReadout = useMemo(
+    () => (depthShown ? <DepthReadoutPanel probe={depthProbe} /> : null),
+    [depthProbe, depthShown],
+  );
+
+  // Steps, seeks, playback and depth landing late each change the depth on
+  // screen without the pointer moving.
+  useEffect(() => {
+    depthProbe.refresh();
+  }, [depthProbe, demo.rendererState, demo.sessionState]);
   const styleClassNames = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Upload
@@ -272,6 +327,8 @@ function DemoApp() {
           <RendererViewport
             containerRef={demo.containerRef}
             explained={viewportOverlay.explained}
+            onPointerLeave={depthProbe.onPointerLeave}
+            onPointerMove={depthProbe.onPointerMove}
             overlay={viewportOverlay.overlay}
           />
         }
@@ -322,6 +379,7 @@ function DemoApp() {
         slowWorkPanel={<SlowWorkPanel onReopenSession={demo.reopenSession} />}
         selectionPanel={
           <SelectionPanel
+            depthReadout={depthReadout}
             hoveredDetectionPick={demo.hoveredDetectionPick}
             onClearSelection={demo.onClearSelectedDetection}
             playbackState={demo.playbackState}
@@ -352,6 +410,7 @@ function DemoApp() {
             availability={demo.presentationAvailability}
             classNames={styleClassNames}
             configuration={demo.sessionConfiguration}
+            depth={workbenchDepth}
             onChange={demo.setPresentationSettings}
             onSessionOptionsChange={demo.setSessionOptions}
             sessionOptions={demo.sessionOptions}

@@ -7,6 +7,7 @@ import {
   type BoxCornerStyle,
   type Detection,
   type DetectionFrame,
+  type DepthAnnotationRenderer,
   type HeatmapAnnotationRenderer,
   type EllipseStyle,
   type MarkerStyle,
@@ -64,6 +65,8 @@ import {
   resolvePaintedMaskHalo,
 } from "./pixi-mask-halo";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
+import { queryMaxTextureSize } from "./depth-textures";
+import { createPixiDepthLayer } from "./pixi-depth-layer";
 import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
@@ -78,6 +81,7 @@ import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
 import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
+import type { DepthFrameProvider } from "#render-preparation/depth/source";
 import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
@@ -158,7 +162,8 @@ const _renderedPresentationFieldsAreExhaustive: [
 
 type FrameDrawTimings = {
   -readonly [
-    Key in "boxMs" | "focusMs" | "interactionMs" | "labelMs" | "maskMs"
+    Key in
+      "boxMs" | "depthMs" | "focusMs" | "interactionMs" | "labelMs" | "maskMs"
   ]: MediaFrameRenderTimings[Key];
 };
 
@@ -167,6 +172,7 @@ const FRAME_DRAW_TIMING_BUCKETS: Partial<
   Record<FramePresentStep, keyof FrameDrawTimings>
 > = {
   drawBox: "boxMs",
+  drawDepth: "depthMs",
   drawFocus: "focusMs",
   drawHeatmap: "maskMs",
   drawInteraction: "interactionMs",
@@ -278,6 +284,9 @@ export async function createPixiMediaScene(
    * four channels there instead. The renderer is only known after init.
    */
   const acceptsUnalignedTextureRows = () => app.renderer?.name === "webgpu";
+  let maxTextureSide: number | undefined;
+  const maxTextureSize = () =>
+    (maxTextureSide ??= queryMaxTextureSize(app.renderer));
   const frameChannel = options.presentedFrames;
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
@@ -296,6 +305,10 @@ export async function createPixiMediaScene(
     options.regionRenderers;
   let currentHeatmapRenderers: readonly HeatmapAnnotationRenderer[] =
     options.heatmapRenderers ?? [];
+  let currentDepthRenderers: readonly DepthAnnotationRenderer[] =
+    options.depthRenderers ?? [];
+  let depthSource: DepthFrameProvider | null = null;
+  let unsubscribeDepthSource: (() => void) | undefined;
   let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
     currentRegionRenderers,
   );
@@ -306,6 +319,7 @@ export async function createPixiMediaScene(
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
   let isPlaybackActive = true;
+  let isScrubbing = false;
   let displayBrightness = 1;
   let displayContrast = 1;
   let viewportScale = 1;
@@ -332,7 +346,7 @@ export async function createPixiMediaScene(
   const annotationWindow = createPreparedAnnotationWindow({
     detectionTimeline: options.detectionTimeline,
     getLayers: () =>
-      [maskLayer, polygonLayer, heatmapLayer].filter(
+      [maskLayer, polygonLayer, heatmapLayer, depthLayer].filter(
         (layer): layer is NonNullable<typeof layer> => layer !== undefined,
       ),
     getPlayheadMediaTime: () => currentMediaTime,
@@ -401,6 +415,41 @@ export async function createPixiMediaScene(
       renderPreparation: options.renderPreparation,
       renderers: currentHeatmapRenderers,
     }));
+  let depthLayer: ReturnType<typeof createPixiDepthLayer> | undefined;
+  const ensureDepthLayer = () =>
+    (depthLayer ??= createPixiDepthLayer({
+      BufferImageSource,
+      Container,
+      ImageSource,
+      Mesh,
+      MeshGeometry,
+      Shader,
+      UniformGroup,
+      acceptsUnalignedTextureRows,
+      getMediaSize: () => ({ height: mediaHeight, width: mediaWidth }),
+      maxTextureSize,
+      prepareTexture: (source) => {
+        app.renderer?.texture?.initSource?.(source);
+      },
+      hidden: currentVisibility?.annotationsHidden === true,
+      renderers: currentDepthRenderers,
+      source: depthSource,
+    }));
+  let depthUploadTimer: ReturnType<typeof setTimeout> | undefined;
+  let depthUploadMediaTime = 0;
+  /**
+   * A task of its own after the present, so the frame just rendered is not
+   * held back by the upload and the present that draws the next frame only
+   * binds its texture.
+   */
+  const scheduleDepthUploadAhead = (mediaTime: number) => {
+    if (!depthLayer || !depthSource) return;
+    depthUploadMediaTime = mediaTime;
+    depthUploadTimer ??= setTimeout(() => {
+      depthUploadTimer = undefined;
+      if (!isDestroyed) depthLayer?.uploadAhead(depthUploadMediaTime);
+    }, 0);
+  };
   let polygonLayer =
     options.polygonStyle !== undefined &&
     currentPolygonStyle &&
@@ -563,6 +612,7 @@ export async function createPixiMediaScene(
   let polygonDisplay: PixiContainer | undefined;
   let timelineContext: MediaRendererSceneTimelineContext | undefined;
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
+  const depthSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Depth);
   const heatmapSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Heatmap);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
   const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
@@ -577,6 +627,7 @@ export async function createPixiMediaScene(
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
     mediaSlot,
+    depthSlot,
     heatmapSlot,
     maskSlot,
     boxSlot,
@@ -969,6 +1020,7 @@ export async function createPixiMediaScene(
   };
 
   const presentLayers: FramePresentLayers = {
+    drawDepth: (mediaTime) => depthLayer?.drawFrame(mediaTime),
     drawHeatmap: (mediaTime) => heatmapLayer?.drawFrame(mediaTime),
     advanceFocus: advanceFocusAnimation,
     drawAnnotationOverlay: (mediaTime) =>
@@ -1047,6 +1099,7 @@ export async function createPixiMediaScene(
       boxLayer.invalidate();
       return boxLayer.drawFrame(mediaTime, viewportScale);
     },
+    drawDepth: undefined,
     drawInteraction: undefined,
     drawMask: undefined,
   };
@@ -1135,6 +1188,9 @@ export async function createPixiMediaScene(
       mediaSprite.height = mediaHeight;
       if (!retainedBoxes) boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
+      if (currentDepthRenderers.length > 0) {
+        depthSlot.setDisplay(ensureDepthLayer().createContainer());
+      }
       if (currentHeatmapRenderers.length > 0) {
         heatmapSlot.setDisplay(ensureHeatmapLayer().createContainer());
       }
@@ -1188,12 +1244,19 @@ export async function createPixiMediaScene(
     setPlaybackActive(active) {
       isPlaybackActive = active;
       maskLayer?.setPlaybackActive(active);
+      depthSource?.setPlaybackActive?.(active);
+    },
+
+    setScrubbing(scrubbing) {
+      isScrubbing = scrubbing;
+      depthSource?.setScrubbing?.(scrubbing);
     },
 
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
       polygonLayer?.setTimelineContext(context);
+      depthSource?.setLoop?.(context.loop);
     },
 
     presentSample(sample) {
@@ -1260,6 +1323,7 @@ export async function createPixiMediaScene(
       } finally {
         isPresenting = false;
         sample.close();
+        scheduleDepthUploadAhead(currentMediaTime);
       }
     },
 
@@ -1281,7 +1345,8 @@ export async function createPixiMediaScene(
     getRenderPreparationProgress() {
       return (
         (maskLayer?.getPreparationProgress() ?? 0) +
-        (polygonLayer?.getPreparationProgress() ?? 0)
+        (polygonLayer?.getPreparationProgress() ?? 0) +
+        (depthLayer?.getPreparationProgress() ?? 0)
       );
     },
 
@@ -1290,7 +1355,8 @@ export async function createPixiMediaScene(
         maskLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
           true ||
         polygonLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
-          true
+          true ||
+        depthLayer?.needsRenderPreparationWait(mediaTime, gateOptions) === true
       );
     },
 
@@ -1298,6 +1364,7 @@ export async function createPixiMediaScene(
       return Promise.all([
         maskLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
         polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
+        depthLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
       ]).then(() => undefined);
     },
 
@@ -1443,6 +1510,11 @@ export async function createPixiMediaScene(
           presentation.visibility,
         );
         currentVisibility = presentation.visibility;
+        // Depth has no classes or detection ids, so only hiding all
+        // annotations reaches it.
+        depthLayer?.setHidden(
+          presentation.visibility.annotationsHidden === true,
+        );
         heatmapLayer?.invalidate();
         boxLayer.invalidate();
         vectorLayer.setStyles({});
@@ -1519,6 +1591,19 @@ export async function createPixiMediaScene(
         syncSceneChildren();
       } else {
         heatmapLayer?.setRenderers([]);
+      }
+      currentDepthRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is DepthAnnotationRenderer =>
+            renderer.kind === "depth",
+        ) ?? [];
+      if (currentDepthRenderers.length > 0) {
+        const layer = ensureDepthLayer();
+        layer.setRenderers(currentDepthRenderers);
+        depthSlot.setDisplay(layer.createContainer());
+        syncSceneChildren();
+      } else {
+        depthLayer?.setRenderers([]);
       }
       const nextRegionMaskCoverageKey = resolveRegionMaskCoverageKey(
         currentRegionRenderers,
@@ -1607,6 +1692,30 @@ export async function createPixiMediaScene(
       return createPresentedSampleState(mediaTime, boxState, regionState);
     },
 
+    setDepthSource(source) {
+      unsubscribeDepthSource?.();
+      depthSource = source;
+      source?.setPlaybackActive?.(isPlaybackActive);
+      source?.setScrubbing?.(isScrubbing);
+      if (timelineContext) source?.setLoop?.(timelineContext.loop);
+      // A clip's exact frame lands after its frame was presented. The layer's
+      // content key is in the render signature, so each of these redraws
+      // renders only when the depth on screen changed.
+      unsubscribeDepthSource = source?.subscribe?.(() => {
+        if (hasPresentedSample) redrawAnnotationsNow();
+      });
+      depthLayer?.setDepthSource(source);
+      if (hasPresentedSample) redrawAnnotationsNow();
+    },
+
+    getActiveDepth() {
+      return depthLayer?.getActiveDepth() ?? null;
+    },
+
+    prefetchDepth(mediaTime) {
+      depthLayer?.prefetch(mediaTime);
+    },
+
     setSelectedDetection(selection, mediaTime) {
       const pick =
         interactionLayer?.setSelectedDetection(
@@ -1658,6 +1767,9 @@ export async function createPixiMediaScene(
       vectorLayer.destroy();
       regionLayer.destroy();
       heatmapLayer?.destroy();
+      unsubscribeDepthSource?.();
+      clearTimeout(depthUploadTimer);
+      depthLayer?.destroy();
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
@@ -2459,6 +2571,7 @@ export async function createPixiMediaScene(
     } finally {
       isPresenting = false;
     }
+    scheduleDepthUploadAhead(presented.mediaTimeS);
   }
 
   function advanceFocusAnimation(mediaTime: number) {
@@ -2538,6 +2651,8 @@ export async function createPixiMediaScene(
       presentedFrameSerial,
       currentMediaTime,
       annotationWindow.getReadinessToken(currentMediaTime),
+      // A new depth map lands without a new presented frame or presentation.
+      depthLayer?.getContentKey(),
       viewportScale,
       baseFit?.x,
       baseFit?.y,
@@ -2970,7 +3085,14 @@ function cancelDisplayFrame(handle: number) {
 }
 
 function createFrameDrawTimings(): FrameDrawTimings {
-  return { boxMs: 0, focusMs: 0, interactionMs: 0, labelMs: 0, maskMs: 0 };
+  return {
+    boxMs: 0,
+    depthMs: 0,
+    focusMs: 0,
+    interactionMs: 0,
+    labelMs: 0,
+    maskMs: 0,
+  };
 }
 
 function measure(work: () => void) {

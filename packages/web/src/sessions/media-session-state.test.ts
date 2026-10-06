@@ -599,6 +599,128 @@ describe("media session state", () => {
     ]);
   });
 
+  it("says depth is the hold-up when depth holds playback, beside masks that do not", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "1.500",
+              mediaTime: 1.5,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 0,
+            preparedCount: 9,
+          },
+          {
+            activeFrame: {
+              key: "depth:36",
+              mediaTime: 1.5,
+              status: RenderPreparationArtifactFrameStatus.Pending,
+            },
+            gateHold: {
+              reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+              requiredAheadSeconds: 0.3,
+            },
+            kind: RenderPreparationArtifactKind.DepthFrame,
+            pendingCount: 1,
+            preparedCount: 4,
+          },
+          {
+            kind: RenderPreparationArtifactKind.ExactDepthFrame,
+            pendingCount: 1,
+            preparedCount: 2,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(
+      state.activities.map((entry) => ({
+        blockingPlayback: entry.blockingPlayback,
+        blockingPresentation: entry.blockingPresentation,
+        detail: entry.detail,
+        label: entry.label,
+      })),
+    ).toStrictEqual([
+      {
+        blockingPlayback: true,
+        blockingPresentation: true,
+        detail: "The depth for this frame is not decoded yet",
+        label: "Waiting for depth",
+      },
+      {
+        blockingPlayback: false,
+        blockingPresentation: false,
+        detail: null,
+        label: "Loading exact depth",
+      },
+    ]);
+  });
+
+  it("names depth when its lead is being banked, and when the gate gave up on it", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "depth:4",
+              mediaTime: 0.1668,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            gateHold: {
+              reason: RenderPreparationGateHoldReason.LeadBelowRequirement,
+              requiredAheadSeconds: 0.9,
+            },
+            kind: RenderPreparationArtifactKind.DepthFrame,
+            pendingCount: 1,
+            preparedAheadSeconds: 0.45,
+            preparedCount: 12,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: {
+        ...createRendererState({
+          detectionBufferStatus: DetectionBufferStatus.Ready,
+          playbackState: MediaRendererPlaybackState.Buffering,
+        }),
+        renderPreparationGateAbandoned: true,
+      },
+    });
+
+    expect(
+      state.activities.map((entry) => [entry.label, entry.detail]),
+    ).toEqual([
+      ["Catching depth up", "Starting again at 0.9s of depth ready"],
+      ["Depth could not keep up", "The video is playing without them"],
+    ]);
+  });
+
   it("blames a transfer only where the session opened one", () => {
     const stoppedOn = (branch: MediaSessionMediaBranch | undefined) =>
       createMediaSessionStateSnapshot({

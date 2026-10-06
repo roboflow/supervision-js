@@ -42,6 +42,9 @@ both gates are about detections. They differ in which stage above they wait on.
   for **preparation**: whether the geometries that need rasterizing have become
   the ID-mask artifact that draws them. Masks and polygons take that step. The
   other geometries have nothing to rasterize, so this gate never waits on them.
+  A depth clip takes part too, though it is not detection data: the gate waits
+  for the depth that plays, the frame's preview or its exact frame, with the
+  same thresholds and bound. See [Depth maps](../annotation-renderers/depth.md#depth-during-playback).
 
 Both gates hold every frame on either kind of media source. A source the
 renderer pulls samples from waits between decoding and drawing. On a source
@@ -132,7 +135,9 @@ edge take their labels off the canvas entirely.
 Masks are the exception. A `DetectionMask` carries the pixel size its `counts`
 are encoded against, and the mask layer stretches the sprite onto whatever the
 media is, so a mask lands correctly at any raster. That difference is why a
-rescaled source shows correct masks beside misplaced boxes.
+rescaled source shows correct masks beside misplaced boxes. A depth map behaves
+like a mask: it is stretched over the media rectangle and never projected by
+`coordinateSpace`.
 
 Vector geometry is reconciled by declaring where it came from.
 `DetectionFrame.coordinateSpace` names the pixel space a frame's geometry was

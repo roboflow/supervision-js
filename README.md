@@ -115,8 +115,8 @@ cost of presenting a frame without WebGPU, audio, and the frame-count ceiling.
 **Supported browser APIs** include `createMediaSession`, media preparation and
 playback controls, detections, the renderer-first `annotationRenderers` API,
 boxes, box corners, ellipses, markers, masks, mask halos, polygons, polylines,
-keypoints, labels, asset- and media-backed regions, presentation styles, picking, and the
-advanced editing subpath.
+keypoints, labels, heatmaps, depth maps, asset- and media-backed regions,
+presentation styles, picking, and the advanced editing subpath.
 
 **Advanced browser APIs** expose lower-level renderer construction, detection
 sources, streaming ingestion, normalization, interaction, and diagnostics for

@@ -9,6 +9,8 @@ import { MediaSessionMode } from "supervision";
 import { describe, expect, it, vi } from "vitest";
 
 import { RenderControls } from "./RenderControls";
+import { createDepthProbe } from "../hooks/depth-probe";
+import type { WorkbenchDepth } from "./DepthStyleSection";
 import { defaultDemoPresentationSettings } from "../presentation/demo-presentation";
 import {
   DemoEngineSource,
@@ -38,6 +40,15 @@ vi.mock("./InspectorControls", async (importOriginal) => {
     },
   };
 });
+
+const depth: WorkbenchDepth = {
+  blockedReason: null,
+  layerId: null,
+  layerLoad: { status: "idle" },
+  layers: [],
+  onLayerChange: () => {},
+  probe: createDepthProbe(() => null),
+};
 
 const configuration = resolveDemoSessionConfiguration({
   detections: { frames: [] },
@@ -94,6 +105,7 @@ describe("RenderControls", () => {
         createElement(RenderControls, {
           classNames: [],
           configuration,
+          depth,
           onChange: () => {},
           onSessionOptionsChange: (updated) => {
             options = updated;

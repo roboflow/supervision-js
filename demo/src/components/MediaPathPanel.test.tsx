@@ -118,4 +118,11 @@ describe("MediaPathPanel", () => {
       /\bvideo engine\b/.test(text.replace(/web video engine/gi, "")),
     ).toBe(false);
   });
+
+  it("says on each card what depth it draws", () => {
+    const text = prose(render());
+
+    expect(text).toContain(demoMediaPathCopy[DemoMediaPath.Mediabunny].depth);
+    expect(text).toContain(demoMediaPathCopy[DemoMediaPath.Engine].depth);
+  });
 });

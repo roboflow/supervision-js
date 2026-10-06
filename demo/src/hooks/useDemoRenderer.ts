@@ -47,6 +47,8 @@ import {
   demoFixtures,
   defaultDemoFixture,
   resolveDemoFixture,
+  findDepthLayer,
+  resolveDemoDepthReach,
   type DemoFixtureDefinition,
 } from "../fixtures/demo-fixtures";
 import {
@@ -60,6 +62,7 @@ import {
 import { defaultPlaybackRate } from "../session/playback-rate";
 import { tapFrameTimeline } from "../session/frame-timeline-source";
 import { createFixtureSession } from "../session/fixture-session";
+import { createDepthLayerLoader, type DepthLayerLoad } from "../depth";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
   defaultDemoRenderQuality,
@@ -77,6 +80,8 @@ import {
   type UploadRunRequest,
 } from "../session/upload-session";
 import {
+  applyDemoMediaPath,
+  buildDemoNormalization,
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
@@ -92,6 +97,11 @@ export interface DemoRendererState {
   readonly setSessionOptions: (options: DemoSessionOptions) => void;
   readonly detectionSourceState: DemoDetectionSourceState;
   readonly containerRef: RefCallback<HTMLDivElement>;
+  /** The open sample's depth layer, or null when it ships no depth. */
+  readonly depthLayerId: string | null;
+  readonly depthLayerLoad: DepthLayerLoad;
+  /** The renderer on screen, read at the moment of asking. */
+  readonly getRenderer: () => MediaRenderer | null;
   readonly duration: number | null;
   readonly errorMessage: string | null;
   readonly fixtureSummary: DemoFixtureSummary | null;
@@ -151,6 +161,8 @@ export interface DemoRendererState {
   readonly reopenSession: () => void;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
+  /** Swaps the sample's depth layer without reopening the clip. */
+  readonly setDepthLayer: (layerId: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
   readonly setUploadApiKey: (apiKey: string) => void;
   readonly setUploadClassNames: (classNames: string) => void;
@@ -308,6 +320,17 @@ export function useDemoRenderer(
   );
   const [sampleFixtureId, setSampleFixtureIdState] = useState(
     initialFixture.sampleName,
+  );
+  const [depthLayerId, setDepthLayerIdState] = useState(
+    initialFixture.depth?.defaultLayer ?? null,
+  );
+  /** The layer the next session opens with, read when it opens. */
+  const depthLayerRef = useRef(depthLayerId);
+  const [depthLayerLoad, setDepthLayerLoad] = useState<DepthLayerLoad>({
+    status: "idle",
+  });
+  const [depthLayerLoader] = useState(() =>
+    createDepthLayerLoader(setDepthLayerLoad),
   );
   const [uploadApiKey, setUploadApiKey] = useState("");
   const [uploadClassNames, setUploadClassNames] = useState(
@@ -479,6 +502,7 @@ export function useDemoRenderer(
           const session = await createFixtureSession({
             container,
             definition: activeFixture,
+            depthLayerId: depthLayerRef.current,
             fixtureDetectionSourceTransform,
             fixtureFrameTransform,
             isActive,
@@ -870,6 +894,9 @@ export function useDemoRenderer(
 
   const setSampleFixtureId = useCallback((sampleName: string) => {
     restoreTimeRef.current = null;
+    depthLayerRef.current =
+      resolveDemoFixture(sampleName).depth?.defaultLayer ?? null;
+    setDepthLayerIdState(depthLayerRef.current);
     uploadAbortRef.current?.abort();
     setUploadRun(null);
     setUploadInferenceState(initialUploadInferenceState);
@@ -887,6 +914,38 @@ export function useDemoRenderer(
     setSampleFixtureIdState(sampleName);
     setSourceModeState(DemoSourceMode.Fixture);
   }, []);
+
+  const depthPlays =
+    sourceMode === DemoSourceMode.Fixture &&
+    buildDemoNormalization(
+      applyDemoMediaPath(sessionOptions),
+      sessionOptions,
+    ) === undefined;
+
+  const setDepthLayer = useCallback(
+    (layerId: string) => {
+      const depth = activeFixture.depth;
+      const session = sessionRef.current;
+
+      if (!depth || depthLayerRef.current === layerId) return;
+
+      depthLayerRef.current = layerId;
+      setDepthLayerIdState(layerId);
+
+      // A converted clip plays no depth; the layer waits for a session that can.
+      if (!depthPlays || !session?.setDepth) {
+        depthLayerLoader.reset();
+        return;
+      }
+
+      const manifest = findDepthLayer(depth, layerId).manifestSrc;
+
+      void depthLayerLoader.load(() => session.setDepth!({ manifest }));
+    },
+    [activeFixture.depth, depthLayerLoader, depthPlays],
+  );
+
+  const getRenderer = useCallback(() => rendererRef.current, []);
 
   const onUploadFileChange = useCallback((file: File | null) => {
     uploadFileRef.current = file;
@@ -948,6 +1007,9 @@ export function useDemoRenderer(
     container.replaceChildren();
     presentedFrameTap.reset();
     rendererRef.current = null;
+    // The new session opens with the layer picked, so a load still running
+    // for the old one says nothing about it.
+    depthLayerLoader.reset();
     setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
     setFixtureSummary(null);
@@ -997,7 +1059,10 @@ export function useDemoRenderer(
   return {
     canUseRenderer,
     containerRef: stage.attach,
+    depthLayerId: sourceMode === DemoSourceMode.Fixture ? depthLayerId : null,
+    depthLayerLoad,
     detectionSourceState,
+    getRenderer,
     duration,
     errorMessage,
     fixtureSummary,
@@ -1026,10 +1091,12 @@ export function useDemoRenderer(
     refreshDetections,
     refreshPresentation,
     reopenSession,
-    presentationAvailability:
+    presentationAvailability: resolveDemoDepthReach(
       sourceMode === DemoSourceMode.Fixture
         ? activeFixture.presentationAvailability
         : undefined,
+      depthPlays,
+    ),
     renderPreparationDiagnostics,
     renderQuality,
     rendererState,
@@ -1038,6 +1105,7 @@ export function useDemoRenderer(
     selectedDetectionPick,
     sessionConfiguration,
     sessionOptions,
+    setDepthLayer,
     setSampleFixtureId,
     setPresentationSettings,
     setRenderQuality: setRenderQualityLive,

@@ -1058,6 +1058,31 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("points depth decoding at where a drag asks to go, not at the frames it lands on", async () => {
+    const producer = createProducer();
+    const prefetchDepth = vi.fn();
+    const setScrubbing = vi.fn();
+    const renderer = await createRenderer(
+      producer,
+      createScene({ prefetchDepth, setScrubbing }),
+    );
+
+    prefetchDepth.mockClear();
+    renderer.scrub(4);
+    expect(setScrubbing).toHaveBeenLastCalledWith(true);
+    expect(prefetchDepth).toHaveBeenLastCalledWith(4);
+
+    // A frame the drag lands on trails the hand; depth stays on the hand.
+    producer.setTimeMs(3000);
+    expect(prefetchDepth).toHaveBeenLastCalledWith(4);
+
+    await renderer.seek(5);
+    expect(setScrubbing).toHaveBeenLastCalledWith(false);
+    producer.setTimeMs(5000);
+    expect(prefetchDepth).toHaveBeenLastCalledWith(5);
+    renderer.destroy();
+  });
+
   it("refreshes the picture actually displayed after a delayed detection load", async () => {
     const producer = createProducer();
     const pending = createDeferred<readonly DetectionFrame[]>();

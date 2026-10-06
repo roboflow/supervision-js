@@ -150,7 +150,10 @@ const mockState = vi.hoisted(() => {
     getTracks: vi.fn(async () => mediaMock.tracks),
     getVideoTracks: vi.fn(async () => mediaMock.videoTracks),
     inputConstructor: vi.fn(),
-    iteratorReturn: vi.fn(async () => undefined),
+    iteratorReturn: vi.fn(async () => ({
+      done: true as const,
+      value: undefined,
+    })),
     primaryVideoTrack: {} as Record<string, unknown>,
     sampleNextCalls: [] as number[],
     samples: [] as MockVideoSample[],
@@ -227,6 +230,7 @@ vi.mock("pixi.js", () => {
   class BufferImageSource {
     destroy = pixiMock.imageSourceDestroy;
     style = {};
+    update = vi.fn();
 
     constructor(options: unknown) {
       pixiMock.bufferImageSourceOptions.push(options);
@@ -568,7 +572,19 @@ vi.mock("mediabunny", () => {
     }
   }
 
+  /** One key packet per mock sample. */
+  class EncodedPacketSink {
+    async *packets() {
+      yield* mediaMock.samples.map((sample) => ({
+        duration: sample.duration,
+        timestamp: sample.timestamp,
+        type: "key" as const,
+      }));
+    }
+  }
+
   return {
+    EncodedPacketSink,
     Input,
     MATROSKA: { name: "Matroska" },
     MP4: { name: "MP4" },
@@ -580,7 +596,9 @@ vi.mock("mediabunny", () => {
 });
 
 vi.stubGlobal("document", {
+  addEventListener: vi.fn(),
   createElement: domMock.createElement,
+  removeEventListener: vi.fn(),
 });
 
 vi.stubGlobal("window", {

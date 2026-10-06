@@ -40,6 +40,7 @@ import type {
 import type { RenderPreparationDiagnostics } from "#types/render-preparation";
 import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaFrameNavigation } from "#types/media-frame-navigation";
+import type { MediaRendererDepthInput } from "#types/media-depth";
 
 export {
   MediaSessionActivityKind,
@@ -276,6 +277,17 @@ export interface MediaSessionOptions {
    */
   readonly detections?: MediaSessionDetectionOptions;
   /**
+   * Depth drawn by `depth` annotation renderers, beside detections. See
+   * {@link MediaRendererDepthInput} for what a map or a clip manifest needs.
+   *
+   * The session does not wait for a manifest: the media shows and plays as
+   * soon as it can, and depth joins it when its files arrive. A manifest
+   * that fails to load leaves the media playing without depth, with a
+   * console warning and the reason in `renderPreparation.message`. To wait
+   * for depth or catch its error, call `setDepth()`.
+   */
+  readonly depth?: MediaRendererDepthInput;
+  /**
    * Buffered playback: hold the picture until the frame it is about to show has
    * both its detections and its prepared annotation artifacts. Opening still
    * presents an initial media frame so the session can accept future appends;
@@ -457,6 +469,13 @@ export interface MediaSession {
    */
   captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
   setPresentation(presentation: MediaRendererPresentation): void;
+  /**
+   * Replaces the session's depth, or removes it with `null`, and redraws the
+   * frame on screen. Resolves once the renderer has that depth, and rejects
+   * with the reason a manifest did not load; the media keeps playing
+   * meanwhile. `session.renderer.getActiveDepth()` reads back what is drawn.
+   */
+  setDepth?(depth: MediaRendererDepthInput | null): Promise<void>;
   setRenderQuality(quality: MediaRendererQuality): void;
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;
   getState(): MediaSessionState;

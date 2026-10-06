@@ -25,6 +25,8 @@ const NTSC_FRAME_27_SECONDS = (27 * 1001) / NTSC_TICK_RATE;
 
 /** The draw order, named once so a present and a redraw are held to the same one. */
 const LAYER_DRAW_ORDER = [
+  "drawDepth",
+  "drawHeatmap",
   "drawMask",
   "drawBox",
   "drawPolygon",
@@ -237,7 +239,9 @@ function recordPresents(): PresentRecording {
           step("drawBox")(mediaTime);
           return boxState;
         },
+        drawDepth: step("drawDepth"),
         drawFocus: step("drawFocus"),
+        drawHeatmap: step("drawHeatmap"),
         drawInteraction: step("drawInteraction"),
         drawInteractionPresentation: step("drawInteractionPresentation"),
         drawLabel: step("drawLabel"),

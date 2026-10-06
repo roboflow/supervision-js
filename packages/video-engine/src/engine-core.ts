@@ -1067,15 +1067,20 @@ export class EngineCore {
    *
    * An exact walk answers at or before the frame it aimed at, and no further
    * back than the sample next to it, so the target falls inside the answering
-   * frame's own span. That span is the whole test: a frame decoded for some
-   * earlier position sits outside it however recently it was painted.
+   * frame's own span. That span is the test: a frame decoded for some earlier
+   * position sits outside it however recently it was painted. The aimed-at
+   * frame answers without it, because a track's last frame has an empty span
+   * when its file states no duration for it.
    */
   private answersAwaitedSeek(painted: FrameId, isKeyFrame: boolean): boolean {
     const awaited = this.awaitedSeek;
     if (!awaited) return false;
     if (painted.ticks > awaited.target.ticks) return false;
     if (awaited.keyOnly) return isKeyFrame;
-    return awaited.target.ticks < this.timeline().endTicksAt(painted.index);
+    return (
+      painted.ticks === awaited.target.ticks ||
+      awaited.target.ticks < this.timeline().endTicksAt(painted.index)
+    );
   }
 
   /** The frame table of the loaded source. Reached only from paths that have

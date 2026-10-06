@@ -19,8 +19,11 @@ import {
   defaultDemoFixture,
   demoFixtureCatalog,
   demoFixtures,
+  parseDemoFixtureDepth,
   resolveDemoFixture,
+  resolveDemoDepthReach,
   resolveDemoFixtureAvailability,
+  resolveDemoFixtureDataLayers,
   resolveDemoFixturePlaybackSrc,
   type DemoFixtureGeometrySummary,
 } from "./demo-fixtures";
@@ -144,6 +147,10 @@ describe("geometry showcase fixture", () => {
         displayName: "Pebbles anomaly (Patrick)",
         sampleName: "pebbles_anomaly",
       },
+      {
+        displayName: "Spring 0021 stereo depth",
+        sampleName: "spring_stereo_depth",
+      },
     ]);
   });
 
@@ -159,6 +166,7 @@ describe("geometry showcase fixture", () => {
       polygonsEnabled: false,
     });
     expect(fixture?.presentationAvailability).toEqual({
+      depthEnabled: false,
       keypointsEnabled: false,
       polygonsEnabled: false,
     });
@@ -180,6 +188,7 @@ describe("geometry showcase fixture", () => {
     });
     // This older fixture has no heatmap count, so its heatmap toggle is closed.
     expect(fixture?.presentationAvailability).toEqual({
+      depthEnabled: false,
       heatmapsEnabled: false,
     });
   });
@@ -520,6 +529,56 @@ describe("fixture layer availability", () => {
     });
   });
 
+  it("offers depth only with a depth block, and no detection layer without detections", () => {
+    expect(
+      resolveDemoFixtureDataLayers(
+        { polygonsEnabled: false },
+        { depth: false, detections: true },
+      ),
+    ).toEqual({ depthEnabled: false, polygonsEnabled: false });
+
+    const depthOnly = resolveDemoFixtureDataLayers(undefined, {
+      depth: true,
+      detections: false,
+    });
+
+    expect(depthOnly.depthEnabled).toBeUndefined();
+    expect(
+      Object.entries(depthOnly).every(([, offered]) => offered === false),
+    ).toBe(true);
+    expect(depthOnly.boxesEnabled).toBe(false);
+    expect(depthOnly.focusEnabled).toBe(false);
+  });
+
+  it("draws depth only on the web video engine path", () => {
+    expect(resolveDemoDepthReach({ polygonsEnabled: false }, false)).toEqual({
+      depthEnabled: false,
+      polygonsEnabled: false,
+    });
+    expect(resolveDemoDepthReach(undefined, false)).toEqual({
+      depthEnabled: false,
+    });
+    expect(resolveDemoDepthReach({ boxesEnabled: false }, true)).toEqual({
+      boxesEnabled: false,
+    });
+  });
+
+  it("opens the Spring stereo sample on its depth alone", () => {
+    const fixture = demoFixtures.find(
+      ({ sampleName }) => sampleName === "spring_stereo_depth",
+    );
+    const settings = constrainDemoPresentationSettings(
+      { ...defaultDemoPresentationSettings, ...fixture?.presentationDefaults },
+      fixture?.presentationAvailability,
+    );
+
+    expect(settings.depthEnabled).toBe(true);
+    expect(
+      geometryBackedLayers.filter((layer) => settings[layer] !== false),
+    ).toEqual([]);
+    expect(settings.focusEnabled).toBe(false);
+  });
+
   it("leaves a manifest that counts nothing to its own declaration", () => {
     expect(
       resolveDemoFixtureAvailability({ keypointsEnabled: false }, undefined),
@@ -528,6 +587,8 @@ describe("fixture layer availability", () => {
 
   it("offers no sample a layer its own manifest counts none of", () => {
     const offered = demoFixtures.flatMap((fixture) => {
+      if (fixture.detectionsManifestSrc === null) return [];
+
       const geometry = readJson<{
         readonly geometry?: DemoFixtureGeometrySummary;
       }>(
@@ -547,17 +608,81 @@ describe("fixture layer availability", () => {
     expect(offered).toEqual([]);
   });
 
-  it("draws some geometry on every sample the picker opens with", () => {
+  it("draws some geometry or depth on every sample the picker opens with", () => {
     const blank = demoFixtures.filter((fixture) => {
       const settings = constrainDemoPresentationSettings(
         { ...defaultDemoPresentationSettings, ...fixture.presentationDefaults },
         fixture.presentationAvailability,
       );
 
-      return geometryBackedLayers.every((layer) => settings[layer] === false);
+      return (
+        !settings.depthEnabled &&
+        geometryBackedLayers.every((layer) => settings[layer] === false)
+      );
     });
 
     expect(blank.map(({ sampleName }) => sampleName)).toEqual([]);
+  });
+});
+
+describe("fixture depth metadata", () => {
+  const layer = {
+    id: "sgbm",
+    label: "Stereo matcher",
+    manifest: "sgbm/depth.json",
+    source: "prediction",
+  };
+
+  it("accepts layers with a default among them", () => {
+    expect(
+      parseDemoFixtureDepth({ defaultLayer: "sgbm", layers: [layer] }),
+    ).toEqual({ defaultLayer: "sgbm", layers: [layer] });
+  });
+
+  it.each([
+    [{ defaultLayer: "sgbm", layers: [] }, "layers must be a non-empty array"],
+    [
+      { defaultLayer: "sgbm", layers: [layer, layer] },
+      'layers[1].id "sgbm" repeats',
+    ],
+    [
+      { defaultLayer: "gt", layers: [layer] },
+      "defaultLayer must name one of the layers",
+    ],
+    [
+      { defaultLayer: "sgbm", layers: [{ ...layer, manifest: "../x.json" }] },
+      "layers[0].manifest must be a .json path inside the fixture folder",
+    ],
+    [
+      {
+        defaultLayer: "sgbm",
+        layers: [{ ...layer, manifest: "https://cdn.test/depth.json" }],
+      },
+      "layers[0].manifest must be a .json path inside the fixture folder",
+    ],
+    [
+      { defaultLayer: "sgbm", layers: [{ ...layer, source: "model" }] },
+      "layers[0].source must be one of ground_truth, prediction",
+    ],
+    [
+      { defaultLayer: "sgbm", layers: [{ ...layer, label: "" }] },
+      "layers[0].label must be a non-empty string",
+    ],
+  ])("rejects %j", (depth, message) => {
+    expect(() => parseDemoFixtureDepth(depth)).toThrow(
+      `fixture.meta.json depth: ${message}`,
+    );
+  });
+
+  it("points every declared depth layer at a committed depth.json", () => {
+    const layers = demoFixtureCatalog.flatMap((fixture) =>
+      (fixture.depth?.layers ?? []).map((depthLayer) =>
+        join(fixturesRoot, basename(fixture.basePath), depthLayer.manifest),
+      ),
+    );
+
+    expect(layers.length).toBeGreaterThan(0);
+    for (const path of layers) expect(existsSync(path), path).toBe(true);
   });
 });
 
@@ -590,6 +715,8 @@ describe("fixture playback media", () => {
     // proxy keeps the source's presentation timestamps and only cheapens
     // decode.
     const unplayable = demoFixtures.filter((fixture) => {
+      if (fixture.detectionsManifestSrc === null) return false;
+
       const meta = readJson<{
         readonly media: { readonly proxyFile?: string };
       }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
@@ -637,6 +764,8 @@ describe("fixture playback media", () => {
     // fixture does not play leaves nothing to catch a swap between two rasters
     // that happen to share a frame size.
     for (const fixture of demoFixtures) {
+      if (fixture.detectionsManifestSrc === null) continue;
+
       const meta = readJson<{
         readonly media: { readonly file: string; readonly proxyFile?: string };
       }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
@@ -815,6 +944,7 @@ describe("basketball region fixture", () => {
 const baseDefinition = {
   basePath: "../../fixtures/sample",
   datasetId: "sample_v1",
+  depth: null,
   detectionsManifestSrc: "/detections.manifest.json",
   displayName: "Sample",
   inferenceLabel: "SAM3",

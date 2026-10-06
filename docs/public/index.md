@@ -104,7 +104,7 @@ console.log(state.status, state.activities);
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">02</span>
         <h3>Detection rendering</h3>
-        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, and multi-instance regions, selected from canonical media timing.</p>
+        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, heatmaps, depth maps, and multi-instance regions, selected from canonical media timing.</p>
         <a href="documents/Core_Concepts.Detections_And_Rendering.html">Detections and rendering</a>
       </article>
       <article class="supervision-home__capability-card">
