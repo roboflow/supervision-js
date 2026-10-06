@@ -195,9 +195,9 @@ export function listDemoLibraryDepartures(options: {
     why: "How often annotations already loaded are read again.",
   });
   compare(departures, {
-    library: String(libraryMaskFrame?.previewScale ?? 0.25),
+    library: String(libraryMaskFrame?.previewScale ?? 0.5),
     setting: "Mask preview scale",
-    value: String(maskFrame?.previewScale ?? 0.25),
+    value: String(maskFrame?.previewScale ?? 0.5),
     why: "The fitted mask width used during rapid movement.",
   });
   compare(departures, {

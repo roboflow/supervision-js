@@ -19,9 +19,8 @@ import {
   type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 
-/* A mask wide enough that a quarter-width raster is a different width from a
-   full one: with the raster capped at 1000, fine cooks 1000 wide and coarse
-   cooks ceil(1000 / 4 / 4) * 4 = 252. The tiny fixtures elsewhere cook at
+/* With the raster capped at 1000, fine cooks 1000 wide and the default
+   half-width preview cooks 500 wide. The tiny fixtures elsewhere cook at
    their own width either way and could not tell the tiers apart. */
 const MASK_WIDTH = 1000;
 const MASK_HEIGHT = 100;
@@ -30,7 +29,7 @@ const MASK_HEIGHT = 100;
 const STEP_MS = 50;
 const FPS = 25;
 const FINE = 1000;
-const COARSE = 252;
+const COARSE = 500;
 
 function wideFrames(count: number, height = MASK_HEIGHT): DetectionFrame[] {
   const counts = encodeCompressedRleCounts([0, MASK_WIDTH * height]);
@@ -122,6 +121,7 @@ describe("prepared raster tiers", () => {
 
   it.each([
     { previewScale: undefined, expectedWidth: COARSE },
+    { previewScale: 0.25, expectedWidth: 252 },
     { previewScale: 0.5, expectedWidth: 500 },
     { previewScale: 1, expectedWidth: FINE },
     { previewScale: 0.01, expectedWidth: 64 },
@@ -470,7 +470,7 @@ describe("prepared raster tiers", () => {
     }
   });
 
-  it("cooks a quarter-width raster while the playhead flings and a full one once it settles", async () => {
+  it("cooks a half-width raster while the playhead flings and a full one once it settles", async () => {
     vi.useFakeTimers();
     resetMocks();
     const frames = wideFrames(60);
@@ -548,17 +548,17 @@ describe("prepared raster quality gate", () => {
     {
       label: "enabled Adaptive",
       playbackGate: { enabled: true, quality: "adaptive" },
-      expectedWidth: 128,
+      expectedWidth: 252,
     },
     {
       label: "disabled Fine",
       playbackGate: { enabled: false, quality: "fine" },
-      expectedWidth: 128,
+      expectedWidth: 252,
     },
     {
       label: "Fine with no enabled gate",
       playbackGate: { quality: "fine" },
-      expectedWidth: 128,
+      expectedWidth: 252,
     },
   ] as const)(
     "warms active and ahead masks once at $expectedWidth px with $label quality",
@@ -669,7 +669,7 @@ describe("prepared raster quality gate", () => {
         }
         expect(worker.pendingRequestCount).toBe(0);
       }
-      expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBe(128);
+      expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBe(252);
 
       await vi.advanceTimersByTimeAsync(200);
       expect(worker.pendingRequestCount).toBe(1);

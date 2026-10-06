@@ -372,7 +372,7 @@ function GlobalRenderControls({
             </ControlNote>
             <NumberControl
               label="Mask preview scale"
-              libraryDefault="0.25"
+              libraryDefault="0.5"
               max={1}
               min={0.01}
               onChange={(value) =>
@@ -383,12 +383,12 @@ function GlobalRenderControls({
                 sessionOptions.maskPreviewScale,
                 sessionOptions.maskPreviewScale ??
                   maskFrame?.previewScale ??
-                  0.25,
-                0.25,
+                  0.5,
+                0.5,
               )}
-              placeholder="0.25"
+              placeholder="0.5"
               step={0.05}
-              tooltip="Masks shown during fast movement use this fraction of the display-fitted width cap, bounded by native mask dimensions. Raise it for sharper previews at greater CPU and memory cost; 1 keeps the full fitted resolution. The visible frame refines when motion stops. `renderer.renderPreparation.maskFrame.previewScale`, default 0.25."
+              tooltip="Masks shown during fast movement use this fraction of the display-fitted width cap, bounded by native mask dimensions. Raise it for sharper previews at greater CPU and memory cost; 1 keeps the full fitted resolution. The visible frame refines when motion stops. `renderer.renderPreparation.maskFrame.previewScale`, default 0.5."
               value={sessionOptions.maskPreviewScale ?? maskFrame?.previewScale}
             />
             <ToggleControl

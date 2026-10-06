@@ -33,7 +33,7 @@ export enum PreparedRasterTier {
   Coarse = "coarse",
   Fine = "fine",
 }
-const DEFAULT_MASK_PREVIEW_SCALE = 0.25;
+const DEFAULT_MASK_PREVIEW_SCALE = 0.5;
 /* A step wider than this many frame strides is fast playback, not a scrub. */
 const FAST_PLAYHEAD_STRIDES = 3.5;
 /* How long without a playhead step before the frame on screen is owed its

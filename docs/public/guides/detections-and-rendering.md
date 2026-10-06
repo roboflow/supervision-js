@@ -53,8 +53,8 @@ that answers for both.
 
 During rapid playhead movement, display-sized masks can use smaller previews.
 `renderer.renderPreparation.maskFrame.previewScale` sets their width cap relative
-to the display-fitted width: the default is `0.25`, `0.5` makes sharper previews,
-and `1` keeps the full fitted resolution during motion. Positive values up to
+to the display-fitted width: the default is `0.5`, `0.25` reduces preparation
+work with coarser previews, and `1` keeps the full fitted resolution during motion. Positive values up to
 `1` are accepted; invalid values use the default. The visible frame refines
 after motion settles. Rasters never exceed native mask dimensions. Masks without
 a display box keep their native resolution.

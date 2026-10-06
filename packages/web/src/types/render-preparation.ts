@@ -110,7 +110,7 @@ export interface RenderPreparationMaskFrameOptions {
   };
   /**
    * Scale of the display-fitted width cap for previews during rapid movement.
-   * Default: 0.25. Rasters never exceed native mask dimensions.
+   * Default: 0.5. Rasters never exceed native mask dimensions.
    * Positive values up to 1 are accepted; invalid values use the default.
    * A value of 1 keeps the full display-fitted resolution during motion.
    * Once motion settles, the visible frame uses the full fitted resolution.
