@@ -1292,6 +1292,85 @@ describe("buffered detection timeline", () => {
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Destroyed);
   });
 
+  it("does not remember stale frames when a write completes during a load", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "write-during-load",
+      store,
+    });
+    await source.appendFrames([
+      { detections: [{ id: "old" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const captured = createDeferred<void>();
+    const release = createDeferred<void>();
+    const originalLoadFrames = store.loadFrames.bind(store);
+    vi.spyOn(store, "loadFrames").mockImplementationOnce(async (options) => {
+      const loadedFrames = await originalLoadFrames(options);
+      captured.resolve();
+      await release.promise;
+      return loadedFrames;
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+    const prepare = timeline.prepare(0);
+    await captured.promise;
+    await source.appendFrames([
+      { detections: [{ id: "new" }], endTime: 1, mediaTime: 0 },
+    ]);
+    release.resolve();
+    await prepare;
+
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
+    await timeline.prepare(10);
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
+    timeline.destroy();
+  });
+
+  it("settles a window load while overlapping live writes continue", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "racing-live-writes",
+      store,
+    });
+    await source.appendLiveFrame({
+      detections: [{ id: "initial" }],
+      mediaTime: 0,
+    });
+    const originalLoadFrames = store.loadFrames.bind(store);
+    let revision = 0;
+    let racing = true;
+    vi.spyOn(store, "loadFrames").mockImplementation(async (options) => {
+      const loadedFrames = await originalLoadFrames(options);
+      if (racing && revision < 4) {
+        revision += 1;
+        await source.appendLiveFrame({
+          detections: [{ id: `revision-${revision}` }],
+          mediaTime: 0,
+        });
+      }
+      return loadedFrames;
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await timeline.prepare(0);
+    expect(revision).toBe(1);
+    expect(timeline.selectFrame(0.5)).toBeDefined();
+    racing = false;
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("revision-1");
+    timeline.destroy();
+  });
+
   it("reloads a buffered range when the source version changes", async () => {
     let version = 0;
     const source = {

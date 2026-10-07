@@ -272,20 +272,26 @@ export function createBufferedDetectionTimeline(
         }
 
         const committedSourceVersion = getSourceVersion(sourceRanges);
+
+        const sourceUnchanged = sourceVersion === committedSourceVersion;
         const loadedFrames = frameRanges.flat();
 
         synchronizeSnapshotMemo();
-        buffer = reuseBufferedFrameSnapshots(
-          bufferedSourceVersion === committedSourceVersion ? buffer : [],
-          loadedFrames,
-          snapshotByIdentity,
-        );
+        buffer = sourceUnchanged
+          ? reuseBufferedFrameSnapshots(
+              bufferedSourceVersion === sourceVersion ? buffer : [],
+              loadedFrames,
+              snapshotByIdentity,
+            )
+          : copySortedDetectionFrames(loadedFrames);
 
-        for (const frame of buffer) {
-          rememberSnapshot(snapshotByIdentity, frame);
+        if (sourceUnchanged) {
+          for (const frame of buffer) {
+            rememberSnapshot(snapshotByIdentity, frame);
+          }
         }
         bufferedVersionRange = versionRange;
-        bufferedSourceVersion = committedSourceVersion;
+        bufferedSourceVersion = sourceVersion;
         state = {
           bufferEndTime: endTime,
           bufferStartTime: startTime,
@@ -1226,12 +1232,6 @@ function mergeIncrementalFrames(
   return Array.from(framesByIdentity.values()).sort(compareDetectionFrames);
 }
 
-/**
- * Keeps the frame already held wherever the source returned one this buffer
- * knows, and copies only what is new. Copying everything first and then
- * discarding it is the same result for a great deal more work: a window rebuilt
- * while a gesture moves inside it re-derives hundreds of frames it already has.
- */
 const MAX_REMEMBERED_SNAPSHOTS = 8192;
 
 function rememberSnapshot(
@@ -1258,6 +1258,7 @@ function rememberSnapshot(
   }
 }
 
+/** Reuse unchanged snapshots so moving the window copies only new frames. */
 function reuseBufferedFrameSnapshots(
   currentFrames: readonly DetectionFrame[],
   loadedFrames: readonly DetectionFrame[],
