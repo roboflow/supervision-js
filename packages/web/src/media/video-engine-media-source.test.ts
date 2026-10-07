@@ -163,13 +163,47 @@ async function collectTimestamps(
 
 describe("video engine media source", () => {
   it("resizes through the existing playback engine without opening another reader", async () => {
-    const source = await openWebVideoEngineMediaSource({ source: urlSource });
     const display = { boxWidth: 800, boxHeight: 600, devicePixelRatio: 2 };
+    const source = await openWebVideoEngineMediaSource({
+      display,
+      source: urlSource,
+    });
     await expect(source.setDisplay?.(display)).resolves.toBe(true);
     expect(engine.setDisplay).toHaveBeenCalledExactlyOnceWith(display);
     expect(engine.options).toHaveLength(1);
     expect(engine.load).toHaveBeenCalledOnce();
     expect(analysis.open).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    { kind: "native" as const },
+    { kind: "capped" as const, maxWidth: 640 },
+  ])(
+    "keeps a %j decode strategy independent of renderer sizing",
+    async (decodeStrategy) => {
+      const source = await openWebVideoEngineMediaSource({
+        decodeStrategy,
+        source: urlSource,
+      });
+
+      expect(source.setDisplay).toBeUndefined();
+      expect(engine.options[0]).toMatchObject({ decodeStrategy });
+      expect(engine.setDisplay).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps an explicit native strategy when an opening display box is supplied", async () => {
+    const source = await openWebVideoEngineMediaSource({
+      decodeStrategy: { kind: "native" },
+      display: { boxWidth: 800, boxHeight: 600, devicePixelRatio: 2 },
+      source: urlSource,
+    });
+
+    expect(source.setDisplay).toBeUndefined();
+    expect(engine.options[0]).toMatchObject({
+      decodeStrategy: { kind: "native" },
+    });
   });
 
   beforeEach(() => {
@@ -540,61 +574,47 @@ describe("video engine media source", () => {
     expect(lastOptions.decodeStrategy).toEqual({ kind: "native" });
   });
 
-  it("holds scrub previews to one width across every box big enough for them", async () => {
-    const rendererSource = createWebVideoEngineMediaRendererSource({
-      display: {
-        boxWidth: 1080,
-        boxHeight: 854,
-        devicePixelRatio: 2,
-        maxDevicePixelRatio: 2,
-      },
-      source: urlSource,
-    });
+  it.each([
+    {
+      boxWidth: 1080,
+      boxHeight: 854,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 2,
+    },
+    {
+      boxWidth: 180,
+      boxHeight: 320,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1.5,
+    },
+    { boxWidth: 100, boxHeight: 200, devicePixelRatio: 3 },
+  ])(
+    "lets the engine size default previews for opening and later display boxes: %j",
+    async (display) => {
+      const rendererSource = createWebVideoEngineMediaRendererSource({
+        display,
+        source: urlSource,
+      });
 
-    await rendererSource.open();
+      await rendererSource.open();
 
-    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
-    expect(lastOptions.previewWidth).toBe(320);
-  });
-
-  it("keeps a scrub preview no wider than the device pixels of a small box", async () => {
-    const rendererSource = createWebVideoEngineMediaRendererSource({
-      display: {
-        boxWidth: 180,
-        boxHeight: 320,
-        devicePixelRatio: 2,
-        maxDevicePixelRatio: 1.5,
-      },
-      source: urlSource,
-    });
-
-    await rendererSource.open();
-
-    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
-    expect(lastOptions.previewWidth).toBe(270);
-  });
-
-  it("caps an unstated pixel-ratio ceiling the way the decode strategy does", async () => {
-    const rendererSource = createWebVideoEngineMediaRendererSource({
-      display: { boxWidth: 100, boxHeight: 200, devicePixelRatio: 3 },
-      source: urlSource,
-    });
-
-    await rendererSource.open();
-
-    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
-    expect(lastOptions.previewWidth).toBe(200);
-  });
+      expect(engine.options.at(-1)).toMatchObject({
+        decodeStrategy: { kind: "displayBox", ...display },
+        previewWidth: undefined,
+      });
+    },
+  );
 
   it("lets the caller size scrub previews themselves", async () => {
     const rendererSource = createWebVideoEngineMediaRendererSource({
-      previewWidth: 480,
+      previewWidth: 640,
+      display: { boxWidth: 180, boxHeight: 320, devicePixelRatio: 2 },
       source: urlSource,
     });
 
     await rendererSource.open();
 
     const lastOptions = engine.options.at(-1) as { previewWidth?: number };
-    expect(lastOptions.previewWidth).toBe(480);
+    expect(lastOptions.previewWidth).toBe(640);
   });
 });

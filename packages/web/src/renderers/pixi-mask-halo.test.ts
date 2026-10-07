@@ -36,7 +36,10 @@ describe("mask halo palette", () => {
 });
 
 function createHarness() {
-  const shaders: { destroy: ReturnType<typeof vi.fn> }[] = [];
+  const shaders: {
+    destroy: ReturnType<typeof vi.fn>;
+    resources: Record<string, unknown>;
+  }[] = [];
   const getContext = vi.fn();
 
   vi.stubGlobal("document", {
@@ -137,6 +140,30 @@ function createHarness() {
 }
 
 describe("mask halo renderer", () => {
+  it("releases both resources of an evicted texture from hidden pooled passes", () => {
+    const { frame, meshes, renderer, shaders, texture } = createHarness();
+    const palette = buildMaskHaloPalette(
+      new Map([[1, { alpha: 1, color: 0xffffff }]]),
+    );
+    renderer.render(frame, texture as never, [
+      { palette, spread: 4 },
+      { palette, spread: 12 },
+    ]);
+    const current = { source: { style: {} } };
+    renderer.render(frame, current as never, [{ palette, spread: 4 }]);
+    expect(meshes[1]!.visible).toBe(false);
+    expect(shaders[1]!.resources.uTexture).toBe(texture.source);
+
+    renderer.releaseTexture(texture.source as never);
+
+    expect(shaders[1]!.resources.uTexture).not.toBe(texture.source);
+    expect(shaders[1]!.resources.uSampler).not.toBe(texture.source.style);
+    expect(shaders[0]!.resources.uTexture).toBe(current.source);
+    expect(shaders[0]!.resources.uSampler).toBe(current.source.style);
+    expect(meshes[0]!.visible).toBe(true);
+    renderer.destroy();
+  });
+
   it("renders one pooled blur pass per distinct spread", () => {
     const { blurFilters, frame, meshes, renderer, texture, uniformGroups } =
       createHarness();

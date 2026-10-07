@@ -106,6 +106,9 @@ export function createBufferedDetectionTimeline(
   let state = createIdleDetectionBufferState();
   let destroyed = false;
   let loadId = 0;
+  // Preserve snapshot reuse without retaining evicted geometry.
+  const snapshotByIdentity = new Map<string, WeakRef<DetectionFrame>>();
+  let snapshotSourceVersion: number | null = null;
   let bufferedSourceVersion: number | null = null;
   let bufferedVersionRange: {
     readonly startTime: number;
@@ -153,6 +156,50 @@ export function createBufferedDetectionTimeline(
         Math.max(version, options.source.getVersion?.(range) ?? 0),
       0,
     );
+  };
+  const synchronizeSnapshotMemo = () => {
+    const sourceVersion = getSourceVersion();
+
+    if (snapshotSourceVersion === sourceVersion) {
+      return;
+    }
+
+    const frames = [...snapshotByIdentity.values()].flatMap((reference) => {
+      const frame = reference.deref();
+      return frame ? [frame] : [];
+    });
+    const changes =
+      snapshotSourceVersion === null || frames.length === 0
+        ? undefined
+        : options.source.getChangesSince?.(snapshotSourceVersion, [
+            {
+              startTime: Math.min(...frames.map((frame) => frame.mediaTime)),
+              endTime: Math.max(
+                ...frames.map(
+                  (frame) =>
+                    frame.endTime ??
+                    frame.mediaTime +
+                      Number.EPSILON * Math.max(1, Math.abs(frame.mediaTime)),
+                ),
+              ),
+            },
+          ]);
+
+    if (!changes || changes.requiresReload) {
+      snapshotByIdentity.clear();
+    } else {
+      for (const frame of frames) {
+        if (
+          changes.ranges.some((range) =>
+            detectionFrameOverlapsRange(frame, range.startTime, range.endTime),
+          )
+        ) {
+          snapshotByIdentity.delete(getDetectionFrameIdentity(frame));
+        }
+      }
+    }
+
+    snapshotSourceVersion = sourceVersion;
   };
   const isLoadingEnabled = () =>
     typeof options.enabled === "function"
@@ -227,15 +274,26 @@ export function createBufferedDetectionTimeline(
         }
 
         const committedSourceVersion = getSourceVersion(sourceRanges);
+
+        const sourceUnchanged = sourceVersion === committedSourceVersion;
         const loadedFrames = frameRanges.flat();
 
-        buffer =
-          bufferedSourceVersion !== null &&
-          bufferedSourceVersion === committedSourceVersion
-            ? reuseBufferedFrameSnapshots(buffer, loadedFrames)
-            : copySortedDetectionFrames(loadedFrames);
+        synchronizeSnapshotMemo();
+        buffer = sourceUnchanged
+          ? reuseBufferedFrameSnapshots(
+              bufferedSourceVersion === sourceVersion ? buffer : [],
+              loadedFrames,
+              snapshotByIdentity,
+            )
+          : copySortedDetectionFrames(loadedFrames);
+
+        if (sourceUnchanged) {
+          for (const frame of buffer) {
+            rememberSnapshot(snapshotByIdentity, frame);
+          }
+        }
         bufferedVersionRange = versionRange;
-        bufferedSourceVersion = committedSourceVersion;
+        bufferedSourceVersion = sourceVersion;
         state = {
           bufferEndTime: endTime,
           bufferStartTime: startTime,
@@ -578,6 +636,8 @@ export function createBufferedDetectionTimeline(
       listeners.clear();
       pendingPrefetch = undefined;
       buffer = [];
+      snapshotByIdentity.clear();
+      snapshotSourceVersion = null;
       bufferedSourceVersion = null;
       bufferedVersionRange = null;
       state = {
@@ -696,11 +756,16 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      buffer = mergeIncrementalFrames(
-        buffer,
+      const changedFrames = copySortedDetectionFrames(
         changedFrameRanges.flat(),
-        changedRanges,
       );
+      synchronizeSnapshotMemo();
+      buffer = mergeIncrementalFrames(buffer, changedFrames, changedRanges);
+      if (getSourceVersion(sourceRanges) === changes.version) {
+        for (const frame of buffer) {
+          rememberSnapshot(snapshotByIdentity, frame);
+        }
+      }
       bufferedSourceVersion = changes.version;
       state = {
         ...state,
@@ -1171,28 +1236,56 @@ function mergeIncrementalFrames(
   return Array.from(framesByIdentity.values()).sort(compareDetectionFrames);
 }
 
-/**
- * Keeps the frame already held wherever the source returned one this buffer
- * knows, and copies only what is new. Copying everything first and then
- * discarding it is the same result for a great deal more work: a window rebuilt
- * while a gesture moves inside it re-derives hundreds of frames it already has.
- */
+const MAX_REMEMBERED_SNAPSHOTS = 8192;
+
+function rememberSnapshot(
+  snapshots: Map<string, WeakRef<DetectionFrame>>,
+  frame: DetectionFrame,
+) {
+  const identity = getDetectionFrameIdentity(frame);
+
+  if (snapshots.get(identity)?.deref() === frame) {
+    return;
+  }
+
+  snapshots.delete(identity);
+  snapshots.set(identity, new WeakRef(frame));
+
+  while (snapshots.size > MAX_REMEMBERED_SNAPSHOTS) {
+    const oldest = snapshots.keys().next().value;
+
+    if (oldest === undefined) {
+      break;
+    }
+
+    snapshots.delete(oldest);
+  }
+}
+
+/** Reuse unchanged snapshots so moving the window copies only new frames. */
 function reuseBufferedFrameSnapshots(
   currentFrames: readonly DetectionFrame[],
   loadedFrames: readonly DetectionFrame[],
+  snapshots: ReadonlyMap<string, WeakRef<DetectionFrame>>,
 ) {
-  validateDetectionFrames(loadedFrames);
-
   const currentFramesByIdentity = new Map(
     currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
   );
 
   return loadedFrames
-    .map(
-      (frame) =>
-        currentFramesByIdentity.get(getDetectionFrameIdentity(frame)) ??
-        copyDetectionFrame(frame),
-    )
+    .map((frame) => {
+      const identity = getDetectionFrameIdentity(frame);
+      const existing =
+        currentFramesByIdentity.get(identity) ??
+        snapshots.get(identity)?.deref();
+
+      if (existing) {
+        return existing;
+      }
+
+      validateDetectionFrames([frame]);
+      return copyDetectionFrame(frame);
+    })
     .sort(compareDetectionFrames);
 }
 

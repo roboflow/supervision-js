@@ -25,6 +25,7 @@ export interface PreparedAnnotationWindowSnapshot {
 /** A layer that cooks per-frame data ahead of the playhead. */
 export interface PreparedAnnotationLayer {
   isArtifactPrepared(mediaTime: number): boolean;
+  getArtifactRevision?(mediaTime: number): number;
 }
 
 export interface PreparedAnnotationWindow {
@@ -77,8 +78,11 @@ export function createPreparedAnnotationWindow(options: {
       const revision = detectionFrame ? frameRevisions.get(detectionFrame) : 0;
       const cooks = options
         .getLayers()
-        .map((layer) => (layer.isArtifactPrepared(mediaTime) ? "1" : "0"))
-        .join("");
+        .map(
+          (layer) =>
+            `${layer.isArtifactPrepared(mediaTime) ? 1 : 0}:${layer.getArtifactRevision?.(mediaTime) ?? 0}`,
+        )
+        .join(",");
 
       return `${detectionFrame?.frameIndex ?? "time"}:${detectionFrame?.mediaTime ?? "none"}:${revision}:${cooks}`;
     },

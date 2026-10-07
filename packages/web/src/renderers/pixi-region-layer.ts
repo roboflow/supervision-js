@@ -94,6 +94,7 @@ export interface PixiRegionLayerState {
 export interface PixiRegionLayer {
   createContainer(): PixiContainer;
   drawFrame(mediaTime: number, viewportScale?: number): PixiRegionLayerState;
+  releaseMaskTexture(texture: PixiTexture): void;
   setRenderers(renderers: readonly RegionAnnotationRenderer[]): void;
   translateDetection(id: string | number, x: number, y: number): boolean;
   destroy(): void;
@@ -342,6 +343,18 @@ export function createPixiRegionLayer(options: {
       }
 
       return { activeDetectionIndexes: [...activeDetectionIndexes] };
+    },
+
+    releaseMaskTexture(texture) {
+      if (destroyed) return;
+      for (const entry of entries.values()) {
+        entry.exactCoverageMask?.releaseTexture(texture.source);
+      }
+      for (const pool of pools.values()) {
+        for (const entry of pool) {
+          entry.exactCoverageMask?.releaseTexture(texture.source);
+        }
+      }
     },
 
     setRenderers(nextRenderers) {

@@ -472,9 +472,13 @@ const session = await createMediaSession({
 When the viewer's box changes, update this same display-box source through the
 optional `session.setDisplay()` method. It changes the output for this session;
 it does not require a new session or a new media source. Web video engine
-sources expose this method, but resizing rejects unless the source uses a
-display-box decode strategy, as configured with `display` above. Other media
-sources may omit the method.
+sources expose this method when using a display-box decode strategy, as
+configured with `display` above. Other media sources may omit the method.
+
+Default scrub previews use at most 320 pixels across, limited to the fitted
+picture's display pixels. Updating the display also updates that preview size
+and its RAM-limited capacity. An explicit `previewWidth` keeps that width
+across display changes.
 
 ```ts
 const resizeOutput = session.setDisplay;

@@ -78,6 +78,7 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 
 const DEPTH_DIAGNOSTICS_FAMILY = "depth";
 
@@ -173,6 +174,7 @@ export async function createMediaRendererCore(
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
+  let presentationDisplay: MediaRendererDisplay | undefined;
   let mediaSize = { height: 0, width: 0 };
   let depthSource: DepthFrameProvider | null = null;
   let depthPreparer: DepthFramePreparer | undefined;
@@ -1306,6 +1308,19 @@ export async function createMediaRendererCore(
           runtimeState.recordPresentationUpdate(presentedSample);
         }
       },
+      onDisplayChange(display) {
+        presentationDisplay = display;
+        if (pushPresentationReady && renderer.setDisplay) {
+          void renderer.setDisplay(display).catch((error: unknown) => {
+            if (
+              !runtimeState.isDestroyed() &&
+              !(error instanceof Error && error.name === "AbortError")
+            ) {
+              console.warn("Video display resize failed:", error);
+            }
+          });
+        }
+      },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
       presentedFrames: protectedPresentedFrames?.source,
@@ -1424,6 +1439,15 @@ export async function createMediaRendererCore(
       if (runtimeState.isDestroyed() || runtimeState.isError()) return renderer;
       pushPresentationReady = true;
       runtimeState.setReady();
+      if (presentationDisplay && renderer.setDisplay) {
+        await renderer
+          .setDisplay(presentationDisplay)
+          .catch((error: unknown) => {
+            if (!(error instanceof Error && error.name === "AbortError")) {
+              throw error;
+            }
+          });
+      }
       loadCreationDepthManifest();
 
       if (options.autoPlay ?? true) {

@@ -54,6 +54,25 @@ settles. See
 [Media Sessions](./media-sessions.md) for the defaults and the single switch
 that answers for both.
 
+During rapid playhead movement, display-sized masks can use smaller previews.
+`renderer.renderPreparation.maskFrame.previewScale` sets their width cap relative
+to the display-fitted width: the default is `0.5`, `0.25` reduces preparation
+work with coarser previews, and `1` keeps the full fitted resolution during motion. Positive values up to
+`1` are accepted; invalid values use the default. The visible frame refines
+after motion settles. Rasters never exceed native mask dimensions. Masks without
+a display box keep their native resolution.
+
+The preparation gate accepts previews by default. Set
+`renderer.renderPreparation.playbackGate.quality` to `"fine"` to wait for the
+full fitted mask resolution and prepare the playback lead at that quality.
+An enabled Fine gate overrides `previewScale` during playback, scrubbing,
+and seeking.
+Fine resolution follows the display and DPR cap; it can be smaller than the
+native mask grid. This option can increase CPU work and buffering. The existing
+`maxWaitSeconds` bound still applies: after it expires, playback may show an
+available preview or omit an unfinished artifact. The default quality is
+`"adaptive"`.
+
 ## Detection Contract
 
 Detection frames are app/model data:

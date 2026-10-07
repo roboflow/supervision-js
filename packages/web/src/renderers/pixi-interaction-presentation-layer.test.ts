@@ -48,6 +48,83 @@ const frame: DetectionFrame = {
 };
 
 describe("pixi interaction presentation layer", () => {
+  it("releases the texture and sampler of a hidden mask highlight", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+      interactionStyle: {
+        resolve: () => ({
+          maskStyle: {
+            resolve: () => ({
+              alpha: 1,
+              color: 0xffffff,
+              mask: {
+                counts: "",
+                encoding: "compressedRle",
+                height: 80,
+                width: 120,
+              },
+            }),
+          },
+        }),
+      } as never,
+    });
+    layer.createDisplay({ height: 80, width: 120 });
+    const source = { style: {} };
+    const texture = { source };
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      idMaskArtifact: {
+        frame: {
+          height: 80,
+          key: "mask-frame",
+          kind: PreparedMaskFrameKind.IdMask,
+          sourceWidth: 120,
+          width: 120,
+        },
+        texture,
+      } as never,
+      mediaTime: frame.mediaTime,
+      selectedPick: {
+        detection: frame.detections[0]!,
+        detectionIndex: 0,
+        frame,
+        mediaTime: frame.mediaTime,
+        point: { x: 15, y: 20 },
+        target: DetectionPickTarget.Mask,
+      },
+    });
+    const resources = FakeShaderFactory.descriptors.at(-1)!.resources;
+    expect(resources.uTexture).toBe(source);
+    expect(resources.uSampler).toBe(source.style);
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick: null,
+    });
+
+    layer.releaseMaskTexture(texture as never);
+
+    expect(resources.uTexture).not.toBe(source);
+    expect(resources.uSampler).not.toBe(source.style);
+    layer.destroy();
+  });
+
   it("passes the picked sub-geometry index to interaction styles", () => {
     const keypointFrame: DetectionFrame = {
       detections: [
@@ -404,10 +481,10 @@ describe("pixi interaction presentation layer", () => {
     const descriptor = FakeShaderFactory.descriptors.at(-1)!;
 
     expect(descriptor.gl.fragment).toContain(
-      `int radius = int(min(uMaxStrokeWidth, float(${MAX_ID_MASK_STROKE_WIDTH})));`,
+      "int radius = int(strokeScanRadius(uMaxStrokeWidth, uMaxFractionalStrokeWidth, pixelWidth));",
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      `let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_ID_MASK_STROKE_WIDTH}.0));`,
+      "let radius = i32(strokeScanRadius(maskUniforms.uMaxStrokeWidth, maskUniforms.uMaxFractionalStrokeWidth, pixelWidth));",
     );
 
     for (const source of [
@@ -424,15 +501,14 @@ describe("pixi interaction presentation layer", () => {
   it("measures an interaction stroke in the texels of the raster it draws on", () => {
     expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 2 })).toBe(2);
     expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(2);
-    // The thinnest line the shader can draw at all.
-    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 1.5 })).toBe(1);
-    // A sub-texel stroke is an inner boundary at any scale, so it keeps its own
-    // width on a raster of any size.
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 1.5 })).toBe(
+      0.75,
+    );
     expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 0.5 })).toBe(
       0.5,
     );
     expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 0.5 })).toBe(
-      0.5,
+      0.25,
     );
   });
 

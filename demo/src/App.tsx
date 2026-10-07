@@ -409,8 +409,11 @@ function DemoApp() {
           <RenderControls
             availability={demo.presentationAvailability}
             classNames={styleClassNames}
+            configuration={demo.sessionConfiguration}
             depth={workbenchDepth}
             onChange={demo.setPresentationSettings}
+            onSessionOptionsChange={demo.setSessionOptions}
+            sessionOptions={demo.sessionOptions}
             settings={demo.presentationSettings}
           />
         }

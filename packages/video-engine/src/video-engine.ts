@@ -90,7 +90,11 @@ export interface WebVideoEngineOptions {
   cacheStrategy?: "tiered" | "none";
   /** Preview-tier capacity (frames). Ignored when cacheStrategy is "none". */
   previewCapacity?: number;
-  /** Preview-tier entry width in CSS pixels. Ignored when cacheStrategy is "none". */
+  /**
+   * Preview-tier entry width in pixels. Default 320, limited to the fitted
+   * display pixels for a displayBox strategy. An explicit width stays fixed
+   * across display changes. Ignored when cacheStrategy is "none".
+   */
   previewWidth?: number;
   /**
    * Cache lookups whose nearest hit lies within this many milliseconds of
@@ -296,9 +300,10 @@ export class WebVideoEngine {
     await this.request((requestId) => ({ type: "play", requestId }));
   };
 
-  /** Changes frames-mode display output without reopening the video. Resolves
-   * with true after worker delivery, or false for unchanged output dimensions.
-   * The host still acknowledges its actual presentation. */
+  /** Changes frames-mode display output and default scrub-preview sizing
+   * without reopening the video. Resolves with true after replacement delivery,
+   * or false when decode and preview sizes are unchanged. The host still
+   * acknowledges its actual presentation. */
   setDisplay = async (
     display: DisplayBoxResolutionOptions,
   ): Promise<boolean> => {

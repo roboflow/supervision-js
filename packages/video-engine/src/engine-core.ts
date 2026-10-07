@@ -284,6 +284,9 @@ export class EngineCore {
           ? null
           : {
               previewWidth: config.previewWidth ?? FRAME_CACHE.PREVIEW_WIDTH_PX,
+              fitPreviewToOutput:
+                config.previewWidth === undefined &&
+                this.decodeStrategy.kind === "displayBox",
               // Budgets omitted: resolveCacheBudgets sizes both tiers
               // from device memory and frame size. previewCapacity is
               // still honored as an explicit caller override.

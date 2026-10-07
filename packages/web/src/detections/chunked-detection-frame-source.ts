@@ -7,11 +7,17 @@ import type {
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import {
-  copySortedDetectionFrames,
   detectionFrameOverlapsRange,
+  sortedDetectionFrames,
 } from "supervision-js-core";
 
-const UNPINNED_CACHE_FLOOR_CHUNKS = 12;
+/**
+ * Chunks kept when the caller sets no cap, at least. Twelve evicted under any
+ * drag wider than twelve seconds and the scrub re-downloaded the dataset over
+ * and over (6.6x its size in 12 s on a 70 s clip); eighty covers a long clip
+ * end to end and measured nothing visible in memory.
+ */
+const UNPINNED_CACHE_FLOOR_CHUNKS = 80;
 /**
  * Windows of cached chunks when the caller sets no cap: the one being served
  * and the one before it. A cache that holds only the live window has nothing
@@ -85,7 +91,8 @@ export function createChunkedDetectionFrameSource(
         new Set(chunks.map((chunk) => chunk.chunkIndex)),
       );
 
-      return copySortedDetectionFrames(
+      // Chunks are validated on load; warm windows only merge and sort them.
+      return sortDetectionFramesByTime(
         dedupeDetectionFrames(
           loadedChunks.flatMap((chunk) => chunk.frames),
         ).filter((frame) =>
@@ -115,6 +122,12 @@ function getOverlappingChunks(
   );
 }
 
+function sortDetectionFramesByTime(
+  frames: readonly DetectionFrame[],
+): DetectionFrame[] {
+  return [...frames].sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
 function loadChunk(
   chunk: DetectionFrameChunkDescriptor,
   fetchChunk: DetectionFrameChunkFetch,
@@ -128,13 +141,19 @@ function loadChunk(
     return cachedChunk;
   }
 
-  const chunkPromise = fetchChunk(chunk).catch((error: unknown) => {
-    if (chunkCache.get(chunk.chunkIndex) === chunkPromise) {
-      chunkCache.delete(chunk.chunkIndex);
-    }
+  const chunkPromise = fetchChunk(chunk)
+    .then((loaded) => ({
+      ...loaded,
+      // validated once, here, for the life of the cached chunk
+      frames: sortedDetectionFrames(loaded.frames),
+    }))
+    .catch((error: unknown) => {
+      if (chunkCache.get(chunk.chunkIndex) === chunkPromise) {
+        chunkCache.delete(chunk.chunkIndex);
+      }
 
-    throw error;
-  });
+      throw error;
+    });
 
   chunkCache.set(chunk.chunkIndex, chunkPromise);
   return chunkPromise;

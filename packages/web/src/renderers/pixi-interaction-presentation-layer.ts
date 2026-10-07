@@ -1,4 +1,8 @@
 import {
+  idMaskStrokeCoverageGlsl,
+  idMaskStrokeCoverageWgsl,
+} from "#renderers/id-mask-stroke-coverage";
+import {
   ID_MASK_STROKE_WIDTH_LANES,
   idMaskFillPaletteWgslField,
   idMaskPaletteGlsl,
@@ -22,10 +26,7 @@ import {
   resolveIdMaskStrokeTexels,
   writeIdMaskPaletteEntry,
 } from "supervision-js-core";
-import {
-  MAX_ID_MASK_PALETTE_ENTRIES,
-  MAX_ID_MASK_STROKE_WIDTH,
-} from "#render-preparation/mask-frame-compositor";
+import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { createPixiBoxLayer } from "#renderers/pixi-box-layer";
@@ -130,6 +131,7 @@ export interface PixiInteractionPresentationLayer {
     readonly height: number;
   }): PixiContainer;
   drawFrame(context: PixiInteractionPresentationLayerFrameContext): void;
+  releaseMaskTexture(texture: PixiTexture): void;
   setInteractionStyle(
     interactionStyle: InteractionStyle | null | undefined,
   ): void;
@@ -227,6 +229,10 @@ export function createPixiInteractionPresentationLayer(options: {
       maskRenderer?.destroy();
       labelLayer.destroy();
       vectorLayer.destroy();
+    },
+
+    releaseMaskTexture(texture) {
+      if (!isDestroyed) maskRenderer?.releaseTexture(texture.source);
     },
 
     drawFrame(context) {
@@ -641,6 +647,7 @@ interface InteractionMaskInstruction {
 interface InteractionMaskRenderer {
   readonly mesh: PixiInteractionMesh;
   hide(): void;
+  releaseTexture(source: PixiImageSource): void;
   render(
     frame: PreparedIdMaskFrame,
     texture: PixiTexture,
@@ -668,6 +675,7 @@ function createInteractionMaskRenderer(options: {
       value: fillPalette,
     },
     uMaxStrokeWidth: { type: "f32", value: 0 },
+    uMaxFractionalStrokeWidth: { type: "f32", value: 0 },
     uStrokePalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
       type: "vec4<f32>",
@@ -724,6 +732,12 @@ function createInteractionMaskRenderer(options: {
       mesh.visible = false;
     },
 
+    releaseTexture(source) {
+      if (shader.resources.uTexture !== source) return;
+      bindTexture(placeholderSource);
+      mesh.visible = false;
+    },
+
     mesh,
 
     render(frame, texture, instructions) {
@@ -738,6 +752,7 @@ function createInteractionMaskRenderer(options: {
       strokeWidths.fill(0);
 
       let maxStrokeWidth = 0;
+      let maxFractionalStrokeWidth = 0;
 
       for (const { detectionIndex, instruction } of instructions) {
         const maskId = resolveIdMaskPaletteId(detectionIndex);
@@ -768,6 +783,13 @@ function createInteractionMaskRenderer(options: {
             frame.width,
           );
           maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidths[maskId] ?? 0);
+          const width = strokeWidths[maskId] ?? 0;
+          if (width > 0 && width < 1) {
+            maxFractionalStrokeWidth = Math.max(
+              maxFractionalStrokeWidth,
+              width,
+            );
+          }
         }
       }
 
@@ -779,6 +801,7 @@ function createInteractionMaskRenderer(options: {
         frame.height,
       ]);
       uniforms.uniforms.uMaxStrokeWidth = maxStrokeWidth;
+      uniforms.uniforms.uMaxFractionalStrokeWidth = maxFractionalStrokeWidth;
       uniforms.update();
       mesh.visible = true;
     },
@@ -836,6 +859,7 @@ in vec4 vColor;
 uniform sampler2D uTexture;
 uniform vec2 uTextureSize;
 uniform float uMaxStrokeWidth;
+uniform float uMaxFractionalStrokeWidth;
 ${idMaskPaletteGlsl}
 out vec4 finalColor;
 
@@ -851,60 +875,30 @@ bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
 
-// Offsets are whole texels, so the integer loop bounds are themselves the
-// Chebyshev stroke-radius test: |offset| <= floor(w) iff |offset| <= w.
-// The winning candidate is the max-(offsetY, offsetX) passing offset, so the
-// scan runs backwards and exits on the first hit.
-float findNeighborStrokeId(float centerId, vec2 texel) {
-  int radius = int(min(uMaxStrokeWidth, float(${MAX_ID_MASK_STROKE_WIDTH})));
-
-  for (int offsetY = radius; offsetY >= -radius; offsetY -= 1) {
-    for (int offsetX = radius; offsetX >= -radius; offsetX -= 1) {
-      if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      float maskId = sampleMaskId(vUV + vec2(float(offsetX), float(offsetY)) * texel);
-
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
-        continue;
-      }
-
-      float distance = max(abs(float(offsetX)), abs(float(offsetY)));
-
-      if (readStrokeWidth(maskId) >= distance && readStroke(maskId).a > 0.0) {
-        return maskId;
-      }
-    }
-  }
-
-  return 0.0;
-}
-
-bool isBoundary(float centerId, vec2 texel) {
-  return
-    differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
-}
+${idMaskStrokeCoverageGlsl}
 
 void main(void) {
   float centerId = sampleMaskId(vUV);
   vec2 texel = 1.0 / uTextureSize;
+  vec2 cell = fract(vUV * uTextureSize);
+  vec2 footprint = fwidth(vUV * uTextureSize);
+  float pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId > 0.5) {
     vec4 fill = readFill(centerId);
     vec4 stroke = readStroke(centerId);
 
-    if (
-      uMaxStrokeWidth > 0.0 &&
-      readStrokeWidth(centerId) > 0.0 &&
-      stroke.a > 0.0 &&
-      isBoundary(centerId, texel)
-    ) {
-      finalColor = premultiplyAlpha(stroke * vColor);
-      return;
+    float width = readStrokeWidth(centerId);
+    if (uMaxStrokeWidth > 0.0 && width > 0.0 && stroke.a > 0.0) {
+      float coverage = innerStrokeCoverage(centerId, texel, cell, width, pixelWidth);
+      if (coverage >= 1.0) {
+        finalColor = premultiplyAlpha(stroke * vColor);
+        return;
+      }
+      if (coverage > 0.0) {
+        finalColor = mix(premultiplyAlpha(fill * vColor), premultiplyAlpha(stroke * vColor), coverage);
+        return;
+      }
     }
 
     finalColor = premultiplyAlpha(fill * vColor);
@@ -912,10 +906,10 @@ void main(void) {
   }
 
   if (uMaxStrokeWidth > 0.0) {
-    float strokeId = findNeighborStrokeId(centerId, texel);
+    vec2 border = findNeighborStroke(centerId, texel, cell, pixelWidth);
 
-    if (strokeId > 0.5) {
-      finalColor = premultiplyAlpha(readStroke(strokeId) * vColor);
+    if (border.x > 0.5) {
+      finalColor = premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
       return;
     }
   }
@@ -928,6 +922,7 @@ const interactionMaskFragmentWgsl = `
 struct InteractionMaskUniforms {
   ${idMaskFillPaletteWgslField}
   uMaxStrokeWidth: f32,
+  uMaxFractionalStrokeWidth: f32,
   ${idMaskStrokePaletteWgslField}
   ${idMaskStrokeWidthsWgslField}
   uTextureSize: vec2<f32>,
@@ -949,43 +944,7 @@ fn differs(left: f32, right: f32) -> bool {
   return abs(left - right) > 0.5;
 }
 
-// Offsets are whole texels, so the integer loop bounds are themselves the
-// Chebyshev stroke-radius test: |offset| <= floor(w) iff |offset| <= w.
-// The winning candidate is the max-(offsetY, offsetX) passing offset, so the
-// scan runs backwards and exits on the first hit.
-fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
-  let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_ID_MASK_STROKE_WIDTH}.0));
-
-  for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
-    for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {
-      if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      let maskId = sampleMaskId(uv + vec2<f32>(f32(offsetX), f32(offsetY)) * texel);
-
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
-        continue;
-      }
-
-      let offsetDistance = max(abs(f32(offsetX)), abs(f32(offsetY)));
-
-      if (readStrokeWidth(maskId) >= offsetDistance && readStroke(maskId).a > 0.0) {
-        return maskId;
-      }
-    }
-  }
-
-  return 0.0;
-}
-
-fn isBoundary(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> bool {
-  return
-    differs(sampleMaskId(uv + vec2<f32>(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(0.0, -texel.y)), centerId);
-}
+${idMaskStrokeCoverageWgsl}
 
 @fragment
 fn mainFragment(
@@ -994,28 +953,33 @@ fn mainFragment(
 ) -> @location(0) vec4<f32> {
   let centerId = sampleMaskId(vUV);
   let texel = 1.0 / maskUniforms.uTextureSize;
+  let cell = fract(vUV * maskUniforms.uTextureSize);
+  let footprint = fwidth(vUV * maskUniforms.uTextureSize);
+  let pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId > 0.5) {
     let fill = readFill(centerId);
     let stroke = readStroke(centerId);
 
-    if (
-      maskUniforms.uMaxStrokeWidth > 0.0 &&
-      readStrokeWidth(centerId) > 0.0 &&
-      stroke.a > 0.0 &&
-      isBoundary(vUV, centerId, texel)
-    ) {
-      return premultiplyAlpha(stroke * vColor);
+    let width = readStrokeWidth(centerId);
+    if (maskUniforms.uMaxStrokeWidth > 0.0 && width > 0.0 && stroke.a > 0.0) {
+      let coverage = innerStrokeCoverage(vUV, centerId, texel, cell, width, pixelWidth);
+      if (coverage >= 1.0) {
+        return premultiplyAlpha(stroke * vColor);
+      }
+      if (coverage > 0.0) {
+        return mix(premultiplyAlpha(fill * vColor), premultiplyAlpha(stroke * vColor), coverage);
+      }
     }
 
     return premultiplyAlpha(fill * vColor);
   }
 
   if (maskUniforms.uMaxStrokeWidth > 0.0) {
-    let strokeId = findNeighborStrokeId(vUV, centerId, texel);
+    let border = findNeighborStroke(vUV, centerId, texel, cell, pixelWidth);
 
-    if (strokeId > 0.5) {
-      return premultiplyAlpha(readStroke(strokeId) * vColor);
+    if (border.x > 0.5) {
+      return premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
     }
   }
 

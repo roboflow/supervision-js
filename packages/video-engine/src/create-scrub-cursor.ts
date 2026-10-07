@@ -32,6 +32,7 @@ export interface ScrubViewport {
  */
 export interface ScrubCacheConfig {
   previewWidth: number;
+  fitPreviewToOutput?: boolean;
   previewCapacity?: number;
   exactBudgetBytes?: number;
 }
@@ -130,17 +131,18 @@ function buildCache(
     fps && fps > 0
       ? Math.max(1, Math.round(1000 / fps))
       : FRAME_CACHE.DEFAULT_BUCKET_MS;
-  const budgets = resolveCacheBudgets(
-    track.decodeWidth,
-    track.decodeHeight,
-    config.previewWidth,
-  );
+  const budgets = resolveCacheBudgets(track.decodeWidth, track.decodeHeight);
   return new FrameCache({
     exactWidth: track.decodeWidth,
     exactHeight: track.decodeHeight,
     previewWidth: config.previewWidth,
+    fitPreviewToOutput: config.fitPreviewToOutput,
     exactBudgetBytes: config.exactBudgetBytes ?? budgets.exactBudgetBytes,
-    previewCapacity: config.previewCapacity ?? budgets.previewCapacity,
+    previewCapacity: config.previewCapacity ?? FRAME_CACHE.PREVIEW_SLOTS_MAX,
+    previewBudgetBytes:
+      config.previewCapacity === undefined
+        ? budgets.previewBudgetBytes
+        : undefined,
     bucketMs,
     // Floor the exact tier to one full prefetch window so a huge-frame source
     // does not evict the very neighbors a settle just decoded.

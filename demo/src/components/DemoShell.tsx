@@ -169,8 +169,8 @@ export function DemoShell({
 
               {tab === DemoInspectorTab.Style ? (
                 <>
-                  {renderControls}
                   {qualityControls}
+                  {renderControls}
                 </>
               ) : null}
 

@@ -97,10 +97,14 @@ export interface FrameCacheOptions {
   readonly exactHeight: number;
   /** Coarse-tier width; height derives from the exact aspect ratio. */
   readonly previewWidth: number;
+  /** Limit the configured coarse width to the current decode width. */
+  readonly fitPreviewToOutput?: boolean;
   /** Crisp scrub-tier RAM ceiling in bytes; slot count derives from frame size. */
   readonly exactBudgetBytes: number;
   /** Coarse-tier slot count. */
   readonly previewCapacity: number;
+  /** Coarse-tier byte ceiling, additionally limiting its slot count. */
+  readonly previewBudgetBytes?: number;
   /** Source frame interval in ms, reported to diagnostics as the timeline mark
    *  width. It keys nothing. */
   readonly bucketMs: number;
@@ -124,7 +128,13 @@ export class FrameCache {
     const exactWidth = Math.max(1, Math.round(options.exactWidth));
     const exactHeight = Math.max(1, Math.round(options.exactHeight));
     const aspect = exactWidth / exactHeight;
-    const previewWidth = Math.max(1, Math.round(options.previewWidth));
+    const configuredPreviewWidth = Math.max(
+      1,
+      Math.round(options.previewWidth),
+    );
+    const previewWidth = options.fitPreviewToOutput
+      ? Math.min(configuredPreviewWidth, exactWidth)
+      : configuredPreviewWidth;
     const previewHeight = Math.max(1, Math.round(previewWidth / aspect));
     const frameBytes = exactWidth * exactHeight * BYTES_PER_PIXEL;
     const floor = Math.max(1, Math.floor(options.minExactSlots ?? 1));
@@ -148,7 +158,18 @@ export class FrameCache {
       FRAME_IDENTITY_KEY_GRID_MS,
     );
     this.preview = new TierStore(
-      Math.max(0, Math.floor(options.previewCapacity)),
+      Math.min(
+        Math.max(0, Math.floor(options.previewCapacity)),
+        options.previewBudgetBytes === undefined
+          ? Infinity
+          : Math.max(
+              0,
+              Math.floor(
+                options.previewBudgetBytes /
+                  (previewWidth * previewHeight * BYTES_PER_PIXEL),
+              ),
+            ),
+      ),
       previewWidth,
       previewHeight,
       PREVIEW_KEY_GRID_MS,
@@ -228,6 +249,12 @@ export class FrameCache {
     const exact = this.exact.getByKey(frame.ticks);
     if (exact) return { ...exact, tier: FrameTier.Exact };
     const coarse = this.preview.get(timestampMs, previewTolMs);
+    return coarse ? { ...coarse, tier: FrameTier.Preview } : null;
+  }
+
+  /** Preview-only lookup without hit accounting or LRU promotion. */
+  peekPreview(timestampMs: number, toleranceMs: number): CachedFrame | null {
+    const coarse = this.preview.peek(timestampMs, toleranceMs);
     return coarse ? { ...coarse, tier: FrameTier.Preview } : null;
   }
 
@@ -313,6 +340,11 @@ export class FrameCache {
   /** Promotes one exact frame by identity. */
   bumpExactFrame(frame: FrameId): void {
     this.exact.touchKey(frame.ticks);
+  }
+
+  /** Protects a resident preview during a sweep that fills other targets. */
+  bumpPreview(timestampMs: number): void {
+    this.preview.touch(timestampMs);
   }
 
   clear(): void {
@@ -475,6 +507,15 @@ export class TierStore {
     if (!entry) return null;
     this.bump(best.key);
     return { canvas: entry.canvas, timestampMs: entry.timestampMs };
+  }
+
+  peek(timestampMs: number, tolMs: number): TierHit | null {
+    const best = this.nearest(timestampMs, false);
+    if (!best || best.delta > tolMs) return null;
+    const entry = this.entries.get(best.key);
+    return entry
+      ? { canvas: entry.canvas, timestampMs: entry.timestampMs }
+      : null;
   }
 
   /** Retrieves exactly one owner-assigned key and promotes it to MRU. */

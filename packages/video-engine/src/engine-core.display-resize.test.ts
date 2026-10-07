@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as factory from "./create-scrub-cursor";
+import * as decodeSource from "./decode-source";
+import type { SessionSourceHandle } from "./decode-source";
 import {
   displayBoxResolution,
+  resolveDecodeDimensions,
   type DecodeResolutionStrategy,
+  type DisplayBoxResolutionOptions,
 } from "./decode-resolution";
 import { EngineCore } from "./engine-core";
 import { handleEngineCommand } from "./worker-dispatch";
@@ -12,6 +16,7 @@ import type { PresentedFrameEvent } from "./worker-protocol";
 import { asSec, WebVideoEngineErrorCode } from "./types";
 import {
   FakeClock,
+  FakeVideoSample,
   installWorkerGlobals,
   LOAD_CONFIG,
   makeFakeCursor,
@@ -101,6 +106,209 @@ async function setup(
   );
   return { engine, cursor, clock, frames, shown, statuses };
 }
+
+async function setupCachedDisplay(
+  display: DisplayBoxResolutionOptions,
+  options: {
+    previewWidth?: number;
+    nativeWidth?: number;
+    nativeHeight?: number;
+    presentation?: "canvas" | "frames";
+  } = {},
+) {
+  const decodeStrategy = displayBoxResolution(display);
+  const native = {
+    ...makeFakeCursor().track,
+    width: options.nativeWidth ?? 1280,
+    height: options.nativeHeight ?? 720,
+  };
+  const initial = resolveDecodeDimensions(decodeStrategy, {
+    nativeWidth: native.width,
+    nativeHeight: native.height,
+    displayWidth: null,
+    devicePixelRatio: display.devicePixelRatio,
+  });
+  const resizeOutput = vi.fn(async () => undefined);
+  const samples: FakeVideoSample[] = [];
+  const source: SessionSourceHandle = {
+    track: {
+      ...native,
+      decodeWidth: initial.width,
+      decodeHeight: initial.height,
+    },
+    keyframeProbe: {
+      async getKeyPacket() {
+        return null;
+      },
+      async getNextKeyPacket() {
+        return null;
+      },
+    },
+    session: {
+      resizeOutput,
+      async frameAt(timestamp) {
+        const sample = new FakeVideoSample(timestamp, 1 / 30);
+        samples.push(sample);
+        return sample;
+      },
+      async *framesFrom() {},
+      async *framesCovering() {},
+      reachableFromS: -Infinity,
+      framesDecoded: 0,
+    },
+    dispose: vi.fn(async () => undefined),
+  };
+  const open = vi
+    .spyOn(decodeSource, "openScrubSource")
+    .mockResolvedValue(source);
+  const frames: PresentedFrameEvent[] = [];
+  const engine = new EngineCore({
+    clock: new FakeClock(),
+    emit: () => undefined,
+    emitPresentedFrame: (frame) => {
+      frames.push(frame);
+      frame.frame.close();
+    },
+  });
+  await engine.load({
+    ...LOAD_CONFIG,
+    presentation: options.presentation ?? "frames",
+    decodeStrategy,
+    previewWidth: options.previewWidth,
+  });
+  await tick();
+  const shown = frames.at(-1);
+  if (shown)
+    engine.acknowledgePresentedFrame(
+      shown.paintSeq,
+      shown.frameId,
+      shown.navigationGeneration,
+    );
+  return { engine, frames, open, source, resizeOutput, samples };
+}
+
+describe("default display-sized scrub previews", () => {
+  const tiny = {
+    boxWidth: 180,
+    boxHeight: 320,
+    devicePixelRatio: 2,
+    maxDevicePixelRatio: 1.5,
+  };
+  const wide = { boxWidth: 1080, boxHeight: 854, devicePixelRatio: 2 };
+
+  it("resizes tiny → large → tiny previews in the same session within their byte budget", async () => {
+    const { engine, frames, open, source } = await setupCachedDisplay(tiny);
+    const initialCapacity = engine.getStats()!.scheduler!.cache.previewCapacity;
+    expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(270);
+    for (const [display, expectedWidth] of [
+      [wide, 320],
+      [tiny, 270],
+    ] as const) {
+      const resize = engine.setDisplay(display);
+      await tick();
+      await expect(resize).resolves.toBe(true);
+      const cache = engine.getStats()!.scheduler!.cache;
+      expect(cache.previewFrameWidth).toBe(expectedWidth);
+      expect(
+        cache.previewCapacity *
+          cache.previewFrameWidth *
+          cache.previewFrameHeight *
+          4,
+      ).toBeLessThanOrEqual(64 * 1024 * 1024);
+      expect(frames.at(-1)?.frameId).toEqual(frames[0].frameId);
+      if (expectedWidth === 320)
+        expect(cache.previewCapacity).toBeLessThan(initialCapacity);
+      else expect(cache.previewCapacity).toBe(initialCapacity);
+    }
+    expect(open).toHaveBeenCalledOnce();
+    expect(source.dispose).not.toHaveBeenCalled();
+    await engine.dispose();
+  });
+
+  it.each([480, 640])(
+    "keeps explicit %spx previews fixed across display resizing",
+    async (previewWidth) => {
+      const { engine, open } = await setupCachedDisplay(tiny, {
+        previewWidth,
+      });
+      expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(
+        previewWidth,
+      );
+      for (const display of [wide, tiny]) {
+        const resize = engine.setDisplay(display);
+        await tick();
+        await resize;
+        expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(
+          previewWidth,
+        );
+      }
+      expect(open).toHaveBeenCalledOnce();
+      await engine.dispose();
+    },
+  );
+
+  it("keeps native-sized previews and decoder output when the display grows beyond a small source", async () => {
+    const { engine, open, resizeOutput } = await setupCachedDisplay(tiny, {
+      nativeWidth: 160,
+      nativeHeight: 90,
+    });
+    expect(engine.getStats()!.track).toMatchObject({
+      decodeWidth: 160,
+      decodeHeight: 90,
+    });
+    expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(160);
+    const initialCapacity = engine.getStats()!.scheduler!.cache.previewCapacity;
+    for (const display of [wide, tiny]) {
+      const resize = engine.setDisplay(display);
+      await tick();
+      await expect(resize).resolves.toBe(false);
+      expect(engine.getStats()!.track).toMatchObject({
+        decodeWidth: 160,
+        decodeHeight: 90,
+      });
+      expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(160);
+      expect(engine.getStats()!.scheduler!.cache.previewCapacity).toBe(
+        initialCapacity,
+      );
+    }
+    await expect(engine.setDisplay(tiny)).resolves.toBe(false);
+    expect(resizeOutput).not.toHaveBeenCalled();
+    expect(open).toHaveBeenCalledOnce();
+    await engine.dispose();
+  });
+
+  it.each([0, -1, NaN])(
+    "uses the decoder's existing fallback for an invalid direct-engine DPR cap: %s",
+    async (maxDevicePixelRatio) => {
+      const { engine } = await setupCachedDisplay({
+        ...tiny,
+        maxDevicePixelRatio,
+      });
+      expect(engine.getStats()!.track).toMatchObject({
+        decodeWidth: 1280,
+        decodeHeight: 720,
+      });
+      expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(320);
+      await engine.dispose();
+    },
+  );
+
+  it.each(["canvas", "frames"] as const)(
+    "caps initial %s previews to the fitted picture with the default DPR ceiling",
+    async (presentation) => {
+      const { engine } = await setupCachedDisplay(
+        {
+          boxWidth: 900,
+          boxHeight: 80,
+          devicePixelRatio: 3,
+        },
+        { presentation },
+      );
+      expect(engine.getStats()!.scheduler!.cache.previewFrameWidth).toBe(285);
+      await engine.dispose();
+    },
+  );
+});
 
 describe("EngineCore display resize", () => {
   it.each(["before", "delivery"])(

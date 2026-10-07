@@ -94,6 +94,40 @@ describe("id mask frame artifacts", () => {
     expect(frame!.data.length).toBe(48);
   });
 
+  it.each([undefined, 4])(
+    "uses integer mask dimensions throughout a raster capped at %s",
+    (maxWidth) => {
+      const instruction = {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 32]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 4,
+          width: 8,
+        },
+      };
+      const expected = createIdMaskFrame([instruction], { maxWidth })!;
+
+      for (const [width, height] of [
+        [8, 4.5],
+        [8.5, 4],
+        [8.5, 4.5],
+      ]) {
+        const actual = createIdMaskFrame(
+          [{ ...instruction, mask: { ...instruction.mask, height, width } }],
+          { maxWidth },
+        )!;
+
+        expect(actual.width).toBe(expected.width);
+        expect(actual.height).toBe(expected.height);
+        expect([...actual.data]).toEqual([...expected.data]);
+        expect(actual.data.some((id) => id !== 0)).toBe(true);
+      }
+    },
+  );
+
   it("keeps every masked pixel of the native cook inside the narrower one", () => {
     const instructions = [
       maskInstruction(0, 16, 12, (x, y) => x + y >= 6 && x + y <= 9),
@@ -145,12 +179,28 @@ describe("id mask frame artifacts", () => {
 
     expect(strokeWidths(undefined, 2)).toBe(2);
     expect(strokeWidths(8, 2)).toBe(1);
-    expect(strokeWidths(4, 2)).toBe(1);
+    expect(strokeWidths(4, 2)).toBe(0.5);
     expect(strokeWidths(8, 4)).toBe(2);
-    // A sub-texel stroke is drawn as an inner boundary at any scale, so it is
-    // never widened to a texel it did not ask for.
     expect(strokeWidths(undefined, 0.5)).toBe(0.5);
-    expect(strokeWidths(8, 0.5)).toBe(0.5);
+    expect(strokeWidths(8, 0.5)).toBe(0.25);
+  });
+
+  it("keeps categorical ids and colors when only fractional border width changes", () => {
+    const instruction = {
+      ...maskInstruction(0, 16, 12, (x, y) => x >= 4 && y >= 3),
+      stroke: { alpha: 0.75, color: 0xffffff, width: 2 },
+    };
+    const thin = createIdMaskFrame([instruction], { maxWidth: 4 })!;
+    const wider = createIdMaskFrame(
+      [{ ...instruction, stroke: { ...instruction.stroke, width: 4 } }],
+      { maxWidth: 4 },
+    )!;
+
+    expect(thin.strokeWidths[1]).toBe(0.5);
+    expect(wider.strokeWidths[1]).toBe(1);
+    expect(thin.data).toEqual(wider.data);
+    expect(thin.fillPalette).toEqual(wider.fillPalette);
+    expect(thin.strokePalette).toEqual(wider.strokePalette);
   });
 
   it("rejects artifacts that exceed the shader palette capacity", () => {
