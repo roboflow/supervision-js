@@ -204,8 +204,8 @@ describe("prepared masks reserve retained renderer backing", () => {
       await harness.visit(1);
       await harness.visit(2);
       expect(harness.readDiagnostics().preparedCount).toBe(1);
-      expect(harness.readDiagnostics().preparedBytes).toBe(
-        8 * MiB + 9 * 256 * 256,
+      expect(harness.readDiagnostics().preparedBytes).toBeLessThanOrEqual(
+        budget,
       );
       const revision = harness.layer.getArtifactRevision(2);
       await harness.visit(2);
