@@ -1340,6 +1340,49 @@ describe("buffered detection timeline", () => {
     timeline.destroy();
   });
 
+  it("does not remember an incremental read superseded by source replacement", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "replace-during-patch",
+      store,
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+    await source.appendFrames([
+      { detections: [{ id: "initial" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+    await source.appendFrames([
+      { detections: [{ id: "patch" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const captured = createDeferred<void>();
+    const release = createDeferred<void>();
+    const originalLoadFrames = store.loadFrames.bind(store);
+    vi.spyOn(store, "loadFrames").mockImplementationOnce(async (options) => {
+      const loadedFrames = await originalLoadFrames(options);
+      captured.resolve();
+      await release.promise;
+      return loadedFrames;
+    });
+    const prepare = timeline.prepare(0.5);
+    await captured.promise;
+    await source.replaceFrames([
+      { detections: [{ id: "replacement" }], endTime: 1, mediaTime: 0 },
+    ]);
+    release.resolve();
+    await prepare;
+
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
+    await timeline.prepare(10);
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
+    timeline.destroy();
+  });
+
   it("settles a window load while overlapping live writes continue", async () => {
     const store = createMemoryColdDetectionFrameStore();
     const source = createWritableDetectionFrameSource({

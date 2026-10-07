@@ -761,8 +761,10 @@ export function createBufferedDetectionTimeline(
       );
       synchronizeSnapshotMemo();
       buffer = mergeIncrementalFrames(buffer, changedFrames, changedRanges);
-      for (const frame of buffer) {
-        rememberSnapshot(snapshotByIdentity, frame);
+      if (getSourceVersion(sourceRanges) === changes.version) {
+        for (const frame of buffer) {
+          rememberSnapshot(snapshotByIdentity, frame);
+        }
       }
       bufferedSourceVersion = changes.version;
       state = {
