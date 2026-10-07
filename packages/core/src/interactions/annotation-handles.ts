@@ -281,15 +281,29 @@ function resizeRect(rect: Rect, handle: string, point: Point): Rect {
   let right = rect.x + rect.width / 2;
   let top = rect.y - rect.height / 2;
   let bottom = rect.y + rect.height / 2;
-  if (handle.includes("w")) left = Math.min(point.x, right - 5);
-  if (handle.includes("e")) right = Math.max(point.x, left + 5);
-  if (handle.includes("n")) top = Math.min(point.y, bottom - 5);
-  if (handle.includes("s")) bottom = Math.max(point.y, top + 5);
+  if (handle.includes("w"))
+    left =
+      point.x > right
+        ? Math.max(point.x, right + 5)
+        : Math.min(point.x, right - 5);
+  if (handle.includes("e"))
+    right =
+      point.x < left
+        ? Math.min(point.x, left - 5)
+        : Math.max(point.x, left + 5);
+  if (handle.includes("n"))
+    top =
+      point.y > bottom
+        ? Math.max(point.y, bottom + 5)
+        : Math.min(point.y, bottom - 5);
+  if (handle.includes("s"))
+    bottom =
+      point.y < top ? Math.min(point.y, top - 5) : Math.max(point.y, top + 5);
   return {
     x: (left + right) / 2,
     y: (top + bottom) / 2,
-    width: right - left,
-    height: bottom - top,
+    width: Math.abs(right - left),
+    height: Math.abs(bottom - top),
   };
 }
 
