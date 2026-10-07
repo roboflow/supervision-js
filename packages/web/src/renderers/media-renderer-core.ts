@@ -1316,7 +1316,7 @@ export async function createMediaRendererCore(
               !runtimeState.isDestroyed() &&
               !(error instanceof Error && error.name === "AbortError")
             ) {
-              runtimeState.setRenderError(error);
+              console.warn("Video display resize failed:", error);
             }
           });
         }

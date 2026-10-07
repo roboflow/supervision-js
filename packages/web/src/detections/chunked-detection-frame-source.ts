@@ -91,11 +91,7 @@ export function createChunkedDetectionFrameSource(
         new Set(chunks.map((chunk) => chunk.chunkIndex)),
       );
 
-      /* Every chunk in loadedChunks was validated once, when it was parsed
-         (see loadChunk). A window load over a warm cache used to walk every
-         detection again through sortedDetectionFrames, on every playhead move
-         wide enough to shift the window: ~20k detections per load, for the
-         same verdict every time. Only the merge and the order are per-load. */
+      // Chunks are validated on load; warm windows only merge and sort them.
       return sortDetectionFramesByTime(
         dedupeDetectionFrames(
           loadedChunks.flatMap((chunk) => chunk.frames),

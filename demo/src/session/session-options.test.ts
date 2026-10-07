@@ -207,7 +207,7 @@ describe("demo session options", () => {
       maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
-    // Seven seconds of prefetch and eight of cache, at the detection rate.
+    // Seven seconds of prefetch and 90 seconds of cache, at 24 fps.
     expect(configuration.resolved.renderPreparation.maskFrame).toMatchObject({
       maxCacheFrameCount: 2160,
       prefetchFrameCount: 168,

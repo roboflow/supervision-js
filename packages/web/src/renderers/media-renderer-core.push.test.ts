@@ -404,6 +404,53 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("keeps navigation usable after an automatic display resize fails", async () => {
+    const producer = createProducer();
+    const failure = new Error("resized frame could not be decoded");
+    const setDisplay = vi.fn(async () => false);
+    let displayChanged: MediaRendererSceneOptions["onDisplayChange"];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const renderer = await createRenderer(
+      producer,
+      createScene(),
+      { source: { open: async () => ({ ...producer.source, setDisplay }) } },
+      undefined,
+      (options) => {
+        displayChanged = options.onDisplayChange;
+      },
+    );
+
+    try {
+      producer.setStatus("PAUSED");
+      setDisplay.mockRejectedValueOnce(failure);
+      displayChanged?.({
+        boxHeight: 360,
+        boxWidth: 640,
+        devicePixelRatio: 2,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      await expect(renderer.seek(1)).resolves.toBeUndefined();
+      expect(renderer.getState()).toMatchObject({
+        currentTime: 1,
+        playbackState: MediaRendererPlaybackState.Paused,
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      setDisplay.mockRejectedValueOnce(failure);
+      await expect(
+        renderer.setDisplay!({
+          boxHeight: 360,
+          boxWidth: 640,
+          devicePixelRatio: 2,
+        }),
+      ).rejects.toBe(failure);
+      await expect(renderer.seek(2)).resolves.toBeUndefined();
+    } finally {
+      renderer.destroy();
+      warn.mockRestore();
+    }
+  });
+
   it("finishes opening when a newer display update supersedes its initial resize", async () => {
     const producer = createProducer();
     const firstResize = createDeferred<boolean>();
