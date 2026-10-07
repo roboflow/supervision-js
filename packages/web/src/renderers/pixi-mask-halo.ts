@@ -123,6 +123,7 @@ export interface MaskHaloPassGroup {
 export interface PixiMaskHaloRenderer {
   readonly display: PixiContainer;
   hide(): void;
+  releaseTexture(source: PixiImageSource): void;
   render(
     frame: { readonly height: number; readonly width: number },
     texture: PixiTexture,
@@ -204,6 +205,14 @@ export function createPixiMaskHaloRenderer(options: {
 
     hide() {
       display.visible = false;
+    },
+
+    releaseTexture(source) {
+      for (const pass of passes) {
+        if (pass.shader.resources.uTexture !== source) continue;
+        bindTexture(pass, placeholderSource);
+        pass.mesh.visible = false;
+      }
     },
 
     render(frame, texture, groups) {

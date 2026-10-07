@@ -102,7 +102,10 @@ function makeCache(): FrameCache {
   });
 }
 
-function makeScheduler(streamTimestamps: number[] = []): {
+function makeScheduler(
+  streamTimestamps: number[] = [],
+  keyframeProbe: KeyframeProbe = PROBE,
+): {
   scheduler: DecodeScheduler;
   sink: FakeSampleSink;
   cache: FrameCache;
@@ -112,7 +115,7 @@ function makeScheduler(streamTimestamps: number[] = []): {
   const handle: SampleSourceHandle = {
     track: TRACK,
     sampleSink: sink,
-    keyframeProbe: PROBE,
+    keyframeProbe,
     dispose: async () => undefined,
   };
   const scheduler = new DecodeScheduler({ source: handle, cache });
@@ -159,14 +162,31 @@ describe("sample cache interaction", () => {
   });
 
   it("a prefetch-swept sample is drawn into the cache then closed", async () => {
-    const { scheduler, sink } = makeScheduler();
+    const { scheduler, sink, cache } = makeScheduler([], {
+      async getKeyPacket(t) {
+        return { timestamp: t >= 2 ? 2 : 0 };
+      },
+      async getNextKeyPacket(packet) {
+        return packet.timestamp === 0 ? { timestamp: 2 } : null;
+      },
+    });
+    const emitted: ScrubFrame[] = [];
+    scheduler.subscribe((frame) => emitted.push(frame));
     await scheduler.open();
     await scheduler.whenSettled();
+
+    expect(sink.produced.map((sample) => sample.timestamp)).toEqual([0, 2]);
+    expect(emitted.map((frame) => frame.timestampS)).toEqual([0]);
+    expect(cache.stats.exactSize).toBe(1);
+    expect(cache.stats.previewSize).toBe(2);
+    const cached = scheduler.peekCached(2000);
+    expect(cached?.kind).toBe("canvas");
+    expect(cached?.timestampS).toBe(2);
 
     // The seed sample (index 0) is emitted, not swept; every swept sample
     // after it must be closed since it is never emitted.
     const swept = sink.produced.slice(1);
-    expect(swept.length).toBeGreaterThan(0);
+    expect(swept).toHaveLength(1);
     for (const s of swept) {
       expect(s.drawCount).toBe(1);
       expect(s.closeCount).toBe(1);

@@ -117,7 +117,9 @@ const horseTrailFrames = Array.from({ length: 340 }, (_, frameIndex) => ({
   mediaTime: frameIndex * HORSE_TRAIL_FRAME_PITCH_SECONDS,
 })) satisfies DetectionFrame[];
 const GATE_FRAME_RATE = 25;
-const SESSION_MASK_CACHE_FRAME_COUNT = 200;
+/* 90 s at the gate's 25 fps. The count is a ceiling only: memory is bounded
+   by `maxCacheBytes` (see media-session-defaults.ts). */
+const SESSION_MASK_CACHE_FRAME_COUNT = 2250;
 const SESSION_PLAYBACK_GATE_OPTIONS = {
   enabled: true,
   resumeAtSeconds: 0.3,
@@ -684,7 +686,7 @@ describe("prepared render window", () => {
       renderWindow.getFrame(0);
       await flushMaskPreparationTimers(4);
 
-      expect(onMaskFrameEvicted).toHaveBeenCalledWith("2:0.08");
+      expect(onMaskFrameEvicted).not.toHaveBeenCalled();
       expect(onDiagnostics).toHaveBeenLastCalledWith(
         expect.objectContaining({
           artifacts: [
@@ -696,7 +698,7 @@ describe("prepared render window", () => {
               window: {
                 availableFrameCount: 4,
                 refillThresholdFrameCount: 2,
-                targetFrameCount: 3,
+                targetFrameCount: 2,
               },
             }),
           ],
@@ -750,11 +752,14 @@ describe("prepared render window", () => {
       renderWindow.getFrame(1.2);
       await flushMaskPreparationTimers(20);
 
-      expect(
-        onMaskFramePrepared.mock.calls
-          .slice(14)
-          .map((call) => (call[0] as { readonly key: string }).key),
-      ).toEqual(["20:0.8", "30:1.2"]);
+      /* The landing the drag stops on is cooked once more at full width. */
+      expect([
+        ...new Set(
+          onMaskFramePrepared.mock.calls
+            .slice(14)
+            .map((call) => (call[0] as { readonly key: string }).key),
+        ),
+      ]).toEqual(["20:0.8", "30:1.2"]);
 
       renderWindow.destroy();
     } finally {
@@ -2463,16 +2468,27 @@ describe("prepared render window", () => {
         worker: fakeWorker.worker,
       });
       const abandonedWait = new AbortController();
+      /* The hold is read after the first step: a held window keeps cooking
+         through the drag, and enough lands to let the wait through before the
+         drag is over. */
       const dragPlayhead = async (fromFrameIndex: number) => {
+        let holdReasonAfterFirstStep: string | null = null;
         for (let step = 0; step < 4; step += 1) {
           renderWindow.getFrame(gateFrameTime(fromFrameIndex + step * 40));
           await flushMaskPreparationTimers(40);
+          if (step === 0) {
+            holdReasonAfterFirstStep =
+              diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold
+                ?.reason ?? null;
+          }
         }
 
-        return (
-          diagnostics[diagnostics.length - 1]?.artifacts?.[0]
-            ?.preparedAheadFrameCount ?? 0
-        );
+        return {
+          holdReason: holdReasonAfterFirstStep,
+          preparedAhead:
+            diagnostics[diagnostics.length - 1]?.artifacts?.[0]
+              ?.preparedAheadFrameCount ?? 0,
+        };
       };
 
       renderWindow.setPlaybackActive(true);
@@ -2487,31 +2503,24 @@ describe("prepared render window", () => {
       await flushMaskPreparationTimers(2);
       renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.5));
 
-      const preparedAheadWhileHeld = await dragPlayhead(0);
-      const heldReason =
-        diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold?.reason ??
-        null;
+      const held = await dragPlayhead(0);
 
       abandonedWait.abort();
 
-      const preparedAheadAfterAbort = await dragPlayhead(240);
-      const abandonedReason =
-        diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold?.reason ??
-        null;
+      const abandoned = await dragPlayhead(240);
 
       renderWindow.destroy();
 
       expect({
-        abandonedReason,
-        heldReason,
-        preparedAheadAfterAbort,
-        preparedAheadWhileHeld,
+        abandonedReason: abandoned.holdReason,
+        heldReason: held.holdReason,
+        preparedAheadAfterAbort: abandoned.preparedAhead,
       }).toEqual({
         abandonedReason: null,
         heldReason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
         preparedAheadAfterAbort: 1,
-        preparedAheadWhileHeld: 20,
       });
+      expect(held.preparedAhead).toBeGreaterThanOrEqual(20);
     } finally {
       vi.useRealTimers();
     }

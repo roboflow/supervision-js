@@ -1,7 +1,10 @@
 import { memo, useState, type CSSProperties } from "react";
 import {
+  ControlNote,
   ColorControl,
   ControlSection,
+  ControlSubheading,
+  NumberControl,
   SegmentedControl,
   SliderControl,
   toHexColor,
@@ -22,6 +25,16 @@ import {
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
 
+import {
+  readDemoLibraryDefaults,
+  readDemoOptionOrigin,
+} from "../session/library-defaults";
+import { formatOptionFlag } from "../session/option-format";
+import type {
+  DemoSessionConfiguration,
+  DemoSessionOptions,
+} from "../session/session-options";
+
 enum RenderControlsTab {
   Global = "global",
   Classes = "classes",
@@ -30,14 +43,20 @@ enum RenderControlsTab {
 export const RenderControls = memo(function RenderControls({
   availability,
   classNames,
+  configuration,
   depth,
   onChange,
+  onSessionOptionsChange,
+  sessionOptions,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
   readonly classNames: readonly string[];
+  readonly configuration: DemoSessionConfiguration | null;
   readonly depth: WorkbenchDepth;
   readonly onChange: (settings: DemoPresentationSettings) => void;
+  readonly onSessionOptionsChange: (options: DemoSessionOptions) => void;
+  readonly sessionOptions: DemoSessionOptions;
   readonly settings: DemoPresentationSettings;
 }) {
   const [activeTab, setActiveTab] = useState(RenderControlsTab.Global);
@@ -108,9 +127,12 @@ export const RenderControls = memo(function RenderControls({
       {activeTab === RenderControlsTab.Global ? (
         <GlobalRenderControls
           availability={availability}
+          configuration={configuration}
           depth={depth}
           onChange={updateSettings}
           onPatch={patchSettings}
+          onSessionOptionsChange={onSessionOptionsChange}
+          sessionOptions={sessionOptions}
           settings={settings}
         />
       ) : (
@@ -128,9 +150,12 @@ export const RenderControls = memo(function RenderControls({
 
 function GlobalRenderControls({
   availability,
+  configuration,
   depth,
   onChange,
   onPatch,
+  onSessionOptionsChange,
+  sessionOptions,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
@@ -140,8 +165,26 @@ function GlobalRenderControls({
     value: DemoPresentationSettings[Key],
   ) => void;
   readonly onPatch: (patch: Partial<DemoPresentationSettings>) => void;
+  readonly configuration: DemoSessionConfiguration | null;
+  readonly onSessionOptionsChange: (options: DemoSessionOptions) => void;
+  readonly sessionOptions: DemoSessionOptions;
   readonly settings: DemoPresentationSettings;
 }) {
+  const maskFrame = configuration?.resolved.renderPreparation.maskFrame;
+  const preparationGate =
+    configuration?.resolved.renderPreparation.playbackGate;
+  const libraryPreparationGate =
+    configuration === null
+      ? undefined
+      : readDemoLibraryDefaults(configuration).renderPreparation.playbackGate;
+  const waitingForMasks =
+    sessionOptions.preparationGateEnabled ?? preparationGate?.enabled ?? false;
+  const updateSessionOption = <Key extends keyof DemoSessionOptions>(
+    key: Key,
+    value: DemoSessionOptions[Key],
+  ) => {
+    onSessionOptionsChange({ ...sessionOptions, [key]: value });
+  };
   const segmentationEnabled = settings.masksEnabled || settings.polygonsEnabled;
   const segmentationUnavailable =
     availability?.masksEnabled === false &&
@@ -339,6 +382,83 @@ function GlobalRenderControls({
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
         />
+        {configuration === null ? null : (
+          <>
+            <ControlSubheading>Mask quality</ControlSubheading>
+            <ControlNote>
+              Changing mask settings reopens the clip at the current playhead.
+            </ControlNote>
+            <NumberControl
+              label="Mask preview scale"
+              libraryDefault="0.5"
+              max={1}
+              min={0.01}
+              onChange={(value) =>
+                updateSessionOption("maskPreviewScale", value)
+              }
+              optionPath="maskFrame.previewScale"
+              origin={readDemoOptionOrigin(
+                sessionOptions.maskPreviewScale,
+                sessionOptions.maskPreviewScale ??
+                  maskFrame?.previewScale ??
+                  0.5,
+                0.5,
+              )}
+              placeholder="0.5"
+              step={0.05}
+              tooltip="Masks shown during fast movement use this fraction of the display-fitted width cap, bounded by native mask dimensions. Raise it for sharper previews at greater CPU and memory cost; 1 keeps the full fitted resolution. The visible frame refines when motion stops. `renderer.renderPreparation.maskFrame.previewScale`, default 0.5."
+              value={sessionOptions.maskPreviewScale ?? maskFrame?.previewScale}
+            />
+            <ToggleControl
+              checked={waitingForMasks}
+              label="Mask playback gate enabled"
+              libraryDefault={formatOptionFlag(
+                libraryPreparationGate?.enabled ?? false,
+              )}
+              onChange={(checked) =>
+                updateSessionOption("preparationGateEnabled", checked)
+              }
+              optionPath="renderPreparation.playbackGate.enabled"
+              origin={readDemoOptionOrigin(
+                sessionOptions.preparationGateEnabled,
+                waitingForMasks,
+                libraryPreparationGate?.enabled ?? false,
+              )}
+              tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
+            />
+            <SegmentedControl
+              label="Mask presentation quality"
+              libraryDefault="Adaptive"
+              onChange={(value) =>
+                updateSessionOption("preparationGateQuality", value)
+              }
+              optionPath="renderPreparation.playbackGate.quality"
+              origin={readDemoOptionOrigin(
+                sessionOptions.preparationGateQuality,
+                sessionOptions.preparationGateQuality ??
+                  preparationGate?.quality ??
+                  "adaptive",
+                "adaptive",
+              )}
+              options={[
+                { label: "Adaptive", value: "adaptive" },
+                { label: "Fine", value: "fine" },
+              ]}
+              tooltip="Adaptive accepts smaller mask previews during fast movement. With the mask playback gate enabled, Fine waits for the full display-fitted resolution during playback, scrubbing and seeking. It can increase CPU usage and buffering; the max-wait bound still applies. `renderer.renderPreparation.playbackGate.quality`, default Adaptive."
+              value={
+                sessionOptions.preparationGateQuality ??
+                preparationGate?.quality ??
+                "adaptive"
+              }
+            />
+            {waitingForMasks ? null : (
+              <ControlNote>
+                The mask gate is off. Enable it to apply the selected
+                presentation quality.
+              </ControlNote>
+            )}
+          </>
+        )}
         <SubLayerToggle
           checked={settings.polygonsEnabled}
           disabled={availability?.polygonsEnabled === false}

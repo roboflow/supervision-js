@@ -98,6 +98,25 @@ describe("FrameCache", () => {
       expect(cache.get(2000, 50, 50)?.tier).toBe(FrameTier.Preview);
     });
 
+    it("a preview-only peek leaves hit counts and eviction order unchanged", () => {
+      const cache = makeCache({
+        previewCapacity: 2,
+        exactBudgetBytes: 64 * MB,
+      });
+      cache.putPreview(0, SRC, 320, 180);
+      cache.putPreview(1000, SRC, 320, 180);
+      cache.putExact(frameAt(0), 0, SRC, 320, 180);
+      const statsBefore = cache.stats;
+
+      expect(cache.peekPreview(0, 0)?.tier).toBe(FrameTier.Preview);
+      expect(cache.stats).toEqual(statsBefore);
+      cache.putPreview(2000, SRC, 320, 180);
+      expect(cache.peekPreview(0, 0)).toBeNull();
+      expect(cache.getForFrame(frameAt(0), 0, 0)?.tier).toBe(FrameTier.Exact);
+      cache.clear();
+      expect(cache.peekPreview(2000, 0)).toBeNull();
+    });
+
     it("collapses re-decodes of one frame onto one slot", () => {
       const cache = makeCache({ previewCapacity: 5, bucketMs: 33 });
       // The same frame, twice, with the float slop a re-decode carries.
@@ -659,6 +678,48 @@ describe("FrameCache", () => {
       expect(cache.stats.previewSize).toBe(0);
       expect(cache.get(1000, 50, 50)).toBeNull();
       expect(cache.get(2000, 50, 50)).toBeNull();
+    });
+  });
+
+  describe("preview resize budgets", () => {
+    it("reallocates coarse slots within the same byte ceiling as preview width changes", () => {
+      const budget = 4 * MB;
+      let cache = makeCache({
+        exactWidth: 180,
+        exactHeight: 101,
+        previewWidth: 640,
+        fitPreviewToOutput: true,
+        previewCapacity: 512,
+        previewBudgetBytes: budget,
+      });
+      const initialCapacity = cache.stats.previewCapacity;
+      for (const width of [180, 640, 180]) {
+        const previous = cache;
+        cache = previous.resized(width, Math.round((width * 180) / 320));
+        previous.clear();
+        for (let slot = 0; slot < cache.stats.previewCapacity + 2; slot++)
+          cache.putPreview(slot * 1000, SRC, 320, 180);
+        const stats = cache.stats;
+        expect(stats.previewFrameWidth).toBe(width);
+        expect(stats.previewSize).toBe(stats.previewCapacity);
+        expect(
+          stats.previewSize *
+            stats.previewFrameWidth *
+            stats.previewFrameHeight *
+            4,
+        ).toBeLessThanOrEqual(budget);
+        if (width === 640)
+          expect(stats.previewCapacity).toBeLessThan(initialCapacity);
+        else expect(stats.previewCapacity).toBe(initialCapacity);
+      }
+      cache.clear();
+    });
+
+    it("retains an explicit preview slot count across resizing", () => {
+      const cache = makeCache({ previewWidth: 480, previewCapacity: 3 });
+      const resized = cache.resized(640, 360);
+      expect(resized.stats.previewCapacity).toBe(3);
+      expect(resized.stats.previewFrameWidth).toBe(480);
     });
   });
 

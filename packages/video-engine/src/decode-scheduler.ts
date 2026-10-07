@@ -115,6 +115,8 @@ const PREVIEW_SWEEP_SPAN_S = 4;
 /** Keyframes one idle sweep decodes; a short-GOP source offers far more inside
  *  the span than a background walk should hold the decoder for. */
 const PREVIEW_SWEEP_MAX_FRAMES = 8;
+/** A provider may round or truncate timestamps onto WebCodecs' microseconds. */
+const DECODE_TIMESTAMP_ROUNDING_MS = 0.001;
 
 /** Spends the sweep budget nearest the playhead, then returns to ascending
  *  order: the decoder flushes and re-walks the GOP on a backward step, so the
@@ -556,7 +558,7 @@ export class DecodeScheduler implements ScrubCursor {
               (k) => Math.abs(k - pos) <= PREVIEW_SWEEP_SPAN_S,
             ),
             pos,
-          )
+          ).filter((targetS) => !this.residentPreviewAt(targetS))
         : this.windowTimestamps(pos);
     if (!targetsS.length) return null;
     // Ascending for the axis; the sweep orders its own copy for the decoder.
@@ -1268,7 +1270,29 @@ export class DecodeScheduler implements ScrubCursor {
       this.closed
     )
       return;
-    await this.decodeInto(selectPreviewTargets(keyframes, aroundS), gen, true);
+    const targets = selectPreviewTargets(keyframes, aroundS).filter(
+      (targetS) => {
+        const resident = this.residentPreviewAt(targetS);
+        if (!resident) return true;
+        this.cache.bumpPreview(resident.timestampMs);
+        return false;
+      },
+    );
+    await this.decodeInto(targets, gen, true);
+  }
+
+  private residentPreviewAt(timestampS: number): CachedFrame | null {
+    const timestampMs = timestampS * 1000;
+    const preview = this.cache.peekPreview(
+      timestampMs,
+      DECODE_TIMESTAMP_ROUNDING_MS +
+        Number.EPSILON * Math.max(1, Math.abs(timestampMs)),
+    );
+    return preview &&
+      this.frameIdOf(preview.timestampMs / 1000).ticks ===
+        this.frameAtTime(timestampS).ticks
+      ? preview
+      : null;
   }
 
   private async decodeInto(

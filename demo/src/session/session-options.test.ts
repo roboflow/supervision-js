@@ -131,6 +131,34 @@ describe("demo session options", () => {
     expect(renderer.renderPreparation?.mode).toBe(RenderPreparationMode.Worker);
   });
 
+  it("applies mask preview and gate quality without changing the display or wait bound", () => {
+    const renderer = applyDemoRendererOptions(
+      {
+        ...baseRenderer,
+        renderPreparation: {
+          ...baseRenderer.renderPreparation,
+          playbackGate: { enabled: true, maxWaitSeconds: 0.5 },
+        },
+      },
+      {
+        maskMaxCacheBytes: 96 * 1024 * 1024,
+        maskPreviewScale: 0.5,
+        preparationGateQuality: "fine",
+      },
+    );
+
+    expect(renderer.renderPreparation?.maskFrame).toEqual({
+      ...baseRenderer.renderPreparation?.maskFrame,
+      maxCacheBytes: 96 * 1024 * 1024,
+      previewScale: 0.5,
+    });
+    expect(renderer.renderPreparation?.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 0.5,
+      quality: "fine",
+    });
+  });
+
   it("reads an explicitly unset playback gate apart from an absent choice", () => {
     expect(applyDemoSessionPlaybackGate(true, { playbackGate: "unset" })).toBe(
       undefined,
@@ -179,9 +207,9 @@ describe("demo session options", () => {
       maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
-    // Seven seconds of prefetch and eight of cache, at the detection rate.
+    // Seven seconds of prefetch and 90 seconds of cache, at 24 fps.
     expect(configuration.resolved.renderPreparation.maskFrame).toMatchObject({
-      maxCacheFrameCount: 192,
+      maxCacheFrameCount: 2160,
       prefetchFrameCount: 168,
     });
     expect(configuration.autoPlay).toBe(false);

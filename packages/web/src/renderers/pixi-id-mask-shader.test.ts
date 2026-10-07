@@ -92,10 +92,10 @@ describe("pixi ID-mask shader", () => {
     const descriptor = FakeShaderFactory.descriptors[0]!;
 
     expect(descriptor.gl.fragment).toContain(
-      `int radius = int(min(uMaxStrokeWidth, float(${MAX_ID_MASK_STROKE_WIDTH})));`,
+      "int radius = int(strokeScanRadius(uMaxStrokeWidth, uMaxFractionalStrokeWidth, pixelWidth));",
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      `let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_ID_MASK_STROKE_WIDTH}.0));`,
+      "let radius = i32(strokeScanRadius(maskUniforms.uMaxStrokeWidth, maskUniforms.uMaxFractionalStrokeWidth, pixelWidth));",
     );
 
     for (const source of [
@@ -107,6 +107,45 @@ describe("pixi ID-mask shader", () => {
       expect(source).not.toContain(`offsetY = -${MAX_ID_MASK_STROKE_WIDTH}`);
       expect(source).not.toContain(`offsetX = -${MAX_ID_MASK_STROKE_WIDTH}`);
     }
+  });
+
+  it("updates the fractional scan bound when a coarse frame becomes fine", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+    const renderer = createPixiIdMaskShaderRenderer({
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+      mediaHeight: 80,
+      mediaWidth: 120,
+    });
+    const widths = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
+    widths[1] = 0.5;
+    widths[2] = 2;
+    const frame = {
+      height: 20,
+      width: 30,
+      strokeWidths: widths,
+      hasStroke: true,
+      maxStrokeWidth: 2,
+    };
+    const texture = { source: new FakeImageSource({}) };
+    const group = FakeShaderFactory.descriptors[0]!.resources
+      .maskUniforms as FakeUniformGroup;
+
+    renderer.render(frame as never, texture as never);
+    expect(group.uniforms.uMaxFractionalStrokeWidth).toBe(0.5);
+
+    widths[1] = 2;
+    renderer.render(frame as never, texture as never);
+    expect(group.uniforms.uMaxFractionalStrokeWidth).toBe(0);
   });
 
   it("reads the stroke widths as four-wide lanes in both programs", () => {

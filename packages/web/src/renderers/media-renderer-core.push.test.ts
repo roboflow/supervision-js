@@ -9,7 +9,10 @@ import {
 } from "#types/media-renderer";
 
 import { createMediaRendererCore } from "./media-renderer-core";
-import type { MediaRendererScene } from "./media-renderer-scene";
+import type {
+  MediaRendererScene,
+  MediaRendererSceneOptions,
+} from "./media-renderer-scene";
 import type {
   PresentedFrameChannel,
   PresentedFrameChannelSignal,
@@ -348,6 +351,142 @@ describe("media renderer over a push-based media source", () => {
 
     expect(displayed).toEqual([1, 2, 3]);
     expect(replacement?.frame.close).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("keeps the latest quality after overlapping 1 to 2 to 1 updates without moving the playhead", async () => {
+    const producer = createProducer();
+    const enlarged = createDeferred<boolean>();
+    const restored = createDeferred<boolean>();
+    const setDisplay = vi.fn(async () => false);
+    let displayChanged: MediaRendererSceneOptions["onDisplayChange"];
+    const display = {
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1,
+    };
+    const scene = createScene({
+      setRenderQuality: vi.fn((maxDevicePixelRatio) => {
+        displayChanged?.({ ...display, maxDevicePixelRatio });
+      }),
+    });
+    const renderer = await createRenderer(
+      producer,
+      scene,
+      { source: { open: async () => ({ ...producer.source, setDisplay }) } },
+      undefined,
+      (options) => {
+        displayChanged = options.onDisplayChange;
+      },
+    );
+    producer.setStatus("PAUSED");
+    producer.present(1000);
+    setDisplay
+      .mockReturnValueOnce(enlarged.promise)
+      .mockReturnValueOnce(restored.promise);
+
+    renderer.setRenderQuality({ maxDevicePixelRatio: 2 });
+    renderer.setRenderQuality({ maxDevicePixelRatio: 1 });
+    restored.resolve(false);
+    enlarged.resolve(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(setDisplay.mock.calls).toEqual([
+      [{ ...display, maxDevicePixelRatio: 2 }],
+      [display],
+    ]);
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 1,
+      playbackState: MediaRendererPlaybackState.Paused,
+    });
+    expect(producer.commit).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it("keeps navigation usable after an automatic display resize fails", async () => {
+    const producer = createProducer();
+    const failure = new Error("resized frame could not be decoded");
+    const setDisplay = vi.fn(async () => false);
+    let displayChanged: MediaRendererSceneOptions["onDisplayChange"];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const renderer = await createRenderer(
+      producer,
+      createScene(),
+      { source: { open: async () => ({ ...producer.source, setDisplay }) } },
+      undefined,
+      (options) => {
+        displayChanged = options.onDisplayChange;
+      },
+    );
+
+    try {
+      producer.setStatus("PAUSED");
+      setDisplay.mockRejectedValueOnce(failure);
+      displayChanged?.({
+        boxHeight: 360,
+        boxWidth: 640,
+        devicePixelRatio: 2,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      await expect(renderer.seek(1)).resolves.toBeUndefined();
+      expect(renderer.getState()).toMatchObject({
+        currentTime: 1,
+        playbackState: MediaRendererPlaybackState.Paused,
+      });
+      expect(warn).toHaveBeenCalledOnce();
+      setDisplay.mockRejectedValueOnce(failure);
+      await expect(
+        renderer.setDisplay!({
+          boxHeight: 360,
+          boxWidth: 640,
+          devicePixelRatio: 2,
+        }),
+      ).rejects.toBe(failure);
+      await expect(renderer.seek(2)).resolves.toBeUndefined();
+    } finally {
+      renderer.destroy();
+      warn.mockRestore();
+    }
+  });
+
+  it("finishes opening when a newer display update supersedes its initial resize", async () => {
+    const producer = createProducer();
+    const firstResize = createDeferred<boolean>();
+    const setDisplay = vi
+      .fn(async () => false)
+      .mockReturnValueOnce(firstResize.promise);
+    let displayChanged: MediaRendererSceneOptions["onDisplayChange"];
+    const display = {
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1,
+    };
+    const opening = createRenderer(
+      producer,
+      createScene({
+        initializeMedia: vi.fn(() => displayChanged?.(display)),
+      }),
+      { source: { open: async () => ({ ...producer.source, setDisplay }) } },
+      undefined,
+      (options) => {
+        displayChanged = options.onDisplayChange;
+      },
+    );
+    await vi.waitFor(() => expect(setDisplay).toHaveBeenCalledOnce());
+    displayChanged?.({ ...display, maxDevicePixelRatio: 2 });
+    firstResize.resolve(true);
+    const renderer = await opening;
+
+    expect(setDisplay).toHaveBeenLastCalledWith({
+      ...display,
+      maxDevicePixelRatio: 2,
+    });
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Ready,
+    );
     renderer.destroy();
   });
 
@@ -2122,6 +2261,7 @@ async function createRenderer(
     presented.acknowledgePresentation?.();
     presented.frame.close();
   },
+  onSceneCreated?: (options: MediaRendererSceneOptions) => void,
 ) {
   const renderer = await createMediaRendererCore(
     {
@@ -2132,6 +2272,7 @@ async function createRenderer(
     } satisfies MediaRendererOptions,
     {
       createScene: async (sceneOptions) => {
+        onSceneCreated?.(sceneOptions);
         // A real push scene subscribes while it is being built and owns every
         // VideoFrame it accepts. This harness keeps that ownership boundary
         // without needing Pixi just to acknowledge the first presentation.

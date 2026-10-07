@@ -43,8 +43,14 @@ export function createIdMaskFrame(
     return undefined;
   }
 
-  const maskWidth = Math.max(...instructions.map(({ mask }) => mask.width));
-  const maskHeight = Math.max(...instructions.map(({ mask }) => mask.height));
+  /* Pixel-grid dimensions use integer parts throughout allocation and RLE
+     traversal. */
+  const maskWidth = Math.floor(
+    Math.max(...instructions.map(({ mask }) => mask.width)),
+  );
+  const maskHeight = Math.floor(
+    Math.max(...instructions.map(({ mask }) => mask.height)),
+  );
   const width = resolveRasterWidth(maskWidth, options.maxWidth);
   const height =
     width === maskWidth
@@ -130,8 +136,8 @@ function writeMaskRuns(
   detectionMaskId: number,
 ) {
   const counts = decodeCompressedRleCounts(mask.counts);
-  const maskWidth = mask.width;
-  const maskHeight = mask.height;
+  const maskWidth = Math.floor(mask.width);
+  const maskHeight = Math.floor(mask.height);
   let maskOffset = 0;
 
   for (let index = 0; index < counts.length; index += 1) {
@@ -178,9 +184,11 @@ function writeScaledMaskRuns(
   detectionMaskId: number,
 ) {
   const counts = decodeCompressedRleCounts(mask.counts);
-  const maskWidth = mask.width;
-  const maskHeight = mask.height;
+  const maskWidth = Math.floor(mask.width);
+  const maskHeight = Math.floor(mask.height);
   let maskOffset = 0;
+
+  const stride = axes.stride;
 
   for (let index = 0; index < counts.length; index += 1) {
     const runLength = counts[index] ?? 0;
@@ -192,20 +200,34 @@ function writeScaledMaskRuns(
 
     let x = Math.floor(maskOffset / maskHeight);
     let y = maskOffset - x * maskHeight;
-    let column = axes.columns[x];
+    let remaining = runLength;
 
-    for (let step = 0; step < runLength; step += 1) {
-      if (x >= maskWidth) {
-        break;
+    /* A run walks down one column and wraps into the next, so it splits into
+       column-sized segments. Within a segment the destination offset only ever
+       steps by the row pitch or stays put: createMaskAxisMap builds
+       `rows[i] = min(height - 1, floor(i * scale)) * width` with scale <= 1, so
+       consecutive entries differ by exactly 0 or exactly `width`. Walking the
+       destination directly therefore touches the same bytes the per-pixel loop
+       touched, and drops the bounds test, the wrap test and one typed-array
+       load from every source pixel. Where the scale collapses several source
+       rows onto one destination row, this writes that byte once instead of
+       once per source row. */
+    while (remaining > 0 && x < maskWidth) {
+      const span = Math.min(remaining, maskHeight - y);
+      const column = axes.columns[x];
+      const first = axes.rows[y];
+      const last = axes.rows[y + span - 1];
+
+      for (let offset = first; offset <= last; offset += stride) {
+        data[offset + column] = detectionMaskId;
       }
 
-      data[axes.rows[y] + column] = detectionMaskId;
-      y += 1;
+      remaining -= span;
+      y += span;
 
       if (y === maskHeight) {
         y = 0;
         x += 1;
-        column = axes.columns[x];
       }
     }
 
@@ -220,13 +242,9 @@ function resolveRasterWidth(maskWidth: number, maxWidth: number | undefined) {
 }
 
 /**
- * A stroke is measured in texels of the raster it is drawn on, so a coarser
- * raster measures it in coarser texels. A stroke of a texel or more keeps at
- * least one, the thinnest line the shader can draw; a narrower one keeps its
- * own width, which the shader draws as an inner boundary at any scale. The
- * ceiling is the widest neighbourhood the shaders scan, so a wider stroke would
- * be drawn at the ceiling anyway and every layer drawing the same annotation
- * has to arrive at the same width.
+ * Converts a source-grid stroke width into raster texels. Fractional widths
+ * let coverage shaders draw a border within a texel. The ceiling bounds the
+ * neighbourhood the shaders scan.
  */
 export function resolveIdMaskStrokeTexels(
   strokeWidth: number,
@@ -235,15 +253,14 @@ export function resolveIdMaskStrokeTexels(
 ) {
   const scale = maskWidth > 0 ? rasterWidth / maskWidth : 1;
 
-  return Math.min(
-    Math.max(strokeWidth * scale, Math.min(strokeWidth, 1)),
-    MAX_ID_MASK_STROKE_WIDTH,
-  );
+  return Math.min(strokeWidth * scale, MAX_ID_MASK_STROKE_WIDTH);
 }
 
 interface ScaledMaskAxes {
   readonly columns: Int32Array;
   readonly rows: Int32Array;
+  /** Destination row pitch, so a run can step rows without re-reading `rows`. */
+  readonly stride: number;
 }
 
 function createScaledMaskAxes(frame: {
@@ -255,6 +272,7 @@ function createScaledMaskAxes(frame: {
   return {
     columns: createMaskAxisMap(frame.maskWidth, frame.width, 1),
     rows: createMaskAxisMap(frame.maskHeight, frame.height, frame.width),
+    stride: frame.width,
   };
 }
 

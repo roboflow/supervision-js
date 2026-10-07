@@ -41,6 +41,7 @@ import type {
   MediaFrameRenderTimings,
   MediaRendererPresentation,
 } from "#types/media-renderer";
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import { captureCanvasMediaFrame } from "./media-frame-capture";
 import {
   drawFramePresentLayers,
@@ -67,6 +68,7 @@ import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { queryMaxTextureSize } from "./depth-textures";
 import { createPixiDepthLayer } from "./pixi-depth-layer";
 import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
+import { installPixiBatchTextureBindings } from "./pixi-batch-texture-bindings";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
@@ -547,6 +549,7 @@ export async function createPixiMediaScene(
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: initialMaskPreparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
+        onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
         resolveInstructions: resolveArtifactMaskInstructions,
       })
@@ -573,6 +576,10 @@ export async function createPixiMediaScene(
     preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
+  const destroyBatchTextureBindings = installPixiBatchTextureBindings(
+    pixi,
+    app.renderer,
+  );
 
   const rendererCanvas = app.canvas;
   rendererCanvas.style.display = "block";
@@ -661,9 +668,11 @@ export async function createPixiMediaScene(
     containerSize.height =
       options.container.clientHeight || containerSize.height;
   };
+  let currentMaxDevicePixelRatio = options.maxDevicePixelRatio;
   let presentationResolution = resolvePixiResolution(
-    options.maxDevicePixelRatio,
+    currentMaxDevicePixelRatio,
   );
+  let rasterDisplay: MediaRendererDisplay | undefined;
   let appliedResolution: number | undefined;
   const interactionLayer =
     options.interaction || options.editingEngine
@@ -689,6 +698,7 @@ export async function createPixiMediaScene(
             width: mediaWidth,
           }),
           onStateChange: () => {
+            if (isDestroyed) return;
             drawFocusLayer(currentMediaTime);
             drawInteractionPresentationLayer(currentMediaTime);
             drawAnnotationOverlay(currentMediaTime, overlayNow());
@@ -905,6 +915,27 @@ export async function createPixiMediaScene(
     return presentationBox;
   };
 
+  const syncDisplaySizing = () => {
+    if (!baseFit || mediaWidth <= 0 || mediaHeight <= 0) return;
+    const display: MediaRendererDisplay = {
+      boxWidth: mediaWidth * baseFit.scale,
+      boxHeight: mediaHeight * baseFit.scale,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      maxDevicePixelRatio: presentationResolution,
+    };
+    const previous = rasterDisplay;
+    if (
+      previous?.boxWidth === display.boxWidth &&
+      previous.boxHeight === display.boxHeight &&
+      resolveDisplayPixelRatio(previous) === resolveDisplayPixelRatio(display)
+    ) {
+      return;
+    }
+    rasterDisplay = display;
+    maskLayer?.setRasterDisplay(display);
+    options.onDisplayChange?.(display);
+  };
+
   const applyViewportTransform = () => {
     if (!mediaScene || !baseFit) return;
     const transform = viewport.getTransform();
@@ -938,8 +969,12 @@ export async function createPixiMediaScene(
     options.container,
     () => {
       measureContainer();
+      presentationResolution = resolvePixiResolution(
+        currentMaxDevicePixelRatio,
+      );
       syncPresentationBox();
       updateMediaSceneFit();
+      syncDisplaySizing();
       renderOnChange();
     },
   );
@@ -1207,6 +1242,7 @@ export async function createPixiMediaScene(
       stagingTextureSource = canvasSource;
       stagingTexture = texture;
       updateMediaSceneFit();
+      syncDisplaySizing();
       if (frameChannel) mediaCompositor = createSceneMediaCompositor();
     },
 
@@ -1233,6 +1269,7 @@ export async function createPixiMediaScene(
         throw new Error("Pixi media scene has not been initialized.");
       }
 
+      isPresenting = true;
       try {
         currentMediaTime = sample.timestamp;
         hasPresentedSample = true;
@@ -1289,6 +1326,7 @@ export async function createPixiMediaScene(
           },
         };
       } finally {
+        isPresenting = false;
         sample.close();
         scheduleDepthUploadAhead(currentMediaTime);
       }
@@ -1336,9 +1374,11 @@ export async function createPixiMediaScene(
     },
 
     setRenderQuality(maxDevicePixelRatio) {
+      currentMaxDevicePixelRatio = maxDevicePixelRatio;
       presentationResolution = resolvePixiResolution(maxDevicePixelRatio);
       syncPresentationBox();
       updateMediaSceneFit();
+      syncDisplaySizing();
       renderOnChange();
     },
 
@@ -1722,6 +1762,7 @@ export async function createPixiMediaScene(
       // one. A frame that arrives after this still has to be closed, or it pins
       // a decoder buffer in a producer that outlives the scene.
       frameChannel?.onPresentedFrame((presented) => presented.frame.close());
+      destroyBatchTextureBindings();
       mediaCompositor?.destroy();
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
@@ -1852,9 +1893,12 @@ export async function createPixiMediaScene(
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: preparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
+        onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
         resolveInstructions: resolveArtifactMaskInstructions,
       });
+
+      if (rasterDisplay) maskLayer.setRasterDisplay(rasterDisplay);
 
       maskLayer.setPlaybackActive(isPlaybackActive);
 
@@ -2288,6 +2332,12 @@ export async function createPixiMediaScene(
     );
   }
 
+  function releaseMaskTextureBindings(texture: PixiTexture) {
+    focusLayer?.releaseMaskTexture(texture);
+    interactionPresentationLayer?.releaseMaskTexture(texture);
+    regionLayer.releaseMaskTexture(texture);
+  }
+
   function drawFocusLayer(mediaTime: number) {
     if (!focusLayer) {
       return;
@@ -2390,16 +2440,17 @@ export async function createPixiMediaScene(
 
   /** Redraws the frame on screen whether or not its readiness moved. */
   function redrawAnnotationsNow(forceRender = false) {
-    if (isPresenting || isDestroyed) {
+    if (isPresenting || isDestroyed || !hasPresentedSample) {
       return;
     }
 
     const { boxState, regionState } = drawAnnotationFrame(currentMediaTime);
 
-    if (!frameChannel) return;
-    const signature = describeSceneRender();
-    if (forceRender) renderScheduler.render(signature);
-    else if (!renderScheduler.renderOnChange(signature)) return;
+    if (frameChannel) {
+      const signature = describeSceneRender();
+      if (forceRender) renderScheduler.render(signature);
+      else if (!renderScheduler.renderOnChange(signature)) return;
+    }
 
     options.onPresentationUpdate?.(
       createPresentedSampleState(currentMediaTime, boxState, regionState),

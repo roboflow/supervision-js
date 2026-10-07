@@ -353,8 +353,8 @@ export function TimelineView({
       const nextTime = getPointerTime(event);
 
       inputPointerTimeRef.current = nextTime;
-      // A click is one seek. Pointer movement is what turns it into a scrub.
       gestureRef.current.onScrubStart(nextTime);
+      gestureRef.current.onScrubChange(nextTime);
     },
     [getPointerTime, mediaDuration],
   );

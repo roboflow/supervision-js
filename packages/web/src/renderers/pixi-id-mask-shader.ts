@@ -4,6 +4,10 @@ import type {
   InjectedShaderFactory,
 } from "#renderers/injected-pixi";
 import {
+  idMaskStrokeCoverageGlsl,
+  idMaskStrokeCoverageWgsl,
+} from "#renderers/id-mask-stroke-coverage";
+import {
   ID_MASK_STROKE_WIDTH_LANES,
   idMaskFillPaletteWgslField,
   idMaskPaletteGlsl,
@@ -56,6 +60,7 @@ type UniformGroupConstructor = new (
 export interface PixiIdMaskShaderRenderer {
   readonly mesh: PixiIdMaskMesh;
   clearTexture(): void;
+  releaseTexture(source: PixiImageSource): void;
   hide(): void;
   render(frame: PreparedIdMaskFrame, texture: PixiTexture): void;
   setOpacity(opacity: number): void;
@@ -79,6 +84,7 @@ export function createPixiIdMaskShaderRenderer(options: {
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     },
     uMaxStrokeWidth: { type: "f32", value: 0 },
+    uMaxFractionalStrokeWidth: { type: "f32", value: 0 },
     uStrokePalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
       type: "vec4<f32>",
@@ -128,6 +134,12 @@ export function createPixiIdMaskShaderRenderer(options: {
       bindTexture(placeholderSource);
     },
 
+    releaseTexture(source) {
+      if (shader.resources.uTexture !== source) return;
+      bindTexture(placeholderSource);
+      mesh.visible = false;
+    },
+
     destroy() {
       mesh.destroy();
       destroyShaderKeepingProgram(shader);
@@ -154,6 +166,11 @@ export function createPixiIdMaskShaderRenderer(options: {
       uniforms.uniforms.uMaxStrokeWidth = Math.min(
         frame.maxStrokeWidth,
         MAX_ID_MASK_STROKE_WIDTH,
+      );
+      uniforms.uniforms.uMaxFractionalStrokeWidth = frame.strokeWidths.reduce(
+        (maximum, width) =>
+          width > 0 && width < 1 ? Math.max(maximum, width) : maximum,
+        0,
       );
       uniforms.update();
       mesh.visible = true;
@@ -217,6 +234,7 @@ uniform sampler2D uTexture;
 uniform vec2 uTextureSize;
 uniform float uBorderEnabled;
 uniform float uMaxStrokeWidth;
+uniform float uMaxFractionalStrokeWidth;
 ${idMaskPaletteGlsl}
 out vec4 finalColor;
 
@@ -232,54 +250,21 @@ bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
 
-// Offsets are whole texels, so the integer loop bounds are themselves the
-// Chebyshev stroke-radius test: |offset| <= floor(w) iff |offset| <= w.
-// The winning candidate is the max-(offsetY, offsetX) passing offset, so the
-// scan runs backwards and exits on the first hit.
-float findNeighborStrokeId(float centerId, vec2 texel) {
-  int radius = int(min(uMaxStrokeWidth, float(${MAX_ID_MASK_STROKE_WIDTH})));
-
-  for (int offsetY = radius; offsetY >= -radius; offsetY -= 1) {
-    for (int offsetX = radius; offsetX >= -radius; offsetX -= 1) {
-      if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      float maskId = sampleMaskId(vUV + vec2(float(offsetX), float(offsetY)) * texel);
-
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
-        continue;
-      }
-
-      float distance = max(abs(float(offsetX)), abs(float(offsetY)));
-
-      if (readStrokeWidth(maskId) >= distance && readStroke(maskId).a > 0.0) {
-        return maskId;
-      }
-    }
-  }
-
-  return 0.0;
-}
-
-bool isBoundary(float centerId, vec2 texel) {
-  return
-    differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
-}
+${idMaskStrokeCoverageGlsl}
 
 void main(void) {
   float centerId = sampleMaskId(vUV);
   vec2 texel = 1.0 / uTextureSize;
+  vec2 cell = fract(vUV * uTextureSize);
+  vec2 footprint = fwidth(vUV * uTextureSize);
+  float pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId < 0.5) {
     if (uBorderEnabled > 0.5 && uMaxStrokeWidth > 0.0) {
-      float borderId = findNeighborStrokeId(centerId, texel);
+      vec2 border = findNeighborStroke(centerId, texel, cell, pixelWidth);
 
-      if (borderId > 0.5) {
-        finalColor = premultiplyAlpha(readStroke(borderId) * vColor);
+      if (border.x > 0.5) {
+        finalColor = premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
         return;
       }
     }
@@ -289,14 +274,21 @@ void main(void) {
   }
 
   if (uBorderEnabled > 0.5) {
-    bool shouldStroke =
-      readStrokeWidth(centerId) > 0.0 &&
-      readStroke(centerId).a > 0.0 &&
-      isBoundary(centerId, texel);
-
-    if (shouldStroke) {
-      finalColor = premultiplyAlpha(readStroke(centerId) * vColor);
-      return;
+    float width = readStrokeWidth(centerId);
+    if (width > 0.0 && readStroke(centerId).a > 0.0) {
+      float coverage = innerStrokeCoverage(centerId, texel, cell, width, pixelWidth);
+      if (coverage >= 1.0) {
+        finalColor = premultiplyAlpha(readStroke(centerId) * vColor);
+        return;
+      }
+      if (coverage > 0.0) {
+        finalColor = mix(
+          premultiplyAlpha(readFill(centerId) * vColor),
+          premultiplyAlpha(readStroke(centerId) * vColor),
+          coverage
+        );
+        return;
+      }
     }
   }
 
@@ -309,6 +301,7 @@ struct MaskUniforms {
   uBorderEnabled: f32,
   ${idMaskFillPaletteWgslField}
   uMaxStrokeWidth: f32,
+  uMaxFractionalStrokeWidth: f32,
   ${idMaskStrokePaletteWgslField}
   ${idMaskStrokeWidthsWgslField}
   uTextureSize: vec2<f32>,
@@ -330,43 +323,7 @@ fn differs(left: f32, right: f32) -> bool {
   return abs(left - right) > 0.5;
 }
 
-// Offsets are whole texels, so the integer loop bounds are themselves the
-// Chebyshev stroke-radius test: |offset| <= floor(w) iff |offset| <= w.
-// The winning candidate is the max-(offsetY, offsetX) passing offset, so the
-// scan runs backwards and exits on the first hit.
-fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
-  let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_ID_MASK_STROKE_WIDTH}.0));
-
-  for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
-    for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {
-      if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      let maskId = sampleMaskId(uv + vec2<f32>(f32(offsetX), f32(offsetY)) * texel);
-
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
-        continue;
-      }
-
-      let offsetDistance = max(abs(f32(offsetX)), abs(f32(offsetY)));
-
-      if (readStrokeWidth(maskId) >= offsetDistance && readStroke(maskId).a > 0.0) {
-        return maskId;
-      }
-    }
-  }
-
-  return 0.0;
-}
-
-fn isBoundary(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> bool {
-  return
-    differs(sampleMaskId(uv + vec2<f32>(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(0.0, -texel.y)), centerId);
-}
+${idMaskStrokeCoverageWgsl}
 
 @fragment
 fn mainFragment(
@@ -375,13 +332,16 @@ fn mainFragment(
 ) -> @location(0) vec4<f32> {
   let centerId = sampleMaskId(vUV);
   let texel = 1.0 / maskUniforms.uTextureSize;
+  let cell = fract(vUV * maskUniforms.uTextureSize);
+  let footprint = fwidth(vUV * maskUniforms.uTextureSize);
+  let pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId < 0.5) {
     if (maskUniforms.uBorderEnabled > 0.5 && maskUniforms.uMaxStrokeWidth > 0.0) {
-      let borderId = findNeighborStrokeId(vUV, centerId, texel);
+      let border = findNeighborStroke(vUV, centerId, texel, cell, pixelWidth);
 
-      if (borderId > 0.5) {
-        return premultiplyAlpha(readStroke(borderId) * vColor);
+      if (border.x > 0.5) {
+        return premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
       }
     }
 
@@ -389,13 +349,19 @@ fn mainFragment(
   }
 
   if (maskUniforms.uBorderEnabled > 0.5) {
-    let shouldStroke =
-      readStrokeWidth(centerId) > 0.0 &&
-      readStroke(centerId).a > 0.0 &&
-      isBoundary(vUV, centerId, texel);
-
-    if (shouldStroke) {
-      return premultiplyAlpha(readStroke(centerId) * vColor);
+    let width = readStrokeWidth(centerId);
+    if (width > 0.0 && readStroke(centerId).a > 0.0) {
+      let coverage = innerStrokeCoverage(vUV, centerId, texel, cell, width, pixelWidth);
+      if (coverage >= 1.0) {
+        return premultiplyAlpha(readStroke(centerId) * vColor);
+      }
+      if (coverage > 0.0) {
+        return mix(
+          premultiplyAlpha(readFill(centerId) * vColor),
+          premultiplyAlpha(readStroke(centerId) * vColor),
+          coverage
+        );
+      }
     }
   }
 

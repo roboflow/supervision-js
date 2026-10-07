@@ -38,6 +38,22 @@ describe("readDemoDisplayBox", () => {
     expect(readDemoDisplayBox(stage(0, 854), 1.5, "")).toBeUndefined();
   });
 
+  it("uses the canvas layout box when a CSS transform changes its bounding rectangle", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const container = {
+      ...stage(1280, 720),
+      clientWidth: 640,
+      clientHeight: 360,
+    } as HTMLElement;
+
+    expect(readDemoDisplayBox(container, 1.25, "")).toEqual({
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 1.25,
+    });
+  });
+
   it("says nothing when the URL asks for native decoding", () => {
     expect(
       readDemoDisplayBox(stage(1080, 854), 1.5, "?decode=native"),

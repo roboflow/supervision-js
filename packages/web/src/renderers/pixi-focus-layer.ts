@@ -149,6 +149,7 @@ export interface PixiFocusLayer {
     readonly height: number;
   }): PixiContainer | PixiFocusGraphics;
   drawFrame(context: PixiFocusLayerFrameContext): void;
+  releaseMaskTexture(texture: PixiTexture): void;
   tick(timestamp: number): void;
   setFocusStyle(focusStyle: FocusStyle | null | undefined): void;
   destroy(): void;
@@ -242,6 +243,10 @@ export function createPixiFocusLayer(options: {
       hide();
       idMaskRenderer?.destroy();
       idMaskRenderer = undefined;
+    },
+
+    releaseMaskTexture(texture) {
+      if (!isDestroyed) idMaskRenderer?.releaseTexture(texture.source);
     },
 
     drawFrame(context) {
@@ -756,6 +761,7 @@ function getTargetMaskIds(targets: readonly DetectionPickResult[]) {
 interface FocusIdMaskRenderer {
   readonly mesh: PixiFocusMesh;
   hide(): void;
+  releaseTexture(source: PixiImageSource): void;
   /** Whether what the mesh last drew still has its ID raster behind it. */
   isDrawnFrameIntact(): boolean;
   render(
@@ -839,6 +845,10 @@ function createFocusIdMaskRenderer(options: {
 
     hide() {
       mesh.visible = false;
+    },
+
+    releaseTexture(source) {
+      if (boundSource === source) bindTexture(placeholderSource);
     },
 
     isDrawnFrameIntact() {

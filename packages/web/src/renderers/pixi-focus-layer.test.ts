@@ -67,6 +67,40 @@ afterEach(() => {
 });
 
 describe("pixi focus layer", () => {
+  it("releases an evicted ID texture and sampler even while focus is hidden", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+    expect(mesh.shader.resources.uTexture).toBe(textureSource);
+    expect(mesh.shader.resources.uSampler).toBe(textureSource.style);
+    layer.setFocusStyle(null);
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+    expect(mesh.visible).toBe(false);
+
+    layer.releaseMaskTexture(artifact.texture);
+
+    expect(mesh.shader.resources.uTexture).not.toBe(textureSource);
+    expect(mesh.shader.resources.uSampler).not.toBe(textureSource.style);
+    layer.destroy();
+  });
+
   it("draws a dim overlay with vector cutouts for selected detections", () => {
     const selectedPick = {
       detection: frame.detections[0]!,

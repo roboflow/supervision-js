@@ -33,6 +33,45 @@ const frames: DetectionFrame[] = [
 ];
 
 describe("buffered detection timeline", () => {
+  it("validates an unknown custom-source frame first loaded into a later window", async () => {
+    const sourceFrames: DetectionFrame[] = [
+      { detections: [], frameIndex: 0, mediaTime: 0 },
+      {
+        detections: [
+          {
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2.5,
+              width: 2,
+            },
+          },
+        ],
+        frameIndex: 150,
+        mediaTime: 15,
+      },
+    ];
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0,
+      source: {
+        loadFrames: async (startTime, endTime) =>
+          sourceFrames.filter(
+            (frame) =>
+              frame.mediaTime >= startTime && frame.mediaTime <= endTime,
+          ),
+      },
+    });
+
+    try {
+      await timeline.prepare(0);
+      await expect(timeline.prepare(15)).rejects.toThrow("mask.height");
+      expect(timeline.getState().status).toBe(DetectionBufferStatus.Error);
+    } finally {
+      timeline.destroy();
+    }
+  });
+
   it("loads a warm window and selects frames synchronously from the hot buffer", async () => {
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 2,
@@ -414,7 +453,8 @@ describe("buffered detection timeline", () => {
   });
 
   it("retains unchanged internal frames across an immutable rolling window", async () => {
-    const source = { loadFrames: vi.fn(async () => frames) };
+    const source = createArrayDetectionFrameSource(frames);
+    vi.spyOn(source, "loadFrames");
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 5,
       bufferBehindSeconds: 0.5,
@@ -436,6 +476,13 @@ describe("buffered detection timeline", () => {
     expect(refreshedSnapshot[0]).toBe(initialSnapshot[0]);
     expect(timeline.getBufferedFrames()[0]).not.toBe(initialPublicFrame);
     expect(timeline.getBufferedFrames()[0]).not.toBe(refreshedSnapshot[0]);
+
+    await timeline.prepare(20);
+    expect(getBufferedDetectionTimelineFrameSnapshot(timeline)).toEqual([]);
+    await timeline.prepare(0);
+    expect(getBufferedDetectionTimelineFrameSnapshot(timeline)[0]).toBe(
+      initialSnapshot[0],
+    );
   });
 
   it("hydrates loop-crossing hot buffers from tail and head source ranges", async () => {
@@ -1251,6 +1298,128 @@ describe("buffered detection timeline", () => {
     expect(source.destroy).toHaveBeenCalledOnce();
     expect(source.loadFrames).not.toHaveBeenCalled();
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Destroyed);
+  });
+
+  it("does not remember stale frames when a write completes during a load", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "write-during-load",
+      store,
+    });
+    await source.appendFrames([
+      { detections: [{ id: "old" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const captured = createDeferred<void>();
+    const release = createDeferred<void>();
+    const originalLoadFrames = store.loadFrames.bind(store);
+    vi.spyOn(store, "loadFrames").mockImplementationOnce(async (options) => {
+      const loadedFrames = await originalLoadFrames(options);
+      captured.resolve();
+      await release.promise;
+      return loadedFrames;
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+    const prepare = timeline.prepare(0);
+    await captured.promise;
+    await source.appendFrames([
+      { detections: [{ id: "new" }], endTime: 1, mediaTime: 0 },
+    ]);
+    release.resolve();
+    await prepare;
+
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
+    await timeline.prepare(10);
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
+    timeline.destroy();
+  });
+
+  it("does not remember an incremental read superseded by source replacement", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "replace-during-patch",
+      store,
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+    await source.appendFrames([
+      { detections: [{ id: "initial" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+    await source.appendFrames([
+      { detections: [{ id: "patch" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const captured = createDeferred<void>();
+    const release = createDeferred<void>();
+    const originalLoadFrames = store.loadFrames.bind(store);
+    vi.spyOn(store, "loadFrames").mockImplementationOnce(async (options) => {
+      const loadedFrames = await originalLoadFrames(options);
+      captured.resolve();
+      await release.promise;
+      return loadedFrames;
+    });
+    const prepare = timeline.prepare(0.5);
+    await captured.promise;
+    await source.replaceFrames([
+      { detections: [{ id: "replacement" }], endTime: 1, mediaTime: 0 },
+    ]);
+    release.resolve();
+    await prepare;
+
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
+    await timeline.prepare(10);
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
+    timeline.destroy();
+  });
+
+  it("settles a window load while overlapping live writes continue", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "racing-live-writes",
+      store,
+    });
+    await source.appendLiveFrame({
+      detections: [{ id: "initial" }],
+      mediaTime: 0,
+    });
+    const originalLoadFrames = store.loadFrames.bind(store);
+    let revision = 0;
+    let racing = true;
+    vi.spyOn(store, "loadFrames").mockImplementation(async (options) => {
+      const loadedFrames = await originalLoadFrames(options);
+      if (racing && revision < 4) {
+        revision += 1;
+        await source.appendLiveFrame({
+          detections: [{ id: `revision-${revision}` }],
+          mediaTime: 0,
+        });
+      }
+      return loadedFrames;
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await timeline.prepare(0);
+    expect(revision).toBe(1);
+    expect(timeline.selectFrame(0.5)).toBeDefined();
+    racing = false;
+    await timeline.prepare(0.5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("revision-1");
+    timeline.destroy();
   });
 
   it("reloads a buffered range when the source version changes", async () => {

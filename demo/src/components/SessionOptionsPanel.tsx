@@ -310,21 +310,10 @@ function SessionOptionControls({
           )}
         />
         <ControlSubheading>Until the masks are drawn</ControlSubheading>
-        <ToggleControl
-          checked={waitingForMasks}
-          label="Playback gate enabled"
-          libraryDefault={formatOptionFlag(
-            libraryPreparationGate?.enabled ?? false,
-          )}
-          onChange={(checked) => onUpdate("preparationGateEnabled", checked)}
-          optionPath="renderPreparation.playbackGate.enabled"
-          origin={readDemoOptionOrigin(
-            options.preparationGateEnabled,
-            waitingForMasks,
-            libraryPreparationGate?.enabled ?? false,
-          )}
-          tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
-        />
+        <ControlNote>
+          The mask playback gate and mask presentation quality are in Style →
+          Segmentation.
+        </ControlNote>
         <SliderControl
           label="Mask max wait seconds"
           libraryDefault={formatOptionSeconds(
@@ -341,7 +330,7 @@ function SessionOptionControls({
             libraryPreparationGate?.maxWaitSeconds,
           )}
           step={0.25}
-          tooltip="How long one mask-preparation wait may freeze the picture before the gate gives up and lets frames through without masks. It can hold again after preparation makes progress. `renderer.renderPreparation.playbackGate.maxWaitSeconds`, default 2s."
+          tooltip="How long one mask-preparation wait may freeze the picture before the gate gives up and lets frames through with available masks. It can hold again after preparation makes progress. `renderer.renderPreparation.playbackGate.maxWaitSeconds`, default 2s."
           value={
             options.preparationGateMaxWaitSeconds ??
             preparationGate?.maxWaitSeconds ??
@@ -582,10 +571,35 @@ function SessionOptionControls({
             libraryMaskFrame?.maxCacheFrameCount,
           )}
           step={1}
-          tooltip="How many drawn masks are held in memory before the oldest are dropped. Set it under the prefetch count and masks the playhead is about to reach get thrown out and drawn a second time. Set it over, and all it costs is memory. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 8 seconds' worth for a file and 5 for a stream."
+          tooltip="How many prepared mask frames may stay cached. This count and the byte budget both limit retention; frames farthest from the playhead are dropped first. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 90 seconds' worth for a file and 5 for a stream."
           value={
             options.maskMaxCacheFrameCount ?? maskFrame?.maxCacheFrameCount
           }
+        />
+        <NumberControl
+          label="Max cache bytes (MiB)"
+          libraryDefault="auto"
+          min={16}
+          onChange={(value) =>
+            onUpdate(
+              "maskMaxCacheBytes",
+              value === undefined
+                ? undefined
+                : Math.floor(Math.max(16, value) * BYTES_PER_MEBIBYTE),
+            )
+          }
+          optionPath="maskFrame.maxCacheBytes"
+          origin={readDemoOptionOrigin(
+            options.maskMaxCacheBytes,
+            options.maskMaxCacheBytes ?? maskFrame?.maxCacheBytes,
+            libraryMaskFrame?.maxCacheBytes,
+          )}
+          placeholder="auto"
+          step={16}
+          tooltip="Memory reserved for cached mask rasters, in MiB. This budget and Max cache frame count both limit retention. Empty uses 64 MiB per reported GB of device memory, clamped to 256 MiB–1 GiB, or 256 MiB when unavailable. An explicit budget has a 16 MiB minimum. The active mask stays until replaced; this is not a limit on total browser memory. `renderer.renderPreparation.maskFrame.maxCacheBytes`."
+          value={toMebibytes(
+            options.maskMaxCacheBytes ?? maskFrame?.maxCacheBytes,
+          )}
         />
         <NumberControl
           label="Max pending frame count"
@@ -775,7 +789,7 @@ function SessionOptionControls({
           optionPath="previewWidth"
           placeholder="auto"
           step={16}
-          tooltip="How wide those coarse frames are, in pixels. Wider is sharper while you drag and fewer of them fit in memory. `previewWidth`; empty follows the box the picture is shown in and never goes past 320."
+          tooltip="How wide those coarse frames are, in pixels. Wider is sharper while you drag and fewer of them fit in memory. `previewWidth`; empty uses at most 320 pixels across. Display-box decoding also limits it to the picture's rendered size."
           value={options.previewWidth ?? engine.previewWidth}
         />
         <NumberControl

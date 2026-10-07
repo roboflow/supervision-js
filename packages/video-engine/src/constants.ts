@@ -169,7 +169,7 @@ export const FRAME_TIMELINE = {
  * session path that is a probe plus a walk from the enclosing sync sample,
  * measured at 49ms mean / 80ms worst on a 2840x2840 15fps source, flat in how
  * far the jump travelled. Coverage past the window is worth having, not worth
- * having crisp, so it lives in the preview tier at a 79th of the bytes.
+ * having crisp, so it lives in the smaller preview tier.
  *
  * resolveCacheBudgets turns these into a per-source budget from
  * navigator.deviceMemory and the decode frame size. A crisp slot costs
@@ -191,9 +191,8 @@ export const FRAME_TIMELINE = {
  * PREVIEW_SLOTS_MAX: the preview slot count is its byte budget over the
  * downscaled frame size, capped here. No floor pairs with it: raising a starved
  * count means overspending the byte budget, when the frame width is what a wide
- * preview has to give up. At a 79th of a crisp slot the tier carries the
- * timeline coverage an 8MP source cannot afford crisply: 163 slots against the
- * exact tier's 13, 11s of a 15fps clip.
+ * preview has to give up. A 320px square preview costs about a 79th of an
+ * 8MP crisp slot, so that source keeps coarse history beyond its exact window.
  *
  * SKIP_NEAR_MS: cache lookups that resolve to a frame within this many
  * milliseconds of what the visible canvas already shows are rejected so the
