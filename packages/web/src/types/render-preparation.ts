@@ -131,10 +131,13 @@ export interface RenderPreparationMaskFrameOptions {
    */
   readonly maxCacheFrameCount?: number;
   /**
-   * Ceiling in bytes for prepared mask rasters held in memory, charged per
-   * frame from its raster. Bounds memory where `maxCacheFrameCount` bounds a
-   * count; whichever is reached first evicts. Default: 64 MiB per reported GB
-   * of device memory, clamped to 256 MiB–1 GiB; 256 MiB when unavailable.
+   * Byte budget for retained prepared mask payloads and reserved renderer
+   * backing, including exact region coverage. Values below 16 MiB are raised
+   * to 16 MiB. This budget and `maxCacheFrameCount` both trigger eviction;
+   * the active frame remains protected even when it exceeds the budget.
+   * Transient preparation allocations and unrelated renderer resources are
+   * excluded. Default: 64 MiB per reported GB of device memory, clamped to
+   * 256 MiB–1 GiB; 256 MiB when unavailable.
    */
   readonly maxCacheBytes?: number;
   /**
@@ -298,7 +301,7 @@ export interface RenderPreparationArtifactDiagnostics {
   readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
-  /** Byte ceiling for prepared rasters, and how much of it is in use. */
+  /** Retained payload and renderer backing budget, and its current reservation. */
   readonly maxPreparedBytes?: number;
   readonly preparedBytes?: number;
   /** Prepared rasters currently at the coarse tier, owed a fine cook once settled. */

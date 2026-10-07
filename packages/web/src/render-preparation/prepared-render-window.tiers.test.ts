@@ -767,7 +767,7 @@ describe("prepared raster quality gate", () => {
 
   it.each([
     { maxCacheBytes: undefined, expectedFineFrames: 3 },
-    { maxCacheBytes: 20_000_001, expectedFineFrames: 2 },
+    { maxCacheBytes: 20_000_145, expectedFineFrames: 2 },
   ])(
     "banks a fine lead capped to $expectedFineFrames retainable frames",
     async ({ maxCacheBytes, expectedFineFrames }) => {
@@ -984,7 +984,7 @@ describe("prepared-mask cache bounded by bytes", () => {
         maskStyle: new BaseMaskStyle(),
         maxMaskFrameCacheBytes:
           budget === "bytes"
-            ? residentFrames * FINE * height * 2 + 1
+            ? residentFrames * (FINE * height * 2 + 72) + 1
             : Number.POSITIVE_INFINITY,
         maxMaskFrameCacheSize: budget === "count" ? residentFrames : 100,
         prefetchFrameCount: 8,
@@ -1002,7 +1002,7 @@ describe("prepared-mask cache bounded by bytes", () => {
           count < 40 && worker.pendingRequestCount > 0;
           count += 1
         ) {
-          worker.completeNext(new Uint8Array(1));
+          worker.completeNext();
           await vi.advanceTimersByTimeAsync(0);
         }
         expect(worker.pendingRequestCount).toBe(0);
@@ -1044,7 +1044,7 @@ describe("prepared-mask cache bounded by bytes", () => {
     const renderWindow = createPreparedRenderWindow({
       detectionTimeline: timelineOf(frames) as never,
       maskStyle: new BaseMaskStyle(),
-      maxMaskFrameCacheBytes: 15 * FINE * height * 2 + 1,
+      maxMaskFrameCacheBytes: 15 * (FINE * height * 2 + 72) + 1,
       maxMaskFrameCacheSize: 100,
       prefetchFrameCount: 8,
       preparedWindowScanIntervalSeconds: 0,
@@ -1064,7 +1064,7 @@ describe("prepared-mask cache bounded by bytes", () => {
           count < 40 && worker.pendingRequestCount > 0;
           count += 1
         ) {
-          worker.completeNext(new Uint8Array(1));
+          worker.completeNext();
           await vi.advanceTimersByTimeAsync(0);
         }
         expect(worker.pendingRequestCount).toBe(0);
@@ -1111,7 +1111,7 @@ describe("prepared-mask cache bounded by bytes", () => {
         maskStyle: new BaseMaskStyle(),
         maxMaskFrameCacheBytes:
           budget === "bytes"
-            ? 2 * FINE * height * 2 + 1
+            ? 2 * (FINE * height * 2 + 72) + 1
             : Number.POSITIVE_INFINITY,
         maxMaskFrameCacheSize: budget === "count" ? 2 : 100,
         prefetchFrameCount: 4,
@@ -1135,7 +1135,7 @@ describe("prepared-mask cache bounded by bytes", () => {
         ) {
           for (const worker of workers) {
             if (worker.pendingRequestCount > 0) {
-              worker.completeNext(new Uint8Array(1));
+              worker.completeNext();
             }
           }
           await vi.advanceTimersByTimeAsync(0);
@@ -1196,7 +1196,7 @@ describe("prepared-mask cache bounded by bytes", () => {
       resetMocks();
       const height = 104_858;
       const frames = wideFrames(7, height);
-      const frameBytes = FINE * height * 2;
+      const frameBytes = FINE * height * 2 + 72;
       const worker = createDeferredTierWorker();
       const diagnostics: RenderPreparationDiagnostics[] = [];
       const renderWindow = createPreparedRenderWindow({
@@ -1231,8 +1231,8 @@ describe("prepared-mask cache bounded by bytes", () => {
         );
         for (let index = 0; index < frames.length; index++) {
           if (!worker.pendingRequestCount) break;
-          // Cache charging uses geometry; no test pixels need to be drawn.
-          worker.completeNext(new Uint8Array(1));
+          // The worker payload retains a raster matching the declared geometry.
+          worker.completeNext();
           await vi.advanceTimersByTimeAsync(0);
         }
         const artifact = diagnostics.at(-1)!.artifacts[0]!;
@@ -1279,7 +1279,7 @@ describe("prepared-mask cache bounded by bytes", () => {
       const renderWindow = createPreparedRenderWindow({
         detectionTimeline: timelineOf(frames) as never,
         maskStyle: new BaseMaskStyle(),
-        maxMaskFrameCacheBytes: 2 * FINE * height * 2 + 1,
+        maxMaskFrameCacheBytes: 2 * (FINE * height * 2 + 72) + 1,
         maxMaskFrameCacheSize: 100,
         onMaskFrameEvicted: evicted,
         prefetchFrameCount: 4,

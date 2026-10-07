@@ -173,6 +173,8 @@ export function createPreparedRenderWindow(options: {
   readonly maskStyle?: MaskStyle | null;
   readonly maxMaskFrameCacheSize?: number;
   readonly maxMaskFrameCacheBytes?: number;
+  /** Reserves renderer backing before a prepared frame can be drawn. */
+  readonly resolveMaskFrameBackingBytes?: (frame: PreparedMaskFrame) => number;
   readonly onMaskFrameEvicted?: (key: string) => void;
   readonly onMaskFramePrepared?: (maskFrame: PreparedMaskFrame) => void;
   readonly onMaskFramesCleared?: () => void;
@@ -216,8 +218,8 @@ export function createPreparedRenderWindow(options: {
      evicts under any wide scrub (one re-cook per cook, measured), 90 s holds a
      70 s clip but costs 2.4 GB. Bytes are the honest unit. The count above
      stays as a ceiling; this budget is what actually bounds memory, and it is
-     charged per frame from the raster the cook produced, so it needs no guess
-     about raster size up front. Default mirrors the engine's frame cache:
+     charged from each frame's payload and reserved texture backing, so it
+     needs no guess about raster size up front. Default mirrors the engine's frame cache:
      per GB of device memory, clamped. */
   const requestedMaskFrameCacheBytes =
     options.maxMaskFrameCacheBytes ??
@@ -236,16 +238,26 @@ export function createPreparedRenderWindow(options: {
 
   function chargeMaskFrame(
     key: string,
-    maskFrame: { width: number; height: number; kind: PreparedMaskFrameKind },
+    maskFrame: PreparedMaskFrame,
     tier: PreparedRasterTier,
   ) {
-    /* An id-mask frame is one byte per pixel on the CPU (the id plane) and,
-       once drawn, one byte per pixel again as an R8 texture the layer keeps
-       per cached key. The RGBA composite fallback is four bytes per pixel
-       plus its plane. Charging five bytes for every frame, as a first version
-       did, starved the cache five-fold and thrashed at 430% of a core. */
-    const perPixel = maskFrame.kind === PreparedMaskFrameKind.IdMask ? 2 : 5;
-    const bytes = Math.max(1, maskFrame.width * maskFrame.height * perPixel);
+    const pixels = maskFrame.width * maskFrame.height;
+    const payloadBytes =
+      maskFrame.kind === PreparedMaskFrameKind.IdMask
+        ? maskFrame.raster.byteLength +
+          maskFrame.fillPalette.byteLength +
+          maskFrame.strokePalette.byteLength +
+          maskFrame.strokeWidths.byteLength
+        : pixels * 4 + (maskFrame.idMaskPlane?.data.byteLength ?? 0);
+    const coverageBytes =
+      maskFrame.regionMaskCoverage?.entries.reduce(
+        (total, entry) => total + entry.data.byteLength,
+        0,
+      ) ?? 0;
+    const backingBytes = options.resolveMaskFrameBackingBytes
+      ? options.resolveMaskFrameBackingBytes(maskFrame)
+      : pixels * (maskFrame.kind === PreparedMaskFrameKind.IdMask ? 1 : 4);
+    const bytes = Math.max(1, payloadBytes + coverageBytes + backingBytes);
     preparedMaskBytesByKey.set(key, bytes);
     preparedMaskBytes += bytes;
     largestMaskFrameBytesByTier.set(

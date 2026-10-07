@@ -297,6 +297,7 @@ export function createPixiMaskLayer(options: {
     renderPreparation: options.renderPreparation,
     resolveInstructions: options.resolveInstructions,
     resolveMaxRasterWidth,
+    resolveMaskFrameBackingBytes,
   });
 
   return {
@@ -611,6 +612,32 @@ export function createPixiMaskLayer(options: {
     );
   }
 
+  function needsFourChannelIds(width: number) {
+    return (
+      width % TEXTURE_ROW_ALIGNMENT_BYTES !== 0 &&
+      options.acceptsUnalignedTextureRows?.() !== true
+    );
+  }
+
+  function resolveMaskFrameBackingBytes(maskFrame: PreparedMaskFrame) {
+    const pixels = maskFrame.width * maskFrame.height;
+    // Reserve backing before upload: drawn frames keep these resources until eviction.
+    let bytes =
+      maskFrame.kind === PreparedMaskFrameKind.IdMask
+        ? pixels * (needsFourChannelIds(maskFrame.width) ? 8 : 1)
+        : pixels * 4;
+    for (const entry of maskFrame.regionMaskCoverage?.entries ?? []) {
+      bytes += entry.width * entry.height * 8;
+    }
+    if (
+      maskFrame.kind === PreparedMaskFrameKind.RgbaImage &&
+      maskFrame.idMaskPlane
+    ) {
+      bytes += maskFrame.idMaskPlane.width * maskFrame.idMaskPlane.height * 8;
+    }
+    return bytes;
+  }
+
   function createTextureSource(maskFrame: PreparedMaskFrame) {
     if (maskFrame.kind !== PreparedMaskFrameKind.IdMask) {
       return new options.ImageSource({
@@ -629,9 +656,7 @@ export function createPixiMaskLayer(options: {
       return undefined;
     }
 
-    const needsFourChannels =
-      maskFrame.width % TEXTURE_ROW_ALIGNMENT_BYTES !== 0 &&
-      options.acceptsUnalignedTextureRows?.() !== true;
+    const needsFourChannels = needsFourChannelIds(maskFrame.width);
 
     return new BufferImageSource({
       autoGenerateMipmaps: false,
