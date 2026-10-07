@@ -1050,6 +1050,36 @@ describe("push-presented Pixi scene", () => {
     expect(pixiMock.extractCanvas).not.toHaveBeenCalled();
   });
 
+  it("stages media over the texture limit smaller, yet paints and captures it at media size", async () => {
+    pixiMock.copyExternalImageToTexture.mockImplementationOnce(() => {
+      throw new TypeError("source could not be converted");
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maxTextureSize: 4096,
+    });
+    scene.initializeMedia({ height: 1200, width: 8000 });
+    const media = pixiMock.sprites[0];
+
+    channel.present(presentedFrame(2000, { height: 1200, width: 8000 }));
+    const capture = await scene.captureFrame?.(undefined);
+
+    expect(stagingContext.drawImage).toHaveBeenCalledWith(
+      expect.anything(),
+      0,
+      0,
+      4096,
+      614,
+    );
+    expect({
+      height: media.scale.y * media.quad.height,
+      width: media.scale.x * media.quad.width,
+    }).toStrictEqual({ height: 1200, width: 8000 });
+    expect(capture).toMatchObject({ height: 1200, width: 8000 });
+  });
+
   it("captures the pixels the compositor put on screen", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
