@@ -106,9 +106,8 @@ export function createBufferedDetectionTimeline(
   let state = createIdleDetectionBufferState();
   let destroyed = false;
   let loadId = 0;
-  /* Unchanged frames retain their snapshot identity after leaving the hot
-     window. The source's change journal invalidates remembered revisions. */
-  const snapshotByIdentity = new Map<string, DetectionFrame>();
+  // Preserve snapshot reuse without retaining evicted geometry.
+  const snapshotByIdentity = new Map<string, WeakRef<DetectionFrame>>();
   let snapshotSourceVersion: number | null = null;
   let bufferedSourceVersion: number | null = null;
   let bufferedVersionRange: {
@@ -165,7 +164,10 @@ export function createBufferedDetectionTimeline(
       return;
     }
 
-    const frames = [...snapshotByIdentity.values()];
+    const frames = [...snapshotByIdentity.values()].flatMap((reference) => {
+      const frame = reference.deref();
+      return frame ? [frame] : [];
+    });
     const changes =
       snapshotSourceVersion === null || frames.length === 0
         ? undefined
@@ -1235,17 +1237,17 @@ function mergeIncrementalFrames(
 const MAX_REMEMBERED_SNAPSHOTS = 8192;
 
 function rememberSnapshot(
-  snapshots: Map<string, DetectionFrame>,
+  snapshots: Map<string, WeakRef<DetectionFrame>>,
   frame: DetectionFrame,
 ) {
   const identity = getDetectionFrameIdentity(frame);
 
-  if (snapshots.get(identity) === frame) {
+  if (snapshots.get(identity)?.deref() === frame) {
     return;
   }
 
   snapshots.delete(identity);
-  snapshots.set(identity, frame);
+  snapshots.set(identity, new WeakRef(frame));
 
   while (snapshots.size > MAX_REMEMBERED_SNAPSHOTS) {
     const oldest = snapshots.keys().next().value;
@@ -1262,7 +1264,7 @@ function rememberSnapshot(
 function reuseBufferedFrameSnapshots(
   currentFrames: readonly DetectionFrame[],
   loadedFrames: readonly DetectionFrame[],
-  snapshots: ReadonlyMap<string, DetectionFrame>,
+  snapshots: ReadonlyMap<string, WeakRef<DetectionFrame>>,
 ) {
   const currentFramesByIdentity = new Map(
     currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
@@ -1272,7 +1274,8 @@ function reuseBufferedFrameSnapshots(
     .map((frame) => {
       const identity = getDetectionFrameIdentity(frame);
       const existing =
-        currentFramesByIdentity.get(identity) ?? snapshots.get(identity);
+        currentFramesByIdentity.get(identity) ??
+        snapshots.get(identity)?.deref();
 
       if (existing) {
         return existing;

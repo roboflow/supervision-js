@@ -453,7 +453,8 @@ describe("buffered detection timeline", () => {
   });
 
   it("retains unchanged internal frames across an immutable rolling window", async () => {
-    const source = { loadFrames: vi.fn(async () => frames) };
+    const source = createArrayDetectionFrameSource(frames);
+    vi.spyOn(source, "loadFrames");
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 5,
       bufferBehindSeconds: 0.5,
@@ -475,6 +476,13 @@ describe("buffered detection timeline", () => {
     expect(refreshedSnapshot[0]).toBe(initialSnapshot[0]);
     expect(timeline.getBufferedFrames()[0]).not.toBe(initialPublicFrame);
     expect(timeline.getBufferedFrames()[0]).not.toBe(refreshedSnapshot[0]);
+
+    await timeline.prepare(20);
+    expect(getBufferedDetectionTimelineFrameSnapshot(timeline)).toEqual([]);
+    await timeline.prepare(0);
+    expect(getBufferedDetectionTimelineFrameSnapshot(timeline)[0]).toBe(
+      initialSnapshot[0],
+    );
   });
 
   it("hydrates loop-crossing hot buffers from tail and head source ranges", async () => {
