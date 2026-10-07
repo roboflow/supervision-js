@@ -313,7 +313,6 @@ function GlobalRenderControls({
       </ControlSection>
 
       <ControlSection
-        description="Mask and polygon styles, plus mask preview and presentation quality."
         enabled={segmentationEnabled}
         evalHook={DemoEvalHook.SegmentationSection}
         onToggleEnabled={(checked) =>
