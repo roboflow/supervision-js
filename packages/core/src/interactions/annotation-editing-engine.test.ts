@@ -192,6 +192,171 @@ describe("annotation editing engine", () => {
     },
   );
 
+  it.each([
+    ["nw", { x: -200, y: -200 }, { x: 35, y: 25, width: 70, height: 50 }],
+    ["n", { x: 50, y: -200 }, { x: 50, y: 25, width: 40, height: 50 }],
+    ["ne", { x: 200, y: -200 }, { x: 65, y: 25, width: 70, height: 50 }],
+    ["e", { x: 200, y: 40 }, { x: 65, y: 40, width: 70, height: 20 }],
+    ["se", { x: 200, y: 200 }, { x: 65, y: 55, width: 70, height: 50 }],
+    ["s", { x: 50, y: 200 }, { x: 50, y: 55, width: 40, height: 50 }],
+    ["sw", { x: -200, y: 200 }, { x: 35, y: 55, width: 70, height: 50 }],
+    ["w", { x: -200, y: 40 }, { x: 35, y: 40, width: 70, height: 20 }],
+    ["nw", { x: 200, y: 200 }, { x: 85, y: 65, width: 30, height: 30 }],
+    ["se", { x: -200, y: -200 }, { x: 15, y: 15, width: 30, height: 30 }],
+  ])(
+    "bounds the %s handle in both preview and commit at %j",
+    (id, point, rect) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const detection = {
+        id: "box",
+        rect: { x: 50, y: 40, width: 40, height: 20 },
+      };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === id,
+      )!;
+      engine.beginHandleDrag(detection, handle, {
+        point: handle.point,
+        timestamp: 0,
+        mediaDimensions: { width: 100, height: 80 },
+      });
+      engine.pointerMove({ point, timestamp: 16 });
+      expect(engine.getState().preview?.rect).toEqual(rect);
+      engine.pointerUp({ point, timestamp: 32 });
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        { ...detection, rect },
+        detection,
+      );
+      expect(detection.rect).toEqual({ x: 50, y: 40, width: 40, height: 20 });
+    },
+  );
+
+  it.each([
+    {
+      rect: { x: 98, y: 78, width: 4, height: 4 },
+      media: { width: 100, height: 80 },
+      expected: { x: 97.5, y: 77.5, width: 5, height: 5 },
+    },
+    {
+      rect: { x: 1.5, y: 1, width: 3, height: 2 },
+      media: { width: 3, height: 2 },
+      expected: { x: 1.5, y: 1, width: 3, height: 2 },
+    },
+  ])(
+    "keeps the minimum-size resize inside media $media",
+    ({ rect, media, expected }) => {
+      const detection = { rect };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === "nw",
+      )!;
+      expect(
+        applyAnnotationHandleDrag(detection, handle, { x: 200, y: 200 }, media)
+          .rect,
+      ).toEqual(expected);
+    },
+  );
+
+  it("bounds a move without resizing the box and keeps fast translation consistent", () => {
+    const onCommit = vi.fn();
+    const onFastTranslate = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      onFastTranslate,
+      viewportScale: () => 0.25,
+    });
+    const detection = {
+      id: "box",
+      rect: { x: 50, y: 40, width: 40, height: 20 },
+    };
+    const start = { x: 45, y: 38 };
+    const pick = pickDetectionAtPoint(
+      { mediaTime: 0, detections: [detection] },
+      start,
+    );
+    engine.pointerDown(
+      {
+        point: start,
+        timestamp: 0,
+        mediaDimensions: { width: 100, height: 80 },
+      },
+      pick,
+    );
+    engine.pointerMove({ point: { x: 200, y: 200 }, timestamp: 16 });
+    expect(engine.getState().preview?.rect).toEqual({
+      x: 80,
+      y: 70,
+      width: 40,
+      height: 20,
+    });
+    expect(onFastTranslate).toHaveBeenLastCalledWith("box", 30, 30);
+    engine.pointerMove({ point: start, timestamp: 32 });
+    expect(engine.getState().preview?.rect).toEqual(detection.rect);
+    engine.pointerMove({ point: { x: -200, y: -200 }, timestamp: 48 });
+    const rect = { x: 20, y: 10, width: 40, height: 20 };
+    expect(engine.getState().preview?.rect).toEqual(rect);
+    expect(onFastTranslate).toHaveBeenLastCalledWith("box", -30, -30);
+    engine.pointerUp({ point: { x: -400, y: -400 }, timestamp: 64 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { ...detection, rect },
+      detection,
+    );
+  });
+
+  it("fits a previously oversized box inside the media when moving it", () => {
+    const engine = createAnnotationEditingEngine();
+    const detection = {
+      id: "box",
+      rect: { x: 50, y: 40, width: 140, height: 100 },
+    };
+    const point = { x: 50, y: 40 };
+    engine.pointerDown(
+      { point, timestamp: 0, mediaDimensions: { width: 100, height: 80 } },
+      pickDetectionAtPoint({ mediaTime: 0, detections: [detection] }, point),
+    );
+    engine.pointerMove({ point: { x: 200, y: 200 }, timestamp: 16 });
+    expect(engine.getState().preview?.rect).toEqual({
+      x: 50,
+      y: 40,
+      width: 100,
+      height: 80,
+    });
+  });
+
+  it.each([
+    [
+      { x: -200, y: -200 },
+      { x: 25, y: 20, width: 50, height: 40 },
+    ],
+    [
+      { x: 200, y: -200 },
+      { x: 75, y: 20, width: 50, height: 40 },
+    ],
+    [
+      { x: -200, y: 200 },
+      { x: 25, y: 60, width: 50, height: 40 },
+    ],
+    [
+      { x: 200, y: 200 },
+      { x: 75, y: 60, width: 50, height: 40 },
+    ],
+  ])("bounds a created box at %j", (point, rect) => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (geometry) => ({ rect: geometry as Rect }),
+    });
+    engine.pointerDown({
+      point: { x: 50, y: 40 },
+      timestamp: 0,
+      mediaDimensions: { width: 100, height: 80 },
+    });
+    engine.pointerMove({ point, timestamp: 300 });
+    expect(engine.getState().preview?.rect).toEqual(rect);
+    engine.pointerUp({ point, timestamp: 400 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith({ rect }, null);
+  });
+
   it("creates center-based boxes and applies the click-cancel threshold", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });
@@ -328,6 +493,113 @@ describe("annotation editing engine", () => {
       rect: { x: 25, y: 35, width: 20, height: 30 },
     });
   });
+
+  it.each([
+    ["nw", { x: 35, y: 50 }, { x: 30, y: 45, width: 10, height: 10 }],
+    ["n", { x: 20, y: 50 }, { x: 20, y: 45, width: 10, height: 10 }],
+    ["ne", { x: 5, y: 50 }, { x: 10, y: 45, width: 10, height: 10 }],
+    ["e", { x: 5, y: 30 }, { x: 10, y: 30, width: 10, height: 20 }],
+    ["se", { x: 5, y: 10 }, { x: 10, y: 15, width: 10, height: 10 }],
+    ["s", { x: 20, y: 10 }, { x: 20, y: 15, width: 10, height: 10 }],
+    ["sw", { x: 35, y: 10 }, { x: 30, y: 15, width: 10, height: 10 }],
+    ["w", { x: 35, y: 30 }, { x: 30, y: 30, width: 10, height: 20 }],
+    ["nw", { x: 35, y: 10 }, { x: 30, y: 25, width: 10, height: 30 }],
+    ["nw", { x: 5, y: 50 }, { x: 15, y: 45, width: 20, height: 10 }],
+    ["nw", { x: 24, y: 39 }, { x: 22.5, y: 37.5, width: 5, height: 5 }],
+    ["nw", { x: 25, y: 40 }, { x: 22.5, y: 37.5, width: 5, height: 5 }],
+    ["nw", { x: 26, y: 41 }, { x: 27.5, y: 42.5, width: 5, height: 5 }],
+  ])("resizes %s through the opposite edges at %j", (id, point, rect) => {
+    const detection = {
+      id: "box",
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const handle = getAnnotationHandles(detection).find(
+      (entry) => entry.id === id,
+    )!;
+
+    expect(applyAnnotationHandleDrag(detection, handle, point)).toEqual({
+      ...detection,
+      rect,
+    });
+    expect(detection.rect).toEqual({ x: 20, y: 30, width: 10, height: 20 });
+  });
+
+  it.each([false, true])(
+    "keeps the opposite corner anchored through crossing and return (cancel: %s)",
+    (cancel) => {
+      const onCommit = vi.fn();
+      const releasePointer = vi.fn();
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        releasePointer,
+      });
+      const detection = {
+        id: "box",
+        rect: { x: 20, y: 30, width: 10, height: 20 },
+      };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === "nw",
+      )!;
+      engine.beginHandleDrag(detection, handle, {
+        point: handle.point,
+        timestamp: 0,
+        pointerId: 7,
+      });
+      engine.pointerMove({
+        point: { x: 25, y: 40 },
+        timestamp: 16,
+        pointerId: 7,
+      });
+      expect(engine.getState().preview?.rect).toEqual({
+        x: 22.5,
+        y: 37.5,
+        width: 5,
+        height: 5,
+      });
+      engine.pointerMove({
+        point: { x: 35, y: 50 },
+        timestamp: 32,
+        pointerId: 7,
+      });
+      expect(engine.getState().preview?.rect).toEqual({
+        x: 30,
+        y: 45,
+        width: 10,
+        height: 10,
+      });
+      engine.pointerMove({
+        point: { x: 5, y: 10 },
+        timestamp: 48,
+        pointerId: 7,
+      });
+      const returned = { x: 15, y: 25, width: 20, height: 30 };
+      expect(engine.getState().preview?.rect).toEqual(returned);
+      expect(onCommit).not.toHaveBeenCalled();
+
+      if (cancel) {
+        engine.keyDown("Escape");
+        engine.pointerUp({
+          point: { x: 5, y: 10 },
+          timestamp: 64,
+          pointerId: 7,
+        });
+        expect(onCommit).not.toHaveBeenCalled();
+      } else {
+        engine.pointerUp({
+          point: { x: 35, y: 50 },
+          timestamp: 64,
+          pointerId: 7,
+        });
+        expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+          { ...detection, rect: { x: 30, y: 45, width: 10, height: 10 } },
+          detection,
+        );
+      }
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(releasePointer).toHaveBeenCalledExactlyOnceWith(7);
+      expect(detection.rect).toEqual({ x: 20, y: 30, width: 10, height: 20 });
+    },
+  );
 
   it("scales only box-relative keypoints with the box and unflags dragged points", () => {
     const detection = {

@@ -40,6 +40,7 @@ type RectangleConstructor = new (
 
 type InteractionEventName =
   | "pointermove"
+  | "globalpointermove"
   | "pointerout"
   | "pointertap"
   | "pointerdown"
@@ -121,6 +122,8 @@ export function createPixiInteractionLayer(options: {
   const mode = options.interaction.mode ?? MediaInteractionMode.PausedOnly;
   const pickPadding = options.interaction.padding ?? DEFAULT_PICK_PADDING;
   let container: PixiInteractionContainer | undefined;
+  let displayDimensions:
+    { readonly width: number; readonly height: number } | undefined;
   let currentMediaTime = 0;
   let hoveredPick: DetectionPickResult | null = null;
   let hoveredPickKey: string | null = null;
@@ -137,11 +140,13 @@ export function createPixiInteractionLayer(options: {
 
   return {
     createDisplay({ width, height }) {
+      displayDimensions = { width, height };
       container = new options.Container();
       container.eventMode = "static";
       container.cursor = "default";
       container.hitArea = new options.Rectangle(0, 0, width, height);
       container.on("pointermove", handlePointerMove);
+      container.on("globalpointermove", handleGlobalPointerMove);
       container.on("pointerout", handlePointerOut);
       container.on("pointertap", handlePointerTap);
       container.on("pointerdown", handlePointerDown);
@@ -232,17 +237,18 @@ export function createPixiInteractionLayer(options: {
       return;
     }
 
-    pointerPoint = getPoint(event);
-    updateCursor(pointerPoint);
     const editingEngine = options.editingEngine;
     if (
       editingEngine &&
       editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
     ) {
-      editingEngine.pointerMove(toPointerInput(event, pointerPoint));
-      notifyStateChange();
+      // Pixi sends both local and global moves inside the hit area. Active
+      // editing uses the global route so captured drags also continue outside.
       return;
     }
+
+    pointerPoint = getPoint(event);
+    updateCursor(pointerPoint);
 
     if (marqueeStart) {
       const point = getPoint(event);
@@ -258,6 +264,25 @@ export function createPixiInteractionLayer(options: {
     if (!hoverChanged && editingEngine?.hasCreationTool()) {
       notifyStateChange();
     }
+  }
+
+  function handleGlobalPointerMove(event: PixiInteractionPointerEvent) {
+    const editingEngine = options.editingEngine;
+    const state = editingEngine?.getState();
+    if (
+      !editingEngine ||
+      !state ||
+      state.kind === AnnotationGestureStateKind.Idle ||
+      !canHandleInteraction() ||
+      (state.pointerId !== null && event.pointerId !== state.pointerId)
+    ) {
+      return;
+    }
+
+    pointerPoint = getPoint(event);
+    updateCursor(pointerPoint);
+    editingEngine.pointerMove(toPointerInput(event, pointerPoint));
+    notifyStateChange();
   }
 
   function handlePointerOut() {
@@ -631,6 +656,7 @@ export function createPixiInteractionLayer(options: {
     return {
       button: event.button,
       detail: event.detail,
+      mediaDimensions: options.getMediaDimensions?.() ?? displayDimensions,
       point,
       pointerId: event.pointerId,
       shiftKey: event.shiftKey,
