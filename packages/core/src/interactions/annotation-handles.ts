@@ -84,9 +84,10 @@ export function applyAnnotationHandleDrag(
   detection: Detection,
   handle: AnnotationHandleDefinition,
   point: Point,
+  mediaDimensions?: Pick<Rect, "width" | "height">,
 ): Detection {
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
-    const rect = resizeRect(detection.rect, handle.id, point);
+    const rect = resizeRect(detection.rect, handle.id, point, mediaDimensions);
     const boxRelative = detection.keypoints?.boxRelative;
     if (!detection.keypoints || !boxRelative?.some(Boolean)) {
       return { ...detection, rect };
@@ -276,35 +277,61 @@ function getPathHandles(
   return handles;
 }
 
-function resizeRect(rect: Rect, handle: string, point: Point): Rect {
+function resizeRect(
+  rect: Rect,
+  handle: string,
+  point: Point,
+  mediaDimensions?: Pick<Rect, "width" | "height">,
+): Rect {
   let left = rect.x - rect.width / 2;
   let right = rect.x + rect.width / 2;
   let top = rect.y - rect.height / 2;
   let bottom = rect.y + rect.height / 2;
+  if (mediaDimensions) {
+    left = Math.max(0, Math.min(left, mediaDimensions.width));
+    right = Math.max(0, Math.min(right, mediaDimensions.width));
+    top = Math.max(0, Math.min(top, mediaDimensions.height));
+    bottom = Math.max(0, Math.min(bottom, mediaDimensions.height));
+  }
   if (handle.includes("w"))
-    left =
-      point.x > right
-        ? Math.max(point.x, right + 5)
-        : Math.min(point.x, right - 5);
+    left = resizeEdge(point.x, right, -1, mediaDimensions?.width);
   if (handle.includes("e"))
-    right =
-      point.x < left
-        ? Math.min(point.x, left - 5)
-        : Math.max(point.x, left + 5);
+    right = resizeEdge(point.x, left, 1, mediaDimensions?.width);
   if (handle.includes("n"))
-    top =
-      point.y > bottom
-        ? Math.max(point.y, bottom + 5)
-        : Math.min(point.y, bottom - 5);
+    top = resizeEdge(point.y, bottom, -1, mediaDimensions?.height);
   if (handle.includes("s"))
-    bottom =
-      point.y < top ? Math.min(point.y, top - 5) : Math.max(point.y, top + 5);
+    bottom = resizeEdge(point.y, top, 1, mediaDimensions?.height);
   return {
     x: (left + right) / 2,
     y: (top + bottom) / 2,
     width: Math.abs(right - left),
     height: Math.abs(bottom - top),
   };
+}
+
+function resizeEdge(
+  point: number,
+  anchor: number,
+  initialDirection: -1 | 1,
+  extent?: number,
+) {
+  let direction = point === anchor ? initialDirection : point < anchor ? -1 : 1;
+  let minimum = 5;
+  if (extent !== undefined) {
+    const available = direction === 1 ? extent - anchor : anchor;
+    const opposite = direction === 1 ? anchor : extent - anchor;
+    // Crossing cannot push the minimum-size box past the media edge. Use the
+    // other side of the fixed anchor when it has more room.
+    if (available < Math.min(minimum, extent) && opposite > available) {
+      direction *= -1;
+    }
+    minimum = Math.min(minimum, direction === 1 ? extent - anchor : anchor);
+  }
+  const edge =
+    direction === 1
+      ? Math.max(point, anchor + minimum)
+      : Math.min(point, anchor - minimum);
+  return extent === undefined ? edge : Math.max(0, Math.min(edge, extent));
 }
 
 function replacePathPoint(

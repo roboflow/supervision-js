@@ -368,6 +368,14 @@ Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
 keeps a selection drag alive when the engine is already in Select mode. To
 abort a gesture explicitly, call `engine.cancel()`.
 
+Browser-routed box creation, movement, and resizing stay inside the natural
+media dimensions in both previews and commits. Moving a box preserves its size
+when it fits the media; a previously oversized box is fitted to the media on
+edit. Resizing can cross the opposite edge while keeping the fixed anchor inside
+the media. The renderer supplies `AnnotationPointerInput.mediaDimensions`; callers
+routing input directly can supply the same optional dimensions to enable these
+constraints, or omit them for unbounded geometry editing.
+
 Creation tools may provide `onRejected()` to handle a completed drag or
 freehand stroke that produced no committed detection. The engine calls it
 after returning to idle. Escape, tool changes, and explicit cancellation do

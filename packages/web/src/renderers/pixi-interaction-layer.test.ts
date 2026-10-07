@@ -1,4 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import "pixi.js/events";
+import {
+  Container,
+  EventBoundary,
+  FederatedPointerEvent,
+  Rectangle,
+} from "pixi.js";
 
 import { createPixiAnnotationOverlayLayer } from "#renderers/pixi-annotation-overlay-layer";
 import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
@@ -39,6 +46,110 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it.each(["move", "resize", "create"] as const)(
+    "keeps a %s preview bounded and synchronized with captured moves outside the media",
+    (gesture) => {
+      const onCommit = vi.fn();
+      const onPreview = vi.fn();
+      const editingEngine = createAnnotationEditingEngine({
+        onCommit,
+        onPreview,
+      });
+      const detection = {
+        id: "box",
+        rect: { x: 60, y: 50, width: 80, height: 60 },
+      };
+      const layer = createPixiInteractionLayer({
+        Container,
+        Rectangle,
+        canInteract: () => true,
+        detectionTimeline: createTimeline({
+          ...frame,
+          detections: [detection],
+        }),
+        editingEngine,
+        interaction: { mode: MediaInteractionMode.Always },
+      });
+      const display = layer.createDisplay({
+        width: 120,
+        height: 100,
+      }) as Container;
+      const boundary = new EventBoundary(display);
+      const sendPointer = (
+        type: string,
+        x: number,
+        y: number,
+        pointerId = 1,
+      ) => {
+        const event = new FederatedPointerEvent(boundary);
+        event.type = type;
+        event.pointerId = pointerId;
+        event.pointerType = "mouse";
+        event.button = 0;
+        event.timeStamp = 500;
+        event.global.set(x, y);
+        boundary.mapEvent(event);
+      };
+      layer.drawFrame(0.1);
+      if (gesture === "resize") {
+        layer.setSelectedDetection({ detectionId: "box" });
+      } else if (gesture === "create") {
+        editingEngine.setCreationTool({
+          geometry: AnnotationGeometryKind.Box,
+          createDetection: (rect) => ({
+            id: "created",
+            rect: rect as typeof detection.rect,
+          }),
+        });
+      }
+      const start =
+        gesture === "move"
+          ? [60, 50]
+          : gesture === "resize"
+            ? [100, 50]
+            : [20, 20];
+      sendPointer("pointerdown", start[0]!, start[1]!);
+      onPreview.mockClear();
+      sendPointer("pointermove", 80, 60);
+      sendPointer("pointermove", 200, 150);
+
+      const expected =
+        gesture === "move"
+          ? { x: 80, y: 70, width: 80, height: 60 }
+          : gesture === "resize"
+            ? { x: 70, y: 50, width: 100, height: 60 }
+            : { x: 70, y: 60, width: 100, height: 80 };
+      expect(editingEngine.getState().preview?.rect).toEqual(expected);
+      expect(onPreview).toHaveBeenCalledTimes(2);
+      expect(onCommit).not.toHaveBeenCalled();
+
+      // A different pointer cannot take over the captured gesture.
+      sendPointer("pointermove", 300, 200, 2);
+      expect(editingEngine.getState().preview?.rect).toEqual(expected);
+      expect(onPreview).toHaveBeenCalledTimes(2);
+
+      // Re-entering the hit area must not dispatch the same move twice.
+      sendPointer("pointermove", 80, 60);
+      sendPointer("pointermove", 200, 150);
+      expect(onPreview).toHaveBeenCalledTimes(4);
+      const finalPreview = editingEngine.getState().preview;
+      sendPointer("pointerup", 200, 150);
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        finalPreview,
+        gesture === "create" ? null : detection,
+      );
+      expect(editingEngine.getState().kind).toBe(
+        AnnotationGestureStateKind.Idle,
+      );
+      expect(layer.getState().hoveredPick).toBeNull();
+
+      const finalPoint = layer.getState().pointerPoint;
+      sendPointer("pointermove", 300, 200);
+      expect(layer.getState().pointerPoint).toEqual(finalPoint);
+      expect(onPreview).toHaveBeenCalledTimes(5); // Commit clears the preview.
+    },
+  );
+
   it("uses the selected annotation handle cursor before the box cursor", () => {
     const layer = createPixiInteractionLayer({
       Container: FakeContainer as never,
@@ -1240,7 +1351,7 @@ describe("pixi interaction layer", () => {
       }),
     );
     display.emit(
-      "pointermove",
+      "globalpointermove",
       createPointerEvent(display, 140, 130, {
         buttons: 1,
         pointerId: 1,
@@ -1320,7 +1431,7 @@ describe("pixi interaction layer", () => {
       editingEngine.setCreationTool(null);
       if (drag)
         display.emit(
-          "pointermove",
+          "globalpointermove",
           createPointerEvent(display, 70, 70, { pointerId: 8, timeStamp: 16 }),
         );
       display.emit(
