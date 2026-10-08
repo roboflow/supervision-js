@@ -646,6 +646,10 @@ export async function createPixiMediaScene(
   const interactionSlot = createPixiSceneLayerSlot(
     PixiSceneLayerKind.Interaction,
   );
+  const interactionLabelSlot = createPixiSceneLayerSlot(
+    PixiSceneLayerKind.Label,
+    interactionSlot.order,
+  );
   const handleSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Handle);
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
@@ -660,6 +664,7 @@ export async function createPixiMediaScene(
     previewSlot,
     handleSlot,
     interactionSlot,
+    interactionLabelSlot,
     labelSlot,
   ];
   const viewport = createViewportController({ scale: 1 });
@@ -856,6 +861,9 @@ export async function createPixiMediaScene(
     labelLayer?.setBackgroundAntialiasFilter(
       annotationAntialiasLayer.getFxaaFilter(),
     );
+    interactionPresentationLayer?.setBackgroundAntialiasFilter(
+      annotationAntialiasLayer.getFxaaFilter(),
+    );
     annotationAntialiasLayer.sync(mediaScene, layerSlots);
   };
 
@@ -945,10 +953,7 @@ export async function createPixiMediaScene(
   const syncAnnotationAntialiasResolution = () => {
     annotationAntialiasResolution = resolvePixiAnnotationAntialiasResolution(
       presentationResolution,
-      {
-        width: rendererCanvas.width / presentationResolution,
-        height: rendererCanvas.height / presentationResolution,
-      },
+      containerSize,
       maxTextureSize(),
       annotationAntialiasing === 2 ? 2 : 1,
     );
@@ -959,12 +964,11 @@ export async function createPixiMediaScene(
 
   function syncMaskRasterDisplay() {
     if (!rasterDisplay) return;
-    maskLayer?.setRasterDisplay(
-      rasterDisplay,
-      annotationAntialiasing
-        ? Math.max(1, annotationAntialiasResolution / presentationResolution)
-        : 1,
-    );
+    const scale = annotationAntialiasing
+      ? annotationAntialiasResolution / presentationResolution
+      : 1;
+    maskLayer?.setRasterDisplay(rasterDisplay, scale);
+    polygonLayer?.setRasterDisplay(rasterDisplay, scale);
   }
 
   const syncDisplaySizing = () => {
@@ -993,6 +997,7 @@ export async function createPixiMediaScene(
     const transform = viewport.getTransform();
     viewportScale = baseFit.scale * transform.scale;
     maskLayer?.setViewportScale(viewportScale);
+    polygonLayer?.setViewportScale(viewportScale);
     mediaScene.scale.set(viewportScale);
     const box = syncPresentationBox();
     mediaScene.position.set(
@@ -1298,6 +1303,9 @@ export async function createPixiMediaScene(
           ? interactionDisplay
           : undefined,
       );
+      interactionLabelSlot.setDisplay(
+        interactionPresentationLayer?.getLabelDisplay() ?? undefined,
+      );
       attachFocusLayerDisplay();
       attachMaskLayerDisplay();
       attachLabelLayerDisplay();
@@ -1445,6 +1453,7 @@ export async function createPixiMediaScene(
       syncPresentationBox();
       updateMediaSceneFit();
       syncDisplaySizing();
+      drawInteractionPresentationLayer(currentMediaTime);
       renderOnChange();
     },
 
@@ -1839,6 +1848,7 @@ export async function createPixiMediaScene(
       destroyBatchTextureBindings();
       destroyFilterBindings();
       labelLayer?.setBackgroundAntialiasFilter(null);
+      interactionPresentationLayer?.setBackgroundAntialiasFilter(null);
       annotationAntialiasLayer.destroy();
       mediaCompositor?.destroy();
       interactionLayer?.destroy();
@@ -1976,6 +1986,7 @@ export async function createPixiMediaScene(
       });
 
       syncMaskRasterDisplay();
+      maskLayer.setViewportScale(viewportScale);
 
       maskLayer.setPlaybackActive(isPlaybackActive);
 
@@ -2322,6 +2333,8 @@ export async function createPixiMediaScene(
         resolveContextState,
       });
       polygonLayer.setPlaybackActive(isPlaybackActive);
+      syncMaskRasterDisplay();
+      polygonLayer.setViewportScale(viewportScale);
 
       if (timelineContext) {
         polygonLayer.setTimelineContext(timelineContext);

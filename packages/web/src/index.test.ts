@@ -1462,6 +1462,27 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("uses the current zoom when masks are enabled after opening", async () => {
+    resetMocks();
+    const windows = await import("#render-preparation/prepared-render-window");
+    const createWindow = vi.spyOn(windows, "createPreparedRenderWindow");
+    const renderer = await createRenderer(false, false);
+    try {
+      renderer.zoomViewportAt({ x: 320, y: 180 }, 2);
+      renderer.setPresentation({
+        maskStyle: new BaseMaskStyle(),
+        polygonStyle: null,
+      });
+      const maskWindow = createWindow.mock.calls.find(
+        ([options]) => options.resolveMaskDisplayWidth,
+      )?.[0];
+      expect(maskWindow?.resolveMaskDisplayWidth?.()).toBe(1280);
+    } finally {
+      renderer.destroy();
+      createWindow.mockRestore();
+    }
+  });
+
   it("cancels scheduled mask preparation when destroyed before it runs", async () => {
     vi.useFakeTimers();
     resetMocks();

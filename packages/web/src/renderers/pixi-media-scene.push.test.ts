@@ -553,6 +553,44 @@ describe("push-presented Pixi scene", () => {
     }
   });
 
+  it("keeps capped annotation density stable as the camera moves", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    const preparation =
+      await import("#render-preparation/prepared-render-window");
+    const createWindow = vi.spyOn(preparation, "createPreparedRenderWindow");
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(createChannel().channel),
+      annotationAntialiasing: 2,
+      container: {
+        appendChild: vi.fn(),
+        clientWidth: 5000,
+        clientHeight: 2000,
+      } as unknown as HTMLElement,
+      maskStyle: new BaseMaskStyle(),
+      maxDevicePixelRatio: 2,
+      renderPreparation: {
+        maskFrame: {
+          display: { boxWidth: 5000, boxHeight: 2000, devicePixelRatio: 2 },
+        },
+      },
+    });
+    try {
+      scene.initializeMedia({ width: 1000, height: 400 });
+      const width = createWindow.mock.calls[0]?.[0].resolveMaxRasterWidth;
+      const capped = width?.();
+      expect(capped).toBeGreaterThan(0);
+      expect(capped).toBeLessThan(8192);
+      scene.panViewportBy?.(-2500, 0);
+      expect(width?.()).toBe(capped);
+      scene.zoomViewportAt?.({ x: 2500, y: 1000 }, 2);
+      expect(width?.()).toBe(capped);
+    } finally {
+      scene.destroy();
+      createWindow.mockRestore();
+    }
+  });
+
   it("keeps canvas, mask and decode sizing together across quality changes and container resizes", async () => {
     vi.stubGlobal("window", { devicePixelRatio: 2 });
     let resized = () => {};
