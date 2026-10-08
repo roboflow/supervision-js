@@ -9,7 +9,6 @@ import {
   type PolygonDrawInstruction,
   type PolygonStyle,
 } from "supervision-js-core";
-import { resolveScreenLength } from "./pixi-path";
 import {
   createPixiMaskLayer,
   type BufferImageSourceConstructor,
@@ -32,7 +31,9 @@ export interface PixiPolygonLayer {
   getVectorFallbackStyle(): PolygonStyle;
   setPolygonStyle(polygonStyle: PolygonStyle | null | undefined): void;
   setPlaybackActive: PixiMaskLayer["setPlaybackActive"];
+  setRasterDisplay: PixiMaskLayer["setRasterDisplay"];
   setTimelineContext: PixiMaskLayer["setTimelineContext"];
+  setViewportScale: PixiMaskLayer["setViewportScale"];
   waitForRenderPreparation: PixiMaskLayer["waitForRenderPreparation"];
   destroy(): void;
 }
@@ -128,12 +129,15 @@ export function createPixiPolygonLayer(
 
     needsRenderPreparationWait: rasterLayer.needsRenderPreparationWait,
     setPlaybackActive: rasterLayer.setPlaybackActive,
+    setRasterDisplay: rasterLayer.setRasterDisplay,
     setTimelineContext: rasterLayer.setTimelineContext,
+    setViewportScale: adoptViewportScale,
     waitForRenderPreparation: rasterLayer.waitForRenderPreparation,
   };
 
   function adoptViewportScale(nextViewportScale: number) {
     const normalizedViewportScale = Math.max(nextViewportScale, Number.EPSILON);
+    rasterLayer.setViewportScale(normalizedViewportScale);
 
     if (normalizedViewportScale === viewportScale) {
       return;
@@ -224,12 +228,10 @@ export function resolvePreparedPolygonInstructions(options: {
       },
       stroke: instruction.stroke
         ? {
+            alignment: BoxStrokeAlignment.Center,
             alpha: instruction.stroke.alpha,
             color: instruction.stroke.color,
-            width: resolveScreenLength(
-              instruction.stroke.width,
-              options.viewportScale,
-            ),
+            width: instruction.stroke.width,
           }
         : undefined,
     });

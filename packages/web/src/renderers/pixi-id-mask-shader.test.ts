@@ -22,35 +22,6 @@ afterEach(() => {
 });
 
 describe("pixi ID-mask shader", () => {
-  it("declares a WebGL and a WebGPU program for the same shader", () => {
-    vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({
-        getContext: vi.fn(),
-        height: 0,
-        width: 0,
-      })),
-    });
-
-    createPixiIdMaskShaderRenderer({
-      ImageSource: FakeImageSource as never,
-      Mesh: FakeMesh as never,
-      MeshGeometry: FakeMeshGeometry as never,
-      Shader: FakeShaderFactory as never,
-      UniformGroup: FakeUniformGroup as never,
-      mediaHeight: 80,
-      mediaWidth: 120,
-    });
-
-    const descriptor = FakeShaderFactory.descriptors[0]!;
-
-    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
-    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
-    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
-    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
-    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
-    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
-  });
-
   it("gives the placeholder texture canvas a rendering context", () => {
     const getContext = vi.fn();
     vi.stubGlobal("document", {

@@ -582,6 +582,64 @@ describe("pixi mask layer", () => {
     expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
   });
 
+  it("updates a paused native-resolution mask's stroke density without recooking", () => {
+    vi.stubGlobal("document", {
+      createElement: () => ({ getContext: () => ({}), height: 0, width: 0 }),
+    });
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      Container: FakeContainer as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: {
+        from: ({ resources }: { resources: Record<string, unknown> }) => ({
+          destroy() {},
+          resources,
+        }),
+      } as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      UniformGroup: FakeUniformGroup as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const display = {
+      boxHeight: 40,
+      boxWidth: 60,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 2,
+    };
+    const container = layer.createSprite({
+      height: 80,
+      width: 120,
+    }) as unknown as FakeContainer;
+    const mesh = container.children[1] as FakeMesh;
+    const group = (mesh.shader as { resources: Record<string, unknown> })
+      .resources.maskUniforms as FakeUniformGroup;
+    const frame = { ...idMaskFrame(), hasStroke: true, maxStrokeWidth: 2 };
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: frame.key,
+      maskFrame: frame,
+      maskStatus: "prepared",
+    };
+    layer.setPlaybackActive(false);
+    layer.setRasterDisplay(display);
+    layer.drawFrame(0.1);
+    const texture = layer.getActiveIdMaskFrameTexture(0.1)?.texture;
+
+    expect(group.uniforms.uStrokePixelRatio).toBe(2);
+    layer.setRasterDisplay({ ...display, maxDevicePixelRatio: 1 });
+    expect(group.uniforms.uStrokePixelRatio).toBe(1);
+    layer.setRasterDisplay(display, 0.25);
+    expect(group.uniforms.uStrokePixelRatio).toBe(0.5);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toEqual({ frame, texture });
+    expect(group.uniforms.uMaxStrokeWidth).toBe(2);
+    expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
+    expect(preparedWindow.invalidateMaskDisplayWidth).not.toHaveBeenCalled();
+  });
+
   it("leaves a polygon frame at the size its geometry was rasterized to", () => {
     const layer = maskLayerWithDisplayBox({
       acceptsUnalignedTextureRows: true,

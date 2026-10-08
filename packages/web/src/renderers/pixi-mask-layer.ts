@@ -464,6 +464,9 @@ export function createPixiMaskLayer(options: {
       const previousWidth = resolveMaxRasterWidth();
       rasterDisplay = display;
       rasterResolutionScale = resolutionScale;
+      idMaskRenderer?.setStrokePixelRatio(
+        resolveDisplayPixelRatio(display) * resolutionScale,
+      );
       const nextWidth = resolveMaxRasterWidth();
       if (mediaWidth > 0 && previousWidth !== nextWidth) {
         preparedRenderWindow.invalidateRasterSize();

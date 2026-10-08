@@ -66,6 +66,7 @@ export interface PixiIdMaskShaderRenderer {
     strokePixelRatio?: number,
   ): void;
   setOpacity(opacity: number): void;
+  setStrokePixelRatio(pixelRatio: number): void;
   destroy(): void;
 }
 
@@ -181,6 +182,11 @@ export function createPixiIdMaskShaderRenderer(options: {
 
     setOpacity(opacity) {
       mesh.alpha = opacity;
+    },
+
+    setStrokePixelRatio(pixelRatio) {
+      uniforms.uniforms.uStrokePixelRatio = pixelRatio;
+      uniforms.update();
     },
   };
 
