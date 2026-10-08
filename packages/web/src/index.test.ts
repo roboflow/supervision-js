@@ -1428,6 +1428,100 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("keeps selected-label text sharp and its background smooth in scene order", async () => {
+    resetMocks();
+    const { BaseInteractionStyle, BaseLabelStyle, MediaInteractionMode } =
+      await import("./index");
+    const renderer = await createRenderer(false, false, {
+      annotationAntialiasing: true,
+      detectionFrames: [
+        {
+          detections: [
+            {
+              className: "player",
+              id: "player-7",
+              rect: { height: 100, width: 50, x: 100, y: 90 },
+            },
+          ],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+      editingEngine: createEditingEngineHarness().engine,
+      interaction: { mode: MediaInteractionMode.Always },
+      interactionStyle: new BaseInteractionStyle({
+        selected: {
+          labelStyle: new BaseLabelStyle({
+            background: { alpha: 0.7, color: 0x112233 },
+            text: "selected player",
+          }),
+        },
+      }),
+      labelStyle: new BaseLabelStyle(),
+    });
+
+    try {
+      expect(
+        renderer.setSelectedDetection({ detectionId: "player-7" }),
+      ).not.toBeNull();
+      const selectedText = pixiMock.textInstances.find(
+        (label) => label.text === "selected player",
+      );
+      const mainText = pixiMock.textInstances.find(
+        (label) => label.text === "player",
+      );
+      const background = pixiMock.graphicsInstances.find(
+        (graphics) => graphics.fill.mock.lastCall?.[0]?.color === 0x112233,
+      );
+      const handles = pixiMock.graphicsInstances.find(
+        (graphics) => graphics.circle.mock.calls.length > 0,
+      );
+      const scene = pixiMock.stageAddChild.mock.calls[0]![0] as {
+        children: unknown[];
+      };
+      type Display = {
+        children?: unknown[];
+        filters?: unknown[] | null;
+      };
+      const pathTo = (
+        target: unknown,
+        display: Display = scene,
+      ): Display[] | undefined => {
+        if (display === target) return [display];
+        for (const child of display.children ?? []) {
+          const path = pathTo(target, child as Display);
+          if (path) return [display, ...path];
+        }
+        return undefined;
+      };
+      const textPath = pathTo(selectedText);
+      const backgroundPath = pathTo(background);
+      const handlesPath = pathTo(handles);
+      const mainTextPath = pathTo(mainText);
+
+      expect(selectedText).toMatchObject({ visible: true });
+      expect(background).toMatchObject({ visible: true });
+      expect(textPath).toBeDefined();
+      expect(textPath!.every((display) => !display.filters?.length)).toBe(true);
+      const backgroundFilters = backgroundPath?.find(
+        (display) => display.filters?.length,
+      )?.filters;
+      const handleFilters = handlesPath?.find(
+        (display) => display.filters?.length,
+      )?.filters;
+      expect(backgroundFilters).toHaveLength(1);
+      expect(backgroundFilters![0]).toBe(handleFilters?.[0]);
+      expect(scene.children.indexOf(textPath![1])).toBeLessThan(
+        scene.children.indexOf(handlesPath![1]),
+      );
+      expect(scene.children.indexOf(handlesPath![1])).toBeLessThan(
+        scene.children.indexOf(mainTextPath![1]),
+      );
+    } finally {
+      renderer.destroy();
+    }
+  });
+
   it("does not create mask textures unless a mask style is supplied", async () => {
     resetMocks();
 
