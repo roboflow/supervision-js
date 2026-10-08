@@ -304,6 +304,10 @@ vi.mock("pixi.js", () => {
 
       return children[0];
     }
+
+    removeChildren() {
+      return this.children.splice(0);
+    }
   }
 
   class Graphics {

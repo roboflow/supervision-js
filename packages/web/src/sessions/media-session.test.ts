@@ -58,10 +58,12 @@ describe("media session", () => {
       });
       const update = vi.spyOn(session.renderer, "setPresentation");
       try {
+        expect(session.getState().status).toBe(MediaSessionStatus.Ready);
         expect(opening).toHaveBeenCalledWith(
           expect.objectContaining({ annotationAntialiasing: antialiasing }),
         );
         session.setPresentation({ annotationAntialiasing: false });
+        expect(session.getState().status).toBe(MediaSessionStatus.Ready);
         expect(update).toHaveBeenCalledWith(
           expect.objectContaining({ annotationAntialiasing: false }),
         );
