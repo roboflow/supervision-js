@@ -71,12 +71,16 @@ vi.mock("pixi.js", () => {
   class Application {
     canvas = {
       addEventListener: vi.fn(),
+      height: 360,
       removeEventListener: vi.fn(),
       style: {},
+      width: 640,
     };
+    screen = { height: 360, width: 640 };
     renderer = {
       background: { color: 0 },
       extract: { canvas: pixiMock.extractCanvas },
+      filter: { applyFilter: vi.fn() },
       gpu: {
         device: {
           createTexture: (descriptor: {
@@ -92,10 +96,16 @@ vi.mock("pixi.js", () => {
         },
       },
       name: "webgpu",
-      resize: pixiMock.resize,
+      resize: (width: number, height: number, resolution: number) => {
+        Object.assign(this.screen, { width, height });
+        this.renderer.resolution = resolution;
+        this.canvas.width = Math.round(width * resolution);
+        this.canvas.height = Math.round(height * resolution);
+        pixiMock.resize.call(this.renderer, width, height, resolution);
+      },
       resolution: 1,
+      screen: this.screen,
     };
-    screen = { height: 360, width: 640 };
     stage = { addChild: vi.fn() };
     ticker = { add: pixiMock.tickerAdd, remove: pixiMock.tickerRemove };
     cancelResize = vi.fn();
@@ -117,6 +127,9 @@ vi.mock("pixi.js", () => {
     }
     removeChild() {
       return undefined;
+    }
+    removeChildren() {
+      return this.children.splice(0);
     }
   }
 
@@ -358,7 +371,26 @@ vi.mock("pixi.js", () => {
     Container,
     defaultFilterVert: "default-filter-vertex",
     ExternalSource,
-    Filter: Stub,
+    Filter: Object.assign(Stub, {
+      from: (options: {
+        resources: Record<string, Record<string, { value: unknown }>>;
+      }) => ({
+        destroy: vi.fn(),
+        resources: Object.fromEntries(
+          Object.entries(options.resources).map(([key, values]) => [
+            key,
+            {
+              uniforms: Object.fromEntries(
+                Object.entries(values).map(([name, uniform]) => [
+                  name,
+                  uniform.value,
+                ]),
+              ),
+            },
+          ]),
+        ),
+      }),
+    }),
     Graphics,
     ImageSource: Destroyable,
     Mesh,
@@ -628,6 +660,56 @@ describe("push-presented Pixi scene", () => {
       expect(pixiMock.resize).toHaveBeenLastCalledWith(320, 180, 1.25);
       expect(invalidateRaster).toHaveBeenCalledTimes(4);
       expect(frame.frame.close).toHaveBeenCalledOnce();
+    } finally {
+      scene.destroy();
+      createWindow.mockRestore();
+    }
+  });
+
+  it("changes mask detail for AA without resizing video or canvas", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 1 });
+    const preparation =
+      await import("#render-preparation/prepared-render-window");
+    const originalCreateWindow = preparation.createPreparedRenderWindow;
+    let resolveRasterWidth: (() => number | undefined) | undefined;
+    const createWindow = vi
+      .spyOn(preparation, "createPreparedRenderWindow")
+      .mockImplementation((options) => {
+        resolveRasterWidth = options.resolveMaxRasterWidth;
+        return originalCreateWindow(options);
+      });
+    const channel = createChannel();
+    const onDisplayChange = vi.fn();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maskStyle: new BaseMaskStyle(),
+      onDisplayChange,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxWidth: 640,
+            boxHeight: 360,
+            devicePixelRatio: 1,
+          },
+        },
+      },
+    });
+
+    try {
+      scene.initializeMedia({ width: 1920, height: 1080 });
+      expect(resolveRasterWidth?.()).toBe(640);
+      onDisplayChange.mockClear();
+      pixiMock.resize.mockClear();
+
+      scene.setPresentation({ annotationAntialiasing: true }, 0);
+      expect(resolveRasterWidth?.()).toBe(640);
+      scene.setPresentation({ annotationAntialiasing: 2 }, 0);
+      expect(resolveRasterWidth?.()).toBe(1280);
+      scene.setPresentation({ annotationAntialiasing: false }, 0);
+      expect(resolveRasterWidth?.()).toBe(640);
+      expect(onDisplayChange).not.toHaveBeenCalled();
+      expect(pixiMock.resize).not.toHaveBeenCalled();
     } finally {
       scene.destroy();
       createWindow.mockRestore();
@@ -1416,6 +1498,7 @@ async function applyDisplayAdjustment(scene: MediaRendererScene) {
  */
 function createPopulatedPresentation(): Required<MediaRendererPresentation> {
   return {
+    annotationAntialiasing: false,
     annotationOverlayStyle: {},
     backgroundColor: 0x101010,
     boxCornerStyle: createStyle(),
@@ -1448,6 +1531,12 @@ function changePresentationField(
 ): MediaRendererPresentation {
   if (field === "backgroundColor") {
     return { ...applied, backgroundColor: applied.backgroundColor + 1 };
+  }
+  if (field === "annotationAntialiasing") {
+    return {
+      ...applied,
+      annotationAntialiasing: !applied.annotationAntialiasing,
+    };
   }
 
   return { ...applied, [field]: createPopulatedPresentation()[field] };

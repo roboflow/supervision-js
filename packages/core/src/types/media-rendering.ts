@@ -271,6 +271,9 @@ export interface MediaRendererState {
   readonly source: MediaSourceState;
 }
 
+/** Annotation edge smoothing: off, FXAA at output density, or FXAA at 2× density. */
+export type AnnotationAntialiasing = boolean | 2;
+
 /**
  * Current annotation renderer, interaction, visibility, and scene presentation.
  */
@@ -282,6 +285,18 @@ export interface MediaRendererPresentation {
    */
   readonly backgroundColor?: number;
   readonly annotationOverlayStyle?: AnnotationOverlayStyle | null;
+  /**
+   * Smooth annotation edges independently of video and canvas resolution.
+   * Applies to fills, borders, focus and interaction overlays. Media
+   * region effects smooth their coverage while preserving the sampled video.
+   * `true` enables FXAA at output density; `2` captures at twice that density.
+   * Label backgrounds are smoothed while text stays sharp. Separated label runs
+   * share captures; overlaps split captures to preserve blending and draw order.
+   * Defaults to false.
+   * The 2× capture preserves more mask detail, up to the original
+   * resolution, increasing preparation work, cache bytes and GPU memory.
+   */
+  readonly annotationAntialiasing?: AnnotationAntialiasing;
   /**
    * Built-in renderers that contribute semantic annotations to the
    * renderer-owned scene. When present, this list selects the enabled

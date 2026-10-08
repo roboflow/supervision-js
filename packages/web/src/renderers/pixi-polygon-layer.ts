@@ -31,6 +31,7 @@ export interface PixiPolygonLayer {
   needsRenderPreparationWait: PixiMaskLayer["needsRenderPreparationWait"];
   getVectorFallbackStyle(): PolygonStyle;
   setPolygonStyle(polygonStyle: PolygonStyle | null | undefined): void;
+  setPlaybackActive: PixiMaskLayer["setPlaybackActive"];
   setTimelineContext: PixiMaskLayer["setTimelineContext"];
   waitForRenderPreparation: PixiMaskLayer["waitForRenderPreparation"];
   destroy(): void;
@@ -126,6 +127,7 @@ export function createPixiPolygonLayer(
     },
 
     needsRenderPreparationWait: rasterLayer.needsRenderPreparationWait,
+    setPlaybackActive: rasterLayer.setPlaybackActive,
     setTimelineContext: rasterLayer.setTimelineContext,
     waitForRenderPreparation: rasterLayer.waitForRenderPreparation,
   };

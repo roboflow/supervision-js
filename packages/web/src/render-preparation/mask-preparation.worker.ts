@@ -197,6 +197,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           requestId: message.requestId,
           sourceWidth: idMaskFrame.sourceWidth,
           strokePalette: idMaskFrame.strokePalette,
+          strokeAlignments: idMaskFrame.strokeAlignments,
           strokeWidths: idMaskFrame.strokeWidths,
           type: MaskPreparationWorkerMessageType.Complete,
           width: idMaskFrame.width,
@@ -205,6 +206,9 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           idMaskFrame.data.buffer,
           idMaskFrame.fillPalette.buffer,
           idMaskFrame.strokePalette.buffer,
+          ...(idMaskFrame.strokeAlignments
+            ? [idMaskFrame.strokeAlignments.buffer]
+            : []),
           idMaskFrame.strokeWidths.buffer,
           ...coverageTransfers,
         ],
@@ -212,7 +216,10 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       return;
     }
 
-    const compositedFrame = compositeMaskFrame(message.job.instructions);
+    const compositedFrame = compositeMaskFrame(
+      message.job.instructions,
+      message.job.displayWidth,
+    );
 
     if (!compositedFrame && !regionMaskCoverage) {
       workerScope.postMessage({

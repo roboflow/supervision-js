@@ -62,12 +62,16 @@ vi.mock("pixi.js", () => {
   class Application {
     canvas = {
       addEventListener: vi.fn(),
+      height: 360,
       removeEventListener: vi.fn(),
       style: {},
+      width: 640,
     };
+    screen = { height: 360, width: 640 };
     renderer = {
       background: { color: 0 },
       extract: { canvas: vi.fn() },
+      filter: { applyFilter: vi.fn() },
       prepare: { upload: vi.fn(async () => undefined) },
       gpu: {
         device: {
@@ -82,10 +86,15 @@ vi.mock("pixi.js", () => {
         },
       },
       name: "webgpu",
-      resize: vi.fn(),
+      resize: vi.fn((width: number, height: number, resolution: number) => {
+        Object.assign(this.screen, { width, height });
+        this.renderer.resolution = resolution;
+        this.canvas.width = Math.round(width * resolution);
+        this.canvas.height = Math.round(height * resolution);
+      }),
       resolution: 1,
+      screen: this.screen,
     };
-    screen = { height: 360, width: 640 };
     stage = { addChild: vi.fn() };
     ticker = { add: pixiMock.tickerAdd, remove: vi.fn() };
     cancelResize = vi.fn();

@@ -36,7 +36,10 @@ export interface LabelBackgroundStyle {
   readonly cornerRadius?: number;
   readonly paddingX?: number;
   readonly paddingY?: number;
-  /** Round only the two top corners, matching editor label pills. */
+  /**
+   * Round only the top corners when true, all four when false. Omit to follow
+   * the label's attachment to a displayed box.
+   */
   readonly topCornersOnly?: boolean;
 }
 

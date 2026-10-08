@@ -84,6 +84,7 @@ const expectedWebRuntimeExports = [
   "RenderPreparationMode",
   "RenderPreparationWorkerStatus",
   "SUPERVISION_ROBOFLOW_COLOR",
+  "StrokeAlignment",
   "TrackingGeometry",
   "annotationRendererKinds",
   "annotationRenderers",

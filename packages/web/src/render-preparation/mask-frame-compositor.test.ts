@@ -4,6 +4,7 @@ import {
   DetectionMaskEncoding,
   encodeBinaryMask,
   encodeCompressedRleCounts,
+  StrokeAlignment,
 } from "supervision-js-core";
 
 import {
@@ -137,6 +138,46 @@ describe("mask frame compositor", () => {
       Float32Array.from([0, 1, 0, 0.25]),
     );
     expect(frame!.strokeWidths[3]).toBe(2);
+  });
+
+  it("excludes hidden polygons from prepared coverage and dimensions", () => {
+    const frame = createIdMaskRasterFrame([
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        polygon: {
+          height: 100,
+          width: 100,
+          points: [
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 0, y: 100 },
+          ],
+        },
+        visible: false,
+      },
+      {
+        alpha: 0.5,
+        color: 0x00ff00,
+        detectionIndex: 1,
+        polygon: {
+          height: 4,
+          width: 4,
+          points: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 4 },
+            { x: 0, y: 4 },
+          ],
+        },
+      },
+    ]);
+
+    expect(frame!.width).toBe(4);
+    expect(frame!.height).toBe(4);
+    expect(frame!.data).toEqual(new Uint8Array(16).fill(2));
+    expect(frame!.fillPalette[7]).toBe(0);
   });
 
   it("builds detection-indexed ID mask artifacts for shader rendering and picking", () => {
@@ -584,6 +625,78 @@ const overlappingStrokedMasks = [
 ] as const;
 
 describe("rgba mask fallback", () => {
+  it("preserves total CSS width and placement across fitted display sizes", () => {
+    const sourceWidth = 64;
+    const sourceHeight = 32;
+    const mask = encodeBinaryMask(
+      Uint8Array.from({ length: sourceWidth * sourceHeight }, (_, index) =>
+        index % sourceWidth >= 32 ? 1 : 0,
+      ),
+      sourceWidth,
+      sourceHeight,
+    );
+    for (const width of [1, 2, 3, 4]) {
+      for (const [alignment, insideFraction] of [
+        [StrokeAlignment.Outside, 0],
+        [StrokeAlignment.Center, 0.5],
+        [StrokeAlignment.Inside, 1],
+      ] as const) {
+        for (const displayWidth of [32, 64, 128]) {
+          const density = sourceWidth / displayWidth;
+          const frame = compositeMaskFrame(
+            [
+              {
+                alpha: 0,
+                color: 0,
+                detectionIndex: 0,
+                mask,
+                stroke: { alpha: 1, color: 0xffffff, width, alignment },
+              },
+            ],
+            displayWidth,
+          )!;
+          let total = 0;
+          for (let x = 0; x < sourceWidth; x += 1) {
+            const signedDistance = 32 - (x + 0.5);
+            const expected = Math.max(
+              0,
+              Math.min(
+                width * density * (1 - insideFraction),
+                signedDistance + 0.5,
+              ) -
+                Math.max(
+                  -width * density * insideFraction,
+                  signedDistance - 0.5,
+                ),
+            );
+            const alpha = readPixel(frame.data, sourceWidth, x, 16)[3]!;
+            expect(alpha).toBeCloseTo(Math.round(expected * 255), 8);
+            total += alpha / 255 / density;
+          }
+          expect(total).toBeCloseTo(width, 1);
+        }
+      }
+    }
+  });
+
+  it("draws an outside border into a hole without replacing the mask interior", () => {
+    const width = 9;
+    const data = new Uint8Array(width * width).fill(1);
+    data[4 * width + 4] = 0;
+    const frame = compositeMaskFrame([
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: encodeBinaryMask(data, width, width),
+        stroke: { alpha: 1, color: 0x00ff00, width: 1 },
+      },
+    ])!;
+    expect(readPixel(frame.data, width, 4, 4)).toEqual([0, 255, 0, 255]);
+    expect(readPixel(frame.data, width, 3, 4)).toEqual([255, 0, 0, 255]);
+    expect(readPixel(frame.data, width, 0, 0)).toEqual([255, 0, 0, 255]);
+  });
+
   it("paints overlapping fills and strokes pixel for pixel", () => {
     expect(paintedGrid(compositeMaskFrame(overlappingStrokedMasks)!)).toEqual([
       "4444cc22222c",

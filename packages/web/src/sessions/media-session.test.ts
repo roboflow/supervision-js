@@ -43,6 +43,37 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
+  it.each([true, 2] as const)(
+    "applies annotation AA %s at opening and updates it in the same session",
+    async (antialiasing) => {
+      resetMocks();
+      const { createMediaSession } = await import("../index");
+      const renderers = await import("#renderers/media-renderer");
+      const opening = vi.spyOn(renderers, "createMediaRenderer");
+      const session = await createMediaSession({
+        container: createContainer(),
+        media: "sample.mp4",
+        presentation: { annotationAntialiasing: antialiasing },
+        renderer: { autoPlay: false },
+      });
+      const update = vi.spyOn(session.renderer, "setPresentation");
+      try {
+        expect(opening).toHaveBeenCalledWith(
+          expect.objectContaining({ annotationAntialiasing: antialiasing }),
+        );
+        session.setPresentation({ annotationAntialiasing: false });
+        expect(update).toHaveBeenCalledWith(
+          expect.objectContaining({ annotationAntialiasing: false }),
+        );
+        expect(opening).toHaveBeenCalledOnce();
+      } finally {
+        update.mockRestore();
+        opening.mockRestore();
+        session.destroy();
+      }
+    },
+  );
+
   it("delegates the renderer's exact frame-navigation capability by identity", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");

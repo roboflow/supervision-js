@@ -121,6 +121,7 @@ describe("package entrypoint", () => {
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
       "SUPERVISION_ROBOFLOW_COLOR",
+      "StrokeAlignment",
       "TrackingGeometry",
       "annotationRendererKinds",
       "annotationRenderers",
@@ -223,6 +224,11 @@ describe("package entrypoint", () => {
       RoundedRect: "roundedRect",
     });
     expect(entrypoint.BoxStrokeAlignment).toEqual({
+      Center: "center",
+      Inside: "inside",
+      Outside: "outside",
+    });
+    expect(entrypoint.StrokeAlignment).toEqual({
       Center: "center",
       Inside: "inside",
       Outside: "outside",

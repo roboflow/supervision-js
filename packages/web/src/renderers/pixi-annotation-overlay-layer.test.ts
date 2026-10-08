@@ -92,7 +92,7 @@ describe("Pixi annotation overlay presentation", () => {
     });
 
     layer.attachGraphics(graphics as never);
-    layer.draw({
+    const context = {
       frame: undefined,
       marquee: null,
       mediaHeight: 100,
@@ -101,7 +101,8 @@ describe("Pixi annotation overlay presentation", () => {
       pointer: null,
       selectedDetectionIds: [],
       viewportScale: 2,
-    });
+    };
+    layer.draw(context);
 
     expect(graphics.roundRect).toHaveBeenCalledWith(25, 40, 30, 20, 0.5);
     expect(graphics.fill).toHaveBeenCalledWith({
@@ -113,6 +114,18 @@ describe("Pixi annotation overlay presentation", () => {
       color: 0xff0056,
       width: 1,
     });
+    expect(layer.getRenderedEditingBox()).toEqual({
+      detection: preview,
+      rect: preview.rect,
+    });
+    layer.setStyle({
+      editingPreview: {
+        boxFill: { alpha: 0, color: 0xff0056 },
+        stroke: { alpha: 0, color: 0xff0056, width: 2 },
+      },
+    });
+    layer.draw(context);
+    expect(layer.getRenderedEditingBox()).toBeUndefined();
   });
 
   it("resolves resize previews from the annotation being edited", () => {

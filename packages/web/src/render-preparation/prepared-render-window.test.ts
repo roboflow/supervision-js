@@ -152,6 +152,126 @@ const SPARSE_FRAMES = Array.from({ length: 12 }, (_, index) =>
 const LATE_FRAME = createGateFrame(5) satisfies DetectionFrame;
 
 describe("prepared render window", () => {
+  it.each([PreparedMaskFrameKind.IdMask, PreparedMaskFrameKind.RgbaImage])(
+    "refreshes zoom-dependent %s borders while retaining ID artifacts",
+    async (kind) => {
+      vi.useFakeTimers();
+      resetMocks();
+      try {
+        let displayWidth = 2;
+        const fakeWorker = createFakeMaskPreparationWorker({
+          createCompleteData: () =>
+            kind === PreparedMaskFrameKind.IdMask
+              ? ({
+                  artifactKind: kind,
+                  fillPalette: new Float32Array(8),
+                  strokePalette: new Float32Array(8),
+                  strokeWidths: new Float32Array(2),
+                  raster: new Uint8Array(4),
+                  hasStroke: false,
+                  maxStrokeWidth: 0,
+                  sourceWidth: 2,
+                  width: 2,
+                  height: 2,
+                } as never)
+              : { imageData: new ImageData(new Uint8ClampedArray(16), 2, 2) },
+        });
+        const renderWindow = createPreparedRenderWindow({
+          detectionTimeline: createTimeline([frames[0]!]),
+          maskStyle: new BaseMaskStyle(),
+          resolveMaskDisplayWidth: () => displayWidth,
+          renderPreparation: {
+            mode: RenderPreparationMode.Worker,
+            workerFactory: { createWorker: () => fakeWorker.worker },
+          },
+        });
+        renderWindow.getFrame(0);
+        await flushMaskPreparationTimers(4);
+        const first = renderWindow.getFrame(0)?.maskFrame;
+        expect(first?.kind).toBe(kind);
+        const jobsBeforeZoom = fakeWorker.messages.length;
+        displayWidth = 4;
+        renderWindow.invalidateMaskDisplayWidth();
+        await flushMaskPreparationTimers(4);
+        const next = renderWindow.getFrame(0)?.maskFrame;
+        if (kind === PreparedMaskFrameKind.IdMask) {
+          expect(next).toBe(first);
+          expect(fakeWorker.messages).toHaveLength(jobsBeforeZoom);
+        } else {
+          expect(next).toBeDefined();
+          expect(next).not.toBe(first);
+          expect(fakeWorker.messages.length).toBeGreaterThan(jobsBeforeZoom);
+          expect(fakeWorker.messages.at(-1)).toMatchObject({
+            job: { displayWidth: 4 },
+          });
+        }
+        renderWindow.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([PreparedMaskFrameKind.IdMask, PreparedMaskFrameKind.RgbaImage])(
+    "accepts an in-flight %s result only if its prepared width is still valid",
+    async (kind) => {
+      vi.useFakeTimers();
+      resetMocks();
+      try {
+        let displayWidth = 2;
+        const fakeWorker = createFakeMaskPreparationWorker({
+          autoComplete: false,
+          createCompleteData: () =>
+            kind === PreparedMaskFrameKind.IdMask
+              ? ({
+                  artifactKind: kind,
+                  fillPalette: new Float32Array(8),
+                  strokePalette: new Float32Array(8),
+                  strokeWidths: new Float32Array(2),
+                  raster: new Uint8Array(4),
+                  hasStroke: false,
+                  maxStrokeWidth: 0,
+                  sourceWidth: 2,
+                  width: 2,
+                  height: 2,
+                } as never)
+              : { imageData: new ImageData(new Uint8ClampedArray(16), 2, 2) },
+        });
+        const renderWindow = createPreparedRenderWindow({
+          detectionTimeline: createTimeline([frames[0]!]),
+          maskStyle: new BaseMaskStyle(),
+          resolveMaskDisplayWidth: () => displayWidth,
+          renderPreparation: {
+            mode: RenderPreparationMode.Worker,
+            workerFactory: { createWorker: () => fakeWorker.worker },
+          },
+        });
+        renderWindow.getFrame(0);
+        await flushMaskPreparationTimers(2);
+        expect(fakeWorker.messages).toHaveLength(1);
+        displayWidth = 4;
+        renderWindow.invalidateMaskDisplayWidth();
+        fakeWorker.completeNext();
+        await flushMaskPreparationTimers(2);
+        if (kind === PreparedMaskFrameKind.RgbaImage) {
+          expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
+          expect(fakeWorker.messages).toHaveLength(2);
+          expect(fakeWorker.messages[1]).toMatchObject({
+            job: { displayWidth: 4 },
+          });
+          fakeWorker.completeNext();
+          await flushMaskPreparationTimers(2);
+        } else {
+          expect(fakeWorker.messages).toHaveLength(1);
+        }
+        expect(renderWindow.getFrame(0)?.maskFrame?.kind).toBe(kind);
+        renderWindow.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("keeps prepared overlap across an immutable rolling buffer refresh", async () => {
     vi.useFakeTimers();
     resetMocks();

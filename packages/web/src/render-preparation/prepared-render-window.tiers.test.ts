@@ -165,9 +165,12 @@ describe("prepared raster tiers", () => {
     },
   );
 
-  it.each([undefined, FINE * 4])(
-    "retains native-width motion artifacts when the fitted cap is %s",
-    async (fittedCap) => {
+  it.each([
+    { fittedCap: undefined, previewWidth: FINE },
+    { fittedCap: FINE * 4, previewWidth: COARSE },
+  ])(
+    "sizes motion previews against available source detail with fitted cap $fittedCap",
+    async ({ fittedCap, previewWidth }) => {
       vi.useFakeTimers();
       resetMocks();
       const frames = wideFrames(60);
@@ -192,10 +195,20 @@ describe("prepared raster tiers", () => {
         }
         const mediaTime = frames[40]!.mediaTime;
         const artifact = renderWindow.getFrame(mediaTime)?.maskFrame;
-        expect(artifact?.width).toBe(FINE);
+        expect(artifact?.width).toBe(previewWidth);
         await vi.advanceTimersByTimeAsync(200);
-        expect(renderWindow.getFrame(mediaTime)?.maskFrame).toBe(artifact);
-        expect(worker.requests).toHaveLength(3);
+        if (previewWidth === FINE) {
+          expect(renderWindow.getFrame(mediaTime)?.maskFrame).toBe(artifact);
+          expect(worker.requests).toHaveLength(3);
+        } else {
+          expect(worker.requests[3]!.job.maxRasterWidth).toBe(FINE);
+          worker.completeNext();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(renderWindow.getFrame(mediaTime)?.maskFrame?.width).toBe(FINE);
+          expect(renderWindow.getFrame(mediaTime)?.maskFrame).not.toBe(
+            artifact,
+          );
+        }
       } finally {
         renderWindow.destroy();
       }

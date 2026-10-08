@@ -194,7 +194,6 @@ export function createDefaultLabelStyle(
       cornerRadius: DEFAULT_LABEL_CORNER_RADIUS,
       paddingX: DEFAULT_LABEL_PADDING_X,
       paddingY: DEFAULT_LABEL_PADDING_Y,
-      topCornersOnly: true,
     }),
     includeConfidence: options.includeConfidence,
     placement: LabelPlacement.Top,

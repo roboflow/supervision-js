@@ -7,6 +7,9 @@ import type {
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
+  MAX_ID_MASK_STROKE_WIDTH,
+  resolveIdMaskStrokeTexels,
+  StrokeAlignment,
   decodeCompressedRleCounts,
   decodeCompressedRleMask,
   encodeBinaryMask,
@@ -117,6 +120,7 @@ function cropCoverageMask(
 
 export function compositeMaskFrame(
   instructions: readonly SerializableMaskInstruction[],
+  displayWidth?: number,
 ): CompositedMaskFrame | undefined {
   const maskInstructions = materializeMaskInstructions(instructions);
 
@@ -127,9 +131,22 @@ export function compositeMaskFrame(
   const width = Math.max(...maskInstructions.map(({ mask }) => mask.width));
   const height = Math.max(...maskInstructions.map(({ mask }) => mask.height));
   const data = new Uint8ClampedArray(new ArrayBuffer(width * height * 4));
+  const strokeCoverage = maskInstructions.some(
+    ({ stroke }) => stroke && stroke.width > 0 && stroke.alpha > 0,
+  )
+    ? new Uint8Array(width * height)
+    : undefined;
+  const strokeKernels = new Map<string, StrokeKernel>();
 
   for (const instruction of maskInstructions) {
-    compositeInstruction(data, width, instruction);
+    compositeInstruction(
+      data,
+      width,
+      instruction,
+      strokeCoverage,
+      strokeKernels,
+      displayWidth,
+    );
   }
 
   return { data, height, width };
@@ -140,9 +157,10 @@ export function createIdMaskRasterFrame(
   maxRasterWidth?: number,
 ): IdMaskFrame | undefined {
   try {
-    return createIdMaskFrame(materializeMaskInstructions(instructions), {
-      maxWidth: maxRasterWidth,
-    });
+    return createIdMaskFrame(
+      instructions.filter((instruction) => instruction.visible !== false),
+      { maxWidth: maxRasterWidth },
+    );
   } catch {
     // The id raster is the fast path, not the only one: answering with nothing
     // puts the caller on the RGBA composite, which draws the same picture.
@@ -188,17 +206,30 @@ function compositeInstruction(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
   instruction: IdMaskInstruction,
+  strokeCoverage: Uint8Array | undefined,
+  strokeKernels: Map<string, StrokeKernel>,
+  displayWidth: number | undefined,
 ) {
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
   const bounds = compositeMaskFill(rgba, canvasWidth, instruction.mask, fill);
 
-  if (instruction.stroke && bounds) {
+  if (instruction.stroke && bounds && strokeCoverage) {
     compositeMaskStroke(
       rgba,
       canvasWidth,
       decodeCompressedRleMask(instruction.mask),
       bounds,
-      instruction.stroke,
+      {
+        ...instruction.stroke,
+        width: resolveIdMaskStrokeTexels(
+          instruction.stroke.width,
+          displayWidth ?? canvasWidth,
+          canvasWidth,
+          instruction.stroke.alignment,
+        ),
+      },
+      strokeCoverage,
+      strokeKernels,
     );
   }
 }
@@ -291,45 +322,148 @@ function compositeMaskFill(
   return maxX < minX || maxY < minY ? undefined : { maxX, maxY, minX, minY };
 }
 
+interface StrokeKernel {
+  readonly inside: readonly (readonly [number, number, number])[];
+  readonly outside: readonly (readonly [number, number, number])[];
+  readonly radius: number;
+}
+
+function createStrokeKernel(
+  width: number,
+  alignment: StrokeAlignment | undefined,
+): StrokeKernel {
+  const innerFraction =
+    alignment === StrokeAlignment.Inside
+      ? 1
+      : alignment === StrokeAlignment.Center
+        ? 0.5
+        : 0;
+  const inside: [number, number, number][] = [];
+  const outside: [number, number, number][] = [];
+  const radius = Math.min(
+    MAX_ID_MASK_STROKE_WIDTH + 1,
+    Math.ceil(width * Math.max(innerFraction, 1 - innerFraction) + 0.5),
+  );
+  const clamp = (value: number) => Math.max(0, Math.min(1, value));
+  const coverage = (signed: number) =>
+    Math.round(
+      255 *
+        (clamp(0.5 + width * (1 - innerFraction) - signed) -
+          clamp(0.5 - width * innerFraction - signed)),
+    );
+
+  for (let y = -radius; y <= radius; y += 1) {
+    for (let x = -radius; x <= radius; x += 1) {
+      if (x === 0 && y === 0) continue;
+      const distance = Math.max(Math.abs(x) - 0.5, Math.abs(y) - 0.5, 0);
+      const innerCoverage = coverage(-distance);
+      const outerCoverage = coverage(distance);
+      if (innerCoverage > 0) inside.push([x, y, innerCoverage]);
+      if (outerCoverage > 0) outside.push([x, y, outerCoverage]);
+    }
+  }
+  return { inside, outside, radius };
+}
+
 function compositeMaskStroke(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
   decodedMask: DecodedMaskPixels,
   bounds: MaskBounds,
   stroke: MaskStrokeStyle,
+  coverage: Uint8Array,
+  kernels: Map<string, StrokeKernel>,
 ) {
-  const width = Math.round(stroke.width);
-
-  if (width <= 0) {
-    return;
+  if (stroke.width <= 0 || stroke.alpha <= 0) return;
+  const key = `${stroke.width}:${stroke.alignment}`;
+  let kernel = kernels.get(key);
+  if (!kernel) {
+    kernel = createStrokeKernel(stroke.width, stroke.alignment);
+    kernels.set(key, kernel);
   }
-
-  const strokeColor = resolveRgbaColor(stroke.color, stroke.alpha);
+  const visitedAir = kernel.inside.length > 0 ? new Set<number>() : undefined;
+  const mark = (
+    sourceX: number,
+    sourceY: number,
+    offsets: StrokeKernel["outside"],
+    foreground: boolean,
+  ) => {
+    for (const [dx, dy, value] of offsets) {
+      const x = sourceX + dx;
+      const y = sourceY + dy;
+      if (
+        isOutsideMaskBounds(decodedMask, x, y) ||
+        isMaskPixel(decodedMask, x, y) !== foreground
+      )
+        continue;
+      const index = y * canvasWidth + x;
+      coverage[index] = Math.max(coverage[index], value);
+    }
+  };
 
   for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
     for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
       if (
         !isMaskPixel(decodedMask, x, y) ||
         !isBoundaryPixel(decodedMask, x, y)
-      ) {
+      )
         continue;
-      }
-
-      for (let offsetY = -width; offsetY <= width; offsetY += 1) {
-        for (let offsetX = -width; offsetX <= width; offsetX += 1) {
-          const strokeX = x + offsetX;
-          const strokeY = y + offsetY;
-
+      mark(x, y, kernel.outside, false);
+      if (!visitedAir) continue;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const airX = x + dx;
+          const airY = y + dy;
           if (
-            isOutsideMaskBounds(decodedMask, strokeX, strokeY) ||
-            isMaskPixel(decodedMask, strokeX, strokeY)
-          ) {
+            isOutsideMaskBounds(decodedMask, airX, airY) ||
+            isMaskPixel(decodedMask, airX, airY)
+          )
             continue;
-          }
-
-          writePixel(rgba, canvasWidth, strokeX, strokeY, strokeColor);
+          const airIndex = airY * decodedMask.width + airX;
+          if (visitedAir.has(airIndex)) continue;
+          visitedAir.add(airIndex);
+          mark(airX, airY, kernel.inside, true);
         }
       }
+    }
+  }
+
+  const color = resolveRgbaColor(stroke.color, stroke.alpha);
+  for (
+    let y = Math.max(0, bounds.minY - kernel.radius);
+    y <= Math.min(decodedMask.height - 1, bounds.maxY + kernel.radius);
+    y += 1
+  ) {
+    for (
+      let x = Math.max(0, bounds.minX - kernel.radius);
+      x <= Math.min(decodedMask.width - 1, bounds.maxX + kernel.radius);
+      x += 1
+    ) {
+      const index = y * canvasWidth + x;
+      const amount = coverage[index] / 255;
+      if (amount <= 0) continue;
+      coverage[index] = 0;
+      const offset = index * 4;
+      const alpha = rgba[offset + 3] * (1 - amount) + color.alpha * amount;
+      rgba[offset] =
+        alpha > 0
+          ? (rgba[offset] * rgba[offset + 3] * (1 - amount) +
+              color.red * color.alpha * amount) /
+            alpha
+          : 0;
+      rgba[offset + 1] =
+        alpha > 0
+          ? (rgba[offset + 1] * rgba[offset + 3] * (1 - amount) +
+              color.green * color.alpha * amount) /
+            alpha
+          : 0;
+      rgba[offset + 2] =
+        alpha > 0
+          ? (rgba[offset + 2] * rgba[offset + 3] * (1 - amount) +
+              color.blue * color.alpha * amount) /
+            alpha
+          : 0;
+      rgba[offset + 3] = alpha;
     }
   }
 }

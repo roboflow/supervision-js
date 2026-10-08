@@ -1,10 +1,13 @@
 import type { MaskDrawInstruction } from "#types/mask-style";
+import type { Point } from "#types/detections";
+import { StrokeAlignment } from "#types/paint-style";
+import { forEachRasterPolygonSpan } from "#utils/detection-conversions";
 import { decodeCompressedRleCounts } from "#utils/detection-frames";
 
 /**
  * Palette slots an id raster can name, one of them the background. A GLSL
  * fragment stage is guaranteed only 224 uniform vectors, and a palette entry
- * costs 2.25 of them, so this stays a multiple of four and well inside that
+ * costs 2.5 of them, so this stays a multiple of four and well inside that
  * budget; past it a frame draws from the RGBA composite instead.
  */
 export const MAX_ID_MASK_PALETTE_ENTRIES = 80;
@@ -12,6 +15,19 @@ export const MAX_ID_MASK_STROKE_WIDTH = 16;
 
 export interface IdMaskInstruction extends MaskDrawInstruction {
   readonly detectionIndex: number;
+  readonly polygon?: never;
+}
+
+export interface IdPolygonInstruction extends Omit<
+  IdMaskInstruction,
+  "mask" | "polygon"
+> {
+  readonly mask?: never;
+  readonly polygon: {
+    readonly height: number;
+    readonly points: readonly Point[];
+    readonly width: number;
+  };
 }
 
 export interface IdMaskFrame {
@@ -19,10 +35,14 @@ export interface IdMaskFrame {
   readonly fillPalette: Float32Array<ArrayBuffer>;
   readonly hasStroke: boolean;
   readonly height: number;
+  /** Largest outside stroke extent in CSS pixels. */
   readonly maxStrokeWidth: number;
-  /** The frame-wide mask width every stroke on this raster is scaled against. */
+  /** Original mask-plane width before optional raster reduction. */
   readonly sourceWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
+  /** Inside fraction per palette ID: outside 0, center 0.5, inside 1. Missing values default to outside. */
+  readonly strokeAlignments?: Float32Array<ArrayBuffer>;
+  /** Total stroke width in CSS pixels per palette ID. */
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
 }
@@ -36,7 +56,7 @@ export interface IdMaskFrameOptions {
 }
 
 export function createIdMaskFrame(
-  instructions: readonly IdMaskInstruction[],
+  instructions: readonly (IdMaskInstruction | IdPolygonInstruction)[],
   options: IdMaskFrameOptions = {},
 ): IdMaskFrame | undefined {
   if (instructions.length === 0) {
@@ -46,10 +66,18 @@ export function createIdMaskFrame(
   /* Pixel-grid dimensions use integer parts throughout allocation and RLE
      traversal. */
   const maskWidth = Math.floor(
-    Math.max(...instructions.map(({ mask }) => mask.width)),
+    Math.max(
+      ...instructions.map(
+        (instruction) => (instruction.mask ?? instruction.polygon).width,
+      ),
+    ),
   );
   const maskHeight = Math.floor(
-    Math.max(...instructions.map(({ mask }) => mask.height)),
+    Math.max(
+      ...instructions.map(
+        (instruction) => (instruction.mask ?? instruction.polygon).height,
+      ),
+    ),
   );
   const width = resolveRasterWidth(maskWidth, options.maxWidth);
   const height =
@@ -70,6 +98,9 @@ export function createIdMaskFrame(
   const strokeWidths = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
   );
+  const strokeAlignments = new Float32Array(
+    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+  );
   let hasStroke = false;
   let maxStrokeWidth = 0;
 
@@ -88,15 +119,18 @@ export function createIdMaskFrame(
     );
 
     if (instruction.stroke && instruction.stroke.width > 0) {
-      const strokeWidth = resolveIdMaskStrokeTexels(
-        instruction.stroke.width,
-        maskWidth,
-        width,
-      );
+      const strokeWidth = instruction.stroke.width;
+      const alignment =
+        instruction.stroke.alignment === StrokeAlignment.Inside
+          ? 1
+          : instruction.stroke.alignment === StrokeAlignment.Center
+            ? 0.5
+            : 0;
 
       hasStroke = true;
       strokeWidths[detectionMaskId] = strokeWidth;
-      maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth);
+      strokeAlignments[detectionMaskId] = alignment;
+      maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth * (1 - alignment));
       writeIdMaskPaletteEntry(
         strokePalette,
         detectionMaskId,
@@ -105,7 +139,15 @@ export function createIdMaskFrame(
       );
     }
 
-    if (scaledAxes) {
+    if (instruction.polygon) {
+      writePolygonSpans(
+        data,
+        width,
+        instruction.polygon,
+        detectionMaskId,
+        scaledAxes,
+      );
+    } else if (scaledAxes) {
       writeScaledMaskRuns(data, scaledAxes, instruction.mask, detectionMaskId);
     } else {
       writeMaskRuns(data, width, instruction.mask, detectionMaskId);
@@ -120,9 +162,26 @@ export function createIdMaskFrame(
     maxStrokeWidth,
     sourceWidth: maskWidth,
     strokePalette,
+    strokeAlignments,
     strokeWidths,
     width,
   };
+}
+
+function writePolygonSpans(
+  data: Uint8Array,
+  frameWidth: number,
+  polygon: IdPolygonInstruction["polygon"],
+  detectionMaskId: number,
+  axes: ScaledMaskAxes | undefined,
+) {
+  forEachRasterPolygonSpan(polygon.points, polygon, (y, left, right) => {
+    const row = axes ? axes.rows[y]! : y * frameWidth;
+    const first = axes ? axes.columns[left]! : left;
+    const last = axes ? axes.columns[right - 1]! + 1 : right;
+
+    data.fill(detectionMaskId, row + first, row + last);
+  });
 }
 
 /**
@@ -242,18 +301,19 @@ function resolveRasterWidth(maskWidth: number, maxWidth: number | undefined) {
 }
 
 /**
- * Converts a source-grid stroke width into raster texels. Fractional widths
- * let coverage shaders draw a border within a texel. The ceiling bounds the
- * neighbourhood the shaders scan.
+ * Converts total CSS outline width into raster texels. Each side is bounded
+ * independently so centered outlines can use the full supported radius.
  */
 export function resolveIdMaskStrokeTexels(
   strokeWidth: number,
-  maskWidth: number,
+  displayWidth: number,
   rasterWidth: number,
+  alignment: StrokeAlignment = StrokeAlignment.Outside,
 ) {
-  const scale = maskWidth > 0 ? rasterWidth / maskWidth : 1;
+  const scale = displayWidth > 0 ? rasterWidth / displayWidth : 1;
+  const sideFraction = alignment === StrokeAlignment.Center ? 0.5 : 1;
 
-  return Math.min(strokeWidth * scale, MAX_ID_MASK_STROKE_WIDTH);
+  return Math.min(strokeWidth * scale, MAX_ID_MASK_STROKE_WIDTH / sideFraction);
 }
 
 interface ScaledMaskAxes {

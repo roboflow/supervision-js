@@ -10,6 +10,7 @@ import { BaseMaskStyle } from "supervision-js-core";
 
 const preparedWindow = vi.hoisted(() => ({
   invalidateRasterSize: vi.fn(),
+  invalidateMaskDisplayWidth: vi.fn(),
   frame: undefined as
     | {
         detectionFrame: { detections: never[]; mediaTime: number };
@@ -23,6 +24,7 @@ const preparedWindow = vi.hoisted(() => ({
         onMaskFrameEvicted?: (key: string) => void;
         onPreparedWindowChange?: () => void;
         resolveMaxRasterWidth?: () => number | undefined;
+        resolveMaskDisplayWidth?: () => number | undefined;
       }
     | undefined,
 }));
@@ -41,6 +43,7 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
       getArtifactRevision: vi.fn(() => 0),
       getFrame: vi.fn(() => preparedWindow.frame),
       invalidateRasterSize: preparedWindow.invalidateRasterSize,
+      invalidateMaskDisplayWidth: preparedWindow.invalidateMaskDisplayWidth,
       isArtifactPrepared: vi.fn(
         () => preparedWindow.frame?.maskStatus === "prepared",
       ),
@@ -60,11 +63,36 @@ import type { IdMaskDisplayBox } from "#renderers/pixi-mask-layer";
 
 beforeEach(() => {
   preparedWindow.invalidateRasterSize.mockClear();
+  preparedWindow.invalidateMaskDisplayWidth.mockClear();
   preparedWindow.frame = undefined;
   preparedWindow.options = undefined;
 });
 
 describe("pixi mask layer", () => {
+  it("updates fallback CSS width during zoom without invalidating the ID raster", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    layer.createSprite({ height: 80, width: 120 });
+    layer.setRasterDisplay({
+      boxWidth: 60,
+      boxHeight: 40,
+      devicePixelRatio: 2,
+    });
+    expect(preparedWindow.options?.resolveMaskDisplayWidth?.()).toBe(60);
+    layer.setViewportScale(0.5);
+    layer.setViewportScale(1);
+    layer.setViewportScale(1);
+    expect(preparedWindow.options?.resolveMaskDisplayWidth?.()).toBe(120);
+    expect(preparedWindow.invalidateMaskDisplayWidth).toHaveBeenCalledTimes(2);
+    expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
+  });
+
   it("leaves the drawn frame alone when a cook lands, and draws it on the redraw", () => {
     const onPreparedWindowChange = vi.fn();
     const layer = createPixiMaskLayer({
@@ -464,6 +492,28 @@ describe("pixi mask layer", () => {
 
     expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(640);
     expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledTimes(2);
+  });
+
+  it("recooks denser AA masks and restores the display raster without changing display DPR", () => {
+    const display = {
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 1,
+      maxDevicePixelRatio: 1,
+    };
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display,
+    });
+    layer.createSprite({ width: 1920, height: 1080 });
+
+    layer.setRasterDisplay(display, 2);
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(1280);
+    layer.setRasterDisplay(display, 4);
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(2560);
+    layer.setRasterDisplay(display);
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(640);
+    expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledTimes(3);
   });
 
   it("uses fractional caps and rebuilds only when the fitted pixel width changes", () => {

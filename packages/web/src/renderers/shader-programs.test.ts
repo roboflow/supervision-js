@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { Filter, GpuProgramOptions } from "pixi.js";
+import { createPixiAnnotationAntialiasFilter } from "./pixi-annotation-antialias";
 
 /**
  * A Pixi shader built with a GLSL program alone draws nothing under the WebGPU
@@ -34,7 +36,9 @@ const shaderFiles = readRendererFiles().filter(
 );
 
 const programs: readonly ShaderProgram[] = shaderFiles.flatMap((file) =>
-  readShaderPrograms(file, readSource(file)),
+  file === "pixi-annotation-antialias.ts"
+    ? captureAnnotationPrograms(file)
+    : readShaderPrograms(file, readSource(file)),
 );
 
 describe("shader programs", () => {
@@ -92,6 +96,55 @@ describe("shader programs", () => {
   }
 });
 
+function captureAnnotationPrograms(file: string): readonly ShaderProgram[] {
+  // Coverage AA selects its vertex source and resource groups at runtime.
+  return [false, true].flatMap((maskCoverage) => {
+    const programs: ShaderProgram[] = [];
+    createPixiAnnotationAntialiasFilter({
+      defaultFilterVert: "void main(void) {}",
+      maskCoverage,
+      Filter: {
+        from(options) {
+          const resources = options.resources ?? {};
+          programs.push({
+            file: `${file} (${maskCoverage ? "coverage" : "annotations"})`,
+            fragment: captureStage(options.gpu?.fragment),
+            vertex: captureStage(options.gpu?.vertex),
+            glStages: Object.keys(options.gl ?? {}),
+            resources: [
+              "gfu",
+              "uTexture",
+              "uSampler",
+              ...Object.keys(resources),
+            ],
+            uniforms: Object.values(resources).flatMap((group: object) =>
+              Object.keys(group),
+            ),
+          });
+          return {} as Filter;
+        },
+      },
+    });
+    if (programs.length === 0)
+      throw Error(
+        `No AA program was captured for maskCoverage=${maskCoverage}`,
+      );
+    return programs;
+  });
+}
+
+function captureStage(
+  stage: GpuProgramOptions["vertex"] | undefined,
+): ShaderStage | undefined {
+  return stage?.entryPoint !== undefined
+    ? {
+        entryPoint: stage.entryPoint,
+        sourceName: "captured",
+        wgsl: stage.source,
+      }
+    : undefined;
+}
+
 function readRendererFiles(): readonly string[] {
   return readdirSync(new URL(".", import.meta.url)).filter(
     (entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"),
@@ -124,7 +177,12 @@ function readShaderPrograms(
       file,
       fragment: readStage(source, gpu, "fragment"),
       glStages: readKeys(readNamedBlock(options, "gl")),
-      resources: readKeys(readNamedBlock(options, "resources")),
+      resources: [
+        ...(source.startsWith("Filter.from(", callIndex)
+          ? ["gfu", "uTexture", "uSampler"]
+          : []),
+        ...readKeys(readNamedBlock(options, "resources")),
+      ],
       uniforms: readKeys(readNamedBlock(options, "resources"), 2),
       vertex: readStage(source, gpu, "vertex"),
     });

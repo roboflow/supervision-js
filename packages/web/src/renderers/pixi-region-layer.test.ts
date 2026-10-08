@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  AlphaMask,
+  BufferImageSource,
+  Container,
+  Graphics,
+  Rectangle,
+  Sprite,
+  Texture,
+} from "pixi.js";
 
 import { createPixiRegionLayer } from "#renderers/pixi-region-layer";
 import {
@@ -40,6 +49,87 @@ const frame: DetectionFrame = {
 };
 
 describe("pixi region layer", () => {
+  it("updates clipped polygon coverage during same-frame camera pan and drag without redrawing geometry", () => {
+    const mediaTexture = new Texture({
+      source: new BufferImageSource({
+        width: 300,
+        height: 200,
+        resource: new Uint8Array(300 * 200 * 4),
+      }),
+    });
+    const viewport = { x: 90, y: 30, width: 30, height: 20 };
+    const polygonFrame: DetectionFrame = {
+      ...frame,
+      detections: [
+        {
+          id: "player-7",
+          rect: { x: 100, y: 40, width: 20, height: 20 },
+          polygon: {
+            points: [
+              { x: 90, y: 30 },
+              { x: 110, y: 30 },
+              { x: 110, y: 50 },
+              { x: 90, y: 50 },
+            ],
+          },
+        },
+      ],
+    };
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(),
+      AlphaMask,
+      Container,
+      Graphics,
+      Rectangle,
+      Sprite,
+      Texture,
+      GifSprite: FakeGifSprite as never,
+      Assets: { load: vi.fn(), unload: vi.fn() } as never,
+      Filter: {
+        from: () => ({
+          resolution: 2,
+          resources: {},
+          destroy: vi.fn(),
+        }),
+      } as never,
+      defaultFilterVert: "filter vertex",
+      getAnnotationAntialiasing: () => true,
+      getViewportBounds: () => viewport,
+      getMediaTexture: () => mediaTexture,
+      detectionTimeline: createTimeline(polygonFrame),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "zoom",
+          region: { kind: "bounds" },
+          source: {
+            kind: "media",
+            region: { kind: "bounds" },
+            coverage: { kind: RegionRendererCoverageKind.Polygon },
+          },
+          target: {},
+          transform: { scale: 2.5 },
+        }),
+      ],
+    });
+    const container = layer.createContainer();
+    layer.drawFrame(1);
+    const maskContainer = container.children[1] as Container;
+    const geometry = maskContainer.children[0] as Graphics;
+    const poly = vi.spyOn(geometry, "poly");
+    expect(maskContainer.boundsArea).toEqual(new Rectangle(90, 30, 30, 20));
+    layer.translateDetection("player-7", 80, 0);
+    expect(maskContainer.boundsArea.width).toBe(0);
+
+    viewport.x = 180;
+    layer.syncViewportBounds();
+    expect(maskContainer.boundsArea).toEqual(new Rectangle(180, 30, 25, 20));
+    expect(poly).not.toHaveBeenCalled();
+    expect(geometry.position.x).toBe(180);
+    layer.destroy();
+    container.destroy({ children: true });
+    mediaTexture.destroy(true);
+  });
+
   it("loads an asset asynchronously and redraws a matching head anchor", async () => {
     const texture = { height: 20, width: 40 };
     const load = vi.fn(async () => texture);
@@ -384,6 +474,12 @@ describe("pixi region layer", () => {
 
   it("keeps prepared media effects sized in media pixels across viewport changes", () => {
     FakeBlurFilter.instances = [];
+    let antialiasing = true;
+    let antialiasResolution = 2;
+    const filterFrom = vi.fn(() => ({
+      destroy: vi.fn(),
+      resources: {},
+    }));
     const mediaTexture = new FakeTexture({
       source: { height: 200, width: 300 },
     });
@@ -391,6 +487,10 @@ describe("pixi region layer", () => {
       ...createTestBackend(mediaTexture),
       Assets: { load: vi.fn(), unload: vi.fn() } as never,
       BlurFilter: FakeBlurFilter as never,
+      Filter: { from: filterFrom } as never,
+      defaultFilterVert: "filter vertex",
+      getAnnotationAntialiasing: () => antialiasing,
+      getAntialiasResolution: () => antialiasResolution,
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
@@ -418,6 +518,27 @@ describe("pixi region layer", () => {
     expect(filter.options).toMatchObject({ strength: 5 });
     expect(FakeBlurFilter.instances).toHaveLength(1);
     expect(display.filters).toEqual([filter]);
+    const coverageContainer = container.children[1] as unknown as FakeContainer;
+    const coverage = coverageContainer.children[0] as FakeGraphics;
+    const coverageFilter = coverage.filters?.[0] as {
+      destroy: ReturnType<typeof vi.fn>;
+      resolution: number;
+    };
+    expect(display.maskOptions.channel).toBe("alpha");
+    expect(coverage.rect).toHaveBeenCalled();
+    expect(filterFrom).toHaveBeenCalledOnce();
+    expect(filterFrom).toHaveBeenCalledWith(
+      expect.objectContaining({ resolution: antialiasResolution }),
+    );
+
+    const positionUpdates = coverage.position.set.mock.calls.length;
+    antialiasResolution = 1.5;
+    layer.setAntialiasResolution(antialiasResolution);
+    expect(coverageFilter.resolution).toBe(1.5);
+    expect(coverage.position.set).toHaveBeenCalledTimes(positionUpdates);
+    expect(display.filters).toEqual([filter]);
+    expect(FakeBlurFilter.instances).toHaveLength(1);
+    expect(filterFrom).toHaveBeenCalledOnce();
 
     layer.drawFrame(1, 2);
     const scaledFilter = display.filters?.[0] as FakeBlurFilter;
@@ -425,11 +546,22 @@ describe("pixi region layer", () => {
     expect(scaledFilter.options).toMatchObject({ strength: 20 });
     expect(filter.destroy).toHaveBeenCalledOnce();
 
+    antialiasing = false;
+    layer.drawFrame(1, 2);
+    expect(container.children).toEqual([display]);
+    expect(display.filters).toEqual([scaledFilter]);
+    expect(coverageFilter.destroy).toHaveBeenCalledOnce();
+
     layer.destroy();
     expect(scaledFilter.destroy).toHaveBeenCalledOnce();
   });
 
   it("clips a media crop to the detection polygon", () => {
+    let antialiasing = false;
+    const filterFrom = vi.fn(() => ({
+      destroy: vi.fn(),
+      resources: {},
+    }));
     const mediaTexture = new FakeTexture({
       source: { height: 200, width: 300 },
     });
@@ -458,6 +590,9 @@ describe("pixi region layer", () => {
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
+      Filter: { from: filterFrom } as never,
+      defaultFilterVert: "filter vertex",
+      getAnnotationAntialiasing: () => antialiasing,
       detectionTimeline: createTimeline(headFrame),
       regionRenderers: [
         annotationRenderers.region({
@@ -478,19 +613,54 @@ describe("pixi region layer", () => {
     expect(layer.drawFrame(1).activeDetectionIndexes).toEqual([0]);
     expect(container.children).toHaveLength(2);
     const display = container.children[0]!;
-    const mask = container.children[1] as FakeGraphics;
+    const maskContainer = container.children[1] as unknown as FakeContainer;
+    const mask = maskContainer.children[0] as FakeGraphics;
     expect(display).toMatchObject({ height: 50, mask, width: 50 });
     expect(mask.poly).toHaveBeenCalledWith(
       [-10, -10, 10, -10, 8, 10, -8, 10],
       true,
     );
     expect(mask.scale.set).toHaveBeenCalledWith(2.5, 2.5);
+    expect(filterFrom).not.toHaveBeenCalled();
+
+    antialiasing = true;
+    layer.drawFrame(1);
+    const effect = display.effects[0] as FakeAlphaMask;
+    const filter = mask.filters?.[0] as {
+      destroy: ReturnType<typeof vi.fn>;
+    };
+    expect(display.mask).toBeNull();
+    expect(display.maskOptions.channel).toBe("alpha");
+    expect(effect.mask).toBe(maskContainer);
+    expect(display.filters).toBeNull();
+
+    antialiasing = false;
+    layer.drawFrame(1);
+    expect(display.mask).toBe(mask);
+    expect(display.effects).toEqual([]);
+    expect(display.maskOptions.channel).toBe("red");
+    expect(mask.filters).toBeNull();
+    expect(filter.destroy).not.toHaveBeenCalled();
+
+    antialiasing = true;
+    layer.drawFrame(1);
+    expect(display.effects).toEqual([effect]);
+    expect(mask.filters).toEqual([filter]);
+    expect(filterFrom).toHaveBeenCalledOnce();
 
     layer.destroy();
     expect(mask.destroy).toHaveBeenCalledOnce();
+    expect(filter.destroy).toHaveBeenCalledOnce();
+    expect(mask.filters).toBeNull();
   });
 
   it("clips a media crop with the prepared exact detection mask", () => {
+    let antialiasing = false;
+    let antialiasResolution = 2;
+    const filterFrom = vi.fn(() => ({
+      destroy: vi.fn(),
+      resources: {},
+    }));
     const mediaTexture = new FakeTexture({
       source: { height: 200, width: 300 },
     });
@@ -520,6 +690,10 @@ describe("pixi region layer", () => {
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
+      Filter: { from: filterFrom } as never,
+      defaultFilterVert: "filter vertex",
+      getAnnotationAntialiasing: () => antialiasing,
+      getAntialiasResolution: () => antialiasResolution,
       detectionTimeline: createTimeline(headFrame, (mediaTime) =>
         mediaTime < 2
           ? headFrame
@@ -560,13 +734,14 @@ describe("pixi region layer", () => {
     expect(layer.drawFrame(1).activeDetectionIndexes).toEqual([0]);
     expect(container.children).toHaveLength(2);
     const display = container.children[0]!;
-    const mask = container.children[1] as FakeMesh;
+    const maskContainer = container.children[1] as unknown as FakeContainer;
+    const mask = maskContainer.children[0] as FakeMesh;
     const maskEffect = (display as FakeSprite).effects[0] as FakeAlphaMask;
     const uniforms = mask.shader.resources
       .regionMaskUniforms as FakeUniformGroup;
 
     expect(display).toMatchObject({ height: 60, width: 70 });
-    expect(maskEffect.mask).toBe(mask);
+    expect(maskEffect.mask).toBe(maskContainer);
     const crop = Array.from(uniforms.uniforms.uCrop as Float32Array);
     const expectedCrop = [86, 28, 28, 24];
     crop.forEach((value, index) =>
@@ -577,9 +752,42 @@ describe("pixi region layer", () => {
     ]);
     expect(mask.position.set).toHaveBeenCalledWith(100, 40);
     expect(mask.scale.set).toHaveBeenCalledWith(70, 60);
+    expect(filterFrom).not.toHaveBeenCalled();
+
+    antialiasing = true;
+    layer.drawFrame(1);
+    const filter = mask.filters?.[0] as {
+      destroy: ReturnType<typeof vi.fn>;
+      resolution: number;
+    };
+    expect(display.maskOptions.channel).toBe("alpha");
+    expect(display.filters).toBeNull();
+    expect(filterFrom).toHaveBeenCalledWith(
+      expect.objectContaining({ resolution: antialiasResolution }),
+    );
+
+    const uniformUpdates = uniforms.update.mock.calls.length;
+    antialiasResolution = 3;
+    layer.setAntialiasResolution(antialiasResolution);
+    expect(filter.resolution).toBe(3);
+    expect(uniforms.update).toHaveBeenCalledTimes(uniformUpdates);
+    expect(filterFrom).toHaveBeenCalledOnce();
+
+    antialiasing = false;
+    layer.drawFrame(1);
+    expect(display.maskOptions.channel).toBe("red");
+    expect(mask.filters).toBeNull();
+    antialiasing = true;
+    layer.drawFrame(1);
+    expect(mask.filters).toEqual([filter]);
+    expect(filterFrom).toHaveBeenCalledOnce();
 
     expect(layer.drawFrame(2).activeDetectionIndexes).toEqual([]);
     expect(mask.shader.resources.uTexture).toBe(idMaskTexture.source);
+    antialiasResolution = 1.5;
+    layer.setAntialiasResolution(antialiasResolution);
+    expect(filter.resolution).toBe(1.5);
+    expect(filterFrom).toHaveBeenCalledOnce();
     layer.releaseMaskTexture(idMaskTexture as never);
 
     expect(mask.shader.resources.uTexture).not.toBe(idMaskTexture.source);
@@ -588,6 +796,8 @@ describe("pixi region layer", () => {
     expect(mask.shader.resources.uTexture).toBe(idMaskTexture.source);
     expect(mask.visible).toBe(true);
     layer.destroy();
+    expect(filter.destroy).toHaveBeenCalledOnce();
+    expect(mask.filters).toBeNull();
   });
 
   it("keeps one display across frames for a stable tracker identity", async () => {
@@ -678,6 +888,12 @@ describe("pixi region layer", () => {
   });
 
   it("creates a looping GifSprite and releases its shared source", async () => {
+    let antialiasing = false;
+    let antialiasResolution = 1.5;
+    const filterFrom = vi.fn(() => ({
+      destroy: vi.fn(),
+      resources: {},
+    }));
     const gifSource = {
       duration: 1_000,
       frames: [{ end: 1_000, start: 0, texture: {} }],
@@ -702,6 +918,10 @@ describe("pixi region layer", () => {
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
+      Filter: { from: filterFrom } as never,
+      defaultFilterVert: "filter vertex",
+      getAnnotationAntialiasing: () => antialiasing,
+      getAntialiasResolution: () => antialiasResolution,
       detectionTimeline: createTimeline(frame),
       regionRenderers: [renderer],
     });
@@ -717,11 +937,38 @@ describe("pixi region layer", () => {
       source: gifSource,
     });
     const display = container.children[0]!;
+    expect(filterFrom).not.toHaveBeenCalled();
+    antialiasing = true;
+    layer.drawFrame(1);
+    const filter = display.filters?.[0] as {
+      destroy: ReturnType<typeof vi.fn>;
+      resolution: number;
+    };
+    expect(filterFrom).toHaveBeenCalledWith(
+      expect.objectContaining({ resolution: antialiasResolution }),
+    );
+    const positionUpdates = display.position.set.mock.calls.length;
+    antialiasResolution = 4;
+    layer.setAntialiasResolution(antialiasResolution);
+    expect(filter.resolution).toBe(4);
+    expect(display.position.set).toHaveBeenCalledTimes(positionUpdates);
+    expect(filterFrom).toHaveBeenCalledOnce();
+    antialiasing = false;
+    layer.drawFrame(1);
+    expect(display.filters).toBeNull();
+    antialiasing = true;
+    layer.drawFrame(1);
+    expect(display.filters).toEqual([filter]);
+    expect(filterFrom).toHaveBeenCalledOnce();
 
     layer.setRenderers([
       { ...renderer, target: { className: "missing-player" } },
     ]);
     expect((display as FakeGifSprite).stop).toHaveBeenCalledOnce();
+    antialiasResolution = 2;
+    layer.setAntialiasResolution(antialiasResolution);
+    expect(filter.resolution).toBe(2);
+    expect(filterFrom).toHaveBeenCalledOnce();
     layer.setRenderers([renderer]);
     expect((display as FakeGifSprite).play).toHaveBeenCalledOnce();
 
@@ -730,11 +977,18 @@ describe("pixi region layer", () => {
     expect(display.destroy).toHaveBeenCalledOnce();
     expect(container.children).toHaveLength(0);
     expect(unload).toHaveBeenCalledWith("/fire.gif");
+    expect(filter.destroy).toHaveBeenCalledOnce();
+    expect(display.filters).toBeNull();
   });
 });
 
 class FakeContainer {
   readonly children: FakeSprite[] = [];
+  readonly removeFromParent = vi.fn(() =>
+    this.parent?.removeChild(this as never),
+  );
+  readonly destroy = vi.fn();
+  parent?: FakeContainer;
   sortableChildren = false;
 
   addChild(...children: FakeSprite[]) {
@@ -779,6 +1033,10 @@ class FakeSprite {
   width = 0;
   zIndex = 0;
   mask: FakeGraphics | null = null;
+  readonly maskOptions = { channel: "red" };
+  readonly setMask = vi.fn((options: { channel?: string }) => {
+    if (options.channel) this.maskOptions.channel = options.channel;
+  });
   parent: FakeContainer | undefined;
 
   constructor(options: { texture: { height: number; width: number } }) {
@@ -797,11 +1055,16 @@ class FakeSprite {
 
 class FakeAlphaMask {
   readonly destroy = vi.fn();
+  mask: FakeMesh | FakeGraphics | null;
+  readonly init = vi.fn((mask: FakeMesh | FakeGraphics) => {
+    this.mask = mask;
+  });
+  readonly reset = vi.fn(() => {
+    this.mask = null;
+  });
 
-  constructor(readonly options: { readonly mask: FakeMesh }) {}
-
-  get mask() {
-    return this.options.mask;
+  constructor(readonly options: { readonly mask: FakeMesh | FakeGraphics }) {
+    this.mask = options.mask;
   }
 }
 
@@ -827,6 +1090,7 @@ class FakeGraphics extends FakeSprite {
   readonly clear = vi.fn(() => this);
   readonly fill = vi.fn(() => this);
   readonly poly = vi.fn(() => this);
+  readonly rect = vi.fn(() => this);
 
   constructor() {
     super({ texture: { height: 0, width: 0 } });

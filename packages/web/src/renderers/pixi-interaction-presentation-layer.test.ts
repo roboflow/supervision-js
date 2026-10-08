@@ -5,6 +5,7 @@ import {
   BaseBoxStyle,
   BaseInteractionStyle,
   MAX_ID_MASK_STROKE_WIDTH,
+  StrokeAlignment,
   createIdMaskFrame,
   encodeCompressedRleCounts,
 } from "supervision-js-core";
@@ -481,10 +482,10 @@ describe("pixi interaction presentation layer", () => {
     const descriptor = FakeShaderFactory.descriptors.at(-1)!;
 
     expect(descriptor.gl.fragment).toContain(
-      "int radius = int(strokeScanRadius(uMaxStrokeWidth, uMaxFractionalStrokeWidth, pixelWidth));",
+      "int radius = int(strokeScanRadius(maxWidth, pixelWidth));",
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      "let radius = i32(strokeScanRadius(maskUniforms.uMaxStrokeWidth, maskUniforms.uMaxFractionalStrokeWidth, pixelWidth));",
+      "let radius = i32(strokeScanRadius(maxWidth, pixelWidth));",
     );
 
     for (const source of [
@@ -498,18 +499,34 @@ describe("pixi interaction presentation layer", () => {
     }
   });
 
-  it("measures an interaction stroke in the texels of the raster it draws on", () => {
+  it("keeps interaction stroke widths in CSS pixels across raster densities", () => {
     expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 2 })).toBe(2);
-    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(2);
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(4);
     expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 1.5 })).toBe(
-      0.75,
+      1.5,
     );
     expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 0.5 })).toBe(
       0.5,
     );
     expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 0.5 })).toBe(
-      0.25,
+      0.5,
     );
+  });
+
+  it("uploads inside alignment and capture density even with no outside extent", () => {
+    uploadedStrokeWidth({
+      rasterWidth: 60,
+      strokeWidth: 3,
+      alignment: StrokeAlignment.Inside,
+      strokePixelRatio: 4,
+    });
+    const group = FakeShaderFactory.descriptors.at(-1)!.resources
+      .maskUniforms as FakeUniformGroup;
+    expect(group.uniforms.uStrokePixelRatio).toBe(4);
+    expect(group.uniforms.uMaxStrokeWidth).toBe(0);
+    expect(group.uniforms.uBorderEnabled).toBe(1);
+    expect((group.uniforms.uStrokeWidths as Float32Array)[1]).toBe(3);
+    expect((group.uniforms.uStrokeAlignments as Float32Array)[1]).toBe(1);
   });
 
   it("gives a wide stroke the width the mask layer drew it at", () => {
@@ -673,6 +690,8 @@ function maskLayerStrokeWidth(strokeWidth: number) {
 function uploadedStrokeWidth(options: {
   readonly rasterWidth: number;
   readonly strokeWidth: number;
+  readonly alignment?: StrokeAlignment;
+  readonly strokePixelRatio?: number;
 }) {
   vi.stubGlobal("document", {
     createElement: vi.fn(() => ({
@@ -708,6 +727,7 @@ function uploadedStrokeWidth(options: {
               alpha: 1,
               color: 0xffffff,
               width: options.strokeWidth,
+              alignment: options.alignment,
             },
           }),
         },
@@ -730,6 +750,7 @@ function uploadedStrokeWidth(options: {
       texture: { source: { style: {} } },
     } as never,
     mediaTime: frame.mediaTime,
+    strokePixelRatio: options.strokePixelRatio,
     selectedPick: {
       detection: frame.detections[0]!,
       detectionIndex: 0,

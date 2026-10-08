@@ -7,6 +7,7 @@ import {
 import { createSourceAwarePresentation } from "#styles/source-presentation";
 import { BoxShape } from "#types/box-style";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
+import { StrokeAlignment } from "#types/paint-style";
 
 const frame: DetectionFrame = { detections: [], mediaTime: 0 };
 const context = { detectionIndex: 0, frame, mediaTime: 0 };
@@ -48,7 +49,7 @@ describe("createDefaultAnnotationPresentation", () => {
       alpha: 0.45,
       color,
       mask,
-      stroke: { alpha: 1, color, width: 2 },
+      stroke: { alignment: StrokeAlignment.Outside, alpha: 1, color, width: 2 },
     });
     expect(
       presentation.polygonStyle?.resolve(
@@ -116,7 +117,6 @@ describe("createDefaultAnnotationPresentation", () => {
         cornerRadius: 4,
         paddingX: 6,
         paddingY: 3,
-        topCornersOnly: true,
       },
       offsetY: 0,
       placement: "top",
@@ -131,6 +131,18 @@ describe("createDefaultAnnotationPresentation", () => {
         fontWeight: "600",
       },
     });
+    expect(
+      presentation.labelStyle?.resolve(
+        { className: "person", mask, rect },
+        context,
+      )?.background,
+    ).toMatchObject({ cornerRadius: 4 });
+    expect(
+      presentation.labelStyle?.resolve(
+        { className: "person", mask, rect },
+        context,
+      )?.background,
+    ).not.toHaveProperty("topCornersOnly");
   });
 
   it("uses stable colors by default and accepts consumer class colors", () => {

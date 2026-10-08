@@ -70,6 +70,8 @@ function defaultLayerOrder(kind: string) {
   switch (kind) {
     case PixiSceneLayerKind.Media:
       return 0;
+    case PixiSceneLayerKind.Focus:
+      return 10;
     case PixiSceneLayerKind.Depth:
       return 25;
     case PixiSceneLayerKind.Heatmap:
@@ -82,8 +84,6 @@ function defaultLayerOrder(kind: string) {
       return 250;
     case PixiSceneLayerKind.Region:
       return 275;
-    case PixiSceneLayerKind.Focus:
-      return 300;
     case PixiSceneLayerKind.Preview:
       return 400;
     case PixiSceneLayerKind.Guide:

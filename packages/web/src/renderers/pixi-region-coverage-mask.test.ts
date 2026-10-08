@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Rectangle } from "pixi.js";
 
 import { createPixiRegionCoverageMask } from "./pixi-region-coverage-mask";
 
@@ -88,9 +89,15 @@ function createMaskOptions(
     uniforms: Record<string, unknown> = {};
     update = vi.fn();
   }
+  class StubContainer {
+    addChild = vi.fn();
+    destroy = vi.fn();
+  }
 
   return {
     AlphaMask: Stub,
+    Container: StubContainer,
+    Rectangle,
     ImageSource: Stub,
     Mesh: Stub,
     MeshGeometry: Stub,

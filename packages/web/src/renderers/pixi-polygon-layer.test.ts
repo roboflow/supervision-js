@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BasePolygonStyle, BoxStrokeAlignment } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+import { createPreparedRenderWindow } from "#render-preparation/prepared-render-window";
 
 const preparedWindow = vi.hoisted(() => ({
   frame: undefined as
@@ -143,6 +144,20 @@ describe("pixi polygon layer", () => {
       stroke: { alpha: 1, color: 0xffffff, width: 3 },
     });
   });
+
+  it("forwards paused and playing states to polygon preparation", () => {
+    const layer = createLayer();
+    const window = vi
+      .mocked(createPreparedRenderWindow)
+      .mock.results.at(-1)!.value;
+
+    layer.setPlaybackActive(false);
+    layer.createDisplay({ height: 50, width: 100 });
+    layer.setPlaybackActive(true);
+
+    expect(window.setPlaybackActive.mock.calls).toEqual([[false], [true]]);
+  });
+
   it("puts a prepared polygon frame on the screen through the id-mask mesh", () => {
     const layer = createLayer();
     const display = layer.createDisplay({ height: 50, width: 100 });
