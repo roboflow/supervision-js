@@ -18,9 +18,11 @@ import {
   LabelPlacement,
   MarkerShape,
   MaskRenderMode,
+  StrokeAlignment,
   PercentageBarPlacement,
   annotationRenderers,
   type BoxDrawInstruction,
+  type AnnotationAntialiasing,
   type BoxCornerStyle,
   type BoxStyle,
   type BoxStyleContext,
@@ -46,6 +48,11 @@ import {
   initialDepthSettings,
   type DepthSettings,
 } from "../depth";
+import {
+  createDemoHeatmapRenderer,
+  initialDemoHeatmapSettings,
+  type DemoHeatmapSettings,
+} from "../heatmap";
 
 export type DemoClassStyle = DetectionClassColorStyle;
 
@@ -63,7 +70,7 @@ export const demoMarkerPositionOffsets = {
 
 export type DemoMarkerPosition = keyof typeof demoMarkerPositionOffsets;
 
-export interface DemoPresentationSettings {
+export interface DemoPresentationSettings extends DemoHeatmapSettings {
   readonly boxesEnabled: boolean;
   readonly boxCornersEnabled: boolean;
   /** The fixture's depth clip, under every detection layer. */
@@ -72,8 +79,6 @@ export interface DemoPresentationSettings {
   readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
   readonly heatmapsEnabled: boolean;
-  readonly heatmapThresholdScale: number;
-  readonly heatmapOpacity: number;
   readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
@@ -109,8 +114,10 @@ export interface DemoPresentationSettings {
   readonly maskMode: MaskRenderMode;
   readonly maskFillAlpha: number;
   readonly maskOpacity: number;
+  readonly annotationAntialiasing: AnnotationAntialiasing;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
+  readonly maskStrokeAlignment: StrokeAlignment;
   readonly markerPosition: DemoMarkerPosition;
   readonly markerShape: MarkerShape;
   readonly markerSize: number;
@@ -135,6 +142,7 @@ export interface DemoPresentationSettings {
   readonly focusCornerRadius: number;
   readonly focusDimColor: number;
   readonly focusDimAlpha: number;
+  readonly focusRectFallbackEnabled: boolean;
   readonly focusTargetMode: FocusTargetMode;
 }
 
@@ -245,9 +253,9 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   focusDimAlpha: 0.4,
   focusDimColor: 0x000000,
   focusEnabled: true,
+  focusRectFallbackEnabled: true,
   heatmapsEnabled: false,
-  heatmapThresholdScale: 0.75,
-  heatmapOpacity: 1,
+  ...initialDemoHeatmapSettings,
   focusTargetMode: FocusTargetMode.Ambient,
   hiddenClasses: [],
   interactionHoverFillAlpha: 0.08,
@@ -274,8 +282,10 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   maskMode: MaskRenderMode.FillAndStroke,
   maskFillAlpha: 0.45,
   maskOpacity: 1,
+  annotationAntialiasing: false,
   maskStrokeAlpha: 1,
   maskStrokeWidth: 2,
+  maskStrokeAlignment: StrokeAlignment.Outside,
   masksEnabled: true,
   markerPosition: "center",
   markerShape: MarkerShape.Circle,
@@ -349,6 +359,7 @@ export function createDemoPresentation(
     keypointStyle,
     labelStyle,
     maskStyle,
+    annotationAntialiasing: settings.annotationAntialiasing,
     markerStyle,
     orientedBoxStyle,
     percentageBarStyle,
@@ -367,13 +378,7 @@ export function createDemoPresentation(
         ? [createDepthRenderer(settings.depthStyle)]
         : []),
       ...(settings.heatmapsEnabled
-        ? [
-            annotationRenderers.heatmap({
-              thresholdScale: settings.heatmapThresholdScale,
-              opacity: settings.heatmapOpacity,
-              minimumAlpha: 0.35,
-            }),
-          ]
+        ? [createDemoHeatmapRenderer(settings)]
         : []),
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
       ...(maskHaloStyle
@@ -628,7 +633,9 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
       alpha: settings.focusDimAlpha,
       color: settings.focusDimColor,
     },
-    shape: resolveBoxShape(settings.focusCornerRadius),
+    shape: settings.focusRectFallbackEnabled
+      ? resolveBoxShape(settings.focusCornerRadius)
+      : null,
     shouldRender: (context) =>
       settings.focusTargetMode === FocusTargetMode.Ambient ||
       hasRenderableFocusTarget(context, settings),
@@ -714,6 +721,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
       settings.maskFillAlpha,
       settings.maskStrokeAlpha,
       settings.maskStrokeWidth,
+      settings.maskStrokeAlignment,
       serializeMaskClassStyles(settings.classStyles),
     ].join(":"),
     opacity: settings.maskOpacity,
@@ -740,6 +748,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
                 alpha: settings.maskStrokeAlpha,
                 color: style.stroke,
                 width: settings.maskStrokeWidth,
+                alignment: settings.maskStrokeAlignment,
               }
             : undefined,
       };
@@ -792,7 +801,6 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
       cornerRadius: settings.labelCornerRadius,
       paddingX: settings.labelPaddingX,
       paddingY: settings.labelPaddingY,
-      topCornersOnly: true,
     }),
     includeConfidence: settings.labelIncludeConfidence,
     offset: {

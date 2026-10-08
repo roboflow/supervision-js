@@ -905,6 +905,8 @@ export function useDemoRenderer(
       {
         ...defaultDemoPresentationSettings,
         ...fixture.presentationDefaults,
+        annotationAntialiasing:
+          presentationSettingsRef.current.annotationAntialiasing,
       },
       fixture.presentationAvailability,
     );

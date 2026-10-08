@@ -2,6 +2,11 @@ import { useMemo } from "react";
 import { MediaRendererPlaybackState } from "supervision";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { useViewportOverlay } from "../hooks/useViewportOverlay";
+import {
+  createDemoHeatmapSnippet,
+  heatmapPaletteOptions,
+  type DemoHeatmapPalette,
+} from "../heatmap";
 import { RendererViewport } from "./RendererViewport";
 
 export function DocsHeatmapPlayground() {
@@ -38,15 +43,7 @@ export function DocsHeatmapPlayground() {
     null,
     demo.mediaState,
   );
-  const snippet = `session.setPresentation({
-  renderers: [
-    annotationRenderers.heatmap({
-      thresholdScale: ${settings.heatmapThresholdScale.toFixed(2)},
-      opacity: ${settings.heatmapOpacity.toFixed(2)},
-      minimumAlpha: 0.35,
-    }),
-  ],
-});`;
+  const snippet = createDemoHeatmapSnippet(settings);
 
   return (
     <main
@@ -89,13 +86,32 @@ export function DocsHeatmapPlayground() {
             </span>
             <input
               type="range"
-              min="0.5"
-              max="1.25"
+              min="0"
+              max="2"
               step="0.05"
               value={settings.heatmapThresholdScale}
               onChange={(event) =>
                 update({
                   heatmapThresholdScale: Number(event.currentTarget.value),
+                })
+              }
+            />
+          </label>
+          <label className="docs-layer-playground__range">
+            <span>
+              <strong>Minimum alpha above cutoff</strong>
+              <output>{Math.round(settings.heatmapMinimumAlpha * 100)}%</output>
+            </span>
+            <input
+              aria-label="Minimum alpha"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={settings.heatmapMinimumAlpha}
+              onChange={(event) =>
+                update({
+                  heatmapMinimumAlpha: Number(event.currentTarget.value),
                 })
               }
             />
@@ -115,6 +131,46 @@ export function DocsHeatmapPlayground() {
                 update({ heatmapOpacity: Number(event.currentTarget.value) })
               }
             />
+          </label>
+          <label className="docs-layer-playground__number">
+            <strong>Maximum score</strong>
+            <input
+              aria-label="Maximum score"
+              type="number"
+              min="0.001"
+              step="0.05"
+              placeholder="1"
+              value={settings.heatmapMaximumScore ?? ""}
+              onChange={(event) => {
+                const raw = event.currentTarget.value;
+                const value = raw === "" ? undefined : Number(raw);
+                if (
+                  value === undefined ||
+                  (Number.isFinite(value) && value > 0)
+                ) {
+                  update({ heatmapMaximumScore: value });
+                }
+              }}
+            />
+          </label>
+          <label className="docs-layer-playground__select">
+            <strong>Color palette</strong>
+            <select
+              aria-label="Color palette"
+              onChange={(event) =>
+                update({
+                  heatmapPalette: event.currentTarget
+                    .value as DemoHeatmapPalette,
+                })
+              }
+              value={settings.heatmapPalette}
+            >
+              {heatmapPaletteOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
         <section

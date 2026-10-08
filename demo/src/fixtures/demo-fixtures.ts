@@ -117,6 +117,7 @@ export interface DemoFixturePresentationDefaults {
   readonly confidenceThreshold?: number;
   readonly depthEnabled?: boolean;
   readonly focusEnabled?: boolean;
+  readonly focusRectFallbackEnabled?: boolean;
   readonly heatmapsEnabled?: boolean;
   readonly keypointsEnabled?: boolean;
   readonly labelsEnabled?: boolean;

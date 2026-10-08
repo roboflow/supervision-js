@@ -434,6 +434,7 @@ body {
 
 .docs-layer-playground__range strong,
 .docs-layer-playground__select strong,
+.docs-layer-playground__number strong,
 .docs-layer-playground__toggle strong {
   color: var(--muted-strong);
   font-size: 0.73rem;
@@ -455,7 +456,8 @@ body {
   gap: 0.45rem;
 }
 
-.docs-layer-playground__select {
+.docs-layer-playground__select,
+.docs-layer-playground__number {
   align-items: center;
   display: grid;
   gap: 0.75rem;
@@ -541,6 +543,22 @@ body {
 }
 
 .docs-layer-playground__select select:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+}
+
+.docs-layer-playground__number input {
+  background: #ffffff;
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.73rem;
+  font-weight: 650;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+}
+
+.docs-layer-playground__number input:focus-visible {
   outline: 2px solid #8b5cf6;
   outline-offset: 2px;
 }
@@ -1315,7 +1333,8 @@ fieldset {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.quality-controls__input-row label {
+.quality-controls__input-row label,
+.quality-controls__aa {
   color: var(--muted);
   display: grid;
   font-size: 10px;
@@ -1326,7 +1345,8 @@ fieldset {
   text-transform: uppercase;
 }
 
-.quality-controls__input-row input[type="number"] {
+.quality-controls__input-row input[type="number"],
+.quality-controls__aa select {
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -1339,9 +1359,17 @@ fieldset {
   padding: 0 8px;
 }
 
-.quality-controls__input-row input:disabled {
+.quality-controls__input-row input:disabled,
+.quality-controls__aa select:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.quality-controls__note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
 }
 
 .quality-controls__toggle {
@@ -4051,6 +4079,7 @@ fieldset {
 .source-field input,
 .source-field textarea,
 .quality-controls__input-row input[type="number"],
+.quality-controls__aa select,
 .render-control--number input,
 .quality-controls__toggle,
 .selection-details,
@@ -5128,6 +5157,7 @@ fieldset {
   .render-control__segments button,
   .quality-controls__toggle,
   .quality-controls__input-row input[type="number"],
+  .quality-controls__aa select,
   .selection-panel .inspector-card__header button,
   .session-options .inspector-card__header button {
     min-height: 44px;

@@ -318,9 +318,11 @@ describe("demo presentation", () => {
     expect(demo.maskStyle?.resolve(detection, context)).toEqual(
       canonical.maskStyle?.resolve(detection, context),
     );
-    expect(demo.labelStyle?.resolve(detection, context)).toEqual(
-      canonical.labelStyle?.resolve(detection, context),
-    );
+    for (const labeledDetection of [detection, rectangle]) {
+      expect(demo.labelStyle?.resolve(labeledDetection, context)).toEqual(
+        canonical.labelStyle?.resolve(labeledDetection, context),
+      );
+    }
     expect(demo.polygonStyle?.resolve(vectorDetection, context)).toEqual(
       canonical.polygonStyle?.resolve(vectorDetection, context),
     );
@@ -1096,6 +1098,30 @@ describe("demo presentation", () => {
       },
       targetMode: FocusTargetMode.HoveredAndSelected,
       targets: [selectedPick, hoveredPick],
+    });
+  });
+
+  it("maps the box fallback toggle without removing semantic focus targets", () => {
+    const frame = { detections: [detection], mediaTime: 0 };
+    const context = {
+      frame,
+      mediaTime: 0,
+      selectedPick: null,
+      hoveredPick: null,
+    };
+    expect(
+      createDemoPresentation(
+        defaultDemoPresentationSettings,
+      ).focusStyle?.resolve(context),
+    ).toMatchObject({ fallback: { shape: BoxShape.RoundedRect } });
+    expect(
+      createDemoPresentation({
+        ...defaultDemoPresentationSettings,
+        focusRectFallbackEnabled: false,
+      }).focusStyle?.resolve(context),
+    ).toMatchObject({
+      fallback: null,
+      targets: [{ detection }],
     });
   });
 });
