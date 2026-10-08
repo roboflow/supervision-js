@@ -56,6 +56,7 @@ import type {
 } from "supervision-js-core";
 import type {
   Container as PixiContainer,
+  Filter as PixiFilter,
   Graphics as PixiGraphics,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
@@ -133,11 +134,13 @@ export interface PixiInteractionPresentationLayer {
     readonly width: number;
     readonly height: number;
   }): PixiContainer;
+  getLabelDisplay(): PixiContainer | null;
   drawFrame(context: PixiInteractionPresentationLayerFrameContext): void;
   releaseMaskTexture(texture: PixiTexture): void;
   setInteractionStyle(
     interactionStyle: InteractionStyle | null | undefined,
   ): void;
+  setBackgroundAntialiasFilter(filter: PixiFilter | null): void;
   destroy(): void;
 }
 
@@ -172,6 +175,7 @@ export function createPixiInteractionPresentationLayer(options: {
   let viewportScale = 1;
   let strokePixelRatio = 1;
   let maskRenderer: InteractionMaskRenderer | undefined;
+  let labelDisplay: PixiContainer | null = null;
   let isDestroyed = false;
 
   const syntheticTimeline = createSyntheticTimeline(() => syntheticFrame);
@@ -207,7 +211,7 @@ export function createPixiInteractionPresentationLayer(options: {
       const container = new options.Container();
 
       const boxGraphics = new options.Graphics();
-      const labels = labelLayer.createContainer();
+      labelDisplay = labelLayer.createContainer();
       const vectors = vectorLayer.createContainer();
 
       boxLayer.attachGraphics(boxGraphics);
@@ -217,9 +221,13 @@ export function createPixiInteractionPresentationLayer(options: {
         container.addChild(maskRenderer.mesh);
       }
 
-      container.addChild(boxGraphics, vectors, labels);
+      container.addChild(boxGraphics, vectors);
 
       return container;
+    },
+
+    getLabelDisplay() {
+      return labelDisplay;
     },
 
     destroy() {
@@ -232,6 +240,7 @@ export function createPixiInteractionPresentationLayer(options: {
       activePicks = [];
       maskRenderer?.destroy();
       labelLayer.destroy();
+      labelDisplay = null;
       vectorLayer.destroy();
     },
 
@@ -284,6 +293,10 @@ export function createPixiInteractionPresentationLayer(options: {
       boxLayer.setBoxStyle(boxStyle);
       labelLayer.setLabelStyle(labelStyle);
       vectorLayer.setStyles({ polygonStyle, polylineStyle, keypointStyle });
+    },
+
+    setBackgroundAntialiasFilter(filter) {
+      labelLayer.setBackgroundAntialiasFilter(filter);
     },
   };
 
@@ -686,8 +699,8 @@ function createInteractionMaskRenderer(options: {
       type: "vec4<f32>",
       value: fillPalette,
     },
-    uBorderEnabled: { type: "f32", value: 0 },
     uMaxStrokeWidth: { type: "f32", value: 0 },
+    uBorderEnabled: { type: "f32", value: 0 },
     uStrokePixelRatio: { type: "f32", value: 1 },
     uStrokePalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
