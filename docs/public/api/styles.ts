@@ -20,6 +20,7 @@ export {
   BasePolylineStyle,
   BoxShape,
   BoxStrokeAlignment,
+  StrokeAlignment,
   DepthColormap,
   DepthQuantity,
   DepthSampling,
