@@ -1191,6 +1191,15 @@ export function createPreparedRenderWindow(options: {
       }
 
       clearPreparedMaskFrames();
+      if (
+        !isDestroyed &&
+        maskStyle &&
+        activeMaskFrame &&
+        isPlayheadFast &&
+        settleTimer === undefined
+      ) {
+        armSettleTimer();
+      }
     },
 
     destroy() {

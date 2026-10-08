@@ -398,7 +398,7 @@ describe("prepared raster tiers", () => {
     }
   });
 
-  it("preserves a settled frame's fine quality when its display size changes", async () => {
+  it("refines paused restyles after a fling and display resize, then stays idle", async () => {
     vi.useFakeTimers();
     resetMocks();
     const frames = wideFrames(20);
@@ -439,6 +439,43 @@ describe("prepared raster tiers", () => {
 
       expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBe(width);
       expect(worker.requests).toHaveLength(5);
+
+      renderWindow.setPlaybackActive(false);
+      for (const strokeWidth of [2, 3]) {
+        renderWindow.setMaskStyle(
+          new BaseMaskStyle({ stroke: { width: strokeWidth } }),
+        );
+        renderWindow.getFrame(at(8));
+        await vi.advanceTimersByTimeAsync(0);
+        worker.completeNext();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBeLessThan(
+          width,
+        );
+
+        await vi.advanceTimersByTimeAsync(200);
+        expect(worker.requests.at(-1)?.job.maxRasterWidth).toBe(width);
+        worker.completeNext();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBe(width);
+        expect(renderWindow.getFrame(at(8))?.detectionFrame).toBe(frames[8]);
+
+        const requestCount = worker.requests.length;
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(worker.requests).toHaveLength(requestCount);
+      }
+
+      const requestCount = worker.requests.length;
+      renderWindow.setMaskStyle(null);
+      expect(vi.getTimerCount()).toBe(0);
+      renderWindow.getFrame(at(8));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(worker.requests).toHaveLength(requestCount);
+      expect(vi.getTimerCount()).toBe(0);
+
+      renderWindow.destroy();
+      renderWindow.setMaskStyle(new BaseMaskStyle());
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       renderWindow.destroy();
     }
