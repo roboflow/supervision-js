@@ -1045,6 +1045,7 @@ export async function createPixiMediaScene(
       syncPresentationBox();
       updateMediaSceneFit();
       syncDisplaySizing();
+      drawInteractionPresentationLayer(currentMediaTime);
       renderOnChange();
     },
   );

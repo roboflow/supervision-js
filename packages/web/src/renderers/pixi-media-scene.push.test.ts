@@ -5,6 +5,9 @@ import {
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
   createIdleDetectionBufferState,
+  DetectionMaskEncoding,
+  DetectionPickTarget,
+  encodeCompressedRleCounts,
   MediaInteractionMode,
   RegionRendererRegionKind,
   RegionRendererSourceKind,
@@ -21,6 +24,7 @@ import type { MediaRendererPresentation } from "#types/media-renderer";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
 import { createMaskBrushEditor } from "#editing/mask-brush-editor";
 import { MediaRendererFit } from "#types/media-renderer";
+import type { PixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
 
 const pixiMock = vi.hoisted(() => ({
   copyExternalImageToTexture: vi.fn(),
@@ -701,6 +705,132 @@ describe("push-presented Pixi scene", () => {
     } finally {
       scene.destroy();
       createWindow.mockRestore();
+    }
+  });
+
+  it("refreshes selected mask capture density when a resize keeps the fitted picture unchanged", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    let resized = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        disconnect = vi.fn();
+        observe = vi.fn();
+      },
+    );
+    const interaction = await import("./pixi-interaction-presentation-layer");
+    const createInteractionLayer = vi.spyOn(
+      interaction,
+      "createPixiInteractionPresentationLayer",
+    );
+    const channel = createChannel();
+    const container = {
+      appendChild: vi.fn(),
+      clientWidth: 2040,
+      clientHeight: 720,
+    };
+    const frame: DetectionFrame = {
+      detections: [
+        {
+          mask: {
+            counts: encodeCompressedRleCounts([0, 1280 * 720]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 720,
+            width: 1280,
+          },
+        },
+      ],
+      mediaTime: 1,
+    };
+    const detectionTimeline = createBufferedDetectionTimeline({
+      source: createArrayDetectionFrameSource([frame]),
+    });
+    const maskStyle = new BaseMaskStyle();
+    const onDisplayChange = vi.fn();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      annotationAntialiasing: 2,
+      canInteract: () => true,
+      container: container as unknown as HTMLElement,
+      detectionTimeline,
+      interaction: { mode: MediaInteractionMode.Always },
+      interactionStyle: { resolve: () => ({ maskStyle }) },
+      maskStyle,
+      maxDevicePixelRatio: 2,
+      onDisplayChange,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxWidth: 1280,
+            boxHeight: 720,
+            devicePixelRatio: 2,
+            maxDevicePixelRatio: 2,
+          },
+        },
+      },
+    });
+    const drawInteraction = vi.spyOn(
+      createInteractionLayer.mock.results[0]!
+        .value as PixiInteractionPresentationLayer,
+      "drawFrame",
+    );
+
+    try {
+      scene.initializeMedia({ width: 1280, height: 720 });
+      scene.setPlaybackActive?.(false);
+      await detectionTimeline.prepare(1);
+      await scene.waitForRenderPreparation?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      });
+      channel.present(presentedFrame(1000, { width: 1280, height: 720 }));
+      expect(
+        scene.setSelectedDetection?.({ detectionIndex: 0 }, 1),
+      ).toMatchObject({ target: DetectionPickTarget.Mask });
+      const before = drawInteraction.mock.lastCall?.[0];
+      expect(before).toMatchObject({
+        idMaskArtifact: { frame: { width: 1280, height: 720 } },
+        strokePixelRatio: 4,
+        viewportScale: 1,
+      });
+      expect(onDisplayChange).toHaveBeenLastCalledWith({
+        boxWidth: 1280,
+        boxHeight: 720,
+        devicePixelRatio: 2,
+        maxDevicePixelRatio: 2,
+      });
+      drawInteraction.mockClear();
+      onDisplayChange.mockClear();
+      pixiMock.resize.mockClear();
+
+      container.clientWidth = 2200;
+      resized();
+
+      expect(drawInteraction).toHaveBeenCalledOnce();
+      const after = drawInteraction.mock.lastCall?.[0];
+      expect(after).toMatchObject({
+        selectedPick: { detectionIndex: 0, target: DetectionPickTarget.Mask },
+        viewportScale: 1,
+      });
+      expect(after?.strokePixelRatio).toBeGreaterThan(0);
+      expect(after?.strokePixelRatio).toBeLessThan(
+        before?.strokePixelRatio ?? 0,
+      );
+      expect(after?.idMaskArtifact?.frame).toBe(before?.idMaskArtifact?.frame);
+      expect(after?.idMaskArtifact?.texture).toBe(
+        before?.idMaskArtifact?.texture,
+      );
+      expect(onDisplayChange).not.toHaveBeenCalled();
+      expect(pixiMock.resize).toHaveBeenLastCalledWith(1280, 720, 2);
+    } finally {
+      scene.destroy();
+      drawInteraction.mockRestore();
+      createInteractionLayer.mockRestore();
     }
   });
 
