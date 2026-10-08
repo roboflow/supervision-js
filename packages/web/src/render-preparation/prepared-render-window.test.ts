@@ -27,7 +27,10 @@ import {
 } from "#types/render-preparation";
 
 import { resetMocks } from "../../../../test/media-renderer-harness";
-import { MaskPreparationWorkerMessageType } from "./mask-preparation-worker-protocol";
+import {
+  MaskPreparationWorkerMessageType,
+  type MaskPreparationWorkerCompleteMessage,
+} from "./mask-preparation-worker-protocol";
 import { PreparedMaskFrameKind } from "./mask-frame-artifact";
 import {
   createPreparedRenderWindow,
@@ -152,69 +155,13 @@ const SPARSE_FRAMES = Array.from({ length: 12 }, (_, index) =>
 const LATE_FRAME = createGateFrame(5) satisfies DetectionFrame;
 
 describe("prepared render window", () => {
-  it.each([PreparedMaskFrameKind.IdMask, PreparedMaskFrameKind.RgbaImage])(
-    "refreshes zoom-dependent %s borders while retaining ID artifacts",
-    async (kind) => {
-      vi.useFakeTimers();
-      resetMocks();
-      try {
-        let displayWidth = 2;
-        const fakeWorker = createFakeMaskPreparationWorker({
-          createCompleteData: () =>
-            kind === PreparedMaskFrameKind.IdMask
-              ? ({
-                  artifactKind: kind,
-                  fillPalette: new Float32Array(8),
-                  strokePalette: new Float32Array(8),
-                  strokeWidths: new Float32Array(2),
-                  raster: new Uint8Array(4),
-                  hasStroke: false,
-                  maxStrokeWidth: 0,
-                  sourceWidth: 2,
-                  width: 2,
-                  height: 2,
-                } as never)
-              : { imageData: new ImageData(new Uint8ClampedArray(16), 2, 2) },
-        });
-        const renderWindow = createPreparedRenderWindow({
-          detectionTimeline: createTimeline([frames[0]!]),
-          maskStyle: new BaseMaskStyle(),
-          resolveMaskDisplayWidth: () => displayWidth,
-          renderPreparation: {
-            mode: RenderPreparationMode.Worker,
-            workerFactory: { createWorker: () => fakeWorker.worker },
-          },
-        });
-        renderWindow.getFrame(0);
-        await flushMaskPreparationTimers(4);
-        const first = renderWindow.getFrame(0)?.maskFrame;
-        expect(first?.kind).toBe(kind);
-        const jobsBeforeZoom = fakeWorker.messages.length;
-        displayWidth = 4;
-        renderWindow.invalidateMaskDisplayWidth();
-        await flushMaskPreparationTimers(4);
-        const next = renderWindow.getFrame(0)?.maskFrame;
-        if (kind === PreparedMaskFrameKind.IdMask) {
-          expect(next).toBe(first);
-          expect(fakeWorker.messages).toHaveLength(jobsBeforeZoom);
-        } else {
-          expect(next).toBeDefined();
-          expect(next).not.toBe(first);
-          expect(fakeWorker.messages.length).toBeGreaterThan(jobsBeforeZoom);
-          expect(fakeWorker.messages.at(-1)).toMatchObject({
-            job: { displayWidth: 4 },
-          });
-        }
-        renderWindow.destroy();
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
-
-  it.each([PreparedMaskFrameKind.IdMask, PreparedMaskFrameKind.RgbaImage])(
-    "accepts an in-flight %s result only if its prepared width is still valid",
-    async (kind) => {
+  it.each([
+    { kind: PreparedMaskFrameKind.IdMask, hasStroke: true },
+    { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: false },
+    { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: true },
+  ])(
+    "keeps a prepared $kind mask with stroke=$hasStroke visible while zoom corrects its borders",
+    async ({ kind, hasStroke }) => {
       vi.useFakeTimers();
       resetMocks();
       try {
@@ -223,23 +170,136 @@ describe("prepared render window", () => {
           autoComplete: false,
           createCompleteData: () =>
             kind === PreparedMaskFrameKind.IdMask
-              ? ({
+              ? {
                   artifactKind: kind,
                   fillPalette: new Float32Array(8),
                   strokePalette: new Float32Array(8),
                   strokeWidths: new Float32Array(2),
                   raster: new Uint8Array(4),
-                  hasStroke: false,
-                  maxStrokeWidth: 0,
+                  hasStroke,
+                  maxStrokeWidth: 1,
                   sourceWidth: 2,
                   width: 2,
                   height: 2,
-                } as never)
+                }
+              : { imageData: new ImageData(new Uint8ClampedArray(16), 2, 2) },
+        });
+        const onMaskFrameEvicted = vi.fn();
+        const onPreparedWindowChange = vi.fn();
+        const renderWindow = createPreparedRenderWindow({
+          detectionTimeline: createTimeline([frames[0]!]),
+          maskStyle: new BaseMaskStyle({
+            stroke: hasStroke ? { width: 1 } : undefined,
+          }),
+          onMaskFrameEvicted,
+          onPreparedWindowChange,
+          resolveMaskDisplayWidth: () => displayWidth,
+          renderPreparation: {
+            mode: RenderPreparationMode.Worker,
+            workerFactory: { createWorker: () => fakeWorker.worker },
+          },
+        });
+        renderWindow.getFrame(0);
+        await flushMaskPreparationTimers(2);
+        fakeWorker.completeNext();
+        await flushMaskPreparationTimers(2);
+        const first = renderWindow.getFrame(0)?.maskFrame;
+        expect(first?.kind).toBe(kind);
+        const firstRevision = renderWindow.getArtifactRevision(0);
+        const closeFirst = vi.spyOn(first!, "close");
+        const jobsBeforeZoom = fakeWorker.messages.length;
+        displayWidth = 4;
+        renderWindow.invalidateMaskDisplayWidth();
+        expect(renderWindow.isArtifactPrepared(0)).toBe(true);
+        expect(
+          renderWindow.needsPlaybackGateWait(0, {
+            enabled: true,
+            stopBelowSeconds: 0,
+            resumeAtSeconds: 0,
+          }),
+        ).toBe(false);
+        expect(renderWindow.getArtifactRevision(0)).toBe(firstRevision);
+        expect(closeFirst).not.toHaveBeenCalled();
+        expect(onMaskFrameEvicted).not.toHaveBeenCalled();
+        await flushMaskPreparationTimers(2);
+        expect(renderWindow.getFrame(0)).toMatchObject({
+          maskFrame: first,
+          maskStatus: PreparedRenderFrameMaskStatus.Prepared,
+        });
+
+        if (kind === PreparedMaskFrameKind.RgbaImage && hasStroke) {
+          expect(fakeWorker.messages.at(-1)).toMatchObject({
+            job: { displayWidth: 4 },
+          });
+          displayWidth = 8;
+          renderWindow.invalidateMaskDisplayWidth();
+          fakeWorker.completeNext();
+          await flushMaskPreparationTimers(2);
+          expect(renderWindow.getFrame(0)?.maskFrame).toBe(first);
+          expect(closeFirst).not.toHaveBeenCalled();
+          expect(onMaskFrameEvicted).not.toHaveBeenCalled();
+          expect(fakeWorker.messages.at(-1)).toMatchObject({
+            job: { displayWidth: 8 },
+          });
+          onPreparedWindowChange.mockClear();
+          fakeWorker.completeNext();
+          await flushMaskPreparationTimers(2);
+          const next = renderWindow.getFrame(0)?.maskFrame;
+          expect(next).toBeDefined();
+          expect(next).not.toBe(first);
+          expect(renderWindow.getArtifactRevision(0)).toBeGreaterThan(
+            firstRevision,
+          );
+          expect(onPreparedWindowChange).toHaveBeenCalled();
+          expect(closeFirst).toHaveBeenCalledTimes(1);
+          expect(onMaskFrameEvicted).toHaveBeenCalledExactlyOnceWith(
+            first!.key,
+          );
+        } else {
+          expect(renderWindow.getFrame(0)?.maskFrame).toBe(first);
+          expect(fakeWorker.messages).toHaveLength(jobsBeforeZoom);
+        }
+        renderWindow.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    { kind: PreparedMaskFrameKind.IdMask, hasStroke: true },
+    { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: false },
+    { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: true },
+  ])(
+    "accepts an in-flight $kind mask with stroke=$hasStroke across zoom when its borders stay valid",
+    async ({ kind, hasStroke }) => {
+      vi.useFakeTimers();
+      resetMocks();
+      try {
+        let displayWidth = 2;
+        const fakeWorker = createFakeMaskPreparationWorker({
+          autoComplete: false,
+          createCompleteData: () =>
+            kind === PreparedMaskFrameKind.IdMask
+              ? {
+                  artifactKind: kind,
+                  fillPalette: new Float32Array(8),
+                  strokePalette: new Float32Array(8),
+                  strokeWidths: new Float32Array(2),
+                  raster: new Uint8Array(4),
+                  hasStroke,
+                  maxStrokeWidth: 1,
+                  sourceWidth: 2,
+                  width: 2,
+                  height: 2,
+                }
               : { imageData: new ImageData(new Uint8ClampedArray(16), 2, 2) },
         });
         const renderWindow = createPreparedRenderWindow({
           detectionTimeline: createTimeline([frames[0]!]),
-          maskStyle: new BaseMaskStyle(),
+          maskStyle: new BaseMaskStyle({
+            stroke: hasStroke ? { width: 1 } : undefined,
+          }),
           resolveMaskDisplayWidth: () => displayWidth,
           renderPreparation: {
             mode: RenderPreparationMode.Worker,
@@ -253,7 +313,7 @@ describe("prepared render window", () => {
         renderWindow.invalidateMaskDisplayWidth();
         fakeWorker.completeNext();
         await flushMaskPreparationTimers(2);
-        if (kind === PreparedMaskFrameKind.RgbaImage) {
+        if (kind === PreparedMaskFrameKind.RgbaImage && hasStroke) {
           expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
           expect(fakeWorker.messages).toHaveLength(2);
           expect(fakeWorker.messages[1]).toMatchObject({
@@ -265,6 +325,7 @@ describe("prepared render window", () => {
           expect(fakeWorker.messages).toHaveLength(1);
         }
         expect(renderWindow.getFrame(0)?.maskFrame?.kind).toBe(kind);
+        expect(renderWindow.getPreparationProgress()).toBe(1);
         renderWindow.destroy();
       } finally {
         vi.useRealTimers();
@@ -728,6 +789,64 @@ describe("prepared render window", () => {
 
       expect(onMaskFrameEvicted).toHaveBeenCalledWith("0:0");
 
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts stroke alignment storage toward the retained frame budget", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const backingBytes = 8 * 1024 * 1024;
+      const payloadBytes = 4 + 32 + 32 + 8;
+      const alignmentBytes = 8;
+      const fakeWorker = createFakeMaskPreparationWorker({
+        createCompleteData: () => ({
+          artifactKind: PreparedMaskFrameKind.IdMask,
+          fillPalette: new Float32Array(8),
+          strokePalette: new Float32Array(8),
+          strokeWidths: new Float32Array(2),
+          strokeAlignments: new Float32Array(2),
+          raster: new Uint8Array(4),
+          sourceWidth: 2,
+          width: 2,
+          height: 2,
+        }),
+      });
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const onMaskFrameEvicted = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        maxMaskFrameCacheSize: 3,
+        maxMaskFrameCacheBytes:
+          2 * (backingBytes + payloadBytes) + alignmentBytes,
+        resolveMaskFrameBackingBytes: () => backingBytes,
+        prefetchFrameCount: 0,
+        onMaskFrameEvicted,
+        renderPreparation: {
+          mode: RenderPreparationMode.Worker,
+          onDiagnostics: (value) => diagnostics.push(value),
+          workerFactory: { createWorker: () => fakeWorker.worker },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(4);
+      renderWindow.getFrame(0.04);
+      await flushMaskPreparationTimers(4);
+
+      expect(diagnostics.at(-1)?.artifacts[0]).toMatchObject({
+        preparedBytes: backingBytes + payloadBytes + alignmentBytes,
+        preparedCount: 1,
+      });
+      expect(onMaskFrameEvicted).toHaveBeenCalledExactlyOnceWith("0:0");
+      expect(renderWindow.getFrame(0.04)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Prepared,
+      );
       renderWindow.destroy();
     } finally {
       vi.useRealTimers();
@@ -2700,10 +2819,7 @@ function createFakeMaskPreparationWorker(
     readonly createCompleteData?: (message: {
       readonly job: { readonly key: string };
       readonly requestId: number;
-    }) => Partial<{
-      readonly imageBitmap: ImageBitmap;
-      readonly imageData: ImageData;
-    }>;
+    }) => Partial<MaskPreparationWorkerCompleteMessage>;
     readonly errorMessage?: string;
   } = {},
 ) {

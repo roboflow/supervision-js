@@ -249,7 +249,8 @@ export function createPreparedRenderWindow(options: {
         ? maskFrame.raster.byteLength +
           maskFrame.fillPalette.byteLength +
           maskFrame.strokePalette.byteLength +
-          maskFrame.strokeWidths.byteLength
+          maskFrame.strokeWidths.byteLength +
+          (maskFrame.strokeAlignments?.byteLength ?? 0)
         : pixels * 4 + (maskFrame.idMaskPlane?.data.byteLength ?? 0);
     const coverageBytes =
       maskFrame.regionMaskCoverage?.entries.reduce(
@@ -330,7 +331,14 @@ export function createPreparedRenderWindow(options: {
   let generation = 0;
   let preparationProgress = 0;
   let nextArtifactRevision = 0;
-  const artifactRevisions = new WeakMap<PreparedMaskFrame, number>();
+  const artifactMetadata = new WeakMap<
+    PreparedMaskFrame,
+    {
+      readonly revision: number;
+      readonly displayWidth: number | undefined;
+      readonly hasStroke: boolean;
+    }
+  >();
   const largestMaskFrameBytesByTier = new Map<PreparedRasterTier, number>();
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
   /** Keys whose prepared raster is the coarse tier and owed a fine cook once settled. */
@@ -369,15 +377,24 @@ export function createPreparedRenderWindow(options: {
     }
 
     observeMaskFrame(frame, key);
-    const tier = scheduleOptions.tier ?? getRequestedRasterTier();
+    let tier = scheduleOptions.tier ?? getRequestedRasterTier();
     if (emptyMaskFrameKeys.has(key)) {
       return false;
     }
-    if (preparedMaskFrames.has(key)) {
+    const prepared = preparedMaskFrames.get(key);
+    if (prepared) {
+      const metadata = artifactMetadata.get(prepared);
+      const owedDisplayWidth =
+        prepared.kind === PreparedMaskFrameKind.RgbaImage &&
+        metadata?.hasStroke === true &&
+        metadata.displayWidth !== options.resolveMaskDisplayWidth?.();
       const owedFine =
         coarseMaskFrameKeys.has(key) && tier === PreparedRasterTier.Fine;
-      if (!owedFine) {
+      if (!owedFine && !owedDisplayWidth) {
         return false;
+      }
+      if (!coarseMaskFrameKeys.has(key)) {
+        tier = PreparedRasterTier.Fine;
       }
     }
 
@@ -501,6 +518,13 @@ export function createPreparedRenderWindow(options: {
         continue;
       }
 
+      const hasStroke = instructions.some(
+        (instruction) =>
+          instruction.visible !== false &&
+          instruction.stroke !== undefined &&
+          instruction.stroke.width > 0 &&
+          instruction.stroke.alpha > 0,
+      );
       const displayWidth = options.resolveMaskDisplayWidth?.();
       void maskFramePreparer
         .prepare({
@@ -534,6 +558,7 @@ export function createPreparedRenderWindow(options: {
 
           const staleDisplayWidth =
             maskFrame?.kind === PreparedMaskFrameKind.RgbaImage &&
+            hasStroke &&
             displayWidth !== options.resolveMaskDisplayWidth?.();
 
           if (
@@ -574,13 +599,16 @@ export function createPreparedRenderWindow(options: {
 
           const previous = preparedMaskFrames.get(key);
           if (previous) {
-            // an upgrade: the coarse raster gives way to the fine one
             releaseMaskFrame(key);
             options.onMaskFrameEvicted?.(key);
             previous.close();
           }
           preparedMaskFrames.set(key, maskFrame);
-          artifactRevisions.set(maskFrame, ++nextArtifactRevision);
+          artifactMetadata.set(maskFrame, {
+            revision: ++nextArtifactRevision,
+            displayWidth,
+            hasStroke,
+          });
           const bytes = chargeMaskFrame(key, maskFrame, job.tier);
           if (
             job.tier === PreparedRasterTier.Coarse &&
@@ -980,7 +1008,7 @@ export function createPreparedRenderWindow(options: {
     getArtifactRevision(mediaTime) {
       const frame = options.detectionTimeline.selectFrame(mediaTime);
       const artifact = frame && preparedMaskFrames.get(getFrameKey(frame));
-      return artifact ? (artifactRevisions.get(artifact) ?? 0) : 0;
+      return artifact ? (artifactMetadata.get(artifact)?.revision ?? 0) : 0;
     },
 
     invalidateRasterSize() {
@@ -1021,36 +1049,9 @@ export function createPreparedRenderWindow(options: {
 
     invalidateMaskDisplayWidth() {
       if (isDestroyed) return;
-      let invalidated = false;
-      const preserveFine =
-        activeMaskFrame &&
-        preparedMaskFrames.get(activeMaskFrame.key)?.kind ===
-          PreparedMaskFrameKind.RgbaImage &&
-        !coarseMaskFrameKeys.has(activeMaskFrame.key);
-      for (const [key, frame] of preparedMaskFrames) {
-        if (frame.kind !== PreparedMaskFrameKind.RgbaImage) continue;
-        invalidated = true;
-        preparedMaskFrames.delete(key);
-        coarseMaskFrameKeys.delete(key);
-        releaseMaskFrame(key);
-        options.onMaskFrameEvicted?.(key);
-        frame.close();
-      }
-      if (!invalidated) return;
       if (activeMaskFrame) {
         getFrame(activeMaskFrame.mediaTime, { forcePreparedWindow: true });
-        if (preserveFine) {
-          const frame = options.detectionTimeline.selectFrame(
-            activeMaskFrame.mediaTime,
-          );
-          if (frame)
-            scheduleMaskFrame(frame, activeMaskFrame.mediaTime, {
-              priority: PreparedRenderSchedulePriority.Active,
-              tier: PreparedRasterTier.Fine,
-            });
-        }
       }
-      emitDiagnostics();
     },
 
     getPreparationProgress() {

@@ -444,6 +444,59 @@ describe("prepared raster tiers", () => {
     }
   });
 
+  it("keeps a cached fine RGBA raster fine when zoom replaces its stroke during motion", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+    const frames = wideFrames(20);
+    let displayWidth = FINE;
+    const worker = createDeferredTierWorker(PreparedMaskFrameKind.RgbaImage);
+    const renderWindow = createPreparedRenderWindow({
+      detectionTimeline: timelineOf(frames) as never,
+      maskStyle: new BaseMaskStyle({ stroke: { width: 1 } }),
+      prefetchFrameCount: 0,
+      preparedWindowScanIntervalSeconds: 0,
+      resolveMaxRasterWidth: () => FINE,
+      resolveMaskDisplayWidth: () => displayWidth,
+      renderPreparation: {
+        maskFrame: { workerCount: 1 },
+        workerFactory: { createWorker: () => worker.worker },
+      },
+    });
+
+    try {
+      for (const index of [0, 4, 8]) {
+        renderWindow.getFrame(frames[index]!.mediaTime);
+        await vi.advanceTimersByTimeAsync(0);
+        worker.completeNext();
+        await vi.advanceTimersByTimeAsync(STEP_MS);
+      }
+      const movingFrame = renderWindow.getFrame(
+        frames[8]!.mediaTime,
+      )?.maskFrame;
+      expect(
+        movingFrame?.kind === PreparedMaskFrameKind.RgbaImage &&
+          movingFrame.idMaskPlane?.width,
+      ).toBe(COARSE);
+
+      const fineFrame = renderWindow.getFrame(0)?.maskFrame;
+      displayWidth = FINE * 2;
+      renderWindow.invalidateMaskDisplayWidth();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(renderWindow.getFrame(0)?.maskFrame).toBe(fineFrame);
+      worker.completeNext();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const replacement = renderWindow.getFrame(0)?.maskFrame;
+      expect(replacement).not.toBe(fineFrame);
+      expect(
+        replacement?.kind === PreparedMaskFrameKind.RgbaImage &&
+          replacement.idMaskPlane?.width,
+      ).toBe(FINE);
+    } finally {
+      renderWindow.destroy();
+    }
+  });
+
   it("retains saturated native mask rasters when only the display cap grows", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -929,7 +982,7 @@ describe("prepared raster quality gate", () => {
   );
 });
 
-function createDeferredTierWorker() {
+function createDeferredTierWorker(kind = PreparedMaskFrameKind.IdMask) {
   const requests: MaskPreparationWorkerPrepareMessage[] = [];
   const listeners = new Set<(event: MessageEvent) => void>();
   let completed = 0;
@@ -968,7 +1021,23 @@ function createDeferredTierWorker() {
         type: MaskPreparationWorkerMessageType.Complete,
         width,
       };
-      for (const listener of listeners) listener({ data } as MessageEvent);
+      const message =
+        kind === PreparedMaskFrameKind.RgbaImage
+          ? {
+              imageData: new ImageData(
+                new Uint8ClampedArray(mask.width * mask.height * 4),
+                mask.width,
+                mask.height,
+              ),
+              idMaskPlane: { data: data.raster, height, width },
+              key: request.job.key,
+              requestId: request.requestId,
+              type: MaskPreparationWorkerMessageType.Complete,
+            }
+          : data;
+      for (const listener of listeners) {
+        listener({ data: message } as MessageEvent);
+      }
     },
     get pendingRequestCount() {
       return requests.length - completed;
