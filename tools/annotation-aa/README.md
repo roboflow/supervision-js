@@ -21,36 +21,3 @@ Start only after the benchmark owner freezes the source and clears the shared br
 ```
 
 Use the existing owned headed Chrome window at `http://127.0.0.1:5277/?backend=webgpu&run=1` or `?backend=webgl&run=1`. `&timings=0` collects functional pixels without timing batches. Never open a second window or use DPR emulation/headless rendering for this comparison. The report is exposed as `window.annotationAaReport`, and native PNGs plus JSON are saved under ignored `tools/annotation-aa/artifacts/`. Every report pins source/dependency bytes before and after the run.
-
-The optional `run-owned.mjs` driver defaults to a read-only preflight. Running it requires an explicit reviewed full Git head, the current saved Chrome anchor, and ownership of its target/window. It records the actual native display DPR separately from the fixed output resolution, and never closes other tabs, creates a window, activates Chrome, changes display settings or silently recovers a stale target. Additional blank/new-tab pages require explicit `--allow-inert-tabs`; other pages can be accepted only for a pixel-only run with explicit owner approval.
-
-Run its read-only preflight against the saved window before starting captures:
-
-```sh
-AA_HEAD=<full reviewed commit> \
-CHROME_ANCHOR=<current chrome-session.json> \
-AA_OUTPUT=<new output folder> \
-node tools/annotation-aa/run-owned.mjs
-```
-
-Once the browser owner authorizes captures, add `--run`; add `--pixels-only` to omit timing batches. This driver accepts `--allow-inert-tabs` for extra blank/new-tab pages. Accepting additional nonblank pages requires both `--pixels-only --allow-extra-pages` and the owner's approval.
-
-## Horse Trail cost and presentation check
-
-`cost-driver.mjs` compares Off and FXAA + 2× in the demo's **Quality → Smooth annotation edges** control, using the same committed and built packages. It prepares files without touching Chrome by default; `--run` requires a clean committed checkout, a completed build, explicit ownership of the saved Chrome target/window, and an otherwise empty dedicated profile.
-
-The compact plan is two counterbalanced off/on pairs for 1× playback, 8× playback, and the captured human timeline drag at output DPR 1. One additional 8× pair uses output DPR 2. This compact cost plan requires native monitor DPR 2, which is verified against the saved window anchor. Each playback window is eight seconds from the beginning of the clip; the recorded drag retains all delivered events and their original timing. Every window reopens the clip and parks the same start frame before measuring. No window is created, activated or resized; cleanup leaves the same owned target idle at `about:blank`.
-
-```sh
-AA_HEAD=<full reviewed commit> \
-CHROME_ANCHOR=<current chrome-session.json> \
-AA_NOTES=<notes/perf-continuation-2026-10-05> \
-AA_OUTPUT=<new output folder> \
-node tools/annotation-aa/cost-driver.mjs
-```
-
-Add `--run` only after the browser owner hands it back. `AA_DEMO_URL` defaults to `http://127.0.0.1:5278/?mediaPath=engine`. The preparation command prints source/build fingerprints and the schedule. Measurement additionally pins all compiled JS chunks, Pixi runtime modules, Horse fixtures, the historical observer, and the recorded human gesture/replay protocol before and after every window.
-
-Timed windows collect Chrome process CPU time and summed resident memory (RSS), small renderer-clock/render-count/mask-stamp samples, and mask-cache diagnostics. RSS includes browser overhead and can count shared pages more than once; it is not exact VRAM. The mask stamp is renderer evidence rather than optical frame capture. No tracing, screenshots, pixel readbacks, profilers, GPU hooks or worker hooks run inside these CPU windows.
-
-For a separate detailed off/on human-scrub pass, use a different output folder and add `--mask-evidence --run`. This reuses the previous post-submit GPU mask observer without modification; its hashes are part of the manifest. Masks drawn into the filtered overlay count as offscreen mask draws, so missing direct canvas draws alone do not count as missing masks. These instrumented records have no CPU/RAM claim. Their source-clock counts describe delivered presentations and do not treat deliberately skipped source frames at 8× as drops.
