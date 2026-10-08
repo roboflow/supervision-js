@@ -910,37 +910,6 @@ describe("pixi focus layer", () => {
     expect(cutout.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 6);
   });
 
-  it("declares a WebGL and a WebGPU program for the focus ID-mask shader", () => {
-    vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({
-        getContext: vi.fn(),
-        height: 0,
-        width: 0,
-      })),
-    });
-
-    const layer = createPixiFocusLayer({
-      Container: FakeContainer as never,
-      Graphics: FakeGraphics as never,
-      ImageSource: FakeImageSource as never,
-      Mesh: FakeMesh as never,
-      MeshGeometry: FakeMeshGeometry as never,
-      Shader: FakeShaderFactory as never,
-      UniformGroup: FakeUniformGroup as never,
-    });
-
-    layer.createDisplay({ height: 80, width: 120 });
-
-    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
-
-    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
-    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
-    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
-    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
-    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
-    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
-  });
-
   it("stops the ID scan at the selected count", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({

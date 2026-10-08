@@ -76,7 +76,7 @@ export interface PixiRegionCoverageMask {
     readonly width: number;
     readonly x: number;
     readonly y: number;
-  }): void;
+  }): boolean;
   destroy(): void;
 }
 
@@ -162,7 +162,7 @@ export function createPixiRegionCoverageMask(options: {
 
     render(renderOptions) {
       bindTexture(renderOptions.artifact.texture.source);
-      updateAntialiasing();
+      const alphaCoverage = updateAntialiasing();
       display.visible = true;
       uniforms.uniforms.uCrop = new Float32Array([
         renderOptions.crop.x,
@@ -184,6 +184,7 @@ export function createPixiRegionCoverageMask(options: {
       );
       display.rotation = renderOptions.rotation;
       syncViewportBounds();
+      return alphaCoverage;
     },
 
     syncViewportBounds,
@@ -212,13 +213,11 @@ export function createPixiRegionCoverageMask(options: {
       if (display.filters?.[0] !== antialiasFilter) {
         display.filters = [antialiasFilter];
       }
-      effect.channel = "alpha";
       return true;
     }
     if (antialiasFilter && display.filters?.includes(antialiasFilter)) {
       display.filters = null;
     }
-    effect.channel = "red";
     return false;
   }
 

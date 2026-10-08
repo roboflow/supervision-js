@@ -207,7 +207,6 @@ export function createPixiFocusLayer(options: {
   let heatmapVectorGraphics: PixiFocusGraphics | undefined;
   let usesHeatmapAlphaMask = false;
   let viewportBounds: PixiViewportBounds | undefined;
-  let drawnHeatmapArtifacts: readonly PixiFocusHeatmapArtifact[] = [];
   const heatmapCutouts = new Map<
     PixiTexture,
     Map<number, ReturnType<typeof createPixiFocusHeatmapCutout>>
@@ -519,11 +518,11 @@ export function createPixiFocusLayer(options: {
       targetsWithGeometry.some(
         ({ detection }) => detection.heatmap && !detection.mask,
       );
-    drawnHeatmapArtifacts = gpuHeatmapTargets ? signature.heatmapArtifacts : [];
     const cutoutGraphics = gpuHeatmapTargets
       ? activateHeatmapMask(
           instruction.targets,
           signature.annotationAntialiasing,
+          signature.heatmapArtifacts,
         )
       : activateVectorMask();
     focusGraphics.clear();
@@ -614,13 +613,14 @@ export function createPixiFocusLayer(options: {
   function activateHeatmapMask(
     targets: readonly DetectionPickResult[],
     annotationAntialiasing: boolean,
+    heatmapArtifacts: readonly PixiFocusHeatmapArtifact[],
   ) {
     const indexes = new Set(
       targets
         .filter(({ detection }) => !detection.mask)
         .map(({ detectionIndex }) => detectionIndex),
     );
-    const artifacts = drawnHeatmapArtifacts.filter((artifact) =>
+    const artifacts = heatmapArtifacts.filter((artifact) =>
       indexes.has(artifact.detectionIndex),
     );
     if (artifacts.length === 0) return activateVectorMask();

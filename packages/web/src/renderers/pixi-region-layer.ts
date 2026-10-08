@@ -646,7 +646,7 @@ export function createPixiRegionLayer(options: {
         return false;
       }
 
-      mask.render({
+      const alphaCoverage = mask.render({
         artifact: { texture: coverageTexture },
         coverage: coverageEntry,
         crop,
@@ -658,7 +658,7 @@ export function createPixiRegionLayer(options: {
         x: entry.display.position.x,
         y: entry.display.position.y,
       });
-      setCoverageChannel(entry, mask.effect.channel === "alpha");
+      setCoverageChannel(entry, alphaCoverage);
       return true;
     }
 
@@ -776,12 +776,6 @@ export function createPixiRegionLayer(options: {
     return entry.antialiasFilter;
   }
 
-  function setCoverageChannel(entry: RegionSpriteEntry, alpha: boolean) {
-    if ((entry.alphaCoverage ?? false) === alpha) return;
-    entry.display.setMask({ channel: alpha ? "alpha" : "red" });
-    entry.alphaCoverage = alpha;
-  }
-
   function updateAssetAntialiasing(
     entry: RegionSpriteEntry,
     renderer: RegionAnnotationRenderer,
@@ -824,38 +818,6 @@ export function createPixiRegionLayer(options: {
     entry.effect?.apply(entry.display, viewportScale);
   }
 
-  function removeCoverageMask(entry: RegionSpriteEntry) {
-    removePolygonCoverageMask(entry);
-    removeExactCoverageMask(entry);
-  }
-
-  function removePolygonCoverageMask(entry: RegionSpriteEntry) {
-    if (!entry.coverageMask) return;
-    entry.display.mask = null;
-    if (entry.coverageMaskEffect) {
-      entry.display.removeEffect(entry.coverageMaskEffect);
-      entry.coverageMaskEffect.destroy();
-      entry.coverageMaskEffect = undefined;
-    }
-    destroyEntryAntialiasFilter(entry);
-    entry.coverageMask.removeFromParent();
-    entry.coverageMask.destroy();
-    entry.coverageMask = undefined;
-    entry.coverageMaskContainer?.removeFromParent();
-    entry.coverageMaskContainer?.destroy();
-    entry.coverageMaskContainer = undefined;
-    setCoverageChannel(entry, false);
-  }
-
-  function removeExactCoverageMask(entry: RegionSpriteEntry) {
-    if (!entry.exactCoverageMask) return;
-    entry.display.removeEffect(entry.exactCoverageMask.effect);
-    entry.exactCoverageMask.container.removeFromParent();
-    entry.exactCoverageMask.destroy();
-    entry.exactCoverageMask = undefined;
-    setCoverageChannel(entry, false);
-  }
-
   function destroyRendererDisplays(rendererId: string) {
     for (const [key, entry] of entries) {
       if (entry.rendererId !== rendererId) continue;
@@ -883,6 +845,44 @@ export function createPixiRegionLayer(options: {
   }
 }
 
+function setCoverageChannel(entry: RegionSpriteEntry, alpha: boolean) {
+  if ((entry.alphaCoverage ?? false) === alpha) return;
+  entry.display.setMask({ channel: alpha ? "alpha" : "red" });
+  entry.alphaCoverage = alpha;
+}
+
+function removeCoverageMask(entry: RegionSpriteEntry) {
+  removePolygonCoverageMask(entry);
+  removeExactCoverageMask(entry);
+}
+
+function removePolygonCoverageMask(entry: RegionSpriteEntry) {
+  if (!entry.coverageMask) return;
+  entry.display.mask = null;
+  if (entry.coverageMaskEffect) {
+    entry.display.removeEffect(entry.coverageMaskEffect);
+    entry.coverageMaskEffect.destroy();
+    entry.coverageMaskEffect = undefined;
+  }
+  destroyEntryAntialiasFilter(entry);
+  entry.coverageMask.removeFromParent();
+  entry.coverageMask.destroy();
+  entry.coverageMask = undefined;
+  entry.coverageMaskContainer?.removeFromParent();
+  entry.coverageMaskContainer?.destroy();
+  entry.coverageMaskContainer = undefined;
+  setCoverageChannel(entry, false);
+}
+
+function removeExactCoverageMask(entry: RegionSpriteEntry) {
+  if (!entry.exactCoverageMask) return;
+  entry.display.removeEffect(entry.exactCoverageMask.effect);
+  entry.exactCoverageMask.container.removeFromParent();
+  entry.exactCoverageMask.destroy();
+  entry.exactCoverageMask = undefined;
+  setCoverageChannel(entry, false);
+}
+
 function updateEntryResolution(entry: RegionSpriteEntry, resolution: number) {
   if (entry.antialiasFilter) entry.antialiasFilter.resolution = resolution;
   entry.exactCoverageMask?.setAntialiasResolution(resolution);
@@ -891,21 +891,8 @@ function updateEntryResolution(entry: RegionSpriteEntry, resolution: number) {
 function destroyEntry(entry: RegionSpriteEntry) {
   entry.effect?.destroy();
   entry.effect = undefined;
-  entry.display.mask = null;
-  if (entry.coverageMaskEffect) {
-    entry.display.removeEffect(entry.coverageMaskEffect);
-    entry.coverageMaskEffect.destroy();
-  }
+  removeCoverageMask(entry);
   destroyEntryAntialiasFilter(entry);
-  entry.coverageMask?.removeFromParent();
-  entry.coverageMask?.destroy();
-  entry.coverageMaskContainer?.removeFromParent();
-  entry.coverageMaskContainer?.destroy();
-  if (entry.exactCoverageMask) {
-    entry.display.removeEffect(entry.exactCoverageMask.effect);
-    entry.exactCoverageMask.container.removeFromParent();
-    entry.exactCoverageMask.destroy();
-  }
   entry.display.removeFromParent?.();
   // GifSprite sources are shared and released through Assets.unload().
   entry.display.destroy();
