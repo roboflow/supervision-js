@@ -13,10 +13,14 @@ describe("Pixi mask brush preview", () => {
     const sourceUpdate = vi.fn();
     const textureUpdate = vi.fn();
     const cursorClear = vi.fn();
+    const cursorStroke = vi.fn();
     const onInvalidate = vi.fn();
+    const addChild = vi.fn<(sprite: Sprite, cursor: Graphics) => void>();
+    let color = 0xff0000;
+    let cursorPoint: { x: number; y: number } | null = { x: 4, y: 5 };
     const editor = {
       canvas: { height: 40, width: 60 },
-      getCursor: () => ({ mode: "add", point: { x: 4, y: 5 }, radius: 3 }),
+      getCursor: () => ({ mode: "add", point: cursorPoint, radius: 3 }),
       subscribeCursorUpdates(listener: () => void) {
         cursorListener = listener;
         return () => {
@@ -48,10 +52,10 @@ describe("Pixi mask brush preview", () => {
     class Graphics {
       circle = vi.fn();
       clear = cursorClear;
-      stroke = vi.fn();
+      stroke = cursorStroke;
     }
     class Container {
-      addChild = vi.fn();
+      addChild = addChild;
     }
 
     const preview = createPixiMaskBrushPreview({
@@ -60,18 +64,35 @@ describe("Pixi mask brush preview", () => {
       Graphics: Graphics as never,
       Sprite: Sprite as never,
       Texture: Texture as never,
-      preview: { editor },
+      preview: {
+        editor,
+        get color() {
+          return color;
+        },
+        get cursorColor() {
+          return color;
+        },
+      },
       onInvalidate: notify ? onInvalidate : undefined,
     });
+    const sprite = addChild.mock.calls[0]![0];
 
     expect(cursorClear).toHaveBeenCalledTimes(1);
+    expect(sprite.tint).toBe(color);
     expect(onInvalidate).not.toHaveBeenCalled();
+    color = 0x0000ff;
     cursorListener!();
+    expect(sprite.tint).toBe(color);
+    expect(cursorStroke).toHaveBeenLastCalledWith(
+      expect.objectContaining({ color }),
+    );
     expect(cursorClear).toHaveBeenCalledTimes(2);
     expect(sourceUpdate).not.toHaveBeenCalled();
     expect(onInvalidate).not.toHaveBeenCalled();
 
+    color = 0x000000;
     textureListener!();
+    expect(sprite.tint).toBe(color);
     expect(sourceUpdate).toHaveBeenCalledTimes(1);
     expect(textureUpdate).not.toHaveBeenCalled();
     expect(cursorClear).toHaveBeenCalledTimes(2);
@@ -83,7 +104,10 @@ describe("Pixi mask brush preview", () => {
     await Promise.resolve();
     expect(onInvalidate).toHaveBeenCalledTimes(notify ? 1 : 0);
 
+    color = 0xff0000;
+    cursorPoint = null;
     cursorListener!();
+    expect(sprite.tint).toBe(color);
     preview.destroy();
     await Promise.resolve();
     expect(onInvalidate).toHaveBeenCalledTimes(notify ? 1 : 0);
