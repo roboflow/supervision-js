@@ -39,7 +39,13 @@ describe("Pixi mask brush preview", () => {
       destroy = vi.fn();
       update = textureUpdate;
     }
+    const sprites: Sprite[] = [];
+    let color = 0xff0000;
+    let alpha = 0.4;
     class Sprite {
+      constructor() {
+        sprites.push(this);
+      }
       alpha = 1;
       height = 0;
       tint = 0;
@@ -60,18 +66,36 @@ describe("Pixi mask brush preview", () => {
       Graphics: Graphics as never,
       Sprite: Sprite as never,
       Texture: Texture as never,
-      preview: { editor },
+      preview: {
+        editor,
+        get color() {
+          return color;
+        },
+        get alpha() {
+          return alpha;
+        },
+        get cursorColor() {
+          return color;
+        },
+      },
       onInvalidate: notify ? onInvalidate : undefined,
     });
 
     expect(cursorClear).toHaveBeenCalledTimes(1);
     expect(onInvalidate).not.toHaveBeenCalled();
+    expect(sprites[0]!.tint).toBe(0xff0000);
+    color = 0x00ff00;
     cursorListener!();
+    expect(sprites[0]!.tint).toBe(0x00ff00);
     expect(cursorClear).toHaveBeenCalledTimes(2);
     expect(sourceUpdate).not.toHaveBeenCalled();
     expect(onInvalidate).not.toHaveBeenCalled();
 
+    color = 0x0000ff;
+    alpha = 0.6;
     textureListener!();
+    expect(sprites[0]!.tint).toBe(0x0000ff);
+    expect(sprites[0]!.alpha).toBe(0.6);
     expect(sourceUpdate).toHaveBeenCalledTimes(1);
     expect(textureUpdate).not.toHaveBeenCalled();
     expect(cursorClear).toHaveBeenCalledTimes(2);

@@ -54,6 +54,7 @@ export function createPixiMaskBrushPreview(options: {
   display.addChild(sprite, cursor);
 
   const updateTexture = () => {
+    syncPreviewStyle();
     source.update();
     scheduleInvalidation();
   };
@@ -89,7 +90,13 @@ export function createPixiMaskBrushPreview(options: {
     });
   }
 
+  function syncPreviewStyle() {
+    sprite.tint = options.preview.color ?? 0x22c55e;
+    sprite.alpha = options.preview.alpha ?? 0.4;
+  }
+
   function drawCursor() {
+    syncPreviewStyle();
     cursor.clear();
     const state = editor.getCursor();
     if (!state.point) return;
