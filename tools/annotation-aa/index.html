@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Annotation antialiasing comparison</title>
+  <style>
+    body {
+      margin: 24px;
+      color: #eee;
+      background: #181818;
+      font: 15px system-ui;
+    }
+    button {
+      padding: 8px 16px;
+      margin-right: 8px;
+    }
+    pre {
+      white-space: pre-wrap;
+      max-width: 1100px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: repeat(2, 768px);
+      gap: 20px;
+    }
+    figure {
+      margin: 0;
+    }
+    img {
+      display: block;
+      width: 768px;
+      height: 512px;
+      background: #666;
+    }
+    figcaption {
+      font-size: 20px;
+      padding: 6px 0;
+    }
+  </style>
+  <h1>Annotation antialiasing at ordinary output resolution</h1>
+  <p>
+    Each pair shows the same production drawing factories over a fixed image,
+    then the transparent annotation layer alone.
+  </p>
+  <button data-backend="webgpu">Run WebGPU</button>
+  <button data-backend="webgl">Run WebGL</button>
+  <pre id="status">Prepared; no rendering has run.</pre>
+  <main id="gallery"></main>
+  <script type="module" src="./main.mjs"></script>
+</html>
