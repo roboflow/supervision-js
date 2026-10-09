@@ -222,12 +222,15 @@ export function createMaskScreenStrokes(
   height: number,
   preparedRaster?: Uint8Array,
 ): readonly PreparedMaskScreenStroke[] | undefined {
-  const masks = materializeMaskInstructions(instructions);
-  const outlined = masks.filter(
-    ({ stroke }) =>
-      stroke?.widthUnit === "screen" && stroke.width > 0 && stroke.alpha > 0,
+  const outlined = instructions.filter(
+    ({ visible, stroke }) =>
+      visible !== false &&
+      stroke?.widthUnit === "screen" &&
+      stroke.width > 0 &&
+      stroke.alpha > 0,
   );
   if (outlined.length === 0) return undefined;
+  const masks = materializeMaskInstructions(instructions);
   const raster: Uint8Array | Uint32Array =
     preparedRaster ?? new Uint32Array(width * height);
   if (!preparedRaster) {
