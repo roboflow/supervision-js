@@ -180,6 +180,7 @@ export async function createMediaSession(
       ...options.renderer,
       ...sessionMedia.rendererSourceOption,
       backgroundColor: initialPresentation.backgroundColor,
+      annotationAntialiasing: initialPresentation.annotationAntialiasing,
       annotationOverlayStyle: initialPresentation.annotationOverlayStyle,
       boxStyle: initialPresentation.boxStyle,
       boxCornerStyle: initialPresentation.boxCornerStyle,

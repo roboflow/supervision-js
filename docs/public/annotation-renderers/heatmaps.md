@@ -56,6 +56,10 @@ demo, the cutoff is 75% of the model threshold and only tracker-confirmed
 detections are displayed. A lower-resolution `anomaly_map` can cover full-image
 `bounds` without making a full-resolution texture.
 
+When focus is enabled, the undimmed region follows the visible heatmap samples
+rather than the detection's rectangular bounds. Changing the cutoff or opacity
+updates both the heatmap and its focus cutout.
+
 Each map is limited to 16,777,216 raster pixels, and the visible maps across
 all heatmap renderers share that same per-frame pixel budget. Maps beyond the
 budget are skipped with a console warning. The prepared raster cache is bounded

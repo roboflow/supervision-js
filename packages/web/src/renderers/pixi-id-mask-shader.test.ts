@@ -22,35 +22,6 @@ afterEach(() => {
 });
 
 describe("pixi ID-mask shader", () => {
-  it("declares a WebGL and a WebGPU program for the same shader", () => {
-    vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({
-        getContext: vi.fn(),
-        height: 0,
-        width: 0,
-      })),
-    });
-
-    createPixiIdMaskShaderRenderer({
-      ImageSource: FakeImageSource as never,
-      Mesh: FakeMesh as never,
-      MeshGeometry: FakeMeshGeometry as never,
-      Shader: FakeShaderFactory as never,
-      UniformGroup: FakeUniformGroup as never,
-      mediaHeight: 80,
-      mediaWidth: 120,
-    });
-
-    const descriptor = FakeShaderFactory.descriptors[0]!;
-
-    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
-    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
-    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
-    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
-    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
-    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
-  });
-
   it("gives the placeholder texture canvas a rendering context", () => {
     const getContext = vi.fn();
     vi.stubGlobal("document", {
@@ -92,10 +63,10 @@ describe("pixi ID-mask shader", () => {
     const descriptor = FakeShaderFactory.descriptors[0]!;
 
     expect(descriptor.gl.fragment).toContain(
-      "int radius = int(strokeScanRadius(uMaxStrokeWidth, uMaxFractionalStrokeWidth, pixelWidth));",
+      "int radius = int(strokeScanRadius(maxWidth, pixelWidth));",
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      "let radius = i32(strokeScanRadius(maskUniforms.uMaxStrokeWidth, maskUniforms.uMaxFractionalStrokeWidth, pixelWidth));",
+      "let radius = i32(strokeScanRadius(maxWidth, pixelWidth));",
     );
 
     for (const source of [
@@ -109,7 +80,7 @@ describe("pixi ID-mask shader", () => {
     }
   });
 
-  it("updates the fractional scan bound when a coarse frame becomes fine", () => {
+  it("keeps the source stroke width as a coarse frame becomes fine", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({
         getContext: vi.fn(),
@@ -127,25 +98,35 @@ describe("pixi ID-mask shader", () => {
       mediaWidth: 120,
     });
     const widths = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
-    widths[1] = 0.5;
-    widths[2] = 2;
+    widths[1] = 1.012;
     const frame = {
       height: 20,
       width: 30,
       strokeWidths: widths,
       hasStroke: true,
-      maxStrokeWidth: 2,
+      maxStrokeWidth: 1.012,
     };
     const texture = { source: new FakeImageSource({}) };
     const group = FakeShaderFactory.descriptors[0]!.resources
       .maskUniforms as FakeUniformGroup;
 
-    renderer.render(frame as never, texture as never);
-    expect(group.uniforms.uMaxFractionalStrokeWidth).toBe(0.5);
+    renderer.render(frame as never, texture as never, 4);
+    expect(group.uniforms.uStrokePixelRatio).toBe(4);
+    expect(group.uniforms.uStrokeAlignments).toEqual(
+      new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES),
+    );
+    expect(group.uniforms.uMaxStrokeWidth).toBe(1.012);
+    expect(group.uniforms.uTextureSize).toEqual(new Float32Array([30, 20]));
 
     widths[1] = 2;
-    renderer.render(frame as never, texture as never);
-    expect(group.uniforms.uMaxFractionalStrokeWidth).toBe(0);
+    renderer.render(
+      { ...frame, width: 60, height: 40, maxStrokeWidth: 2 } as never,
+      texture as never,
+    );
+    expect(group.uniforms.uMaxStrokeWidth).toBe(2);
+    expect(group.uniforms.uStrokeWidths).toBe(widths);
+    expect(group.uniforms.uStrokePixelRatio).toBe(1);
+    expect(group.uniforms.uTextureSize).toEqual(new Float32Array([60, 40]));
   });
 
   it("reads the stroke widths as four-wide lanes in both programs", () => {

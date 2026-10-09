@@ -8,6 +8,7 @@ import type {
   MaskStyleContext,
 } from "#types/mask-style";
 import { MaskRenderMode } from "#types/mask-style";
+import { StrokeAlignment } from "#types/paint-style";
 import type {
   DetectionStylePredicate,
   DetectionStyleValue,
@@ -124,7 +125,7 @@ function serializeStroke(stroke: MaskStrokeStyle | undefined) {
     return "none";
   }
 
-  return `${stroke.color}:${stroke.alpha}:${stroke.width}`;
+  return `${stroke.color}:${stroke.alpha}:${stroke.width}:${stroke.alignment}`;
 }
 
 function normalizeStroke(
@@ -136,6 +137,7 @@ function normalizeStroke(
   }
 
   return {
+    alignment: stroke.alignment ?? StrokeAlignment.Outside,
     alpha: stroke.alpha ?? DEFAULT_MASK_STROKE_ALPHA,
     color: stroke.color ?? fallbackColor,
     width: stroke.width ?? DEFAULT_MASK_STROKE_WIDTH,

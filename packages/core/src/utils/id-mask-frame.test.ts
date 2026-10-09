@@ -1,14 +1,140 @@
 import { describe, expect, it } from "vitest";
 
 import { DetectionMaskEncoding } from "#types/detections";
+import { StrokeAlignment } from "#types/paint-style";
 import { encodeCompressedRleCounts } from "#utils/detection-frames";
+import { rasterizePolygonToMask } from "#utils/detection-conversions";
+import { encodeBinaryMask } from "#utils/detection-masks";
 import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
   createIdMaskFrame,
+  resolveIdMaskStrokeTexels,
+  type IdPolygonInstruction,
 } from "#utils/id-mask-frame";
 
 describe("id mask frame artifacts", () => {
+  it("keeps fractional polygon edges on the same pixel grid", () => {
+    const frame = createIdMaskFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        polygon: {
+          height: 5,
+          width: 5,
+          points: [
+            { x: 0.75, y: 1.25 },
+            { x: 3.25, y: 1.25 },
+            { x: 3.25, y: 3.75 },
+            { x: 0.75, y: 3.75 },
+          ],
+        },
+      },
+    ]);
+
+    expect(frame!.data).toEqual(
+      Uint8Array.from([
+        0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0,
+        0,
+      ]),
+    );
+  });
+
+  it.each([undefined, 7, 3])(
+    "matches encoded polygon coverage, overlap and strokes at raster width %s",
+    (maxWidth) => {
+      const polygons: IdPolygonInstruction[] = [
+        {
+          alpha: 0.25,
+          color: 0x00ff00,
+          detectionIndex: 1,
+          polygon: {
+            height: 9,
+            width: 12,
+            points: [
+              { x: -2.25, y: 1.25 },
+              { x: 10.75, y: 1.25 },
+              { x: 10.75, y: 3.25 },
+              { x: 2.25, y: 3.25 },
+              { x: 2.25, y: 12.25 },
+              { x: -2.25, y: 12.25 },
+            ],
+          },
+          stroke: { alpha: 0.75, color: 0xffffff, width: 2.5 },
+        },
+        {
+          alpha: 0.5,
+          color: 0x0000ff,
+          detectionIndex: 2,
+          polygon: {
+            height: 6,
+            width: 8,
+            points: [
+              { x: 0.5, y: 0.25 },
+              { x: 7.5, y: 5.75 },
+              { x: 0.5, y: 5.75 },
+              { x: 7.5, y: 0.25 },
+            ],
+          },
+          stroke: { alpha: 1, color: 0xff0000, width: 0.5 },
+        },
+        {
+          alpha: 1,
+          color: 0xffffff,
+          detectionIndex: 3,
+          polygon: {
+            height: 9,
+            width: 12,
+            points: [
+              { x: 10.25, y: -1 },
+              { x: 11.25, y: 10 },
+              { x: 10.25, y: 10 },
+            ],
+          },
+        },
+      ];
+      const encoded = polygons.map(({ polygon, ...instruction }) => ({
+        ...instruction,
+        mask: encodeBinaryMask(
+          rasterizePolygonToMask(polygon.points, polygon),
+          polygon.width,
+          polygon.height,
+        ),
+      }));
+      const background = maskInstruction(0, 12, 9, (x, y) => x + y > 6);
+      const options = { maxWidth };
+
+      expect(createIdMaskFrame([background, ...polygons], options)).toEqual(
+        createIdMaskFrame([background, ...encoded], options),
+      );
+      expect(createIdMaskFrame([...polygons, background], options)).toEqual(
+        createIdMaskFrame([...encoded, background], options),
+      );
+    },
+  );
+
+  it("rejects noninteger polygon media dimensions", () => {
+    expect(() =>
+      createIdMaskFrame([
+        {
+          alpha: 1,
+          color: 0xffffff,
+          detectionIndex: 0,
+          polygon: {
+            height: 4.5,
+            width: 8,
+            points: [
+              { x: 0, y: 0 },
+              { x: 8, y: 0 },
+              { x: 0, y: 4 },
+            ],
+          },
+        },
+      ]),
+    ).toThrow("Media dimensions must be positive integers.");
+  });
+
   it("encodes detection ids and lets later detections render on top", () => {
     const frame = createIdMaskFrame([
       {
@@ -42,7 +168,7 @@ describe("id mask frame artifacts", () => {
     ]);
   });
 
-  it("preserves stroke palettes and clamps stroke widths", () => {
+  it("preserves CSS stroke widths until the display density is known", () => {
     const frame = createIdMaskFrame([
       {
         alpha: 1,
@@ -64,8 +190,9 @@ describe("id mask frame artifacts", () => {
 
     expect(frame).toBeDefined();
     expect(frame!.hasStroke).toBe(true);
-    expect(frame!.maxStrokeWidth).toBe(MAX_ID_MASK_STROKE_WIDTH);
-    expect(frame!.strokeWidths[1]).toBe(MAX_ID_MASK_STROKE_WIDTH);
+    expect(frame!.maxStrokeWidth).toBe(MAX_ID_MASK_STROKE_WIDTH + 10);
+    expect(frame!.strokeWidths[1]).toBe(MAX_ID_MASK_STROKE_WIDTH + 10);
+    expect(frame!.strokeAlignments![1]).toBe(0);
     expect([...frame!.strokePalette.slice(4, 8)]).toEqual([1, 1, 1, 0.75]);
   });
 
@@ -165,7 +292,7 @@ describe("id mask frame artifacts", () => {
     expect([...frame.data]).toContain(2);
   });
 
-  it("measures a stroke in the texels of the raster it is drawn on", () => {
+  it("keeps CSS widths independent of preview raster reduction", () => {
     const strokeWidths = (maxWidth: number | undefined, width: number) =>
       createIdMaskFrame(
         [
@@ -178,11 +305,11 @@ describe("id mask frame artifacts", () => {
       )!.strokeWidths[1];
 
     expect(strokeWidths(undefined, 2)).toBe(2);
-    expect(strokeWidths(8, 2)).toBe(1);
-    expect(strokeWidths(4, 2)).toBe(0.5);
-    expect(strokeWidths(8, 4)).toBe(2);
+    expect(strokeWidths(8, 2)).toBe(2);
+    expect(strokeWidths(4, 2)).toBe(2);
+    expect(strokeWidths(8, 4)).toBe(4);
     expect(strokeWidths(undefined, 0.5)).toBe(0.5);
-    expect(strokeWidths(8, 0.5)).toBe(0.25);
+    expect(strokeWidths(8, 0.5)).toBe(0.5);
   });
 
   it("keeps categorical ids and colors when only fractional border width changes", () => {
@@ -196,11 +323,47 @@ describe("id mask frame artifacts", () => {
       { maxWidth: 4 },
     )!;
 
-    expect(thin.strokeWidths[1]).toBe(0.5);
-    expect(wider.strokeWidths[1]).toBe(1);
+    expect(thin.strokeWidths[1]).toBe(2);
+    expect(wider.strokeWidths[1]).toBe(4);
     expect(thin.data).toEqual(wider.data);
     expect(thin.fillPalette).toEqual(wider.fillPalette);
     expect(thin.strokePalette).toEqual(wider.strokePalette);
+  });
+
+  it("stores total width and alignment without changing categorical coverage", () => {
+    const instruction = maskInstruction(0, 16, 12, (x) => x >= 4);
+    const frames = [
+      StrokeAlignment.Outside,
+      StrokeAlignment.Center,
+      StrokeAlignment.Inside,
+    ].map((alignment) =>
+      createIdMaskFrame([
+        {
+          ...instruction,
+          stroke: { alpha: 1, color: 0xffffff, width: 4, alignment },
+        },
+      ])!,
+    );
+    expect(frames.map((frame) => frame.strokeWidths[1])).toEqual([4, 4, 4]);
+    expect(frames.map((frame) => frame.strokeAlignments![1])).toEqual([
+      0, 0.5, 1,
+    ]);
+    expect(frames.map((frame) => frame.maxStrokeWidth)).toEqual([4, 2, 0]);
+    expect(frames.every((frame) => frame.hasStroke)).toBe(true);
+    expect(frames[1]!.data).toEqual(frames[0]!.data);
+    expect(frames[2]!.data).toEqual(frames[0]!.data);
+  });
+
+  it("bounds each side after converting total CSS width to raster texels", () => {
+    expect(resolveIdMaskStrokeTexels(3, 500, 1000)).toBe(6);
+    expect(
+      resolveIdMaskStrokeTexels(4, 500, 1000, StrokeAlignment.Center),
+    ).toBe(8);
+    expect(resolveIdMaskStrokeTexels(40, 500, 1000)).toBe(16);
+    expect(
+      resolveIdMaskStrokeTexels(40, 500, 1000, StrokeAlignment.Center),
+    ).toBe(32);
+    expect(resolveIdMaskStrokeTexels(0, 500, 1000)).toBe(0);
   });
 
   it("rejects artifacts that exceed the shader palette capacity", () => {

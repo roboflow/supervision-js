@@ -1,3 +1,10 @@
+import { createPixiFocusHeatmapCutout } from "./pixi-focus-heatmap-cutout";
+import {
+  setPixiViewportBounds,
+  syncPixiMaskViewportBounds,
+  type PixiRectangleConstructor,
+  type PixiViewportBounds,
+} from "./pixi-mask-viewport";
 import {
   tintedMaskVertexGlsl,
   tintedMaskVertexWgsl,
@@ -11,17 +18,20 @@ import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifac
 import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
 import type { FocusDrawInstruction, FocusStyle } from "supervision-js-core";
+import type { HeatmapAnnotationRenderer, Rect } from "supervision-js-core";
 import type { DetectionPickResult } from "supervision-js-core";
 import { centerRectToTopLeftRect } from "supervision-js-core";
 import { extractDetectionMaskRectRuns } from "supervision-js-core";
 import type { MaskRectRun } from "supervision-js-core";
 import type {
+  AlphaMask as PixiAlphaMask,
   Container as PixiContainer,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
   MeshGeometry as PixiMeshGeometry,
   Shader as PixiShader,
   Texture as PixiTexture,
+  Rectangle as PixiRectangle,
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
@@ -54,14 +64,17 @@ type MaskCutoutCacheEntry = {
  * snapshots, so identity is enough to tell one frame's targets from another's.
  */
 interface VectorFocusSignature {
+  readonly annotationAntialiasing: boolean;
   readonly cornerRadius: number | undefined;
   readonly detections: readonly object[];
   readonly fillAlpha: number;
   readonly fillColor: number;
   readonly frame: object;
+  readonly heatmapsEnabled: boolean;
+  readonly heatmapArtifacts: readonly PixiFocusHeatmapArtifact[];
   readonly mediaHeight: number;
   readonly mediaWidth: number;
-  readonly shape: BoxShape | undefined;
+  readonly shape: BoxShape | null | undefined;
 }
 
 type GraphicsConstructor = new () => PixiFocusGraphics;
@@ -104,6 +117,7 @@ type UniformGroupConstructor = new (
 ) => PixiUniformGroup;
 
 type PixiFocusGraphics = {
+  boundsArea?: PixiRectangle;
   visible: boolean;
   clear(): PixiFocusGraphics;
   cut(): unknown;
@@ -125,6 +139,12 @@ export interface PixiFocusMaskArtifact {
   readonly texture: PixiTexture;
 }
 
+export interface PixiFocusHeatmapArtifact {
+  readonly detectionIndex: number;
+  readonly bounds: Rect;
+  readonly texture: PixiTexture;
+}
+
 export interface PixiFocusLayerFrameContext {
   readonly frame: FocusDrawFrame | undefined;
   /**
@@ -135,6 +155,7 @@ export interface PixiFocusLayerFrameContext {
   readonly heldMaskFrameTime?: number | null;
   readonly hoveredPick: DetectionPickResult | null;
   readonly idMaskArtifact?: PixiFocusMaskArtifact | null;
+  readonly heatmapArtifacts?: readonly PixiFocusHeatmapArtifact[];
   readonly isMaskArtifactOwed?: boolean;
   readonly mediaTime: number;
   readonly selectedPick: DetectionPickResult | null;
@@ -149,6 +170,7 @@ export interface PixiFocusLayer {
     readonly height: number;
   }): PixiContainer | PixiFocusGraphics;
   drawFrame(context: PixiFocusLayerFrameContext): void;
+  syncViewportBounds(): void;
   releaseMaskTexture(texture: PixiTexture): void;
   tick(timestamp: number): void;
   setFocusStyle(focusStyle: FocusStyle | null | undefined): void;
@@ -156,13 +178,18 @@ export interface PixiFocusLayer {
 }
 
 export function createPixiFocusLayer(options: {
+  readonly AlphaMask?: new (options: { mask: PixiContainer }) => PixiAlphaMask;
   readonly Container?: ContainerConstructor;
   readonly Graphics: GraphicsConstructor;
+  readonly Rectangle?: PixiRectangleConstructor;
   readonly ImageSource?: ImageSourceConstructor;
   readonly Mesh?: MeshConstructor;
   readonly MeshGeometry?: MeshGeometryConstructor;
   readonly Shader?: ShaderFactory;
   readonly UniformGroup?: UniformGroupConstructor;
+  readonly getHeatmapRenderers?: () => readonly HeatmapAnnotationRenderer[];
+  readonly getAnnotationAntialiasing?: () => boolean;
+  readonly getViewportBounds?: () => PixiViewportBounds | undefined;
   readonly focusStyle?: FocusStyle | null;
   readonly isDetectionVisible?: (
     detection: DetectionPickResult["detection"],
@@ -176,6 +203,14 @@ export function createPixiFocusLayer(options: {
       : (options.focusStyle ?? new BaseFocusStyle());
   let focusGraphics: PixiFocusGraphics | undefined;
   let focusMaskGraphics: PixiFocusGraphics | undefined;
+  let heatmapMaskContainer: PixiContainer | undefined;
+  let heatmapVectorGraphics: PixiFocusGraphics | undefined;
+  let usesHeatmapAlphaMask = false;
+  let viewportBounds: PixiViewportBounds | undefined;
+  const heatmapCutouts = new Map<
+    PixiTexture,
+    Map<number, ReturnType<typeof createPixiFocusHeatmapCutout>>
+  >();
   let idMaskRenderer: FocusIdMaskRenderer | undefined;
   let focusDisplay:
     | (PixiContainer & { alpha: number; visible: boolean })
@@ -206,6 +241,7 @@ export function createPixiFocusLayer(options: {
       resetHeldFocus();
       focusGraphics = new options.Graphics();
       focusGraphics.visible = false;
+      syncViewportBounds(true);
       idMaskRenderer = createIdMaskRenderer();
 
       if (!options.Container || !focusGraphics.setMask) {
@@ -243,13 +279,28 @@ export function createPixiFocusLayer(options: {
       hide();
       idMaskRenderer?.destroy();
       idMaskRenderer = undefined;
+      activateVectorMask();
+      heatmapMaskContainer?.destroy({ children: true });
+      heatmapMaskContainer = undefined;
     },
 
     releaseMaskTexture(texture) {
-      if (!isDestroyed) idMaskRenderer?.releaseTexture(texture.source);
+      if (!isDestroyed) {
+        idMaskRenderer?.releaseTexture(texture.source);
+        const cutouts = heatmapCutouts.get(texture);
+        if (cutouts) {
+          for (const cutout of cutouts.values()) cutout.destroy();
+          heatmapCutouts.delete(texture);
+          vectorFocusSignature = null;
+          if (heatmapCutouts.size === 0 && usesHeatmapAlphaMask) {
+            activateVectorMask()?.clear();
+          }
+        }
+      }
     },
 
     drawFrame(context) {
+      syncViewportBounds();
       if (isDestroyed || !focusStyle || mediaWidth <= 0 || mediaHeight <= 0) {
         hide();
         return;
@@ -277,8 +328,9 @@ export function createPixiFocusLayer(options: {
         ? {
             ...resolvedInstruction,
             targets: resolvedInstruction.targets.filter(
-              ({ detection }) =>
-                options.isDetectionVisible?.(detection) ?? true,
+              ({ detection, frame }) =>
+                frame === context.frame &&
+                (options.isDetectionVisible?.(detection) ?? true),
             ),
           }
         : undefined;
@@ -286,6 +338,9 @@ export function createPixiFocusLayer(options: {
       endHold();
 
       if (!instruction || instruction.targets.length === 0) {
+        if (usesHeatmapAlphaMask && heldFill) {
+          drawOverlayWithoutCutout(heldFill);
+        }
         resetHeldFocus();
         transitionToHidden();
         return;
@@ -296,6 +351,7 @@ export function createPixiFocusLayer(options: {
       if (focusDisplay) focusDisplay.visible = true;
 
       if (drawIdMaskFocus(context.idMaskArtifact, instruction)) {
+        activateVectorMask();
         hideVectorFocus();
         markCutoutDrawn(context.mediaTime, context.frame.mediaTime);
         return;
@@ -303,7 +359,7 @@ export function createPixiFocusLayer(options: {
 
       idMaskRenderer?.hide();
 
-      if (drawVectorFocus(instruction, context.frame)) {
+      if (drawVectorFocus(instruction, context)) {
         markCutoutDrawn(context.mediaTime, context.frame.mediaTime);
       }
     },
@@ -334,7 +390,42 @@ export function createPixiFocusLayer(options: {
 
       focusStyle = nextFocusStyle;
     },
+
+    syncViewportBounds,
   };
+
+  function syncViewportBounds(force = false) {
+    if (!options.Rectangle) return;
+    const next = options.getViewportBounds?.();
+    if (
+      !force &&
+      next?.x === viewportBounds?.x &&
+      next?.y === viewportBounds?.y &&
+      next?.width === viewportBounds?.width &&
+      next?.height === viewportBounds?.height
+    )
+      return;
+    viewportBounds = next ? { ...next } : undefined;
+    if (focusGraphics) {
+      setPixiViewportBounds(
+        focusGraphics,
+        { x: 0, y: 0, width: mediaWidth, height: mediaHeight },
+        viewportBounds,
+        options.Rectangle,
+      );
+    }
+    syncHeatmapViewportBounds();
+  }
+
+  function syncHeatmapViewportBounds() {
+    if (heatmapMaskContainer && options.Rectangle) {
+      syncPixiMaskViewportBounds(
+        heatmapMaskContainer,
+        viewportBounds,
+        options.Rectangle,
+      );
+    }
+  }
 
   function drawIdMaskFocus(
     artifact: PixiFocusMaskArtifact | null | undefined,
@@ -352,6 +443,7 @@ export function createPixiFocusLayer(options: {
 
     if (
       maskIds.length === 0 ||
+      instruction.targets.some((target) => !target.detection.mask) ||
       (!instruction.ambient && maskIds.length !== instruction.targets.length)
     ) {
       return false;
@@ -370,7 +462,7 @@ export function createPixiFocusLayer(options: {
 
   function drawVectorFocus(
     instruction: FocusDrawInstruction,
-    frame: FocusDrawFrame,
+    context: PixiFocusLayerFrameContext,
   ) {
     if (!focusGraphics) {
       return false;
@@ -379,6 +471,7 @@ export function createPixiFocusLayer(options: {
     const targetsWithGeometry = instruction.targets.filter(
       (target) =>
         target.detection.mask ||
+        target.detection.heatmap ||
         target.detection.rect ||
         target.detection.polygon,
     );
@@ -389,18 +482,21 @@ export function createPixiFocusLayer(options: {
     }
 
     const signature: VectorFocusSignature = {
+      annotationAntialiasing: options.getAnnotationAntialiasing?.() ?? false,
       cornerRadius: instruction.fallback?.cornerRadius,
       detections: targetsWithGeometry.map((target) => target.detection),
       fillAlpha: instruction.fill.alpha,
       fillColor: instruction.fill.color,
-      frame,
+      frame: context.frame!,
+      heatmapsEnabled: (options.getHeatmapRenderers?.().length ?? 0) > 0,
+      heatmapArtifacts: context.heatmapArtifacts ?? [],
       mediaHeight,
       mediaWidth,
-      shape: instruction.fallback?.shape,
+      shape: instruction.fallback === null ? null : instruction.fallback?.shape,
     };
 
     focusGraphics.visible = true;
-    if (focusMaskGraphics) focusMaskGraphics.visible = true;
+    if (focusMaskGraphics) focusMaskGraphics.visible = !usesHeatmapAlphaMask;
 
     // Tessellating thousands of mask runs on every draw is what makes this path
     // expensive, and nothing it draws moves while its inputs hold still.
@@ -409,24 +505,47 @@ export function createPixiFocusLayer(options: {
     }
 
     vectorFocusSignature = signature;
+    const gpuHeatmapTargets =
+      context.heatmapArtifacts !== undefined &&
+      signature.heatmapsEnabled &&
+      options.AlphaMask &&
+      options.Container &&
+      options.Mesh &&
+      options.MeshGeometry &&
+      options.Shader &&
+      focusMaskGraphics &&
+      focusGraphics.setMask &&
+      targetsWithGeometry.some(
+        ({ detection }) => detection.heatmap && !detection.mask,
+      );
+    const cutoutGraphics = gpuHeatmapTargets
+      ? activateHeatmapMask(
+          instruction.targets,
+          signature.annotationAntialiasing,
+          signature.heatmapArtifacts,
+        )
+      : activateVectorMask();
     focusGraphics.clear();
     focusGraphics.rect(0, 0, mediaWidth, mediaHeight);
     focusGraphics.fill(instruction.fill);
+    const vectorTargets = targetsWithGeometry.filter(
+      ({ detection }) =>
+        !signature.heatmapsEnabled || !detection.heatmap || detection.mask,
+    );
 
-    if (focusMaskGraphics) {
-      focusMaskGraphics.clear();
+    if (cutoutGraphics) {
+      cutoutGraphics.clear();
 
-      for (const target of targetsWithGeometry) {
-        if (
-          drawCutoutShape(focusMaskGraphics, target, instruction) === "drawn"
-        ) {
-          focusMaskGraphics.fill({ alpha: 1, color: 0xffffff });
+      for (const target of vectorTargets) {
+        if (drawCutoutShape(cutoutGraphics, target, instruction) === "drawn") {
+          cutoutGraphics.fill({ alpha: 1, color: 0xffffff });
         }
       }
+      syncHeatmapViewportBounds();
       return true;
     }
 
-    for (const target of targetsWithGeometry) {
+    for (const target of vectorTargets) {
       if (drawCutoutShape(focusGraphics, target, instruction) === "drawn") {
         focusGraphics.cut();
       }
@@ -454,7 +573,7 @@ export function createPixiFocusLayer(options: {
       return "drawn";
     }
 
-    if (!target.detection.rect) {
+    if (!target.detection.rect || instruction.fallback === null) {
       return "empty";
     }
 
@@ -475,6 +594,97 @@ export function createPixiFocusLayer(options: {
     }
 
     return "drawn";
+  }
+
+  function activateVectorMask() {
+    clearHeatmapCutouts();
+    if (heatmapMaskContainer) heatmapMaskContainer.visible = false;
+    if (usesHeatmapAlphaMask && focusMaskGraphics) {
+      focusGraphics?.setMask?.({
+        inverse: true,
+        mask: focusMaskGraphics as unknown as PixiContainer,
+      });
+      usesHeatmapAlphaMask = false;
+    }
+    if (focusMaskGraphics) focusMaskGraphics.visible = true;
+    return focusMaskGraphics;
+  }
+
+  function activateHeatmapMask(
+    targets: readonly DetectionPickResult[],
+    annotationAntialiasing: boolean,
+    heatmapArtifacts: readonly PixiFocusHeatmapArtifact[],
+  ) {
+    const indexes = new Set(
+      targets
+        .filter(({ detection }) => !detection.mask)
+        .map(({ detectionIndex }) => detectionIndex),
+    );
+    const artifacts = heatmapArtifacts.filter((artifact) =>
+      indexes.has(artifact.detectionIndex),
+    );
+    if (artifacts.length === 0) return activateVectorMask();
+    if (!heatmapMaskContainer) {
+      heatmapMaskContainer = new options.Container!();
+      heatmapVectorGraphics = new options.Graphics();
+      heatmapMaskContainer.addChild(heatmapVectorGraphics as never);
+      (focusDisplay as PixiContainer).addChild(heatmapMaskContainer);
+    }
+    heatmapMaskContainer.visible = true;
+    if (!usesHeatmapAlphaMask) {
+      focusGraphics?.setMask?.({
+        inverse: true,
+        channel: "alpha",
+        mask: new options.AlphaMask!({
+          mask: heatmapMaskContainer,
+        }) as unknown as PixiContainer,
+      });
+      usesHeatmapAlphaMask = true;
+    }
+    if (focusMaskGraphics) focusMaskGraphics.visible = false;
+    const activeTextures = new Map<PixiTexture, Set<number>>();
+    for (const artifact of artifacts) {
+      let indexes = activeTextures.get(artifact.texture);
+      if (!indexes) {
+        indexes = new Set();
+        activeTextures.set(artifact.texture, indexes);
+      }
+      indexes.add(artifact.detectionIndex);
+      let textureCutouts = heatmapCutouts.get(artifact.texture);
+      if (!textureCutouts) {
+        textureCutouts = new Map();
+        heatmapCutouts.set(artifact.texture, textureCutouts);
+      }
+      let cutout = textureCutouts.get(artifact.detectionIndex);
+      if (!cutout) {
+        cutout = createPixiFocusHeatmapCutout({
+          artifact,
+          Mesh: options.Mesh!,
+          MeshGeometry: options.MeshGeometry!,
+          Shader: options.Shader!,
+        });
+        textureCutouts.set(artifact.detectionIndex, cutout);
+        heatmapMaskContainer.addChild(cutout.display);
+      }
+      cutout.render(artifact, annotationAntialiasing);
+    }
+    for (const [texture, cutouts] of heatmapCutouts) {
+      const activeIndexes = activeTextures.get(texture);
+      for (const [index, cutout] of cutouts) {
+        if (activeIndexes?.has(index)) continue;
+        cutout.destroy();
+        cutouts.delete(index);
+      }
+      if (cutouts.size === 0) heatmapCutouts.delete(texture);
+    }
+    return heatmapVectorGraphics;
+  }
+
+  function clearHeatmapCutouts() {
+    for (const cutouts of heatmapCutouts.values()) {
+      for (const cutout of cutouts.values()) cutout.destroy();
+    }
+    heatmapCutouts.clear();
   }
 
   function drawMaskCutout(
@@ -558,7 +768,10 @@ export function createPixiFocusLayer(options: {
     targetAlpha = 1;
     if (focusDisplay) focusDisplay.visible = true;
 
-    if (isDrawnCutoutStillCurrent(mediaTime, heldMaskFrameTime)) {
+    if (
+      !usesHeatmapAlphaMask &&
+      isDrawnCutoutStillCurrent(mediaTime, heldMaskFrameTime)
+    ) {
       return;
     }
 
@@ -665,6 +878,7 @@ export function createPixiFocusLayer(options: {
     cutoutMediaTime = null;
     cutoutFrameTime = null;
     drawnOverlayWithoutCutout = fill;
+    activateVectorMask();
 
     if (idMaskRenderer) {
       hideVectorFocus();
@@ -737,7 +951,10 @@ function isSameVectorFocus(
 ) {
   return (
     previous !== null &&
+    previous.annotationAntialiasing === next.annotationAntialiasing &&
     previous.frame === next.frame &&
+    previous.heatmapsEnabled === next.heatmapsEnabled &&
+    sameHeatmapArtifacts(previous.heatmapArtifacts, next.heatmapArtifacts) &&
     previous.fillAlpha === next.fillAlpha &&
     previous.fillColor === next.fillColor &&
     previous.cornerRadius === next.cornerRadius &&
@@ -748,6 +965,26 @@ function isSameVectorFocus(
     previous.detections.every(
       (detection, index) => detection === next.detections[index],
     )
+  );
+}
+
+function sameHeatmapArtifacts(
+  left: readonly PixiFocusHeatmapArtifact[],
+  right: readonly PixiFocusHeatmapArtifact[],
+) {
+  return (
+    left.length === right.length &&
+    left.every((artifact, index) => {
+      const next = right[index]!;
+      return (
+        artifact.texture === next.texture &&
+        artifact.detectionIndex === next.detectionIndex &&
+        artifact.bounds.x === next.bounds.x &&
+        artifact.bounds.y === next.bounds.y &&
+        artifact.bounds.width === next.bounds.width &&
+        artifact.bounds.height === next.bounds.height
+      );
+    })
   );
 }
 

@@ -194,11 +194,24 @@ vi.mock("pixi.js", () => {
   class Application {
     canvas = {
       addEventListener: pixiMock.canvasAddEventListener,
+      height: 360,
       removeEventListener: pixiMock.canvasRemoveEventListener,
       style: {},
+      width: 640,
     };
-    renderer = { name: "webgl", resize: pixiMock.rendererResize };
     screen = { height: 360, width: 640 };
+    renderer = {
+      name: "webgl",
+      resolution: 1,
+      screen: this.screen,
+      resize: (width: number, height: number, resolution: number) => {
+        Object.assign(this.screen, { width, height });
+        this.renderer.resolution = resolution;
+        this.canvas.width = Math.round(width * resolution);
+        this.canvas.height = Math.round(height * resolution);
+        pixiMock.rendererResize.call(this.renderer, width, height, resolution);
+      },
+    };
     stage = { addChild: pixiMock.stageAddChild };
     ticker = { add: pixiMock.tickerAdd, remove: pixiMock.tickerRemove };
     destroy = pixiMock.appDestroy;
@@ -290,6 +303,10 @@ vi.mock("pixi.js", () => {
       }
 
       return children[0];
+    }
+
+    removeChildren() {
+      return this.children.splice(0);
     }
   }
 

@@ -392,6 +392,7 @@ describe("mask frame preparer", () => {
       const fillPalette = new Float32Array([0, 0, 0, 0, 1, 0, 0, 0.5]);
       const strokePalette = new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]);
       const strokeWidths = new Float32Array([0, 5]);
+      const strokeAlignments = new Float32Array([0, 0.5]);
       const raster = new Uint8Array([1, 0, 0, 0]);
       const fakeWorker = createFakeMaskPreparationWorker((message) => ({
         artifactKind: PreparedMaskFrameKind.IdMask,
@@ -405,6 +406,7 @@ describe("mask frame preparer", () => {
         sourceWidth: 2,
         strokePalette,
         strokeWidths,
+        strokeAlignments,
         type: MaskPreparationWorkerMessageType.Complete,
         width: 2,
       }));
@@ -431,6 +433,7 @@ describe("mask frame preparer", () => {
         sourceWidth: 2,
         strokePalette,
         strokeWidths,
+        strokeAlignments,
         width: 2,
       });
 

@@ -1,6 +1,7 @@
 import {
   MarkerShape,
   PercentageBarPlacement,
+  StrokeAlignment,
   type DetectionFrame,
 } from "supervision";
 import {
@@ -52,7 +53,10 @@ export interface DocsAnnotationRendererControl {
 }
 
 export type DocsAnnotationRendererSelectSetting =
-  "markerPosition" | "markerShape" | "percentageBarPlacement";
+  | "markerPosition"
+  | "markerShape"
+  | "percentageBarPlacement"
+  | "maskStrokeAlignment";
 
 export interface DocsAnnotationRendererSelectControl {
   readonly key: DocsAnnotationRendererSelectSetting;
@@ -181,6 +185,17 @@ export const docsAnnotationRenderers: Readonly<
       },
     ],
     description: "Compressed RLE segmentation",
+    selects: [
+      {
+        key: "maskStrokeAlignment",
+        label: "Border alignment",
+        options: [
+          { label: "Outside", value: StrokeAlignment.Outside },
+          { label: "Center", value: StrokeAlignment.Center },
+          { label: "Inside", value: StrokeAlignment.Inside },
+        ],
+      },
+    ],
     title: "Masks",
   },
   "mask-halo": {
@@ -560,7 +575,7 @@ export function createDocsAnnotationRendererSnippet(
       style: new BaseMaskStyle({
         fillAlpha: ${formatNumber(settings.maskFillAlpha)},
         opacity: ${formatNumber(settings.maskOpacity)},
-        stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)} },
+        stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)}, alignment: StrokeAlignment.${settings.maskStrokeAlignment === StrokeAlignment.Inside ? "Inside" : settings.maskStrokeAlignment === StrokeAlignment.Center ? "Center" : "Outside"} },
       }),
     }),
   ],

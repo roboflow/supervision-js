@@ -2,6 +2,7 @@ import {
   DetectionPickTarget,
   encodeCompressedRleCounts,
   MaskRenderMode,
+  StrokeAlignment,
   resolveDetectionClassColorStyle,
   type DetectionFrame,
 } from "supervision-js-core";
@@ -986,6 +987,42 @@ describe("React Native ID-mask artifacts", () => {
     expect(artifact!.opacity).toBe(0.7);
     expect(artifact!.hasStroke).toBe(true);
     expect(artifact!.strokeWidths[1]).toBe(3);
+  });
+
+  it.each([
+    StrokeAlignment.Outside,
+    StrokeAlignment.Center,
+    StrokeAlignment.Inside,
+  ])("preserves the native radius cap for %s source styles", (alignment) => {
+    const artifact = createReactNativeIdMaskFrame({
+      detectionFrame: {
+        detections: [
+          {
+            mask: {
+              counts: encodeCompressedRleCounts([0, 1]),
+              encoding: DetectionMaskEncoding.CompressedRle,
+              width: 1,
+              height: 1,
+            },
+          },
+        ],
+        mediaTime: 0,
+      },
+      maskStyle: new BaseMaskStyle({ stroke: { width: 30, alignment } }),
+    })!;
+    const uniforms = resolveReactNativeIdMaskUniforms({
+      artifact,
+      layout: resolveReactNativeFrameLayout({
+        canvasWidth: 1,
+        canvasHeight: 1,
+        mediaWidth: 1,
+        mediaHeight: 1,
+      }),
+    });
+    expect(artifact.strokeWidths[1]).toBe(16);
+    expect(artifact.maxStrokeWidth).toBe(16);
+    expect(uniforms.uStrokeWidths[1]).toBe(16);
+    expect(uniforms.uMaxStrokeWidth).toBe(16);
   });
 
   it("returns undefined when no masks should render", () => {

@@ -10,6 +10,7 @@ import { BaseMaskStyle } from "supervision-js-core";
 
 const preparedWindow = vi.hoisted(() => ({
   invalidateRasterSize: vi.fn(),
+  invalidateMaskDisplayWidth: vi.fn(),
   frame: undefined as
     | {
         detectionFrame: { detections: never[]; mediaTime: number };
@@ -23,6 +24,7 @@ const preparedWindow = vi.hoisted(() => ({
         onMaskFrameEvicted?: (key: string) => void;
         onPreparedWindowChange?: () => void;
         resolveMaxRasterWidth?: () => number | undefined;
+        resolveMaskDisplayWidth?: () => number | undefined;
       }
     | undefined,
 }));
@@ -41,6 +43,7 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
       getArtifactRevision: vi.fn(() => 0),
       getFrame: vi.fn(() => preparedWindow.frame),
       invalidateRasterSize: preparedWindow.invalidateRasterSize,
+      invalidateMaskDisplayWidth: preparedWindow.invalidateMaskDisplayWidth,
       isArtifactPrepared: vi.fn(
         () => preparedWindow.frame?.maskStatus === "prepared",
       ),
@@ -60,11 +63,36 @@ import type { IdMaskDisplayBox } from "#renderers/pixi-mask-layer";
 
 beforeEach(() => {
   preparedWindow.invalidateRasterSize.mockClear();
+  preparedWindow.invalidateMaskDisplayWidth.mockClear();
   preparedWindow.frame = undefined;
   preparedWindow.options = undefined;
 });
 
 describe("pixi mask layer", () => {
+  it("updates fallback CSS width during zoom without invalidating the ID raster", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    layer.createSprite({ height: 80, width: 120 });
+    layer.setRasterDisplay({
+      boxWidth: 60,
+      boxHeight: 40,
+      devicePixelRatio: 2,
+    });
+    expect(preparedWindow.options?.resolveMaskDisplayWidth?.()).toBe(60);
+    layer.setViewportScale(0.5);
+    layer.setViewportScale(1);
+    layer.setViewportScale(1);
+    expect(preparedWindow.options?.resolveMaskDisplayWidth?.()).toBe(120);
+    expect(preparedWindow.invalidateMaskDisplayWidth).toHaveBeenCalledTimes(2);
+    expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
+  });
+
   it("leaves the drawn frame alone when a cook lands, and draws it on the redraw", () => {
     const onPreparedWindowChange = vi.fn();
     const layer = createPixiMaskLayer({
@@ -466,6 +494,28 @@ describe("pixi mask layer", () => {
     expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledTimes(2);
   });
 
+  it("recooks denser AA masks and restores the display raster without changing display DPR", () => {
+    const display = {
+      boxWidth: 640,
+      boxHeight: 360,
+      devicePixelRatio: 1,
+      maxDevicePixelRatio: 1,
+    };
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display,
+    });
+    layer.createSprite({ width: 1920, height: 1080 });
+
+    layer.setRasterDisplay(display, 2);
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(1280);
+    layer.setRasterDisplay(display, 4);
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(2560);
+    layer.setRasterDisplay(display);
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(640);
+    expect(preparedWindow.invalidateRasterSize).toHaveBeenCalledTimes(3);
+  });
+
   it("uses fractional caps and rebuilds only when the fitted pixel width changes", () => {
     const display = {
       boxWidth: 640,
@@ -530,6 +580,64 @@ describe("pixi mask layer", () => {
 
     expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
     expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
+  });
+
+  it("updates a paused native-resolution mask's stroke density without recooking", () => {
+    vi.stubGlobal("document", {
+      createElement: () => ({ getContext: () => ({}), height: 0, width: 0 }),
+    });
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      Container: FakeContainer as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: {
+        from: ({ resources }: { resources: Record<string, unknown> }) => ({
+          destroy() {},
+          resources,
+        }),
+      } as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      UniformGroup: FakeUniformGroup as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const display = {
+      boxHeight: 40,
+      boxWidth: 60,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 2,
+    };
+    const container = layer.createSprite({
+      height: 80,
+      width: 120,
+    }) as unknown as FakeContainer;
+    const mesh = container.children[1] as FakeMesh;
+    const group = (mesh.shader as { resources: Record<string, unknown> })
+      .resources.maskUniforms as FakeUniformGroup;
+    const frame = { ...idMaskFrame(), hasStroke: true, maxStrokeWidth: 2 };
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: frame.key,
+      maskFrame: frame,
+      maskStatus: "prepared",
+    };
+    layer.setPlaybackActive(false);
+    layer.setRasterDisplay(display);
+    layer.drawFrame(0.1);
+    const texture = layer.getActiveIdMaskFrameTexture(0.1)?.texture;
+
+    expect(group.uniforms.uStrokePixelRatio).toBe(2);
+    layer.setRasterDisplay({ ...display, maxDevicePixelRatio: 1 });
+    expect(group.uniforms.uStrokePixelRatio).toBe(1);
+    layer.setRasterDisplay(display, 0.25);
+    expect(group.uniforms.uStrokePixelRatio).toBe(0.5);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toEqual({ frame, texture });
+    expect(group.uniforms.uMaxStrokeWidth).toBe(2);
+    expect(preparedWindow.invalidateRasterSize).not.toHaveBeenCalled();
+    expect(preparedWindow.invalidateMaskDisplayWidth).not.toHaveBeenCalled();
   });
 
   it("leaves a polygon frame at the size its geometry was rasterized to", () => {

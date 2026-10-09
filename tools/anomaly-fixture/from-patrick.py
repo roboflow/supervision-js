@@ -208,6 +208,7 @@ def generate(source: Path, destination: Path, media: Path, frame_count: int):
         },
         "presentation": {
             "boxesEnabled": False,
+            "focusRectFallbackEnabled": False,
             "heatmapsEnabled": True,
             "confidenceThreshold": 0,
             "labelsEnabled": False,

@@ -6,7 +6,11 @@ import {
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
-import type { AnnotationStyleContext, Detection } from "supervision-js-core";
+import type {
+  AnnotationStyleContext,
+  Detection,
+  Rect,
+} from "supervision-js-core";
 import type { Graphics as PixiGraphics } from "pixi.js";
 import type { Container as PixiContainer } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
@@ -22,10 +26,16 @@ export interface PixiBoxLayerState {
   readonly activeDetectionIndexes: readonly number[];
 }
 
+export interface PixiRenderedBoxFrame {
+  readonly frame: DetectionFrame;
+  readonly rects: ReadonlyMap<number, Rect>;
+}
+
 export interface PixiBoxLayer {
   createContainer(): PixiContainer | undefined;
   attachGraphics(graphics: PixiGraphics): void;
   drawFrame(mediaTime: number, viewportScale?: number): PixiBoxLayerState;
+  getRenderedBoxes(): PixiRenderedBoxFrame | undefined;
   setBoxStyle(boxStyle: BoxStyle | null | undefined): void;
   invalidate(): void;
   invalidateDetection(id: string | number): void;
@@ -55,6 +65,8 @@ export function createPixiBoxLayer(options: {
   let retainedContainer: PixiContainer | undefined;
   const retainedEntries = new Map<string, PixiGraphics>();
   const invalidatedDetections = new Set<string>();
+  const renderedRects = new Map<number, Rect>();
+  let renderedBoxFrame: PixiRenderedBoxFrame | undefined;
 
   const usingRetainedEntries = Boolean(options.Container && options.Graphics);
 
@@ -90,6 +102,10 @@ export function createPixiBoxLayer(options: {
 
       const activeDetectionIndexes: number[] = [];
       const activeKeys = new Set<string>();
+      renderedRects.clear();
+      renderedBoxFrame = detectionFrame
+        ? { frame: detectionFrame, rects: renderedRects }
+        : undefined;
 
       if (boxStyle && detectionFrame) {
         const orderedDetections = detectionFrame.detections
@@ -125,9 +141,11 @@ export function createPixiBoxLayer(options: {
             display.position?.set?.(0, 0);
             display.clear();
             drawBoxInstruction(display, instruction, viewportScale);
+            retainRenderedBox(detectionIndex, instruction);
             invalidatedDetections.delete(key);
           } else {
             drawBoxInstruction(boxGraphics, instruction, viewportScale);
+            if (boxGraphics) retainRenderedBox(detectionIndex, instruction);
           }
         }
       }
@@ -140,6 +158,10 @@ export function createPixiBoxLayer(options: {
       lastDrawnState = getBoxLayerState(detectionFrame, activeDetectionIndexes);
 
       return lastDrawnState;
+    },
+
+    getRenderedBoxes() {
+      return renderedBoxFrame;
     },
 
     setBoxStyle(nextBoxStyle) {
@@ -167,6 +189,22 @@ export function createPixiBoxLayer(options: {
       return true;
     },
   };
+
+  function retainRenderedBox(
+    detectionIndex: number,
+    instruction: BoxDrawInstruction,
+  ) {
+    if (
+      instruction.rect.width > 0 &&
+      instruction.rect.height > 0 &&
+      ((instruction.fill && (instruction.fill.alpha ?? 1) > 0) ||
+        (instruction.stroke &&
+          instruction.stroke.width > 0 &&
+          (instruction.stroke.alpha ?? 1) > 0))
+    ) {
+      renderedRects.set(detectionIndex, instruction.rect);
+    }
+  }
 
   function ensureRetainedEntry(key: string) {
     let display = retainedEntries.get(key);

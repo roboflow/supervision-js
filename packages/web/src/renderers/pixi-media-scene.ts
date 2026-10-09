@@ -69,7 +69,10 @@ import { queryMaxTextureSize } from "./depth-textures";
 import { createPixiDepthLayer } from "./pixi-depth-layer";
 import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
 import { installPixiBatchTextureBindings } from "./pixi-batch-texture-bindings";
+import { installPixiFilterBindings } from "./pixi-filter-bindings";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
+import { createPixiAnnotationAntialiasLayer } from "./pixi-annotation-antialias-layer";
+import { resolvePixiAnnotationAntialiasResolution } from "./pixi-annotation-antialias";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
@@ -95,7 +98,6 @@ import {
 import {
   createPixiSceneLayerSlot,
   PixiSceneLayerKind,
-  syncPixiSceneLayerChildren,
 } from "./pixi-scene-layer-slot";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
@@ -127,6 +129,7 @@ const STATIC_FOCUS_SETTLE_MS = 10_000;
 
 /** The presentation fields a render answers to that no renderer kind owns. */
 const RENDERED_PRESENTATION_TAIL = [
+  "annotationAntialiasing",
   "annotationOverlayStyle",
   "backgroundColor",
   "focusStyle",
@@ -292,6 +295,14 @@ export async function createPixiMediaScene(
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
+  let annotationAntialiasing = options.annotationAntialiasing ?? false;
+  let annotationAntialiasResolution = 1;
+  const annotationAntialiasLayer = createPixiAnnotationAntialiasLayer({
+    Container,
+    Filter,
+    defaultFilterVert,
+    getEnabled: () => Boolean(annotationAntialiasing),
+  });
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
   let currentBoxCornerStyle: BoxCornerStyle | null =
@@ -412,6 +423,7 @@ export async function createPixiMediaScene(
         !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       // A partial heatmap changes pixels before the all-ready token changes.
       onPreparedWindowChange: () => redrawAnnotationsNow(true),
+      onTextureRelease: (texture) => focusLayer?.releaseMaskTexture(texture),
       prepareTexture: (texture) => app.renderer.prepare.upload(texture),
       renderPreparation: options.renderPreparation,
       renderers: currentHeatmapRenderers,
@@ -473,6 +485,7 @@ export async function createPixiMediaScene(
           resolveContextState,
         })
       : undefined;
+  polygonLayer?.setPlaybackActive(isPlaybackActive);
   const vectorLayer = createPixiVectorLayer({
     Container,
     Graphics,
@@ -501,6 +514,9 @@ export async function createPixiMediaScene(
     Texture,
     UniformGroup,
     detectionTimeline: annotationDetectionTimeline,
+    getAnnotationAntialiasing: () => Boolean(annotationAntialiasing),
+    getAntialiasResolution: () => annotationAntialiasResolution,
+    getViewportBounds: resolveViewportBounds,
     getActiveRegionMaskCoverage: (detectionFrameTime) =>
       maskLayer?.getActiveRegionMaskCoverage(detectionFrameTime) ?? null,
     // Under GPU compositing the decoded frame lands in a texture the
@@ -563,6 +579,7 @@ export async function createPixiMediaScene(
         Text,
         detectionTimeline: annotationDetectionTimeline,
         labelStyle: options.labelStyle,
+        getRenderedBoxes: () => boxLayer.getRenderedBoxes(),
         resolveContextState: resolveLabelContextState,
       })
     : undefined;
@@ -580,6 +597,7 @@ export async function createPixiMediaScene(
     pixi,
     app.renderer,
   );
+  const destroyFilterBindings = installPixiFilterBindings(pixi, app.renderer);
 
   const rendererCanvas = app.canvas;
   rendererCanvas.style.display = "block";
@@ -628,6 +646,10 @@ export async function createPixiMediaScene(
   const interactionSlot = createPixiSceneLayerSlot(
     PixiSceneLayerKind.Interaction,
   );
+  const interactionLabelSlot = createPixiSceneLayerSlot(
+    PixiSceneLayerKind.Label,
+    interactionSlot.order,
+  );
   const handleSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Handle);
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
@@ -642,6 +664,7 @@ export async function createPixiMediaScene(
     previewSlot,
     handleSlot,
     interactionSlot,
+    interactionLabelSlot,
     labelSlot,
   ];
   const viewport = createViewportController({ scale: 1 });
@@ -812,13 +835,18 @@ export async function createPixiMediaScene(
   }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
+        AlphaMask,
         Container,
         Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         UniformGroup,
+        getHeatmapRenderers: () => currentHeatmapRenderers,
+        getAnnotationAntialiasing: () => Boolean(annotationAntialiasing),
+        getViewportBounds: resolveViewportBounds,
         focusStyle: options.focusStyle,
         isDetectionVisible: (detection) =>
           !resolveAnnotationStyleState(detection, currentVisibility).hidden,
@@ -830,7 +858,13 @@ export async function createPixiMediaScene(
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
 
   const syncSceneChildren = () => {
-    syncPixiSceneLayerChildren(mediaScene, layerSlots);
+    labelLayer?.setBackgroundAntialiasFilter(
+      annotationAntialiasLayer.getFxaaFilter(),
+    );
+    interactionPresentationLayer?.setBackgroundAntialiasFilter(
+      annotationAntialiasLayer.getFxaaFilter(),
+    );
+    annotationAntialiasLayer.sync(mediaScene, layerSlots);
   };
 
   const updateMediaSceneFit = () => {
@@ -912,8 +946,30 @@ export async function createPixiMediaScene(
     rendererCanvas.style.left = `${next.left}px`;
     rendererCanvas.style.top = `${next.top}px`;
     app.renderer.resize(next.width, next.height, presentationResolution);
+    syncAnnotationAntialiasResolution();
     return presentationBox;
   };
+
+  const syncAnnotationAntialiasResolution = () => {
+    annotationAntialiasResolution = resolvePixiAnnotationAntialiasResolution(
+      presentationResolution,
+      containerSize,
+      maxTextureSize(),
+      annotationAntialiasing === 2 ? 2 : 1,
+    );
+    annotationAntialiasLayer.setResolution(annotationAntialiasResolution);
+    regionLayer.setAntialiasResolution(annotationAntialiasResolution);
+    syncMaskRasterDisplay();
+  };
+
+  function syncMaskRasterDisplay() {
+    if (!rasterDisplay) return;
+    const scale = annotationAntialiasing
+      ? annotationAntialiasResolution / presentationResolution
+      : 1;
+    maskLayer?.setRasterDisplay(rasterDisplay, scale);
+    polygonLayer?.setRasterDisplay(rasterDisplay, scale);
+  }
 
   const syncDisplaySizing = () => {
     if (!baseFit || mediaWidth <= 0 || mediaHeight <= 0) return;
@@ -932,7 +988,7 @@ export async function createPixiMediaScene(
       return;
     }
     rasterDisplay = display;
-    maskLayer?.setRasterDisplay(display);
+    syncMaskRasterDisplay();
     options.onDisplayChange?.(display);
   };
 
@@ -940,14 +996,28 @@ export async function createPixiMediaScene(
     if (!mediaScene || !baseFit) return;
     const transform = viewport.getTransform();
     viewportScale = baseFit.scale * transform.scale;
+    maskLayer?.setViewportScale(viewportScale);
+    polygonLayer?.setViewportScale(viewportScale);
     mediaScene.scale.set(viewportScale);
     const box = syncPresentationBox();
     mediaScene.position.set(
       baseFit.x + transform.x - box.left,
       baseFit.y + transform.y - box.top,
     );
+    focusLayer?.syncViewportBounds();
+    regionLayer.syncViewportBounds();
     maskBrushPreview?.setViewportScale(viewportScale);
   };
+
+  function resolveViewportBounds() {
+    if (!mediaScene || viewportScale <= 0) return undefined;
+    return {
+      x: -mediaScene.x / viewportScale,
+      y: -mediaScene.y / viewportScale,
+      width: app.renderer.screen.width / viewportScale,
+      height: app.renderer.screen.height / viewportScale,
+    };
+  }
 
   const mediaPointToScreen = (point: Point): Point => {
     const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
@@ -975,6 +1045,7 @@ export async function createPixiMediaScene(
       syncPresentationBox();
       updateMediaSceneFit();
       syncDisplaySizing();
+      drawInteractionPresentationLayer(currentMediaTime);
       renderOnChange();
     },
   );
@@ -1233,6 +1304,9 @@ export async function createPixiMediaScene(
           ? interactionDisplay
           : undefined,
       );
+      interactionLabelSlot.setDisplay(
+        interactionPresentationLayer?.getLabelDisplay() ?? undefined,
+      );
       attachFocusLayerDisplay();
       attachMaskLayerDisplay();
       attachLabelLayerDisplay();
@@ -1249,6 +1323,7 @@ export async function createPixiMediaScene(
     setPlaybackActive(active) {
       isPlaybackActive = active;
       maskLayer?.setPlaybackActive(active);
+      polygonLayer?.setPlaybackActive(active);
       depthSource?.setPlaybackActive?.(active);
     },
 
@@ -1379,6 +1454,7 @@ export async function createPixiMediaScene(
       syncPresentationBox();
       updateMediaSceneFit();
       syncDisplaySizing();
+      drawInteractionPresentationLayer(currentMediaTime);
       renderOnChange();
     },
 
@@ -1504,6 +1580,14 @@ export async function createPixiMediaScene(
     setPresentation(presentation, mediaTime) {
       appliedPresentation = presentation;
       currentMediaTime = mediaTime;
+      if (
+        annotationAntialiasing !==
+        (presentation.annotationAntialiasing ?? false)
+      ) {
+        annotationAntialiasing = presentation.annotationAntialiasing ?? false;
+        syncAnnotationAntialiasResolution();
+        syncSceneChildren();
+      }
       if (presentation.backgroundColor !== undefined) {
         app.renderer.background.color = presentation.backgroundColor;
         applyBackdropColor(backdrop, presentation.backgroundColor);
@@ -1763,6 +1847,10 @@ export async function createPixiMediaScene(
       // a decoder buffer in a producer that outlives the scene.
       frameChannel?.onPresentedFrame((presented) => presented.frame.close());
       destroyBatchTextureBindings();
+      destroyFilterBindings();
+      labelLayer?.setBackgroundAntialiasFilter(null);
+      interactionPresentationLayer?.setBackgroundAntialiasFilter(null);
+      annotationAntialiasLayer.destroy();
       mediaCompositor?.destroy();
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
@@ -1898,7 +1986,8 @@ export async function createPixiMediaScene(
         resolveInstructions: resolveArtifactMaskInstructions,
       });
 
-      if (rasterDisplay) maskLayer.setRasterDisplay(rasterDisplay);
+      syncMaskRasterDisplay();
+      maskLayer.setViewportScale(viewportScale);
 
       maskLayer.setPlaybackActive(isPlaybackActive);
 
@@ -2244,6 +2333,9 @@ export async function createPixiMediaScene(
         renderPreparation: options.renderPreparation,
         resolveContextState,
       });
+      polygonLayer.setPlaybackActive(isPlaybackActive);
+      syncMaskRasterDisplay();
+      polygonLayer.setViewportScale(viewportScale);
 
       if (timelineContext) {
         polygonLayer.setTimelineContext(timelineContext);
@@ -2298,14 +2390,19 @@ export async function createPixiMediaScene(
   ) {
     if (!focusLayer) {
       focusLayer = createPixiFocusLayer({
+        AlphaMask,
         Container,
         Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         UniformGroup,
         focusStyle,
+        getHeatmapRenderers: () => currentHeatmapRenderers,
+        getAnnotationAntialiasing: () => Boolean(annotationAntialiasing),
+        getViewportBounds: resolveViewportBounds,
         isDetectionVisible: (detection) =>
           !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       });
@@ -2368,6 +2465,7 @@ export async function createPixiMediaScene(
 
     focusLayer.drawFrame({
       frame,
+      heatmapArtifacts: heatmapLayer?.getActiveFocusArtifacts(frame) ?? [],
       hoveredPick: withEditingPreview(
         filterVisiblePick(interactionState?.hoveredPick ?? null),
       ),
@@ -2414,6 +2512,9 @@ export async function createPixiMediaScene(
       mediaTime,
       selectedPick: interactionState?.selectedPick ?? null,
       selectedPicks: interactionState?.selectedPicks,
+      strokePixelRatio: annotationAntialiasing
+        ? annotationAntialiasResolution
+        : presentationResolution,
       viewportScale,
     });
   }
@@ -2517,13 +2618,6 @@ export async function createPixiMediaScene(
     const frame = annotationDetectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
     const editingState = options.editingEngine?.getState();
-    labelLayer?.drawCreationPreview(
-      editingState?.kind === AnnotationGestureStateKind.Creating
-        ? editingState.preview
-        : null,
-      mediaTime,
-      viewportScale,
-    );
     annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,
@@ -2538,6 +2632,27 @@ export async function createPixiMediaScene(
       viewportScale,
       visibility: currentVisibility,
     });
+    const editingBox = annotationOverlayLayer.getRenderedEditingBox();
+    const creationPreview =
+      editingState?.kind === AnnotationGestureStateKind.Creating
+        ? editingState.preview
+        : null;
+    labelLayer?.drawCreationPreview(
+      creationPreview,
+      mediaTime,
+      viewportScale,
+      editingBox && editingBox.detection === creationPreview
+        ? editingBox.rect
+        : undefined,
+    );
+    if (editingState?.activeDetectionId != null) {
+      labelLayer?.updateEditingBox(
+        editingState.activeDetectionId,
+        editingBox?.detection.id === editingState.activeDetectionId
+          ? editingBox.rect
+          : undefined,
+      );
+    }
   }
 
   /**
@@ -2767,6 +2882,7 @@ export async function createPixiMediaScene(
         Text,
         detectionTimeline: annotationDetectionTimeline,
         labelStyle,
+        getRenderedBoxes: () => boxLayer.getRenderedBoxes(),
         resolveContextState: resolveLabelContextState,
       });
     }

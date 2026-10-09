@@ -1,10 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  Container,
+  Graphics,
+  GpuUboSystem,
+  Rectangle,
+  UniformGroup,
+  createUboElementsWGSL,
+  extractStructAndGroups,
+  type Filter,
+} from "pixi.js";
 
 import { createPixiInteractionPresentationLayer } from "#renderers/pixi-interaction-presentation-layer";
 import {
   BaseBoxStyle,
   BaseInteractionStyle,
   MAX_ID_MASK_STROKE_WIDTH,
+  LabelPlacement,
+  StrokeAlignment,
   createIdMaskFrame,
   encodeCompressedRleCounts,
 } from "supervision-js-core";
@@ -48,6 +60,124 @@ const frame: DetectionFrame = {
 };
 
 describe("pixi interaction presentation layer", () => {
+  it("keeps interaction glyphs sharp while their ordered backgrounds move and clear", () => {
+    const layer = createPixiInteractionPresentationLayer({
+      Container,
+      Graphics,
+      Text: MeasuredText as never,
+      interactionStyle: {
+        resolve: (_detection, context) => ({
+          boxStyle: new BaseBoxStyle(),
+          labelStyle: {
+            resolve: (detection) => ({
+              rect: detection.rect!,
+              text: `${context.state}: ${detection.className}`,
+              placement: LabelPlacement.InsideTop,
+              textStyle: { alpha: 0.7, color: 0xffffff },
+              background: {
+                alpha: 0.4,
+                color: 0x00ff00,
+                cornerRadius: 3,
+                paddingX: 3,
+                paddingY: 2,
+              },
+            }),
+          },
+        }),
+      },
+    });
+    const geometry = layer.createDisplay({ height: 80, width: 120 });
+    const labels = layer.getLabelDisplay()!;
+    expect(labels.parent).toBeNull();
+    expect(geometry.children).not.toContain(labels);
+    const scene = new Container();
+    scene.addChild(geometry, labels);
+    const filter = { padding: 2 } as Filter;
+    geometry.filters = [filter];
+    layer.setBackgroundAntialiasFilter(filter);
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const twoLabels: DetectionFrame = {
+      ...frame,
+      detections: [
+        ...frame.detections,
+        { ...frame.detections[0]!, id: "player-2", className: "other" },
+      ],
+    };
+    const hoveredPick = {
+      ...selectedPick,
+      detection: twoLabels.detections[1]!,
+      detectionIndex: 1,
+      frame: twoLabels,
+    };
+    const draw = (activeFrame: DetectionFrame | undefined) =>
+      layer.drawFrame({
+        frame: activeFrame,
+        hoveredPick,
+        selectedPick,
+        mediaTime: activeFrame?.mediaTime ?? frame.mediaTime,
+      });
+    draw(twoLabels);
+    const [selectedCapture, selectedText, hoveredCapture, hoveredText] =
+      labels.children;
+    const texts = [selectedText, hoveredText] as MeasuredText[];
+    const captures = [selectedCapture, hoveredCapture] as Container[];
+    expect(texts.map((text) => text.text)).toEqual([
+      `${DetectionInteractionState.Selected}: player`,
+      `${DetectionInteractionState.Hovered}: other`,
+    ]);
+    for (const text of texts) {
+      expect(text.parent).toBe(labels);
+      expect(text.parent!.filters ?? []).toEqual([]);
+      expect(text.alpha).toBe(0.7);
+    }
+    for (const capture of captures) {
+      expect(capture.filters).toEqual([filter]);
+      expect(capture.children[0]).toBeInstanceOf(Graphics);
+      expect((capture.children[0] as Graphics).context.fillStyle).toMatchObject(
+        {
+          alpha: 0.4,
+          color: 0x00ff00,
+        },
+      );
+    }
+    expect(texts[0]!.position).toMatchObject({ x: 13, y: 17 });
+    draw({
+      ...twoLabels,
+      detections: twoLabels.detections.map((detection) => ({
+        ...detection,
+        rect: { ...detection.rect!, x: 40, y: 40 },
+      })),
+    });
+    expect(texts[0]!.position).toMatchObject({ x: 33, y: 27 });
+    expect(labels.children).toEqual([
+      selectedCapture,
+      selectedText,
+      hoveredCapture,
+      hoveredText,
+    ]);
+    draw(undefined);
+    for (const text of texts) expect(text.visible).toBe(false);
+    draw(twoLabels);
+    for (const text of texts) expect(text.visible).toBe(true);
+    layer.setInteractionStyle(null);
+    draw(twoLabels);
+    for (const text of texts) expect(text.visible).toBe(false);
+    layer.destroy();
+    expect(layer.getLabelDisplay()).toBeNull();
+    for (const capture of captures) expect(capture.filters ?? []).toEqual([]);
+    expect(labels.destroyed).toBe(false);
+    scene.destroy({ children: true });
+    expect(labels.destroyed).toBe(true);
+    for (const text of texts) expect(text.destroyed).toBe(true);
+  });
+
   it("releases the texture and sampler of a hidden mask highlight", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({
@@ -481,10 +611,10 @@ describe("pixi interaction presentation layer", () => {
     const descriptor = FakeShaderFactory.descriptors.at(-1)!;
 
     expect(descriptor.gl.fragment).toContain(
-      "int radius = int(strokeScanRadius(uMaxStrokeWidth, uMaxFractionalStrokeWidth, pixelWidth));",
+      "int radius = int(strokeScanRadius(maxWidth, pixelWidth));",
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      "let radius = i32(strokeScanRadius(maskUniforms.uMaxStrokeWidth, maskUniforms.uMaxFractionalStrokeWidth, pixelWidth));",
+      "let radius = i32(strokeScanRadius(maxWidth, pixelWidth));",
     );
 
     for (const source of [
@@ -498,18 +628,55 @@ describe("pixi interaction presentation layer", () => {
     }
   });
 
-  it("measures an interaction stroke in the texels of the raster it draws on", () => {
+  it("keeps interaction stroke widths in CSS pixels across raster densities", () => {
     expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 2 })).toBe(2);
-    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(2);
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(4);
     expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 1.5 })).toBe(
-      0.75,
+      1.5,
     );
     expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 0.5 })).toBe(
       0.5,
     );
     expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 0.5 })).toBe(
-      0.25,
+      0.5,
     );
+  });
+
+  it("packs inside interaction strokes for the WebGPU shader with no outside extent", () => {
+    uploadedStrokeWidth({
+      rasterWidth: 60,
+      strokeWidth: 3,
+      alignment: StrokeAlignment.Inside,
+      strokePixelRatio: 4,
+    });
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+    const group = descriptor.resources.maskUniforms as UniformGroup;
+    const ubo = new GpuUboSystem();
+    ubo.updateUniformGroup(group);
+    const gpuBuffer = group.buffer!;
+    const buffer = gpuBuffer.data as Float32Array;
+    const shaderStruct = extractStructAndGroups(
+      descriptor.gpu.fragment.source,
+    ).structs.find((struct) => struct.name === "InteractionMaskUniforms")!;
+    const shaderLayout = createUboElementsWGSL(
+      Object.keys(shaderStruct.members).map(
+        (name) => group.uniformStructures[name]!,
+      ),
+    );
+    const readShaderUniform = (name: string, index = 0) =>
+      buffer[
+        shaderLayout.uboElements.find((element) => element.data.name === name)!
+          .offset /
+          4 +
+          index
+      ];
+    expect(readShaderUniform("uStrokePixelRatio")).toBe(4);
+    expect(readShaderUniform("uMaxStrokeWidth")).toBe(0);
+    expect(readShaderUniform("uBorderEnabled")).toBe(1);
+    expect(readShaderUniform("uStrokeWidths", 1)).toBe(3);
+    expect(readShaderUniform("uStrokeAlignments", 1)).toBe(1);
+    gpuBuffer.destroy();
+    ubo.destroy();
   });
 
   it("gives a wide stroke the width the mask layer drew it at", () => {
@@ -673,6 +840,8 @@ function maskLayerStrokeWidth(strokeWidth: number) {
 function uploadedStrokeWidth(options: {
   readonly rasterWidth: number;
   readonly strokeWidth: number;
+  readonly alignment?: StrokeAlignment;
+  readonly strokePixelRatio?: number;
 }) {
   vi.stubGlobal("document", {
     createElement: vi.fn(() => ({
@@ -696,7 +865,7 @@ function uploadedStrokeWidth(options: {
     MeshGeometry: FakeMeshGeometry as never,
     Shader: FakeShaderFactory as never,
     Text: FakeText as never,
-    UniformGroup: FakeUniformGroup as never,
+    UniformGroup,
     interactionStyle: {
       resolve: () => ({
         maskStyle: {
@@ -708,6 +877,7 @@ function uploadedStrokeWidth(options: {
               alpha: 1,
               color: 0xffffff,
               width: options.strokeWidth,
+              alignment: options.alignment,
             },
           }),
         },
@@ -730,6 +900,7 @@ function uploadedStrokeWidth(options: {
       texture: { source: { style: {} } },
     } as never,
     mediaTime: frame.mediaTime,
+    strokePixelRatio: options.strokePixelRatio,
     selectedPick: {
       detection: frame.detections[0]!,
       detectionIndex: 0,
@@ -829,6 +1000,17 @@ class FakeText {
   y = 0;
 
   constructor(options: { readonly style?: unknown; readonly text?: string }) {
+    this.style = options.style;
+    this.text = options.text ?? "";
+  }
+}
+
+class MeasuredText extends Container {
+  style: unknown;
+  text: string;
+
+  constructor(options: { readonly style?: unknown; readonly text?: string }) {
+    super({ boundsArea: new Rectangle(0, 0, 20, 10) });
     this.style = options.style;
     this.text = options.text ?? "";
   }

@@ -219,6 +219,7 @@ export {
   type DetectionClassColorStyle,
 } from "supervision-js-core";
 export { BoxShape, BoxStrokeAlignment } from "supervision-js-core";
+export { StrokeAlignment } from "supervision-js-core";
 export type {
   BoxCornerDrawInstruction,
   BoxCornerStyle,
@@ -474,6 +475,7 @@ export {
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,
+  type AnnotationAntialiasing,
   type MediaRendererDiagnosticsOptions,
   type MediaRendererAssetError,
   type DetectionLabelBounds,

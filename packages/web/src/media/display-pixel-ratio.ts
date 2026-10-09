@@ -1,14 +1,9 @@
 const DEFAULT_MAX_DEVICE_PIXEL_RATIO = 2;
 
 /**
- * The pixel ratio a host's display box rasterizes at, for every grid that lands
- * in that box: the presentation surface, the mask rasters drawn onto it, and the
- * decode under both. The ceiling is what keeps a 3x display from costing nine
- * times the texels of a 1x one for sharpness nobody resolves on a moving
- * picture. An id raster carries a detection per pixel and can only be sampled
- * nearest, so a grid it does not share ragged its edges.
- *
- * A ceiling that is not a usable number states nothing, and takes the default.
+ * Base display density for the presentation surface and video decode.
+ * Annotation antialiasing can prepare mask rasters at a higher density.
+ * Invalid ceilings use the default maximum.
  */
 export function resolveDisplayPixelRatio(display: {
   readonly devicePixelRatio: number;

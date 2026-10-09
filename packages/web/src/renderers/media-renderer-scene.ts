@@ -55,6 +55,7 @@ import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-win
 import type { MediaRendererDisplay } from "#types/media-renderer-display";
 
 export interface MediaRendererSceneOptions {
+  readonly annotationAntialiasing?: MediaRendererPresentation["annotationAntialiasing"];
   readonly container: HTMLElement;
   readonly backgroundColor: MediaRendererPresentation["backgroundColor"];
   readonly fit: MediaRendererFit;

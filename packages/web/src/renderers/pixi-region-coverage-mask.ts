@@ -9,8 +9,16 @@ import {
   destroyShaderKeepingProgram,
 } from "#renderers/pixi-shader-lifecycle";
 import type { PreparedRegionMaskCoverageEntry } from "#render-preparation/mask-frame-artifact";
+import { createPixiAnnotationAntialiasFilter } from "#renderers/pixi-annotation-antialias";
+import {
+  syncPixiMaskViewportBounds,
+  type PixiRectangleConstructor,
+  type PixiViewportBounds,
+} from "./pixi-mask-viewport";
 import type {
   AlphaMask as PixiAlphaMask,
+  Container as PixiContainer,
+  Filter as PixiFilter,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
   MeshGeometry as PixiMeshGeometry,
@@ -22,7 +30,7 @@ import type {
 type RegionCoverageMaskMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
 type AlphaMaskConstructor = new (options: {
-  mask: RegionCoverageMaskMesh;
+  mask: PixiContainer;
 }) => PixiAlphaMask;
 
 type ImageSourceConstructor = new (options: {
@@ -46,9 +54,12 @@ export interface PixiRegionCoverageMaskArtifact {
 }
 
 export interface PixiRegionCoverageMask {
+  readonly container: PixiContainer;
   readonly display: RegionCoverageMaskMesh;
   readonly effect: PixiAlphaMask;
   releaseTexture(source: PixiImageSource): void;
+  setAntialiasResolution(resolution: number): void;
+  syncViewportBounds(): void;
   render(options: {
     readonly artifact: PixiRegionCoverageMaskArtifact;
     readonly coverage: PreparedRegionMaskCoverageEntry;
@@ -65,7 +76,7 @@ export interface PixiRegionCoverageMask {
     readonly width: number;
     readonly x: number;
     readonly y: number;
-  }): void;
+  }): boolean;
   destroy(): void;
 }
 
@@ -75,7 +86,14 @@ export interface PixiRegionCoverageMask {
  * never enter the playback hot path.
  */
 export function createPixiRegionCoverageMask(options: {
+  readonly getAnnotationAntialiasing?: () => boolean;
+  readonly getAntialiasResolution?: () => number;
+  readonly getViewportBounds?: () => PixiViewportBounds | undefined;
+  readonly defaultFilterVert?: string;
+  readonly Filter?: Pick<typeof PixiFilter, "from">;
   readonly AlphaMask: AlphaMaskConstructor;
+  readonly Container: new () => PixiContainer;
+  readonly Rectangle: PixiRectangleConstructor;
   readonly ImageSource: ImageSourceConstructor;
   readonly Mesh: InjectedMeshConstructor<RegionCoverageMaskMesh>;
   readonly MeshGeometry: InjectedMeshGeometryConstructor;
@@ -109,19 +127,32 @@ export function createPixiRegionCoverageMask(options: {
   });
   let shader = createShader();
   const display = new options.Mesh({ geometry, shader });
-  const effect = new options.AlphaMask({ mask: display });
+  const container = new options.Container();
+  container.addChild(display);
+  const effect = new options.AlphaMask({ mask: container });
+  let antialiasFilter: PixiFilter | undefined;
 
   return {
     destroy() {
+      if (antialiasFilter && display.filters?.includes(antialiasFilter)) {
+        display.filters = null;
+      }
+      antialiasFilter?.destroy();
       effect.destroy();
       display.destroy();
+      container.destroy();
       destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
 
+    container,
     display,
     effect,
+
+    setAntialiasResolution(resolution) {
+      if (antialiasFilter) antialiasFilter.resolution = resolution;
+    },
 
     releaseTexture(source) {
       if (shader.resources.uTexture !== source) return;
@@ -131,6 +162,7 @@ export function createPixiRegionCoverageMask(options: {
 
     render(renderOptions) {
       bindTexture(renderOptions.artifact.texture.source);
+      const alphaCoverage = updateAntialiasing();
       display.visible = true;
       uniforms.uniforms.uCrop = new Float32Array([
         renderOptions.crop.x,
@@ -151,8 +183,43 @@ export function createPixiRegionCoverageMask(options: {
         renderOptions.height * (renderOptions.flipVertical ? -1 : 1),
       );
       display.rotation = renderOptions.rotation;
+      syncViewportBounds();
+      return alphaCoverage;
     },
+
+    syncViewportBounds,
   };
+
+  function syncViewportBounds() {
+    syncPixiMaskViewportBounds(
+      container,
+      options.getViewportBounds?.(),
+      options.Rectangle,
+    );
+  }
+
+  function updateAntialiasing() {
+    if (
+      options.getAnnotationAntialiasing?.() &&
+      options.Filter &&
+      options.defaultFilterVert
+    ) {
+      antialiasFilter ??= createPixiAnnotationAntialiasFilter({
+        maskCoverage: true,
+        Filter: options.Filter,
+        defaultFilterVert: options.defaultFilterVert,
+        resolution: options.getAntialiasResolution?.(),
+      });
+      if (display.filters?.[0] !== antialiasFilter) {
+        display.filters = [antialiasFilter];
+      }
+      return true;
+    }
+    if (antialiasFilter && display.filters?.includes(antialiasFilter)) {
+      display.filters = null;
+    }
+    return false;
+  }
 
   function bindTexture(source: PixiImageSource) {
     try {

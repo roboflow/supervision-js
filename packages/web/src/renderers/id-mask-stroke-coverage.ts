@@ -1,21 +1,27 @@
 import { MAX_ID_MASK_STROKE_WIDTH } from "supervision-js-core";
 
 const coverageBody = `
-  return clamp(0.5 + (width - distance) / pixelWidth, 0.0, 1.0)
-    - clamp(0.5 - (width + distance) / pixelWidth, 0.0, 1.0);
+  return clamp(0.5 + (width * (1.0 - alignment) - distance) / pixelWidth, 0.0, 1.0)
+    - clamp(0.5 - (width * alignment + distance) / pixelWidth, 0.0, 1.0);
 `;
 const distanceBody = `
   return max(max(offset - position, position - offset - 1.0), 0.0);
 `;
 const radiusBody = `
-  if (fractionalWidth > 0.0) {
-    return min(max(floor(maxWidth), ceil(fractionalWidth + pixelWidth * 0.5)), ${MAX_ID_MASK_STROKE_WIDTH}.0);
+  if (maxWidth < 0.0) {
+    return 0.0;
   }
-  return min(floor(maxWidth), ${MAX_ID_MASK_STROKE_WIDTH}.0);
+  return min(ceil(maxWidth + pixelWidth * 0.5), ${MAX_ID_MASK_STROKE_WIDTH + 1}.0);
 `;
 
 export const idMaskStrokeCoverageGlsl = `
-float subtexelStrokeCoverage(float distance, float width, float pixelWidth) {
+float sampleMaskIdCell(ivec2 cell) {
+  int x = clamp(cell.x, 0, int(uTextureSize.x) - 1);
+  int y = clamp(cell.y, 0, int(uTextureSize.y) - 1);
+  return floor(texelFetch(uTexture, ivec2(x, y), 0).r * 255.0 + 0.5);
+}
+
+float subtexelStrokeCoverage(float distance, float width, float alignment, float pixelWidth) {
   ${coverageBody}
 }
 
@@ -23,42 +29,55 @@ float neighborCellDistance(float offset, float position) {
   ${distanceBody}
 }
 
-float strokeScanRadius(float maxWidth, float fractionalWidth, float pixelWidth) {
+float strokeScanRadius(float maxWidth, float pixelWidth) {
   ${radiusBody}
 }
 
-bool isBoundary(float centerId, vec2 texel) {
-  return
-    differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
+float strokeWidthInTexels(float maskId, float pixelWidth) {
+  float alignment = readStrokeAlignment(maskId);
+  float sideFraction = max(alignment, 1.0 - alignment);
+  return min(readStrokeWidth(maskId) * pixelWidth * uStrokePixelRatio, ${MAX_ID_MASK_STROKE_WIDTH}.0 / sideFraction);
 }
 
-float innerStrokeCoverage(float centerId, vec2 texel, vec2 cell, float width, float pixelWidth) {
-  if (width >= 1.0) {
-    return isBoundary(centerId, texel) ? 1.0 : 0.0;
-  }
+float innerStrokeCoverage(float centerId, ivec2 sourceCell, vec2 cell, float width, float pixelWidth) {
+  if (width <= 0.0) return 0.0;
+  float alignment = readStrokeAlignment(centerId);
+  int radius = int(strokeScanRadius(width * alignment, pixelWidth));
+  float nearestDistance = width * alignment + pixelWidth * 0.5;
+  float minimumDistance = min(min(cell.x, 1.0 - cell.x), min(cell.y, 1.0 - cell.y));
 
-  float coverage = 0.0;
-  if (differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(1.0 - cell.x, width, pixelWidth));
+  for (int offsetY = radius; offsetY >= -radius; offsetY -= 1) {
+    for (int offsetX = radius; offsetX >= -radius; offsetX -= 1) {
+      if (offsetX == 0 && offsetY == 0) {
+        continue;
+      }
+      float distance = max(
+        neighborCellDistance(float(offsetX), cell.x),
+        neighborCellDistance(float(offsetY), cell.y)
+      );
+      if (distance >= nearestDistance) {
+        continue;
+      }
+      float maskId = sampleMaskIdCell(sourceCell + ivec2(offsetX, offsetY));
+      if (differs(maskId, centerId)) {
+        nearestDistance = distance;
+        if (distance <= minimumDistance) {
+          return subtexelStrokeCoverage(-distance, width, alignment, pixelWidth);
+        }
+      }
+    }
   }
-  if (differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(cell.x, width, pixelWidth));
-  }
-  if (differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(1.0 - cell.y, width, pixelWidth));
-  }
-  if (differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(cell.y, width, pixelWidth));
-  }
-  return coverage;
+  return subtexelStrokeCoverage(-nearestDistance, width, alignment, pixelWidth);
 }
 
 // Descending offsets give the outer border its palette priority.
-vec2 findNeighborStroke(float centerId, vec2 texel, vec2 cell, float pixelWidth) {
-  int radius = int(strokeScanRadius(uMaxStrokeWidth, uMaxFractionalStrokeWidth, pixelWidth));
+vec2 findNeighborStroke(float centerId, ivec2 sourceCell, vec2 cell, float pixelWidth) {
+  float maxWidth = min(uMaxStrokeWidth * pixelWidth * uStrokePixelRatio, ${MAX_ID_MASK_STROKE_WIDTH}.0);
+  int radius = int(strokeScanRadius(maxWidth, pixelWidth));
+  vec2 stroke = vec2(0.0);
+  float nearestDistance = maxWidth + pixelWidth * 0.5;
+  float minimumDistance = min(min(cell.x, 1.0 - cell.x), min(cell.y, 1.0 - cell.y));
+  if (uBorderEnabled <= 0.5) return stroke;
 
   for (int offsetY = radius; offsetY >= -radius; offsetY -= 1) {
     for (int offsetX = radius; offsetX >= -radius; offsetX -= 1) {
@@ -66,36 +85,45 @@ vec2 findNeighborStroke(float centerId, vec2 texel, vec2 cell, float pixelWidth)
         continue;
       }
 
-      float maskId = sampleMaskId(vUV + vec2(float(offsetX), float(offsetY)) * texel);
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
+      float distance = max(
+        neighborCellDistance(float(offsetX), cell.x),
+        neighborCellDistance(float(offsetY), cell.y)
+      );
+      if (distance >= nearestDistance) {
+        continue;
+      }
+      float maskId = sampleMaskIdCell(sourceCell + ivec2(offsetX, offsetY));
+      if (maskId < 0.5 || !differs(maskId, centerId) ||
+          (stroke.x > 0.5 && differs(maskId, stroke.x))) {
         continue;
       }
 
-      float width = readStrokeWidth(maskId);
-      if (width >= 1.0) {
-        float distance = max(abs(float(offsetX)), abs(float(offsetY)));
-        if (width >= distance && readStroke(maskId).a > 0.0) {
-          return vec2(maskId, 1.0);
-        }
-      } else if (width > 0.0 && readStroke(maskId).a > 0.0) {
-        float distance = max(
-          neighborCellDistance(float(offsetX), cell.x),
-          neighborCellDistance(float(offsetY), cell.y)
-        );
-        float coverage = subtexelStrokeCoverage(distance, width, pixelWidth);
+      float width = strokeWidthInTexels(maskId, pixelWidth);
+      if (width > 0.0 && readStroke(maskId).a > 0.0) {
+        float coverage = subtexelStrokeCoverage(distance, width, readStrokeAlignment(maskId), pixelWidth);
         if (coverage > 0.0) {
-          return vec2(maskId, coverage);
+          stroke = vec2(maskId, coverage);
+          nearestDistance = distance;
+          if (distance <= minimumDistance) {
+            return stroke;
+          }
         }
       }
     }
   }
 
-  return vec2(0.0);
+  return stroke;
 }
 `;
 
 export const idMaskStrokeCoverageWgsl = `
-fn subtexelStrokeCoverage(distance: f32, width: f32, pixelWidth: f32) -> f32 {
+fn sampleMaskIdCell(cell: vec2<i32>) -> f32 {
+  let x = clamp(cell.x, 0, i32(maskUniforms.uTextureSize.x) - 1);
+  let y = clamp(cell.y, 0, i32(maskUniforms.uTextureSize.y) - 1);
+  return floor(textureLoad(uTexture, vec2<i32>(x, y), 0).r * 255.0 + 0.5);
+}
+
+fn subtexelStrokeCoverage(distance: f32, width: f32, alignment: f32, pixelWidth: f32) -> f32 {
   ${coverageBody}
 }
 
@@ -103,45 +131,55 @@ fn neighborCellDistance(offset: f32, position: f32) -> f32 {
   ${distanceBody}
 }
 
-fn strokeScanRadius(maxWidth: f32, fractionalWidth: f32, pixelWidth: f32) -> f32 {
+fn strokeScanRadius(maxWidth: f32, pixelWidth: f32) -> f32 {
   ${radiusBody}
 }
 
-fn isBoundary(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> bool {
-  return
-    differs(sampleMaskId(uv + vec2<f32>(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(uv + vec2<f32>(0.0, -texel.y)), centerId);
+fn strokeWidthInTexels(maskId: f32, pixelWidth: f32) -> f32 {
+  let alignment = readStrokeAlignment(maskId);
+  let sideFraction = max(alignment, 1.0 - alignment);
+  return min(readStrokeWidth(maskId) * pixelWidth * maskUniforms.uStrokePixelRatio, ${MAX_ID_MASK_STROKE_WIDTH}.0 / sideFraction);
 }
 
-fn innerStrokeCoverage(uv: vec2<f32>, centerId: f32, texel: vec2<f32>, cell: vec2<f32>, width: f32, pixelWidth: f32) -> f32 {
-  if (width >= 1.0) {
-    if (isBoundary(uv, centerId, texel)) {
-      return 1.0;
-    }
-    return 0.0;
-  }
+fn innerStrokeCoverage(centerId: f32, sourceCell: vec2<i32>, cell: vec2<f32>, width: f32, pixelWidth: f32) -> f32 {
+  if (width <= 0.0) { return 0.0; }
+  let alignment = readStrokeAlignment(centerId);
+  let radius = i32(strokeScanRadius(width * alignment, pixelWidth));
+  var nearestDistance = width * alignment + pixelWidth * 0.5;
+  let minimumDistance = min(min(cell.x, 1.0 - cell.x), min(cell.y, 1.0 - cell.y));
 
-  var coverage = 0.0;
-  if (differs(sampleMaskId(uv + vec2<f32>(texel.x, 0.0)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(1.0 - cell.x, width, pixelWidth));
+  for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
+    for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {
+      if (offsetX == 0 && offsetY == 0) {
+        continue;
+      }
+      let distance = max(
+        neighborCellDistance(f32(offsetX), cell.x),
+        neighborCellDistance(f32(offsetY), cell.y)
+      );
+      if (distance >= nearestDistance) {
+        continue;
+      }
+      let maskId = sampleMaskIdCell(sourceCell + vec2<i32>(offsetX, offsetY));
+      if (differs(maskId, centerId)) {
+        nearestDistance = distance;
+        if (distance <= minimumDistance) {
+          return subtexelStrokeCoverage(-distance, width, alignment, pixelWidth);
+        }
+      }
+    }
   }
-  if (differs(sampleMaskId(uv + vec2<f32>(-texel.x, 0.0)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(cell.x, width, pixelWidth));
-  }
-  if (differs(sampleMaskId(uv + vec2<f32>(0.0, texel.y)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(1.0 - cell.y, width, pixelWidth));
-  }
-  if (differs(sampleMaskId(uv + vec2<f32>(0.0, -texel.y)), centerId)) {
-    coverage = max(coverage, subtexelStrokeCoverage(cell.y, width, pixelWidth));
-  }
-  return coverage;
+  return subtexelStrokeCoverage(-nearestDistance, width, alignment, pixelWidth);
 }
 
 // Descending offsets give the outer border its palette priority.
-fn findNeighborStroke(uv: vec2<f32>, centerId: f32, texel: vec2<f32>, cell: vec2<f32>, pixelWidth: f32) -> vec2<f32> {
-  let radius = i32(strokeScanRadius(maskUniforms.uMaxStrokeWidth, maskUniforms.uMaxFractionalStrokeWidth, pixelWidth));
+fn findNeighborStroke(centerId: f32, sourceCell: vec2<i32>, cell: vec2<f32>, pixelWidth: f32) -> vec2<f32> {
+  let maxWidth = min(maskUniforms.uMaxStrokeWidth * pixelWidth * maskUniforms.uStrokePixelRatio, ${MAX_ID_MASK_STROKE_WIDTH}.0);
+  let radius = i32(strokeScanRadius(maxWidth, pixelWidth));
+  var stroke = vec2<f32>(0.0);
+  var nearestDistance = maxWidth + pixelWidth * 0.5;
+  let minimumDistance = min(min(cell.x, 1.0 - cell.x), min(cell.y, 1.0 - cell.y));
+  if (maskUniforms.uBorderEnabled <= 0.5) { return stroke; }
 
   for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
     for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {
@@ -149,30 +187,33 @@ fn findNeighborStroke(uv: vec2<f32>, centerId: f32, texel: vec2<f32>, cell: vec2
         continue;
       }
 
-      let maskId = sampleMaskId(uv + vec2<f32>(f32(offsetX), f32(offsetY)) * texel);
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
+      let distance = max(
+        neighborCellDistance(f32(offsetX), cell.x),
+        neighborCellDistance(f32(offsetY), cell.y)
+      );
+      if (distance >= nearestDistance) {
+        continue;
+      }
+      let maskId = sampleMaskIdCell(sourceCell + vec2<i32>(offsetX, offsetY));
+      if (maskId < 0.5 || !differs(maskId, centerId) ||
+          (stroke.x > 0.5 && differs(maskId, stroke.x))) {
         continue;
       }
 
-      let width = readStrokeWidth(maskId);
-      if (width >= 1.0) {
-        let distance = max(abs(f32(offsetX)), abs(f32(offsetY)));
-        if (width >= distance && readStroke(maskId).a > 0.0) {
-          return vec2<f32>(maskId, 1.0);
-        }
-      } else if (width > 0.0 && readStroke(maskId).a > 0.0) {
-        let distance = max(
-          neighborCellDistance(f32(offsetX), cell.x),
-          neighborCellDistance(f32(offsetY), cell.y)
-        );
-        let coverage = subtexelStrokeCoverage(distance, width, pixelWidth);
+      let width = strokeWidthInTexels(maskId, pixelWidth);
+      if (width > 0.0 && readStroke(maskId).a > 0.0) {
+        let coverage = subtexelStrokeCoverage(distance, width, readStrokeAlignment(maskId), pixelWidth);
         if (coverage > 0.0) {
-          return vec2<f32>(maskId, coverage);
+          stroke = vec2<f32>(maskId, coverage);
+          nearestDistance = distance;
+          if (distance <= minimumDistance) {
+            return stroke;
+          }
         }
       }
     }
   }
 
-  return vec2<f32>(0.0);
+  return stroke;
 }
 `;

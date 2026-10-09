@@ -11,7 +11,11 @@ import { describe, expect, it, vi } from "vitest";
 import { RenderControls } from "./RenderControls";
 import { createDepthProbe } from "../hooks/depth-probe";
 import type { WorkbenchDepth } from "./DepthStyleSection";
-import { defaultDemoPresentationSettings } from "../presentation/demo-presentation";
+import {
+  createDemoPresentation,
+  defaultDemoPresentationSettings,
+  type DemoPresentationSettings,
+} from "../presentation/demo-presentation";
 import {
   DemoEngineSource,
   DemoMediaPath,
@@ -94,6 +98,53 @@ function findControlOrNull(
 }
 
 describe("RenderControls", () => {
+  it("applies Heatmap controls to the public renderer without accepting a zero score range", () => {
+    let settings: DemoPresentationSettings = {
+      ...defaultDemoPresentationSettings,
+      heatmapsEnabled: true,
+    };
+    const render = () => {
+      sections.clear();
+      renderToStaticMarkup(
+        createElement(RenderControls, {
+          classNames: [],
+          configuration,
+          depth,
+          onChange: (updated) => {
+            settings = updated;
+          },
+          onSessionOptionsChange: () => {},
+          sessionOptions: {},
+          settings,
+        }),
+      );
+      return sections.get("Heatmap");
+    };
+
+    findControl(render(), "heatmap.thresholdScale").props.onChange!(1.25);
+    findControl(render(), "heatmap.minimumAlpha").props.onChange!(0);
+    findControl(render(), "heatmap.opacity").props.onChange!(0.4);
+    findControl(render(), "heatmap.maximumScore").props.onChange!(2);
+    findControl(render(), "heatmap.maximumScore").props.onChange!(0);
+    findControl(render(), "heatmap.colorStops").props.onChange!("grayscale");
+
+    const renderer = createDemoPresentation(settings).renderers?.find(
+      (item) => item.kind === "heatmap",
+    );
+    expect(renderer).toMatchObject({
+      thresholdScale: 1.25,
+      minimumAlpha: 0,
+      opacity: 0.4,
+      maximumScore: 2,
+      colorStops: [
+        { position: 0, color: 0 },
+        { position: 1, color: 0xffffff },
+      ],
+    });
+    findControl(render(), "heatmap.maximumScore").props.onChange!(undefined);
+    expect(settings.heatmapMaximumScore).toBeUndefined();
+  });
+
   it("keeps the mask gate disabled when Fine is selected in Segmentation", () => {
     let options: DemoSessionOptions = {
       loop: false,

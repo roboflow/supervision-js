@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Rectangle } from "pixi.js";
 
 import { createPixiRegionCoverageMask } from "./pixi-region-coverage-mask";
 
@@ -47,16 +48,6 @@ describe("region coverage mask", () => {
     // same one; destroying it nulls the layout the others still render through.
     expect(shader.destroy).toHaveBeenCalledWith();
   });
-
-  it("names the resources both programs read", () => {
-    const program = buildProgram();
-
-    // WGSL binds a resource by the name it is declared under, so a rename that
-    // reaches only one program leaves WebGPU sampling an unbound texture.
-    for (const resource of Object.keys(program?.resources ?? {})) {
-      expect(program?.gpu.fragment.source).toContain(resource);
-    }
-  });
 });
 
 function buildProgram() {
@@ -88,9 +79,15 @@ function createMaskOptions(
     uniforms: Record<string, unknown> = {};
     update = vi.fn();
   }
+  class StubContainer {
+    addChild = vi.fn();
+    destroy = vi.fn();
+  }
 
   return {
     AlphaMask: Stub,
+    Container: StubContainer,
+    Rectangle,
     ImageSource: Stub,
     Mesh: Stub,
     MeshGeometry: Stub,

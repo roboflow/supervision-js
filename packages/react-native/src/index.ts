@@ -809,9 +809,21 @@ export function createReactNativeIdMaskFrame(
     return undefined;
   }
 
+  // The native shader consumes capped raster radii.
+  let maxStrokeWidth = 0;
+  for (let index = 0; index < frame.strokeWidths.length; index += 1) {
+    const width = Math.min(
+      frame.strokeWidths[index]!,
+      MAX_ID_MASK_STROKE_WIDTH,
+    );
+    frame.strokeWidths[index] = width;
+    maxStrokeWidth = Math.max(maxStrokeWidth, width);
+  }
+
   return {
     ...frame,
     maskCount: instructions.length,
+    maxStrokeWidth,
     opacity: maskStyle.opacity ?? 1,
   };
 }

@@ -38,6 +38,90 @@ describe("pixi heatmap layer", () => {
         { id: "low", className: "low", heatmap: map, zIndex: 0 },
       ],
     };
+    let currentFrame = frame;
+    const layer = createPixiHeatmapLayer({
+      CanvasSource: FakeCanvasSource as never,
+      Container: FakeContainer as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {
+        selectFrame: () => currentFrame,
+        getBufferedFrames: () => [currentFrame],
+      } as unknown as BufferedDetectionTimeline,
+      isVisible: () => true,
+      renderers: [annotationRenderers.heatmap()],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+
+    expect(container.children.map((child) => child.x)).toEqual([0, 1]);
+    expect(
+      layer
+        .getActiveFocusArtifacts(frame)
+        .map(({ detectionIndex, bounds, texture }) => [
+          detectionIndex,
+          bounds,
+          texture,
+        ]),
+    ).toEqual([
+      [1, { x: 1, y: 1, width: 2, height: 2 }, container.children[0]!.texture],
+      [0, { x: 2, y: 1, width: 2, height: 2 }, container.children[1]!.texture],
+    ]);
+    expect(layer.getActiveFocusArtifacts(undefined)).toEqual([]);
+    expect(layer.translateDetection("high", 5, -2)).toBe(true);
+    expect(container.children.map((child) => [child.x, child.y])).toEqual([
+      [0, 0],
+      [6, -2],
+    ]);
+    expect(layer.getActiveFocusArtifacts(frame)[1]!.bounds).toEqual({
+      x: 7,
+      y: -1,
+      width: 2,
+      height: 2,
+    });
+    layer.translateDetection("high", 0, 0);
+    expect(container.children[1]?.x).toBe(1);
+
+    currentFrame = {
+      ...frame,
+      detections: frame.detections.map((detection) => ({ ...detection })),
+    };
+    expect(currentFrame.mediaTime).toBe(frame.mediaTime);
+    expect(layer.getActiveFocusArtifacts(currentFrame)).toEqual([]);
+    layer.drawFrame(0);
+    expect(layer.getActiveFocusArtifacts(frame)).toEqual([]);
+    expect(layer.getActiveFocusArtifacts(currentFrame)).toHaveLength(2);
+    layer.destroy();
+  });
+
+  it("releases borrowed texture bindings before destroying temporary heatmap textures", () => {
+    vi.stubGlobal("document", {
+      createElement: () => ({
+        getContext: () => ({
+          createImageData: () => ({ data: new Uint8ClampedArray(4) }),
+          putImageData: vi.fn(),
+        }),
+        width: 0,
+        height: 0,
+      }),
+    });
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          heatmap: {
+            bounds: { x: 1, y: 1, width: 2, height: 2 },
+            width: 1,
+            height: 1,
+            values: [0.8],
+          },
+        },
+      ],
+    };
+    const onTextureRelease = vi.fn((texture: FakeTexture) => {
+      expect(texture.destroyed).toBe(false);
+    });
     const layer = createPixiHeatmapLayer({
       CanvasSource: FakeCanvasSource as never,
       Container: FakeContainer as never,
@@ -49,20 +133,15 @@ describe("pixi heatmap layer", () => {
       } as unknown as BufferedDetectionTimeline,
       isVisible: () => true,
       renderers: [annotationRenderers.heatmap()],
+      onTextureRelease: onTextureRelease as never,
     });
-    const container = layer.createContainer() as unknown as FakeContainer;
-
     layer.drawFrame(0);
-
-    expect(container.children.map((child) => child.x)).toEqual([0, 1]);
-    expect(layer.translateDetection("high", 5, -2)).toBe(true);
-    expect(container.children.map((child) => [child.x, child.y])).toEqual([
-      [0, 0],
-      [6, -2],
-    ]);
-    layer.translateDetection("high", 0, 0);
-    expect(container.children[1]?.x).toBe(1);
-    layer.destroy();
+    const texture = layer.getActiveFocusArtifacts(frame)[0]!
+      .texture as unknown as FakeTexture;
+    layer.setRenderers([]);
+    expect(onTextureRelease).toHaveBeenCalledWith(texture);
+    expect(texture.destroyed).toBe(true);
+    expect(layer.getActiveFocusArtifacts(frame)).toEqual([]);
   });
 
   it("skips a malformed map before canvas allocation and draws the next one", () => {
@@ -401,8 +480,11 @@ class FakeImageSource {
 }
 
 class FakeTexture {
+  destroyed = false;
   constructor(_options: unknown) {}
-  destroy(_destroySource?: boolean) {}
+  destroy(_destroySource?: boolean) {
+    this.destroyed = true;
+  }
 }
 
 class FakeSprite {

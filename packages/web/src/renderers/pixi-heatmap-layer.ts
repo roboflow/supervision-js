@@ -20,6 +20,7 @@ import {
 } from "#render-preparation/heatmap-frame-preparer";
 import type { RenderPreparationOptions } from "#types/render-preparation";
 import { colorizeHeatmap } from "./heatmap-color";
+import type { PixiFocusHeatmapArtifact } from "./pixi-focus-layer";
 
 const ASYNC_HEATMAP_PIXELS = 65_536;
 const MAX_VISIBLE_HEATMAP_PIXELS = 16_777_216;
@@ -59,6 +60,7 @@ export function createPixiHeatmapLayer(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly isVisible: (detection: Detection) => boolean;
   readonly onPreparedWindowChange?: () => void;
+  readonly onTextureRelease?: (texture: PixiTexture) => void;
   readonly prepareTexture?: (texture: PixiTexture) => Promise<void>;
   readonly preparer?: HeatmapFramePreparer;
   readonly preparerFactory?: () => HeatmapFramePreparer;
@@ -87,6 +89,7 @@ export function createPixiHeatmapLayer(options: {
   const positionedSprites: {
     readonly sprite: PixiSprite;
     readonly detectionId: string | number | undefined;
+    readonly detectionIndex: number;
     readonly x: number;
     readonly y: number;
     readonly temporaryTexture: boolean;
@@ -97,7 +100,7 @@ export function createPixiHeatmapLayer(options: {
       const texture = sprite.texture;
       sprite.removeFromParent();
       sprite.destroy();
-      if (temporaryTexture) texture.destroy(true);
+      if (temporaryTexture) releaseTexture(texture);
     }
     positionedSprites.length = 0;
     activeKeys.clear();
@@ -112,7 +115,7 @@ export function createPixiHeatmapLayer(options: {
     }
     clear();
     for (const entry of cache.values()) {
-      entry.texture.destroy(true);
+      releaseTexture(entry.texture);
       entry.image.close();
     }
     cache.clear();
@@ -154,7 +157,7 @@ export function createPixiHeatmapLayer(options: {
       if (activeKeys.has(key)) continue;
       cache.delete(key);
       cachedBytes -= entry.bytes;
-      entry.texture.destroy(true);
+      releaseTexture(entry.texture);
       entry.image.close();
     }
   };
@@ -214,11 +217,12 @@ export function createPixiHeatmapLayer(options: {
       );
     const result: {
       detection: Detection;
+      detectionIndex: number;
       map: DetectionHeatmap;
       renderer: HeatmapAnnotationRenderer;
     }[] = [];
     let pixels = 0;
-    for (const { detection } of orderedDetections) {
+    for (const { detection, index } of orderedDetections) {
       const map = detection.heatmap;
       if (!map || !options.isVisible(detection)) continue;
       for (const renderer of renderers) {
@@ -232,7 +236,7 @@ export function createPixiHeatmapLayer(options: {
           continue;
         }
         pixels += map.width * map.height;
-        result.push({ detection, map, renderer });
+        result.push({ detection, detectionIndex: index, map, renderer });
       }
     }
     return result;
@@ -272,7 +276,7 @@ export function createPixiHeatmapLayer(options: {
           texture = makePreparedTexture(job.map, image);
           await options.prepareTexture?.(texture);
         } catch (error) {
-          texture?.destroy(true);
+          if (texture) releaseTexture(texture);
           image.close();
           if (destroyed || job.cancelled || job.generation !== generation) {
             return;
@@ -291,7 +295,7 @@ export function createPixiHeatmapLayer(options: {
           job.generation !== generation ||
           !wantedKeys.has(job.key)
         ) {
-          texture.destroy(true);
+          releaseTexture(texture);
           image.close();
           return;
         }
@@ -353,6 +357,21 @@ export function createPixiHeatmapLayer(options: {
 
   return {
     createContainer: () => container,
+    getActiveFocusArtifacts(
+      frame: DetectionFrame | undefined,
+    ): readonly PixiFocusHeatmapArtifact[] {
+      if (!frame || lastFrame !== frame) return [];
+      return positionedSprites.map(({ sprite, detectionIndex }) => ({
+        detectionIndex,
+        texture: sprite.texture,
+        bounds: {
+          x: sprite.x + sprite.width / 2,
+          y: sprite.y + sprite.height / 2,
+          width: sprite.width,
+          height: sprite.height,
+        },
+      }));
+    },
     setRenderers(next: readonly HeatmapAnnotationRenderer[]) {
       if (
         next.length === renderers.length &&
@@ -425,7 +444,7 @@ export function createPixiHeatmapLayer(options: {
         (total, { map }) => total + map.width * map.height,
         0,
       );
-      for (const { detection, map, renderer } of maps) {
+      for (const { detection, detectionIndex, map, renderer } of maps) {
         const key = keyFor(map, renderer);
         if (shouldPrepareAsync(map, visiblePixelCount)) {
           wantedKeys.add(key);
@@ -462,6 +481,7 @@ export function createPixiHeatmapLayer(options: {
         positionedSprites.push({
           sprite,
           detectionId: detection.id,
+          detectionIndex,
           x: sprite.x,
           y: sprite.y,
           temporaryTexture,
@@ -498,4 +518,9 @@ export function createPixiHeatmapLayer(options: {
       container.destroy();
     },
   };
+
+  function releaseTexture(texture: PixiTexture) {
+    options.onTextureRelease?.(texture);
+    texture.destroy(true);
+  }
 }

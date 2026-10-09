@@ -27,6 +27,39 @@ const frame: DetectionFrame = {
 };
 
 describe("pixi box layer", () => {
+  it("records only visibly painted boxes and keeps their current frame identity", () => {
+    const nextRect = { height: 40, width: 30, x: 100, y: 80 };
+    let alpha = 1;
+    const layer = createPixiBoxLayer({
+      detectionTimeline: createTimeline(frame),
+      boxStyle: {
+        resolve(_detection, context) {
+          return context.detectionIndex === 0
+            ? {
+                rect: nextRect,
+                shape: BoxShape.Rect,
+                fill: { color: 0, alpha },
+              }
+            : undefined;
+        },
+      },
+    });
+    layer.attachGraphics(new FakeGraphics() as never);
+    layer.drawFrame(0.1);
+    const drawn = layer.getRenderedBoxes();
+    expect(drawn?.frame).toBe(frame);
+    expect(drawn?.rects.get(0)).toBe(nextRect);
+    expect(drawn?.rects.has(1)).toBe(false);
+    layer.drawFrame(0.1);
+    expect(layer.getRenderedBoxes()).toBe(drawn);
+
+    alpha = 0;
+    layer.invalidate();
+    layer.drawFrame(0.1);
+    expect(layer.getRenderedBoxes()).not.toBe(drawn);
+    expect(layer.getRenderedBoxes()?.rects.size).toBe(0);
+  });
+
   it("dirty redraws only when the active frame or style changes", () => {
     const graphics = new FakeGraphics();
     const style = createBoxStyle(0xff0000);

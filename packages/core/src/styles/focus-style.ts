@@ -26,9 +26,10 @@ export interface BaseFocusStyleOptions {
    */
   readonly fill?: FocusStyleValue<Partial<FocusFillStyle> | null>;
   /**
-   * Geometry used when the focused target cannot use a prepared mask artifact.
+   * Rectangle fallback geometry. Pass null to focus only actual masks,
+   * polygons, and visible heatmap regions.
    */
-  readonly shape?: FocusStyleValue<BoxShape>;
+  readonly shape?: FocusStyleValue<BoxShape | null>;
   /**
    * Rounded-rectangle fallback corner radius in media pixels.
    */
@@ -59,8 +60,8 @@ export class BaseFocusStyle implements FocusStyle {
     const targets = getFocusTargets(context, targetMode);
     const ambient =
       targetMode === FocusTargetMode.Ambient &&
-      !context.selectedPick &&
-      !context.hoveredPick;
+      context.selectedPick?.frame !== context.frame &&
+      context.hoveredPick?.frame !== context.frame;
     const fill = resolveFocusStyleValue(this.options.fill, context);
 
     if (targets.length === 0 || fill === null) {
@@ -79,10 +80,14 @@ export class BaseFocusStyle implements FocusStyle {
     };
   }
 
-  protected resolveFallback(context: FocusStyleContext): FocusFallbackStyle {
-    const shape =
-      resolveFocusStyleValue(this.options.shape, context) ??
-      BoxShape.RoundedRect;
+  protected resolveFallback(
+    context: FocusStyleContext,
+  ): FocusFallbackStyle | null {
+    const configuredShape = resolveFocusStyleValue(this.options.shape, context);
+
+    if (configuredShape === null) return null;
+
+    const shape = configuredShape ?? BoxShape.RoundedRect;
     const cornerRadius =
       shape === BoxShape.RoundedRect
         ? (resolveFocusStyleValue(this.options.cornerRadius, context) ??
@@ -107,8 +112,12 @@ function getFocusTargets(
   const targets: DetectionPickResult[] = [];
 
   if (targetMode === FocusTargetMode.Ambient) {
-    if (context.selectedPick) return [context.selectedPick];
-    if (context.hoveredPick) return [context.hoveredPick];
+    if (context.selectedPick?.frame === context.frame) {
+      return [context.selectedPick];
+    }
+    if (context.hoveredPick?.frame === context.frame) {
+      return [context.hoveredPick];
+    }
     return context.frame.detections.map((detection, detectionIndex) => ({
       detection,
       detectionIndex,

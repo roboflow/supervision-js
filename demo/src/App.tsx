@@ -354,7 +354,16 @@ function DemoApp() {
         }
         qualityControls={
           <QualityControls
+            annotationAntialiasing={
+              demo.presentationSettings.annotationAntialiasing
+            }
             disabled={!demo.canUseRenderer}
+            onAnnotationAntialiasingChange={(annotationAntialiasing) =>
+              demo.setPresentationSettings({
+                ...demo.presentationSettings,
+                annotationAntialiasing,
+              })
+            }
             onChange={demo.setRenderQuality}
             quality={demo.renderQuality}
           />

@@ -43,6 +43,8 @@ export interface MaskFramePreparationJob {
   readonly key: string;
   /** Widest id raster to cook; absent, the instructions' own resolution. */
   readonly maxRasterWidth?: number;
+  /** Fitted media width before DPR or annotation supersampling. */
+  readonly displayWidth?: number;
 }
 
 export interface MaskPreparationWorkerPrepareMessage {
@@ -66,6 +68,7 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly requestId: number;
   readonly sourceWidth?: number;
   readonly strokePalette?: Float32Array<ArrayBuffer>;
+  readonly strokeAlignments?: Float32Array<ArrayBuffer>;
   readonly strokeWidths?: Float32Array<ArrayBuffer>;
   readonly type: MaskPreparationWorkerMessageType.Complete;
   readonly width?: number;

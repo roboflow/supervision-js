@@ -14,6 +14,7 @@ import {
   idMaskPaletteWgsl,
   idMaskStrokePaletteWgslField,
   idMaskStrokeWidthsWgslField,
+  idMaskStrokeAlignmentsWgslField,
 } from "#renderers/mask-palette";
 import {
   tintedMaskVertexGlsl,
@@ -23,10 +24,7 @@ import {
   createShaderPlaceholderCanvas,
   destroyShaderKeepingProgram,
 } from "#renderers/pixi-shader-lifecycle";
-import {
-  MAX_ID_MASK_PALETTE_ENTRIES,
-  MAX_ID_MASK_STROKE_WIDTH,
-} from "#render-preparation/mask-frame-compositor";
+import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import type {
   ImageSource as PixiImageSource,
@@ -62,8 +60,13 @@ export interface PixiIdMaskShaderRenderer {
   clearTexture(): void;
   releaseTexture(source: PixiImageSource): void;
   hide(): void;
-  render(frame: PreparedIdMaskFrame, texture: PixiTexture): void;
+  render(
+    frame: PreparedIdMaskFrame,
+    texture: PixiTexture,
+    strokePixelRatio?: number,
+  ): void;
   setOpacity(opacity: number): void;
+  setStrokePixelRatio(pixelRatio: number): void;
   destroy(): void;
 }
 
@@ -76,6 +79,7 @@ export function createPixiIdMaskShaderRenderer(options: {
   readonly mediaHeight: number;
   readonly mediaWidth: number;
 }): PixiIdMaskShaderRenderer {
+  const defaultStrokeAlignments = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
   const uniforms = new options.UniformGroup({
     uBorderEnabled: { type: "f32", value: 0 },
     uFillPalette: {
@@ -84,7 +88,7 @@ export function createPixiIdMaskShaderRenderer(options: {
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     },
     uMaxStrokeWidth: { type: "f32", value: 0 },
-    uMaxFractionalStrokeWidth: { type: "f32", value: 0 },
+    uStrokePixelRatio: { type: "f32", value: 1 },
     uStrokePalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
       type: "vec4<f32>",
@@ -94,6 +98,11 @@ export function createPixiIdMaskShaderRenderer(options: {
       size: ID_MASK_STROKE_WIDTH_LANES,
       type: "vec4<f32>",
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES),
+    },
+    uStrokeAlignments: {
+      size: ID_MASK_STROKE_WIDTH_LANES,
+      type: "vec4<f32>",
+      value: defaultStrokeAlignments,
     },
     uTextureSize: {
       type: "vec2<f32>",
@@ -153,31 +162,31 @@ export function createPixiIdMaskShaderRenderer(options: {
 
     mesh,
 
-    render(frame, texture) {
+    render(frame, texture, strokePixelRatio = 1) {
       bindTexture(texture.source);
       uniforms.uniforms.uFillPalette = frame.fillPalette;
       uniforms.uniforms.uStrokePalette = frame.strokePalette;
       uniforms.uniforms.uStrokeWidths = frame.strokeWidths;
+      uniforms.uniforms.uStrokeAlignments =
+        frame.strokeAlignments ?? defaultStrokeAlignments;
+      uniforms.uniforms.uStrokePixelRatio = strokePixelRatio;
       uniforms.uniforms.uTextureSize = new Float32Array([
         frame.width,
         frame.height,
       ]);
       uniforms.uniforms.uBorderEnabled = frame.hasStroke ? 1 : 0;
-      uniforms.uniforms.uMaxStrokeWidth = Math.min(
-        frame.maxStrokeWidth,
-        MAX_ID_MASK_STROKE_WIDTH,
-      );
-      uniforms.uniforms.uMaxFractionalStrokeWidth = frame.strokeWidths.reduce(
-        (maximum, width) =>
-          width > 0 && width < 1 ? Math.max(maximum, width) : maximum,
-        0,
-      );
+      uniforms.uniforms.uMaxStrokeWidth = frame.maxStrokeWidth;
       uniforms.update();
       mesh.visible = true;
     },
 
     setOpacity(opacity) {
       mesh.alpha = opacity;
+    },
+
+    setStrokePixelRatio(pixelRatio) {
+      uniforms.uniforms.uStrokePixelRatio = pixelRatio;
+      uniforms.update();
     },
   };
 
@@ -234,13 +243,9 @@ uniform sampler2D uTexture;
 uniform vec2 uTextureSize;
 uniform float uBorderEnabled;
 uniform float uMaxStrokeWidth;
-uniform float uMaxFractionalStrokeWidth;
+uniform float uStrokePixelRatio;
 ${idMaskPaletteGlsl}
 out vec4 finalColor;
-
-float sampleMaskId(vec2 uv) {
-  return floor(texture(uTexture, uv).r * 255.0 + 0.5);
-}
 
 vec4 premultiplyAlpha(vec4 color) {
   return vec4(color.rgb * color.a, color.a);
@@ -253,15 +258,16 @@ bool differs(float left, float right) {
 ${idMaskStrokeCoverageGlsl}
 
 void main(void) {
-  float centerId = sampleMaskId(vUV);
-  vec2 texel = 1.0 / uTextureSize;
-  vec2 cell = fract(vUV * uTextureSize);
-  vec2 footprint = fwidth(vUV * uTextureSize);
+  vec2 position = vUV * uTextureSize;
+  ivec2 sourceCell = ivec2(floor(position));
+  float centerId = sampleMaskIdCell(sourceCell);
+  vec2 cell = fract(position);
+  vec2 footprint = fwidth(position);
   float pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId < 0.5) {
-    if (uBorderEnabled > 0.5 && uMaxStrokeWidth > 0.0) {
-      vec2 border = findNeighborStroke(centerId, texel, cell, pixelWidth);
+    if (uBorderEnabled > 0.5) {
+      vec2 border = findNeighborStroke(centerId, sourceCell, cell, pixelWidth);
 
       if (border.x > 0.5) {
         finalColor = premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
@@ -274,9 +280,9 @@ void main(void) {
   }
 
   if (uBorderEnabled > 0.5) {
-    float width = readStrokeWidth(centerId);
+    float width = strokeWidthInTexels(centerId, pixelWidth);
     if (width > 0.0 && readStroke(centerId).a > 0.0) {
-      float coverage = innerStrokeCoverage(centerId, texel, cell, width, pixelWidth);
+      float coverage = innerStrokeCoverage(centerId, sourceCell, cell, width, pixelWidth);
       if (coverage >= 1.0) {
         finalColor = premultiplyAlpha(readStroke(centerId) * vColor);
         return;
@@ -301,9 +307,10 @@ struct MaskUniforms {
   uBorderEnabled: f32,
   ${idMaskFillPaletteWgslField}
   uMaxStrokeWidth: f32,
-  uMaxFractionalStrokeWidth: f32,
+  uStrokePixelRatio: f32,
   ${idMaskStrokePaletteWgslField}
   ${idMaskStrokeWidthsWgslField}
+  ${idMaskStrokeAlignmentsWgslField}
   uTextureSize: vec2<f32>,
 }
 
@@ -311,9 +318,6 @@ struct MaskUniforms {
 @group(2) @binding(1) var uTexture: texture_2d<f32>;
 @group(2) @binding(2) var uSampler: sampler;
 
-fn sampleMaskId(uv: vec2<f32>) -> f32 {
-  return floor(textureSampleLevel(uTexture, uSampler, uv, 0.0).r * 255.0 + 0.5);
-}
 ${idMaskPaletteWgsl}
 fn premultiplyAlpha(color: vec4<f32>) -> vec4<f32> {
   return vec4<f32>(color.rgb * color.a, color.a);
@@ -330,15 +334,16 @@ fn mainFragment(
   @location(0) vUV: vec2<f32>,
   @location(1) vColor: vec4<f32>,
 ) -> @location(0) vec4<f32> {
-  let centerId = sampleMaskId(vUV);
-  let texel = 1.0 / maskUniforms.uTextureSize;
-  let cell = fract(vUV * maskUniforms.uTextureSize);
-  let footprint = fwidth(vUV * maskUniforms.uTextureSize);
+  let position = vUV * maskUniforms.uTextureSize;
+  let sourceCell = vec2<i32>(floor(position));
+  let centerId = sampleMaskIdCell(sourceCell);
+  let cell = fract(position);
+  let footprint = fwidth(position);
   let pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId < 0.5) {
-    if (maskUniforms.uBorderEnabled > 0.5 && maskUniforms.uMaxStrokeWidth > 0.0) {
-      let border = findNeighborStroke(vUV, centerId, texel, cell, pixelWidth);
+    if (maskUniforms.uBorderEnabled > 0.5) {
+      let border = findNeighborStroke(centerId, sourceCell, cell, pixelWidth);
 
       if (border.x > 0.5) {
         return premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
@@ -349,9 +354,9 @@ fn mainFragment(
   }
 
   if (maskUniforms.uBorderEnabled > 0.5) {
-    let width = readStrokeWidth(centerId);
+    let width = strokeWidthInTexels(centerId, pixelWidth);
     if (width > 0.0 && readStroke(centerId).a > 0.0) {
-      let coverage = innerStrokeCoverage(vUV, centerId, texel, cell, width, pixelWidth);
+      let coverage = innerStrokeCoverage(centerId, sourceCell, cell, width, pixelWidth);
       if (coverage >= 1.0) {
         return premultiplyAlpha(readStroke(centerId) * vColor);
       }

@@ -118,6 +118,16 @@ annotation visualization. An annotation renderer consumes semantic detections
 and contributes to the renderer-owned scene. The built-ins retain the
 established draw order and backend paths for masks, boxes, vectors, and labels.
 
+`MediaRendererPresentation.annotationAntialiasing` enables smoothing for all
+annotation edges, including focus and interaction, without filtering video
+frames. Use `true` for FXAA at output density or `2` for FXAA captured at twice
+that density in each dimension. It smooths label
+backgrounds while keeping text sharp. Separated label runs share captures;
+overlaps split captures to preserve blending and draw order. It defaults to
+`false` and can change in an existing
+session. See
+[Presentation Styles](presentation-styles.md#smooth-annotation-edges).
+
 ```ts
 import { annotationRenderers, BaseBoxStyle, BaseLabelStyle } from "supervision";
 

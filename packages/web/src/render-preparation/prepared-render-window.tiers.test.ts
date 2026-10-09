@@ -165,9 +165,12 @@ describe("prepared raster tiers", () => {
     },
   );
 
-  it.each([undefined, FINE * 4])(
-    "retains native-width motion artifacts when the fitted cap is %s",
-    async (fittedCap) => {
+  it.each([
+    { fittedCap: undefined, previewWidth: FINE },
+    { fittedCap: FINE * 4, previewWidth: COARSE },
+  ])(
+    "sizes motion previews against available source detail with fitted cap $fittedCap",
+    async ({ fittedCap, previewWidth }) => {
       vi.useFakeTimers();
       resetMocks();
       const frames = wideFrames(60);
@@ -192,10 +195,20 @@ describe("prepared raster tiers", () => {
         }
         const mediaTime = frames[40]!.mediaTime;
         const artifact = renderWindow.getFrame(mediaTime)?.maskFrame;
-        expect(artifact?.width).toBe(FINE);
+        expect(artifact?.width).toBe(previewWidth);
         await vi.advanceTimersByTimeAsync(200);
-        expect(renderWindow.getFrame(mediaTime)?.maskFrame).toBe(artifact);
-        expect(worker.requests).toHaveLength(3);
+        if (previewWidth === FINE) {
+          expect(renderWindow.getFrame(mediaTime)?.maskFrame).toBe(artifact);
+          expect(worker.requests).toHaveLength(3);
+        } else {
+          expect(worker.requests[3]!.job.maxRasterWidth).toBe(FINE);
+          worker.completeNext();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(renderWindow.getFrame(mediaTime)?.maskFrame?.width).toBe(FINE);
+          expect(renderWindow.getFrame(mediaTime)?.maskFrame).not.toBe(
+            artifact,
+          );
+        }
       } finally {
         renderWindow.destroy();
       }
@@ -385,7 +398,7 @@ describe("prepared raster tiers", () => {
     }
   });
 
-  it("preserves a settled frame's fine quality when its display size changes", async () => {
+  it("refines paused restyles after a fling and display resize, then stays idle", async () => {
     vi.useFakeTimers();
     resetMocks();
     const frames = wideFrames(20);
@@ -426,6 +439,96 @@ describe("prepared raster tiers", () => {
 
       expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBe(width);
       expect(worker.requests).toHaveLength(5);
+
+      renderWindow.setPlaybackActive(false);
+      for (const strokeWidth of [2, 3]) {
+        renderWindow.setMaskStyle(
+          new BaseMaskStyle({ stroke: { width: strokeWidth } }),
+        );
+        renderWindow.getFrame(at(8));
+        await vi.advanceTimersByTimeAsync(0);
+        worker.completeNext();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBeLessThan(
+          width,
+        );
+
+        await vi.advanceTimersByTimeAsync(200);
+        expect(worker.requests.at(-1)?.job.maxRasterWidth).toBe(width);
+        worker.completeNext();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(renderWindow.getFrame(at(8))?.maskFrame?.width).toBe(width);
+        expect(renderWindow.getFrame(at(8))?.detectionFrame).toBe(frames[8]);
+
+        const requestCount = worker.requests.length;
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(worker.requests).toHaveLength(requestCount);
+      }
+
+      const requestCount = worker.requests.length;
+      renderWindow.setMaskStyle(null);
+      expect(vi.getTimerCount()).toBe(0);
+      renderWindow.getFrame(at(8));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(worker.requests).toHaveLength(requestCount);
+      expect(vi.getTimerCount()).toBe(0);
+
+      renderWindow.destroy();
+      renderWindow.setMaskStyle(new BaseMaskStyle());
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      renderWindow.destroy();
+    }
+  });
+
+  it("keeps a cached fine RGBA raster fine when zoom replaces its stroke during motion", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+    const frames = wideFrames(20);
+    let displayWidth = FINE;
+    const worker = createDeferredTierWorker(PreparedMaskFrameKind.RgbaImage);
+    const renderWindow = createPreparedRenderWindow({
+      detectionTimeline: timelineOf(frames) as never,
+      maskStyle: new BaseMaskStyle({ stroke: { width: 1 } }),
+      prefetchFrameCount: 0,
+      preparedWindowScanIntervalSeconds: 0,
+      resolveMaxRasterWidth: () => FINE,
+      resolveMaskDisplayWidth: () => displayWidth,
+      renderPreparation: {
+        maskFrame: { workerCount: 1 },
+        workerFactory: { createWorker: () => worker.worker },
+      },
+    });
+
+    try {
+      for (const index of [0, 4, 8]) {
+        renderWindow.getFrame(frames[index]!.mediaTime);
+        await vi.advanceTimersByTimeAsync(0);
+        worker.completeNext();
+        await vi.advanceTimersByTimeAsync(STEP_MS);
+      }
+      const movingFrame = renderWindow.getFrame(
+        frames[8]!.mediaTime,
+      )?.maskFrame;
+      expect(
+        movingFrame?.kind === PreparedMaskFrameKind.RgbaImage &&
+          movingFrame.idMaskPlane?.width,
+      ).toBe(COARSE);
+
+      const fineFrame = renderWindow.getFrame(0)?.maskFrame;
+      displayWidth = FINE * 2;
+      renderWindow.invalidateMaskDisplayWidth();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(renderWindow.getFrame(0)?.maskFrame).toBe(fineFrame);
+      worker.completeNext();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const replacement = renderWindow.getFrame(0)?.maskFrame;
+      expect(replacement).not.toBe(fineFrame);
+      expect(
+        replacement?.kind === PreparedMaskFrameKind.RgbaImage &&
+          replacement.idMaskPlane?.width,
+      ).toBe(FINE);
     } finally {
       renderWindow.destroy();
     }
@@ -916,7 +1019,7 @@ describe("prepared raster quality gate", () => {
   );
 });
 
-function createDeferredTierWorker() {
+function createDeferredTierWorker(kind = PreparedMaskFrameKind.IdMask) {
   const requests: MaskPreparationWorkerPrepareMessage[] = [];
   const listeners = new Set<(event: MessageEvent) => void>();
   let completed = 0;
@@ -955,7 +1058,23 @@ function createDeferredTierWorker() {
         type: MaskPreparationWorkerMessageType.Complete,
         width,
       };
-      for (const listener of listeners) listener({ data } as MessageEvent);
+      const message =
+        kind === PreparedMaskFrameKind.RgbaImage
+          ? {
+              imageData: new ImageData(
+                new Uint8ClampedArray(mask.width * mask.height * 4),
+                mask.width,
+                mask.height,
+              ),
+              idMaskPlane: { data: data.raster, height, width },
+              key: request.job.key,
+              requestId: request.requestId,
+              type: MaskPreparationWorkerMessageType.Complete,
+            }
+          : data;
+      for (const listener of listeners) {
+        listener({ data: message } as MessageEvent);
+      }
     },
     get pendingRequestCount() {
       return requests.length - completed;

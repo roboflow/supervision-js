@@ -15,9 +15,11 @@ import {
   FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
+  StrokeAlignment,
 } from "supervision";
 import { DemoEvalHook } from "../eval-hooks";
 import { DepthStyleSection, type WorkbenchDepth } from "./DepthStyleSection";
+import { HeatmapStyleSection } from "./HeatmapStyleSection";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
@@ -372,6 +374,17 @@ function GlobalRenderControls({
           value={settings.maskStrokeWidth}
           valueLabel={`${settings.maskStrokeWidth}px`}
         />
+        <SegmentedControl
+          disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
+          label="Border Align"
+          onChange={(value) => onChange("maskStrokeAlignment", value)}
+          options={[
+            { label: "Outside", value: StrokeAlignment.Outside },
+            { label: "Center", value: StrokeAlignment.Center },
+            { label: "Inside", value: StrokeAlignment.Inside },
+          ]}
+          value={settings.maskStrokeAlignment}
+        />
         <SliderControl
           disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
           label="Border Alpha"
@@ -486,6 +499,14 @@ function GlobalRenderControls({
           valueLabel={formatPercent(settings.polygonFillAlpha)}
         />
       </ControlSection>
+
+      <HeatmapStyleSection
+        available={availability?.heatmapsEnabled !== false}
+        enabled={settings.heatmapsEnabled}
+        onChange={onPatch}
+        onToggleEnabled={(checked) => onChange("heatmapsEnabled", checked)}
+        settings={settings}
+      />
 
       <DepthStyleSection
         available={availability?.depthEnabled !== false}
@@ -670,6 +691,13 @@ function GlobalRenderControls({
             { label: "Both", value: FocusTargetMode.HoveredAndSelected },
           ]}
           value={settings.focusTargetMode}
+        />
+        <ToggleControl
+          checked={settings.focusRectFallbackEnabled}
+          disabled={!settings.focusEnabled}
+          label="Use box fallback"
+          onChange={(checked) => onChange("focusRectFallbackEnabled", checked)}
+          tooltip="Allows detection boxes to cut out focus. Masks, polygons and heatmaps keep their own shapes."
         />
         <ColorControl
           disabled={!settings.focusEnabled}

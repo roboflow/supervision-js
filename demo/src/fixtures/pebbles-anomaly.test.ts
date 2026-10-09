@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Detection, DetectionFrame } from "supervision";
 import manifest from "../../fixtures/pebbles_anomaly/detections.manifest.json";
+import meta from "../../fixtures/pebbles_anomaly/fixture.meta.json";
 import early from "../../fixtures/pebbles_anomaly/detections/000000.json";
 import bolt from "../../fixtures/pebbles_anomaly/detections/000003.json";
 import raw from "../../fixtures/pebbles_anomaly/raw-patrick-detections.json";
+import {
+  createDemoPresentation,
+  defaultDemoPresentationSettings,
+} from "../presentation/demo-presentation";
 
 const chunks = import.meta.glob(
   "../../fixtures/pebbles_anomaly/detections/*.json",
@@ -37,6 +42,30 @@ describe("Patrick pebbles fixture", () => {
     expect(
       Math.max(...detection!.heatmap!.values) * detection!.heatmap!.valueScale!,
     ).toBeCloseTo(raw.frames[109].heat_max, 4);
+  });
+
+  it("focuses the heatmap view without treating coast boxes as visible heat", () => {
+    expect(meta.presentation.focusRectFallbackEnabled).toBe(false);
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      ...meta.presentation,
+    });
+    for (const frameIndex of [108, 109]) {
+      const frame = bolt.frames.find(
+        (candidate) => candidate.frameIndex === frameIndex,
+      )!;
+      expect(
+        presentation.focusStyle?.resolve({
+          frame,
+          mediaTime: frame.mediaTime,
+          hoveredPick: null,
+          selectedPick: null,
+        }),
+      ).toMatchObject({
+        fallback: null,
+        targets: [{ detection: frame.detections[0] }],
+      });
+    }
   });
 
   it("preserves every playable tracker state and only adds heat on hits", () => {

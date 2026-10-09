@@ -37,6 +37,7 @@ export {
   MediaSourceStatus,
 } from "supervision-js-core";
 export type {
+  AnnotationAntialiasing,
   MediaFrameDiagnostics,
   MediaFrameRenderTimings,
   MediaRendererDiagnosticsOptions,

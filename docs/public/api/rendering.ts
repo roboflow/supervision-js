@@ -24,6 +24,7 @@ export {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type ActiveDepthMap,
+  type AnnotationAntialiasing,
   type DetectionLabelBounds,
   type MediaFrameCapture,
   type MediaFrameCaptureOptions,

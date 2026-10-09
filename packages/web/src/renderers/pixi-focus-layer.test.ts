@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  AlphaMask,
+  Container,
+  Graphics,
+  Rectangle,
+  type Texture,
+  UniformGroup,
+} from "pixi.js";
 
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import { createPixiFocusLayer } from "#renderers/pixi-focus-layer";
@@ -11,6 +19,8 @@ import {
   type DetectionFrame,
 } from "supervision-js-core";
 import { DetectionPickTarget } from "supervision-js-core";
+import { annotationRenderers } from "supervision-js-core";
+import type { FocusStyle } from "supervision-js-core";
 
 const frame: DetectionFrame = {
   detections: [
@@ -61,12 +71,513 @@ const polygonFrame: DetectionFrame = {
   mediaTime: 0.1,
 };
 
+const pebblesCoastFrame: DetectionFrame = {
+  frameIndex: 108,
+  mediaTime: 3.6036,
+  detections: [
+    {
+      id: "108:5",
+      trackerId: 5,
+      className: "bolt",
+      metadata: { state: "coast" },
+      rect: { x: 2449, y: 920, width: 120, height: 74 },
+    },
+  ],
+};
+const pebblesHitFrame: DetectionFrame = {
+  frameIndex: 109,
+  mediaTime: 3.6369667,
+  detections: [
+    {
+      id: "109:5",
+      trackerId: 5,
+      className: "bolt",
+      metadata: { state: "hit" },
+      rect: { x: 2424, y: 928.5, width: 182, height: 101 },
+      heatmap: {
+        bounds: { x: 2398.5, y: 945.5, width: 291, height: 175 },
+        width: 1,
+        height: 1,
+        values: [0.8],
+      },
+    },
+  ],
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   FakeShaderFactory.descriptors.length = 0;
 });
 
 describe("pixi focus layer", () => {
+  it("clips a held focus overlay after camera pan without rebuilding its cutout", () => {
+    const viewport = { x: 10, y: 20, width: 80, height: 40 };
+    const layer = createPixiFocusLayer({
+      Container,
+      Graphics,
+      Rectangle,
+      getViewportBounds: () => viewport,
+      focusStyle: new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 80,
+    }) as Container;
+    const overlay = display.children[0] as Graphics;
+    const clear = vi.spyOn(overlay, "clear");
+    layer.drawFrame({
+      frame,
+      mediaTime: frame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+    });
+    expect(overlay.boundsArea).toEqual(new Rectangle(10, 20, 80, 40));
+    const draws = clear.mock.calls.length;
+
+    viewport.x = 70;
+    layer.syncViewportBounds();
+    expect(overlay.boundsArea).toEqual(new Rectangle(70, 20, 50, 40));
+    expect(clear).toHaveBeenCalledTimes(draws);
+    layer.drawFrame({
+      frame: undefined,
+      mediaTime: frame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+    });
+    expect(overlay.boundsArea).toEqual(new Rectangle(70, 20, 50, 40));
+    expect(clear).toHaveBeenCalledTimes(draws);
+    layer.destroy();
+    display.destroy({ children: true });
+  });
+
+  it.each([
+    FocusTargetMode.Ambient,
+    FocusTargetMode.Selected,
+    FocusTargetMode.Hovered,
+    FocusTargetMode.HoveredAndSelected,
+  ])(
+    "leaves Pebbles coast boxes dimmed in %s focus without box fallback",
+    (targetMode) => {
+      const { layer, display, overlay, stencil, texture } = createHeatmapFocus(
+        new BaseFocusStyle({ shape: null, targetMode }),
+      );
+      const draw = (frame: DetectionFrame, ready: boolean) => {
+        const pick = {
+          detection: frame.detections[0]!,
+          detectionIndex: 0,
+          frame,
+          mediaTime: frame.mediaTime,
+          point: { x: 2449, y: 920 },
+          target: DetectionPickTarget.Box,
+        };
+        layer.drawFrame({
+          frame,
+          mediaTime: frame.mediaTime,
+          hoveredPick: targetMode === FocusTargetMode.Hovered ? pick : null,
+          selectedPick: targetMode === FocusTargetMode.Ambient ? null : pick,
+          heatmapArtifacts: ready
+            ? [
+                {
+                  detectionIndex: 0,
+                  bounds: frame.detections[0]!.heatmap!.bounds,
+                  texture,
+                },
+              ]
+            : [],
+        });
+      };
+
+      draw(pebblesHitFrame, false);
+      expect(stencil.roundRect).not.toHaveBeenCalled();
+      draw(pebblesHitFrame, true);
+      const maskContainer = display.children[2] as FakeContainer;
+      const mesh = maskContainer.children[1] as FakeMesh;
+      expect(mesh.position.set).toHaveBeenLastCalledWith(2253, 858);
+      expect(mesh.scale.set).toHaveBeenLastCalledWith(291, 175);
+
+      draw(pebblesCoastFrame, false);
+      expect(mesh.destroy).toHaveBeenCalledOnce();
+      expect(overlay.rect).toHaveBeenLastCalledWith(0, 0, 3600, 1570);
+      expect(stencil.rect).not.toHaveBeenCalled();
+      expect(stencil.roundRect).not.toHaveBeenCalled();
+      expect(overlay.setMask).toHaveBeenLastCalledWith({
+        inverse: true,
+        mask: stencil,
+      });
+      layer.destroy();
+      expect(texture.source.destroy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps normal box focus beside a heatmap unless fallback is explicitly disabled", () => {
+    const { layer, display, texture } = createHeatmapFocus(
+      new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+    );
+    const frame: DetectionFrame = {
+      mediaTime: pebblesHitFrame.mediaTime,
+      detections: [
+        ...pebblesHitFrame.detections,
+        ...pebblesCoastFrame.detections,
+      ],
+    };
+    const context = {
+      frame,
+      mediaTime: frame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+      heatmapArtifacts: [
+        {
+          detectionIndex: 0,
+          bounds: frame.detections[0]!.heatmap!.bounds,
+          texture,
+        },
+      ],
+    };
+    layer.drawFrame(context);
+    const maskContainer = display.children[2] as FakeContainer;
+    const vector = maskContainer.children[0] as FakeGraphics;
+    expect(vector.roundRect).toHaveBeenLastCalledWith(2389, 883, 120, 74, 8);
+
+    layer.setFocusStyle(
+      new BaseFocusStyle({ shape: null, targetMode: FocusTargetMode.Ambient }),
+    );
+    layer.drawFrame(context);
+    expect(vector.clear).toHaveBeenCalledTimes(2);
+    expect(vector.roundRect).toHaveBeenCalledOnce();
+    layer.destroy();
+  });
+
+  it("distinguishes null fallback from omitted fallback when the frame is unchanged", () => {
+    const base = new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient });
+    const legacyStyle = {
+      resolve(context: Parameters<BaseFocusStyle["resolve"]>[0]) {
+        const instruction = base.resolve(context)!;
+        return { ...instruction, fallback: undefined };
+      },
+    };
+    const { layer, stencil } = createHeatmapFocus(legacyStyle);
+    const context = {
+      frame: pebblesCoastFrame,
+      mediaTime: pebblesCoastFrame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+    };
+    layer.drawFrame(context);
+    expect(stencil.rect).toHaveBeenCalledWith(2389, 883, 120, 74);
+    layer.setFocusStyle(
+      new BaseFocusStyle({ shape: null, targetMode: FocusTargetMode.Ambient }),
+    );
+    layer.drawFrame(context);
+    expect(stencil.clear).toHaveBeenCalledTimes(2);
+    expect(stencil.rect).toHaveBeenCalledOnce();
+    layer.setFocusStyle(legacyStyle);
+    layer.drawFrame(context);
+    expect(stencil.rect).toHaveBeenCalledTimes(2);
+    layer.destroy();
+  });
+
+  it.each([maskFrame, polygonFrame])(
+    "keeps semantic cutouts with rectangle fallback disabled",
+    (frame) => {
+      const layer = createPixiFocusLayer({
+        Graphics: FakeGraphics as never,
+        focusStyle: new BaseFocusStyle({
+          shape: null,
+          targetMode: FocusTargetMode.Ambient,
+        }),
+      });
+      const display = layer.createDisplay({
+        width: 120,
+        height: 80,
+      }) as FakeGraphics;
+      layer.drawFrame({
+        frame,
+        mediaTime: frame.mediaTime,
+        selectedPick: null,
+        hoveredPick: null,
+      });
+      expect(display.cut).toHaveBeenCalledOnce();
+      expect(display.roundRect).not.toHaveBeenCalled();
+      layer.destroy();
+    },
+  );
+
+  it("drops borrowed heatmap holes immediately while retaining a dim hold or fade", () => {
+    const { layer, display, overlay, stencil, texture } = createHeatmapFocus(
+      new BaseFocusStyle({ shape: null, targetMode: FocusTargetMode.Ambient }),
+    );
+    const context = {
+      frame: pebblesHitFrame,
+      mediaTime: pebblesHitFrame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+      heatmapArtifacts: [
+        {
+          detectionIndex: 0,
+          bounds: pebblesHitFrame.detections[0]!.heatmap!.bounds,
+          texture,
+        },
+      ],
+    };
+    layer.drawFrame(context);
+    layer.tick(0);
+    layer.tick(120);
+    const maskContainer = display.children[2] as FakeContainer;
+    const heldMesh = maskContainer.children[1] as FakeMesh;
+    layer.drawFrame({ ...context, frame: undefined });
+    expect(heldMesh.destroy).toHaveBeenCalledOnce();
+    expect(display.alpha).toBe(1);
+    expect(overlay.setMask).toHaveBeenLastCalledWith({
+      inverse: true,
+      mask: stencil,
+    });
+
+    layer.drawFrame(context);
+    const fadingMesh = maskContainer.children[2] as FakeMesh;
+    const staleInstruction = new BaseFocusStyle({
+      shape: null,
+      targetMode: FocusTargetMode.Ambient,
+    }).resolve(context)!;
+    layer.setFocusStyle({ resolve: () => staleInstruction });
+    layer.drawFrame({
+      ...context,
+      frame: { detections: [], mediaTime: context.mediaTime + 0.0333 },
+      mediaTime: context.mediaTime + 0.0333,
+      heatmapArtifacts: [],
+    });
+    expect(fadingMesh.destroy).toHaveBeenCalledOnce();
+    expect(stencil.rect).not.toHaveBeenCalled();
+    expect(stencil.roundRect).not.toHaveBeenCalled();
+    expect(display.visible).toBe(true);
+    layer.tick(150);
+    expect(display.alpha).toBeGreaterThan(0);
+    expect(display.alpha).toBeLessThan(1);
+    layer.destroy();
+    expect(texture.source.destroy).not.toHaveBeenCalled();
+  });
+
+  it("borrows a large heatmap's drawn texture without reading or tessellating its scores", () => {
+    const heatmapFrame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          rect: { x: 40, y: 30, width: 20, height: 20 },
+          heatmap: {
+            bounds: { x: 40, y: 30, width: 20, height: 20 },
+            width: 1024,
+            height: 1024,
+            get values(): number[] {
+              throw new Error("Focus must not read scores on the GPU path");
+            },
+          },
+        },
+      ],
+    };
+    const layer = createPixiFocusLayer({
+      AlphaMask,
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      focusStyle: new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+      getHeatmapRenderers: () => [heatmapRenderer],
+    });
+    const heatmapRenderer = annotationRenderers.heatmap();
+    const display = layer.createDisplay({
+      width: 120,
+      height: 80,
+    }) as unknown as FakeContainer;
+    const texture = { source: new FakeImageSource({}) };
+    const context = {
+      frame: heatmapFrame,
+      mediaTime: 0,
+      hoveredPick: null,
+      selectedPick: null,
+      heatmapArtifacts: [
+        {
+          detectionIndex: 0,
+          bounds: heatmapFrame.detections[0]!.heatmap!.bounds,
+          texture: texture as never,
+        },
+      ],
+    };
+
+    layer.drawFrame(context);
+    const maskContainer = display.children[2] as FakeContainer;
+    const mesh = maskContainer.children[1] as FakeMesh;
+    const graphics = display.children[0] as FakeGraphics;
+    const stencil = display.children[1] as FakeGraphics;
+    expect(mesh.shader.resources.uTexture).toBe(texture.source);
+    expect(mesh.position.set).toHaveBeenLastCalledWith(30, 20);
+    expect(mesh.scale.set).toHaveBeenLastCalledWith(20, 20);
+    expect(graphics.setMask).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        inverse: true,
+        channel: "alpha",
+        mask: expect.any(AlphaMask),
+      }),
+    );
+    expect(stencil.visible).toBe(false);
+    layer.drawFrame(context);
+    expect(stencil.visible).toBe(false);
+    expect(graphics.clear).toHaveBeenCalledOnce();
+
+    layer.drawFrame({ ...context, heatmapArtifacts: [] });
+    expect(mesh.destroy).toHaveBeenCalledOnce();
+    expect(stencil.rect).not.toHaveBeenCalled();
+    expect(stencil.roundRect).not.toHaveBeenCalled();
+    expect(graphics.setMask).toHaveBeenLastCalledWith({
+      inverse: true,
+      mask: stencil,
+    });
+    layer.drawFrame(context);
+    const replacement = maskContainer.children[2] as FakeMesh;
+
+    layer.releaseMaskTexture(texture as never);
+    expect(mesh.shader.destroy).toHaveBeenCalledOnce();
+    expect(replacement.shader.destroy).toHaveBeenCalledOnce();
+    expect(texture.source.destroy).not.toHaveBeenCalled();
+    expect(graphics.setMask).toHaveBeenLastCalledWith({
+      inverse: true,
+      mask: stencil,
+    });
+    layer.destroy();
+    expect(mesh.destroy).toHaveBeenCalledOnce();
+    expect(replacement.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("updates heatmap edge coverage when AA toggles on a held frame", () => {
+    let antialiasing = false;
+    const { layer, display, overlay, texture } = createHeatmapFocus(
+      new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+      () => antialiasing,
+    );
+    const context = {
+      frame: pebblesHitFrame,
+      mediaTime: pebblesHitFrame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+      heatmapArtifacts: [
+        {
+          detectionIndex: 0,
+          bounds: pebblesHitFrame.detections[0]!.heatmap!.bounds,
+          texture,
+        },
+      ],
+    };
+    layer.drawFrame(context);
+    const mask = display.children[2] as FakeContainer;
+    const cutout = mask.children[1] as FakeMesh;
+    const uniforms = cutout.shader.resources
+      .heatmapCoverageUniforms as UniformGroup;
+    expect(uniforms.uniforms.uAntialiasing).toBe(0);
+    const geometry = cutout.options.geometry;
+
+    antialiasing = true;
+    layer.drawFrame(context);
+    expect(mask.children).toHaveLength(2);
+    expect(mask.children[1]).toBe(cutout);
+    expect(cutout.options.geometry).toBe(geometry);
+    expect(cutout.shader.resources.uTexture).toBe(texture.source);
+    expect(uniforms.uniforms.uAntialiasing).toBe(1);
+    expect(overlay.clear).toHaveBeenCalledTimes(2);
+    layer.drawFrame(context);
+    expect(overlay.clear).toHaveBeenCalledTimes(2);
+
+    antialiasing = false;
+    layer.drawFrame(context);
+    expect(mask.children[1]).toBe(cutout);
+    expect(uniforms.uniforms.uAntialiasing).toBe(0);
+    layer.destroy();
+    expect(texture.source.destroyed).toBe(false);
+  });
+
+  it("preserves box cutouts beside masks in ambient focus", () => {
+    const { layer, artifact, mesh, maskGraphics } = createIdMaskFocus();
+    const mixedFrame = {
+      ...maskFrame,
+      detections: [...maskFrame.detections, ...frame.detections],
+    };
+    layer.drawFrame({
+      frame: mixedFrame,
+      mediaTime: mixedFrame.mediaTime,
+      hoveredPick: null,
+      selectedPick: null,
+      idMaskArtifact: artifact,
+    });
+    expect(mesh.visible).toBe(false);
+    expect(maskGraphics.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 8);
+  });
+
+  it("keeps independently moved detections separate when they share a heatmap texture", () => {
+    const heatmap = {
+      bounds: { x: 40, y: 30, width: 20, height: 20 },
+      width: 1,
+      height: 1,
+      values: [0.8],
+    };
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        { id: "first", heatmap },
+        { id: "second", heatmap },
+      ],
+    };
+    const layer = createPixiFocusLayer({
+      AlphaMask,
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      focusStyle: new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+      getHeatmapRenderers: () => [annotationRenderers.heatmap()],
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 80,
+    }) as unknown as FakeContainer;
+    const texture = { source: new FakeImageSource({}) } as never;
+    const context = {
+      frame,
+      mediaTime: 0,
+      hoveredPick: null,
+      selectedPick: null,
+      heatmapArtifacts: [
+        { detectionIndex: 0, bounds: heatmap.bounds, texture },
+        { detectionIndex: 1, bounds: { ...heatmap.bounds, x: 80 }, texture },
+      ],
+    };
+    layer.drawFrame(context);
+    const maskContainer = display.children[2] as FakeContainer;
+    const first = maskContainer.children[1] as FakeMesh;
+    const second = maskContainer.children[2] as FakeMesh;
+    expect(first).not.toBe(second);
+    expect(first.position.set).toHaveBeenLastCalledWith(30, 20);
+    expect(second.position.set).toHaveBeenLastCalledWith(70, 20);
+
+    layer.drawFrame({
+      ...context,
+      heatmapArtifacts: [
+        context.heatmapArtifacts[0]!,
+        {
+          ...context.heatmapArtifacts[1]!,
+          bounds: { ...heatmap.bounds, x: 90 },
+        },
+      ],
+    });
+    expect(maskContainer.children).toHaveLength(3);
+    expect(first.position.set).toHaveBeenLastCalledWith(30, 20);
+    expect(second.position.set).toHaveBeenLastCalledWith(80, 20);
+    layer.releaseMaskTexture(texture);
+    expect(first.shader.destroy).toHaveBeenCalledOnce();
+    expect(second.shader.destroy).toHaveBeenCalledOnce();
+    layer.destroy();
+    expect(first.destroy).toHaveBeenCalledOnce();
+    expect(second.destroy).toHaveBeenCalledOnce();
+  });
+
   it("releases an evicted ID texture and sampler even while focus is hidden", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({
@@ -165,7 +676,7 @@ describe("pixi focus layer", () => {
     const display = layer.createDisplay({
       height: 80,
       width: 120,
-    }) as FakeContainer;
+    }) as unknown as FakeContainer;
     const overlay = display.children[0] as FakeGraphics;
     const mask = display.children[1] as FakeGraphics;
 
@@ -307,7 +818,7 @@ describe("pixi focus layer", () => {
     const display = layer.createDisplay({
       height: 80,
       width: 120,
-    }) as FakeContainer;
+    }) as unknown as FakeContainer;
     const mesh = display.children[0] as FakeMesh;
     const graphics = display.children[1] as FakeGraphics;
     const textureSource = new FakeImageSource({
@@ -383,7 +894,7 @@ describe("pixi focus layer", () => {
     const display = layer.createDisplay({
       height: 80,
       width: 120,
-    }) as FakeContainer;
+    }) as unknown as FakeContainer;
     const overlay = display.children[0] as FakeGraphics;
     const cutout = display.children[1] as FakeGraphics;
 
@@ -399,38 +910,7 @@ describe("pixi focus layer", () => {
     expect(cutout.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 6);
   });
 
-  it("declares a WebGL and a WebGPU program for the focus ID-mask shader", () => {
-    vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({
-        getContext: vi.fn(),
-        height: 0,
-        width: 0,
-      })),
-    });
-
-    const layer = createPixiFocusLayer({
-      Container: FakeContainer as never,
-      Graphics: FakeGraphics as never,
-      ImageSource: FakeImageSource as never,
-      Mesh: FakeMesh as never,
-      MeshGeometry: FakeMeshGeometry as never,
-      Shader: FakeShaderFactory as never,
-      UniformGroup: FakeUniformGroup as never,
-    });
-
-    layer.createDisplay({ height: 80, width: 120 });
-
-    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
-
-    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
-    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
-    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
-    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
-    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
-    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
-  });
-
-  it("samples the ID mask once per fragment and stops the ID scan at the selected count", () => {
+  it("stops the ID scan at the selected count", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({
         getContext: vi.fn(),
@@ -457,7 +937,6 @@ describe("pixi focus layer", () => {
       descriptor.gl.fragment,
       descriptor.gpu.fragment.source,
     ]) {
-      expect(source.match(/sampleMaskId\(vUV\)/g)).toHaveLength(1);
       expect(source).toContain("uSelectedCount");
       expect(source).toContain("break;");
     }
@@ -1199,6 +1678,8 @@ class FakeContainer {
   addChild(...children: unknown[]) {
     this.children.push(...children);
   }
+
+  readonly destroy = vi.fn();
 }
 
 class FakeImageSource {
@@ -1208,6 +1689,37 @@ class FakeImageSource {
   constructor(readonly _options: unknown) {}
 
   readonly destroy = vi.fn();
+}
+
+function createHeatmapFocus(
+  focusStyle: FocusStyle,
+  getAnnotationAntialiasing?: () => boolean,
+) {
+  const layer = createPixiFocusLayer({
+    AlphaMask,
+    Container: FakeContainer as never,
+    Graphics: FakeGraphics as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
+    Shader: FakeShaderFactory as never,
+    focusStyle,
+    getAnnotationAntialiasing,
+    getHeatmapRenderers: () => [annotationRenderers.heatmap()],
+  });
+  const display = layer.createDisplay({
+    width: 3600,
+    height: 1570,
+  }) as unknown as FakeContainer & {
+    alpha: number;
+    visible: boolean;
+  };
+  return {
+    layer,
+    display,
+    overlay: display.children[0] as FakeGraphics,
+    stencil: display.children[1] as FakeGraphics,
+    texture: { source: new FakeImageSource({}) } as unknown as Texture,
+  };
 }
 
 function createIdMaskFocus() {
@@ -1227,7 +1739,7 @@ function createIdMaskFocus() {
   const display = layer.createDisplay({
     height: 80,
     width: 120,
-  }) as FakeContainer;
+  }) as unknown as FakeContainer;
   const textureSource = new FakeImageSource({
     dynamic: false,
     height: 80,
@@ -1255,6 +1767,7 @@ function createIdMaskFocus() {
     },
     layer,
     mesh: display.children[0] as FakeMesh,
+    maskGraphics: display.children[2] as FakeGraphics,
     textureSource,
   };
 }
@@ -1266,7 +1779,12 @@ class FakeMeshGeometry {
 }
 
 class FakeShader {
-  constructor(readonly resources: Record<string, unknown>) {}
+  constructor(readonly resources: Record<string, unknown>) {
+    const coverage = resources.heatmapCoverageUniforms as
+      Record<string, { value: number; type: "f32" }> | undefined;
+    if (coverage)
+      resources.heatmapCoverageUniforms = new UniformGroup(coverage);
+  }
 
   readonly destroy = vi.fn();
 }
@@ -1304,6 +1822,9 @@ class FakeUniformGroup {
 
 class FakeMesh {
   visible = true;
+  readonly position = { set: vi.fn() };
+  readonly scale = { set: vi.fn() };
+  readonly removeFromParent = vi.fn();
 
   constructor(
     readonly options: {
