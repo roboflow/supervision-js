@@ -536,6 +536,7 @@ export async function createPixiMediaScene(
         BlurFilter,
         BufferImageSource,
         Container,
+        Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
@@ -1880,6 +1881,7 @@ export async function createPixiMediaScene(
         BlurFilter,
         BufferImageSource,
         Container,
+        Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
@@ -2476,7 +2478,7 @@ export async function createPixiMediaScene(
     }
 
     if (isFramePrepared(mediaTime)) {
-      maskLayer.drawFrame(mediaTime, presentedFrameId);
+      maskLayer.drawFrame(mediaTime, presentedFrameId, viewportScale);
       return;
     }
 

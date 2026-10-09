@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { encodeBinaryMask } from "supervision-js-core";
 
 import { encodePng } from "../../../../test/depth-png";
 import { DepthPreparationWorkerMessageType } from "./depth/worker-protocol";
+import { MaskPreparationWorkerMessageType } from "./mask-preparation-worker-protocol";
+import type { MaskPreparationWorkerCompleteMessage } from "./mask-preparation-worker-protocol";
 
 type MessageListener = (event: { data: unknown }) => void;
 
@@ -41,6 +44,68 @@ afterEach(() => {
 });
 
 describe("render-preparation worker", () => {
+  it.each([0, 100])(
+    "transfers screen stroke paths for detection %i without baking their width into the mask",
+    async (detectionIndex) => {
+      vi.stubGlobal(
+        "ImageData",
+        class {
+          constructor(
+            readonly data: Uint8ClampedArray,
+            readonly width: number,
+            readonly height: number,
+          ) {}
+        },
+      );
+      const worker = await loadWorker();
+      worker.send({
+        type: MaskPreparationWorkerMessageType.Prepare,
+        requestId: 9,
+        job: {
+          key: "screen-outline",
+          instructions: [
+            {
+              alpha: 0.45,
+              color: 0xff0000,
+              detectionIndex,
+              mask: encodeBinaryMask(
+                new Uint8Array([1, 1, 1, 1, 0, 1, 1, 1, 1]),
+                3,
+                3,
+              ),
+              stroke: {
+                alpha: 1,
+                color: 0x00ff00,
+                width: 2,
+                widthUnit: "screen",
+              },
+            },
+          ],
+        },
+      });
+      await worker.replied;
+      const [{ message, transfer }] = worker.posted as [
+        {
+          message: MaskPreparationWorkerCompleteMessage;
+          transfer: Transferable[];
+        },
+      ];
+      expect(message.type).toBe(MaskPreparationWorkerMessageType.Complete);
+      expect(message.screenStrokes?.[0]).toMatchObject({
+        detectionIndex,
+        width: 2,
+      });
+      expect(message.screenStrokes?.[0]?.paths).toHaveLength(2);
+      for (const path of message.screenStrokes![0]!.paths)
+        expect(transfer).toContain(path.buffer);
+      if (detectionIndex === 0) expect(message.hasStroke).toBe(false);
+      else
+        expect([...message.imageData!.data.slice(0, 4)]).toEqual([
+          255, 0, 0, 115,
+        ]);
+    },
+  );
+
   it("decodes a depth PNG and transfers the samples back", async () => {
     const worker = await loadWorker();
     const samples = Uint16Array.from({ length: 3 * 2 }, (_, i) => i * 4000);

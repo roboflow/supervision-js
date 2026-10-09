@@ -16,6 +16,8 @@ export interface MaskStrokeStyle {
   readonly color: number;
   readonly alpha: number;
   readonly width: number;
+  /** Defaults to mask pixels. Screen widths stay fixed through zoom. */
+  readonly widthUnit?: "mask" | "screen";
 }
 
 /**
@@ -28,6 +30,7 @@ export interface MaskStrokeStyleOptions {
   readonly color?: number;
   readonly alpha?: number;
   readonly width?: number;
+  readonly widthUnit?: "mask" | "screen";
 }
 
 /**

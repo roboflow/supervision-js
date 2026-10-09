@@ -257,7 +257,16 @@ export function createPreparedRenderWindow(options: {
     const backingBytes = options.resolveMaskFrameBackingBytes
       ? options.resolveMaskFrameBackingBytes(maskFrame)
       : pixels * (maskFrame.kind === PreparedMaskFrameKind.IdMask ? 1 : 4);
-    const bytes = Math.max(1, payloadBytes + coverageBytes + backingBytes);
+    const strokeBytes =
+      maskFrame.screenStrokes?.reduce(
+        (total, stroke) =>
+          total + stroke.paths.reduce((sum, path) => sum + path.byteLength, 0),
+        0,
+      ) ?? 0;
+    const bytes = Math.max(
+      1,
+      payloadBytes + coverageBytes + strokeBytes + backingBytes,
+    );
     preparedMaskBytesByKey.set(key, bytes);
     preparedMaskBytes += bytes;
     largestMaskFrameBytesByTier.set(

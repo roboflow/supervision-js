@@ -17,12 +17,75 @@ import {
   createIdMaskFrame,
   createIdMaskPlane,
   createIdMaskRasterFrame,
+  createMaskScreenStrokes,
   createRegionMaskCoverageFrame,
   MAX_ID_MASK_PALETTE_ENTRIES,
   type CompositedMaskFrame,
 } from "./mask-frame-compositor";
 
 describe("mask frame compositor", () => {
+  it.each([0, 100])(
+    "keeps screen stroke geometry and fill separate for detection %i",
+    (detectionIndex) => {
+      const instruction = {
+        alpha: 0.45,
+        color: 0xff0000,
+        detectionIndex,
+        mask: encodeBinaryMask(
+          new Uint8Array([1, 1, 1, 1, 0, 1, 1, 1, 1]),
+          3,
+          3,
+        ),
+        stroke: {
+          alpha: 1,
+          color: 0x00ff00,
+          width: 2,
+          widthUnit: "screen" as const,
+        },
+      };
+      const raster = createIdMaskRasterFrame([instruction]);
+      const fill = compositeMaskFrame([instruction])!;
+      const strokes = createMaskScreenStrokes(
+        [instruction],
+        3,
+        3,
+        raster?.data,
+      )!;
+      expect(strokes[0]).toMatchObject({
+        detectionIndex,
+        width: 2,
+        alpha: 1,
+        color: 0x00ff00,
+      });
+      expect(strokes[0]!.paths).toHaveLength(2);
+      expect(strokes[0]!.paths.map(signedArea).sort((a, b) => a - b)).toEqual([
+        -1, 9,
+      ]);
+      expect(readPixel(fill.data, fill.width, 1, 1)).toEqual([0, 0, 0, 0]);
+      expect(readPixel(fill.data, fill.width, 0, 0)).toEqual([255, 0, 0, 115]);
+      if (raster) expect(raster.hasStroke).toBe(false);
+    },
+  );
+
+  it("retains disconnected islands at a diagonal pixel contact", () => {
+    const instruction = {
+      alpha: 1,
+      color: 0xff0000,
+      detectionIndex: 0,
+      mask: encodeBinaryMask(new Uint8Array([1, 0, 0, 1]), 2, 2),
+      stroke: {
+        alpha: 1,
+        color: 0xff0000,
+        width: 2,
+        widthUnit: "screen" as const,
+      },
+    };
+    const raster = createIdMaskRasterFrame([instruction])!;
+    const strokes = createMaskScreenStrokes([instruction], 2, 2, raster.data)!;
+    expect(strokes[0]!.paths.map(signedArea)).toEqual([1, 1]);
+    expect(strokes[0]!.paths.every((path) => path.length === 8)).toBe(true);
+  });
+
   it("carries an unaligned ID raster one byte per pixel", () => {
     const frame = createIdMaskRasterFrame([
       {
@@ -618,3 +681,12 @@ describe("rgba mask fallback", () => {
     expect(paintedGrid(frame!)).toEqual(["....", "00.0", "0..0"]);
   });
 });
+
+function signedArea(path: Float32Array) {
+  let area = 0;
+  for (let index = 0; index < path.length; index += 2) {
+    const next = (index + 2) % path.length;
+    area += path[index]! * path[next + 1]! - path[next]! * path[index + 1]!;
+  }
+  return area / 2;
+}

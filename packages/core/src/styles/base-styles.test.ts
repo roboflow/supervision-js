@@ -75,6 +75,26 @@ describe("base presentation styles", () => {
     ).toBeUndefined();
   });
 
+  it("preserves screen stroke units and separates their cached artifacts", () => {
+    const mask = {
+      counts: "04",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 2,
+    } as const;
+    const screenStyle = new BaseMaskStyle({
+      stroke: { width: 2, widthUnit: "screen" },
+    });
+    const maskStyle = new BaseMaskStyle({ stroke: { width: 2 } });
+    expect(screenStyle.artifactKey).toBe(`${maskStyle.artifactKey}:screen`);
+    expect(
+      screenStyle.resolve(
+        { mask },
+        { detectionIndex: 0, frame, mediaTime: 0.25 },
+      )?.stroke,
+    ).toMatchObject({ width: 2, widthUnit: "screen" });
+  });
+
   it("supports dynamic mask colors while preserving global opacity as a cheap knob", () => {
     const staticStyle = new BaseMaskStyle({
       color: 0x00ff66,
