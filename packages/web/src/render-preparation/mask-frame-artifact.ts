@@ -45,6 +45,7 @@ export interface PreparedIdMaskPlane {
 }
 
 export interface PreparedRgbaMaskFrame {
+  readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
   readonly height: number;
   readonly idMaskPlane?: PreparedIdMaskPlane;
   readonly key: string;
@@ -56,6 +57,7 @@ export interface PreparedRgbaMaskFrame {
 }
 
 export interface PreparedIdMaskFrame {
+  readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
   readonly fillPalette: Float32Array<ArrayBuffer>;
   readonly hasStroke: boolean;
   readonly height: number;
@@ -70,6 +72,15 @@ export interface PreparedIdMaskFrame {
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
   close(): void;
+}
+
+export interface PreparedMaskScreenStroke {
+  readonly detectionIndex: number;
+  readonly color: number;
+  readonly alpha: number;
+  readonly width: number;
+  /** Closed contours in this artifact's raster coordinates, including holes. */
+  readonly paths: readonly Float32Array<ArrayBuffer>[];
 }
 
 export type PreparedMaskFrame = PreparedIdMaskFrame | PreparedRgbaMaskFrame;

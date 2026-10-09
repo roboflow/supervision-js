@@ -3,7 +3,9 @@ import type {
   PreparedIdMaskPlane,
   PreparedRegionMaskCoverageEntry,
   PreparedRegionMaskCoverageFrame,
+  PreparedMaskScreenStroke,
 } from "#render-preparation/mask-frame-artifact";
+import { traceMaskOutlinePaths } from "#render-preparation/mask-outline-paths";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
@@ -140,9 +142,16 @@ export function createIdMaskRasterFrame(
   maxRasterWidth?: number,
 ): IdMaskFrame | undefined {
   try {
-    return createIdMaskFrame(materializeMaskInstructions(instructions), {
-      maxWidth: maxRasterWidth,
-    });
+    return createIdMaskFrame(
+      materializeMaskInstructions(instructions).map((instruction) =>
+        instruction.stroke?.widthUnit === "screen"
+          ? { ...instruction, stroke: undefined }
+          : instruction,
+      ),
+      {
+        maxWidth: maxRasterWidth,
+      },
+    );
   } catch {
     // The id raster is the fast path, not the only one: answering with nothing
     // puts the caller on the RGBA composite, which draws the same picture.
@@ -192,7 +201,11 @@ function compositeInstruction(
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
   const bounds = compositeMaskFill(rgba, canvasWidth, instruction.mask, fill);
 
-  if (instruction.stroke && bounds) {
+  if (
+    instruction.stroke &&
+    instruction.stroke.widthUnit !== "screen" &&
+    bounds
+  ) {
     compositeMaskStroke(
       rgba,
       canvasWidth,
@@ -201,6 +214,52 @@ function compositeInstruction(
       instruction.stroke,
     );
   }
+}
+
+export function createMaskScreenStrokes(
+  instructions: readonly SerializableMaskInstruction[],
+  width: number,
+  height: number,
+  preparedRaster?: Uint8Array,
+): readonly PreparedMaskScreenStroke[] | undefined {
+  const masks = materializeMaskInstructions(instructions);
+  const outlined = masks.filter(
+    ({ stroke }) =>
+      stroke?.widthUnit === "screen" && stroke.width > 0 && stroke.alpha > 0,
+  );
+  if (outlined.length === 0) return undefined;
+  const raster: Uint8Array | Uint32Array =
+    preparedRaster ?? new Uint32Array(width * height);
+  if (!preparedRaster) {
+    for (const { detectionIndex, mask } of masks) {
+      const counts = decodeCompressedRleCounts(mask.counts);
+      let offset = 0;
+      for (let index = 0; index < counts.length; index += 1) {
+        const length = counts[index]!;
+        if (index % 2 === 1) {
+          for (let pixel = offset; pixel < offset + length; pixel += 1) {
+            const x = Math.floor(pixel / mask.height);
+            const y = pixel % mask.height;
+            raster[y * width + x] = detectionIndex + 1;
+          }
+        }
+        offset += length;
+      }
+    }
+  }
+  const paths = traceMaskOutlinePaths(
+    raster,
+    width,
+    height,
+    new Set(outlined.map(({ detectionIndex }) => detectionIndex + 1)),
+  );
+  return outlined.map(({ detectionIndex, stroke }) => ({
+    detectionIndex,
+    alpha: stroke!.alpha,
+    color: stroke!.color,
+    width: stroke!.width,
+    paths: paths.get(detectionIndex + 1) ?? [],
+  }));
 }
 
 function materializeMaskInstructions(

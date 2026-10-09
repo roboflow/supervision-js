@@ -2,6 +2,7 @@ import {
   compositeMaskFrame,
   createIdMaskPlane,
   createIdMaskRasterFrame,
+  createMaskScreenStrokes,
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
@@ -184,6 +185,16 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
     );
 
     if (idMaskFrame) {
+      const screenStrokes = createMaskScreenStrokes(
+        message.job.instructions,
+        idMaskFrame.width,
+        idMaskFrame.height,
+        idMaskFrame.data,
+      );
+      const strokeTransfers =
+        screenStrokes?.flatMap(({ paths }) =>
+          paths.map((path) => path.buffer),
+        ) ?? [];
       workerScope.postMessage(
         {
           artifactKind: PreparedMaskFrameKind.IdMask,
@@ -193,6 +204,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           key: message.job.key,
           maxStrokeWidth: idMaskFrame.maxStrokeWidth,
           raster: idMaskFrame.data,
+          screenStrokes,
           regionMaskCoverage,
           requestId: message.requestId,
           sourceWidth: idMaskFrame.sourceWidth,
@@ -206,6 +218,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           idMaskFrame.fillPalette.buffer,
           idMaskFrame.strokePalette.buffer,
           idMaskFrame.strokeWidths.buffer,
+          ...strokeTransfers,
           ...coverageTransfers,
         ],
       );
@@ -236,18 +249,32 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       message.job.maxRasterWidth,
     );
     const idMaskTransfers = idMaskPlane ? [idMaskPlane.data.buffer] : [];
+    const screenStrokes = createMaskScreenStrokes(
+      message.job.instructions,
+      preparedPixels.width,
+      preparedPixels.height,
+    );
+    const strokeTransfers =
+      screenStrokes?.flatMap(({ paths }) => paths.map((path) => path.buffer)) ??
+      [];
 
     if (imageBitmap) {
       workerScope.postMessage(
         {
           idMaskPlane,
           imageBitmap,
+          screenStrokes,
           key: message.job.key,
           regionMaskCoverage,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,
         },
-        [imageBitmap, ...idMaskTransfers, ...coverageTransfers],
+        [
+          imageBitmap,
+          ...idMaskTransfers,
+          ...strokeTransfers,
+          ...coverageTransfers,
+        ],
       );
       return;
     }
@@ -256,12 +283,18 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       {
         idMaskPlane,
         imageData,
+        screenStrokes,
         key: message.job.key,
         regionMaskCoverage,
         requestId: message.requestId,
         type: MaskPreparationWorkerMessageType.Complete,
       },
-      [imageData.data.buffer, ...idMaskTransfers, ...coverageTransfers],
+      [
+        imageData.data.buffer,
+        ...idMaskTransfers,
+        ...strokeTransfers,
+        ...coverageTransfers,
+      ],
     );
   } catch (error) {
     workerScope.postMessage({

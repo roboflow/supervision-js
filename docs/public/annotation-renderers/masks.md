@@ -26,7 +26,7 @@ session.setPresentation({
       style: new BaseMaskStyle({
         fillAlpha: 1,
         opacity: 0.72,
-        stroke: { alpha: 1, width: 2 },
+        stroke: { alpha: 1, width: 2, widthUnit: "screen" },
       }),
     }),
   ],
@@ -35,7 +35,11 @@ session.setPresentation({
 
 `opacity` applies to the complete mask layer and can be updated cheaply.
 `fillAlpha` is part of prepared fill styling and remains separate so an outline
-can stay opaque.
+can stay opaque. Use `widthUnit: "screen"` for outlines measured in CSS pixels,
+like box outlines, with the same thickness through zoom and across mask
+resolutions. The renderer prepares the pixel boundaries once, including holes
+and disconnected components, without changing the semantic mask. Omit
+`widthUnit` (or use `"mask"`) to retain widths measured in mask pixels.
 
 See [Detections And Rendering](../guides/detections-and-rendering.md) for the
 semantic-mask and prepared-artifact boundary.
