@@ -103,6 +103,12 @@ export interface MediaRendererSceneOptions {
    * of what the renderer pulls, and renders only when something changed.
    */
   readonly presentedFrames?: PresentedFrameSource;
+  /**
+   * The media is a single frame with nothing to play. The scene then renders
+   * only when something changed, as under push presentation, and runs the
+   * ticker only while something on the frame animates.
+   */
+  readonly stillFrame?: boolean;
 }
 
 export interface PresentedMediaSample {

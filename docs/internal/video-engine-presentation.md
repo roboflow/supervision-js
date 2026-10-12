@@ -170,8 +170,8 @@ put on screen against what was last drawn, so a notification that describes the
 current picture costs nothing. It owns no timer, ticker or animation frame:
 nobody notifies it, nothing renders. It counts the renders it issues, and
 `renderer.getRenderCount()` reports that count under push presentation and
-`null` under pull, where the ticker paints every animation frame and no count
-would describe it.
+on a still image, and `null` for pulled media that plays, where the ticker
+paints every animation frame and no count would describe it.
 
 The zero-render gate is asserted, not assumed: "holds at zero renders while
 paused, untouched, for ten seconds" in
@@ -303,3 +303,13 @@ A pull scene keeps Pixi's ticker, has no prepared annotation window, and reports
 no render count. None of it is precedent for the push path: new video work goes
 through the engine-backed source
 and the push path described above.
+
+A still image is the exception among pulled media. A source with no duration,
+such as `createStaticImageMediaSource()`, has one frame and nothing to play, so
+the scene renders it on change through the same scheduler and signature as the
+push path, with the presented sample as one more change. It answers
+`getRenderCount()`, and a notification that describes what is already drawn
+renders nothing, as on a paused video. Pixi's ticker starts only while
+something on the frame moves by the clock, a looping GIF region or a loading
+spinner, and stops with the render that removes the last of them. The behavior is pinned in
+`packages/web/src/renderers/media-renderer.still.test.ts`.

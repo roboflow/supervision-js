@@ -731,6 +731,56 @@ describe("pixi region layer", () => {
     expect(container.children).toHaveLength(0);
     expect(unload).toHaveBeenCalledWith("/fire.gif");
   });
+
+  it("reports an animated display only while a GIF is on the frame", async () => {
+    const gifSource = {
+      duration: 1_000,
+      frames: [{ end: 1_000, start: 0, texture: {} }],
+      height: 160,
+      textures: [{}],
+      totalFrames: 1,
+      width: 160,
+    };
+    const gif = annotationRenderers.region({
+      id: "player-fire",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: { asset: { src: "/fire.gif" }, kind: "asset" },
+      target: { className: "player" },
+    });
+    const badge = annotationRenderers.region({
+      id: "player-badge",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: { asset: { src: "/badge.png" }, kind: "asset" },
+      target: { className: "player" },
+    });
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(),
+      Assets: {
+        load: vi.fn(async (src: string) =>
+          src === "/fire.gif" ? gifSource : { height: 20, width: 20 },
+        ),
+        unload: vi.fn(async () => undefined),
+      } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(frame),
+      regionRenderers: [badge],
+    });
+    layer.createContainer();
+    await Promise.resolve();
+
+    layer.drawFrame(1);
+    expect(layer.hasAnimatedDisplay()).toBe(false);
+
+    layer.setRenderers([badge, gif]);
+    await Promise.resolve();
+    layer.drawFrame(1);
+    expect(layer.hasAnimatedDisplay()).toBe(true);
+
+    layer.setRenderers([badge, { ...gif, target: { className: "missing" } }]);
+    expect(layer.hasAnimatedDisplay()).toBe(false);
+  });
 });
 
 class FakeContainer {

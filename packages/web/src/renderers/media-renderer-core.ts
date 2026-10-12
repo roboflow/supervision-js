@@ -1334,6 +1334,9 @@ export async function createMediaRendererCore(
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
       presentedFrames: protectedPresentedFrames?.source,
+      // A source with no duration, such as a still image, has one frame to
+      // show and nothing to play.
+      stillFrame: metadata.duration === 0,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       heatmapRenderers: resolveHeatmapRenderers(currentPresentation),
       depthRenderers: resolveDepthRenderers(currentPresentation),

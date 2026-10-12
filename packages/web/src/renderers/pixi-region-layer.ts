@@ -94,6 +94,8 @@ export interface PixiRegionLayerState {
 export interface PixiRegionLayer {
   createContainer(): PixiContainer;
   drawFrame(mediaTime: number, viewportScale?: number): PixiRegionLayerState;
+  /** Whether the last drawn frame shows an asset that animates on its own. */
+  hasAnimatedDisplay(): boolean;
   releaseMaskTexture(texture: PixiTexture): void;
   setRenderers(renderers: readonly RegionAnnotationRenderer[]): void;
   translateDetection(id: string | number, x: number, y: number): boolean;
@@ -343,6 +345,13 @@ export function createPixiRegionLayer(options: {
       }
 
       return { activeDetectionIndexes: [...activeDetectionIndexes] };
+    },
+
+    hasAnimatedDisplay() {
+      for (const entry of entries.values()) {
+        if (isAnimatedDisplay(entry.display)) return true;
+      }
+      return false;
     },
 
     releaseMaskTexture(texture) {
@@ -740,12 +749,16 @@ function destroyEntry(entry: RegionSpriteEntry) {
   entry.ownedTexture?.destroy(false);
 }
 
+function isAnimatedDisplay(display: RegionDisplay): display is PixiGifSprite {
+  return "play" in display && typeof display.play === "function";
+}
+
 function pauseAnimatedDisplay(display: RegionDisplay) {
   if ("stop" in display && typeof display.stop === "function") display.stop();
 }
 
 function resumeAnimatedDisplay(display: RegionDisplay) {
-  if ("play" in display && typeof display.play === "function") display.play();
+  if (isAnimatedDisplay(display)) display.play();
 }
 
 function matchesTarget(

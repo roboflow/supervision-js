@@ -200,7 +200,9 @@ not the first thing most users should reach for:
   `display` to size the decode to the box the frames are painted into; without
   it they decode at the source's full resolution however small that box is.
   Under this source the renderer also answers `getRenderCount()` and
-  `getPreparedAnnotationWindow()`, which report `null` for pulled media;
+  `getPreparedAnnotationWindow()`, which report `null` for pulled media that
+  plays. A still image renders on change too, so it answers
+  `getRenderCount()`;
 - `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses
