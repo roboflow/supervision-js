@@ -2729,11 +2729,24 @@ export async function createPixiMediaScene(
       });
       detached.width = mediaWidth;
       detached.height = mediaHeight;
+      const source = sprite.texture.source;
+      const displayScaleMode = source.scaleMode;
       try {
+        // Capture retains its baseline sampling even when pixel inspection
+        // changes display sampling. Extraction is synchronous, so the shared
+        // source can be restored before another frame draws.
+        if (displayScaleMode !== "linear") {
+          source.scaleMode = "linear";
+          source.style.update();
+        }
         return app.renderer.extract.canvas(
           detached,
         ) as unknown as HTMLCanvasElement;
       } finally {
+        if (displayScaleMode !== "linear") {
+          source.scaleMode = displayScaleMode;
+          source.style.update();
+        }
         detached.destroy();
       }
     };

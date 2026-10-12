@@ -58,6 +58,7 @@ interface MockTextureInstance {
  * texture's dimensions, scaled by the sprite's transform.
  */
 interface PaintedSprite {
+  readonly destroy: ReturnType<typeof vi.fn>;
   readonly quad: { height: number; width: number };
   readonly scale: { x: number; y: number };
 }
@@ -1285,6 +1286,54 @@ describe("push-presented Pixi scene", () => {
 
     expect(capture).toMatchObject({ height: 240, mediaTime: 2, width: 320 });
     expect(pixiMock.extractCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures with baseline sampling while preserving pixel inspection on screen", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      pixelInspection: { minScale: 3 },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setViewportTransform?.({ scale: 4 });
+    channel.present(presentedFrame(2000, { height: 120, width: 160 }));
+    const source = pixiMock.externalSources[0]!;
+    expect(source.scaleMode).toBe("nearest");
+    pixiMock.extractCanvas.mockImplementationOnce(() => {
+      expect(source.scaleMode).toBe("linear");
+      return { height: 240, width: 320 };
+    });
+
+    const capture = await scene.captureFrame?.(undefined);
+
+    expect(capture).toMatchObject({ height: 240, mediaTime: 2, width: 320 });
+    expect(source.scaleMode).toBe("nearest");
+    expect(pixiMock.sprites.at(-1)?.destroy).toHaveBeenCalledTimes(1);
+    scene.destroy();
+  });
+
+  it("restores display sampling and releases the detached sprite when capture fails", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      pixelInspection: { minScale: 3 },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setViewportTransform?.({ scale: 4 });
+    channel.present(presentedFrame(2000));
+    const source = pixiMock.externalSources[0]!;
+    pixiMock.extractCanvas.mockImplementationOnce(() => {
+      expect(source.scaleMode).toBe("linear");
+      throw new Error("capture failed");
+    });
+
+    expect(() => scene.captureFrame?.(undefined)).toThrow("capture failed");
+
+    expect(source.scaleMode).toBe("nearest");
+    expect(pixiMock.sprites.at(-1)?.destroy).toHaveBeenCalledTimes(1);
+    scene.destroy();
   });
 
   it("paints the media at its own size when decode sizes alternate", async () => {
