@@ -2,11 +2,11 @@ import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
   type AnnotationCreationTool,
-  type AnnotationEditingEngine,
   type AnnotationEditingEngineOptions,
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
   type AnnotationPointerInput,
+  type DraftUndoAnnotationEditingEngine,
 } from "#types/editing";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
@@ -30,7 +30,7 @@ type ActiveGesture =
   | {
       kind: "path";
       points: Point[];
-      lastTimestamp: number;
+      lastTimestamp: number | null;
       pointerId: number | null;
     }
   | {
@@ -57,7 +57,7 @@ type ActiveGesture =
 
 export function createAnnotationEditingEngine(
   options: AnnotationEditingEngineOptions = {},
-): AnnotationEditingEngine {
+): DraftUndoAnnotationEditingEngine {
   let tool: AnnotationCreationTool | null = null;
   let gesture: ActiveGesture | null = null;
   let state: AnnotationEditingState = idleState();
@@ -209,6 +209,15 @@ export function createAnnotationEditingEngine(
         commitPath();
       }
     },
+    undoCreation() {
+      if (gesture?.kind !== "path") return false;
+      gesture.points.pop();
+      gesture.lastTimestamp = null;
+      const last = gesture.points.at(-1);
+      if (!last) cancel();
+      else setPreview(resolvePathPreview([...gesture.points, last]));
+      return true;
+    },
     beginHandleDrag(detection, handle, input) {
       if (detection.locked || detection.mask) return;
       capture(input.pointerId);
@@ -308,9 +317,10 @@ export function createAnnotationEditingEngine(
         input.point.y - gesture.points[0]!.y,
       ) * scale();
     const doubleClick =
-      input.detail !== undefined
+      gesture.lastTimestamp !== null &&
+      (input.detail !== undefined
         ? input.detail >= 2
-        : input.timestamp - gesture.lastTimestamp < CLICK_CANCEL_MS;
+        : input.timestamp - gesture.lastTimestamp < CLICK_CANCEL_MS);
     if (
       gesture.points.length >= minimum &&
       ((tool.geometry === AnnotationGeometryKind.Polygon &&
