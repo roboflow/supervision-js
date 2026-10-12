@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AnnotationGestureStateKind,
   BaseBoxStyle,
+  BaseKeypointStyle,
+  BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
   type AnnotationEditingEngine,
@@ -37,6 +39,97 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it.each([
+    [0, 1, [0x0000ff, 0xff0000]],
+    [1, 0, [0xff0000, 0x0000ff]],
+    [undefined, undefined, [0xff0000, 0x0000ff]],
+    [4, 4, [0xff0000, 0x0000ff]],
+    [-1.5, -0.25, [0x0000ff, 0xff0000]],
+  ] as const)(
+    "composes mixed retained geometry by detection order (%s, %s)",
+    async (polygonZ, boxZ, expected) => {
+      resetMocks();
+      const editing = createEditingEngineHarness();
+      const renderer = await createRenderer(false, false, {
+        boxStyle: new BaseBoxStyle({
+          fill: { alpha: 1, color: 0xff0000 },
+          shouldRender: (detection) => !detection.polygon,
+        }),
+        polygonStyle: new BasePolygonStyle({
+          fill: { alpha: 1, color: 0x0000ff },
+        }),
+        detectionFrames: [
+          {
+            detections: [
+              { ...SUBJECT, zIndex: boxZ },
+              {
+                id: "polygon",
+                zIndex: polygonZ,
+                polygon: {
+                  points: [
+                    { x: 0, y: 0 },
+                    { x: 200, y: 0 },
+                    { x: 200, y: 200 },
+                    { x: 0, y: 200 },
+                  ],
+                },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+        editingEngine: editing.engine,
+      });
+      await vi.waitFor(() =>
+        expect(renderer.getState().activeDetectionCount).toBe(1),
+      );
+      expect(visibleFillColors()).toEqual(expected);
+      renderer.destroy();
+    },
+  );
+
+  it("keeps a skeleton's keypoints above its box when the box appears later", async () => {
+    resetMocks();
+    const keypointStyle = new BaseKeypointStyle({
+      markerFill: { alpha: 1, color: 0x0000ff },
+    });
+    const renderer = await createRenderer(false, false, {
+      labelStyle: null,
+      boxStyle: null,
+      keypointStyle,
+      editingEngine: createEditingEngineHarness().engine,
+      detectionFrames: [
+        {
+          detections: [
+            {
+              ...SUBJECT,
+              keypoints: {
+                points: [
+                  { x: 100, y: 90 },
+                  { x: 110, y: 90 },
+                ],
+                edges: [[0, 1]],
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+    });
+    await vi.waitFor(() => expect(visibleFillColors()).toEqual([0x0000ff]));
+    renderer.setPresentation({
+      keypointStyle,
+      labelStyle: null,
+      boxStyle: new BaseBoxStyle({ fill: { alpha: 1, color: 0xff0000 } }),
+    });
+    await vi.waitFor(() =>
+      expect(renderer.getState().activeDetectionCount).toBe(1),
+    );
+    expect(visibleFillColors()).toEqual([0xff0000, 0x0000ff]);
+    renderer.destroy();
+  });
+
   it("hides the edited detection from the base layers while it is edited", async () => {
     resetMocks();
     const editing = createEditingEngineHarness();
@@ -215,6 +308,28 @@ describe("editing gestures in the Pixi media scene", () => {
     renderer.destroy();
   });
 });
+
+function visibleFillColors(): number[] {
+  type SceneDisplay = {
+    children?: SceneDisplay[];
+    sortableChildren?: boolean;
+    zIndex?: number;
+    visible?: boolean;
+    fill?: ReturnType<typeof vi.fn>;
+  };
+  const fills: number[] = [];
+  function collect(display: SceneDisplay) {
+    if (display.visible === false) return;
+    const fill = display.fill?.mock.calls.at(-1)?.[0];
+    if (fill?.alpha === 1) fills.push(fill.color);
+    const children = [...(display.children ?? [])];
+    if (display.sortableChildren)
+      children.sort((left, right) => (left.zIndex ?? 0) - (right.zIndex ?? 0));
+    children.forEach(collect);
+  }
+  collect(pixiMock.stageAddChild.mock.calls.at(-1)![0]);
+  return fills;
+}
 
 function idleState(): AnnotationEditingState {
   return {

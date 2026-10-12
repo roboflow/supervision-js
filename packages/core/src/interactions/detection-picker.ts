@@ -99,7 +99,19 @@ export function pickDetectionAtPoint(
       });
     };
 
-    if (detection.rect && containsPoint(detection.rect, point, padding)) {
+    const rectIsBounds =
+      options.preferTopmost &&
+      Boolean(
+        detection.mask ||
+        detection.polygon ||
+        detection.polyline ||
+        detection.orientedBox,
+      );
+    if (
+      detection.rect &&
+      !rectIsBounds &&
+      containsPoint(detection.rect, point, padding)
+    ) {
       pushCandidate(DetectionPickTarget.Box, rectArea(detection.rect));
     }
 
@@ -225,6 +237,17 @@ export function pickDetectionAtPoint(
   }
 
   candidates.sort((left, right) => {
+    if (options.preferTopmost) {
+      const layer =
+        Number(left.result.target === DetectionPickTarget.Mask) -
+        Number(right.result.target === DetectionPickTarget.Mask);
+      if (layer !== 0) return layer;
+      const order =
+        right.zIndex - left.zIndex ||
+        right.result.detectionIndex - left.result.detectionIndex;
+      if (order !== 0) return order;
+    }
+
     const priorityDifference = left.priority - right.priority;
 
     if (priorityDifference !== 0) {

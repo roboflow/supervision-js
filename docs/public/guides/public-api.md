@@ -367,6 +367,21 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
 
+With an editing engine, retained boxes, polygons, polylines, keypoints, and
+shape decorations share detection order: higher `Detection.zIndex` is in front;
+missing values use the detection's frame index, and equal values follow frame
+order. Masks remain a prepared fill layer below this geometry, and labels and
+interaction overlays stay above it. Without an editing engine, the dense renderer
+keeps its separate geometry layers; `zIndex` orders detections within each layer.
+
+Set `interaction.preferTopmost: true` to pick that editable stack rather than
+prefer smaller shapes or subtargets in other detections. The same option is
+available to `pickDetectionAtPoint`. It interprets rectangles accompanying
+paths or masks as bounds, so they do not create a second box hit target; mask
+fills stay below vector geometry. Keypoints and edges retain priority within
+the chosen detection. Leave this option unset for the default smallest-object
+policy or when accompanying rectangles are independent box targets.
+
 Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
 keeps a selection drag alive when the engine is already in Select mode. To
 abort a gesture explicitly, call `engine.cancel()`.

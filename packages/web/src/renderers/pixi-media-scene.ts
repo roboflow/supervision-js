@@ -392,7 +392,11 @@ export async function createPixiMediaScene(
       hidden: currentVisibility?.labelsHidden === true || state.hidden,
     };
   };
+  // Editable geometry uses retained displays, so boxes and vectors can share
+  // one ordered parent without changing the dense, non-editing raster paths.
+  const retainedGeometry = options.editingEngine ? new Container() : undefined;
   const boxLayer = createPixiBoxLayer({
+    container: retainedGeometry,
     boxStyle: options.boxStyle,
     Container: options.editingEngine ? Container : undefined,
     detectionTimeline: annotationDetectionTimeline,
@@ -474,6 +478,7 @@ export async function createPixiMediaScene(
         })
       : undefined;
   const vectorLayer = createPixiVectorLayer({
+    container: retainedGeometry,
     Container,
     Graphics,
     detectionTimeline: annotationDetectionTimeline,
@@ -1199,7 +1204,9 @@ export async function createPixiMediaScene(
       if (currentHeatmapRenderers.length > 0) {
         heatmapSlot.setDisplay(ensureHeatmapLayer().createContainer());
       }
-      boxSlot.setDisplay(retainedBoxes ?? boxes);
+      boxSlot.setDisplay(
+        retainedGeometry ? undefined : (retainedBoxes ?? boxes),
+      );
       vectorDisplay = new Container();
       attachPolygonLayerDisplay();
       vectorDisplay.addChild(vectorLayer.createContainer());

@@ -38,3 +38,7 @@ recovering geometry from rendered pixels.
 
 See [Detections And Rendering](../guides/detections-and-rendering.md) for the
 complete detection geometry contract.
+
+When an editing engine is attached, polygons share detection stacking order
+with retained boxes and other vector geometry. See the [editing contract](../guides/public-api.md#editing-api)
+for ordering and the opt-in topmost picking policy.
