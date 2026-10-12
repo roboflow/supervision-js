@@ -192,7 +192,8 @@ export interface Detection {
   readonly confidence?: number;
   /** Optional host-owned annotation attributes. */
   readonly attributes?: readonly string[];
-  /** Optional per-annotation render and pick order. Higher values are on top. */
+  /** Optional per-annotation geometry order. Higher values are in front within
+   *  a renderer layer; editable boxes and vectors share a layer. */
   readonly zIndex?: number;
   /** Optional host editing lock. Renderers may still present locked records. */
   readonly locked?: boolean;

@@ -20,10 +20,14 @@ import type {
   MediaSourceState,
 } from "#types/media-rendering";
 import type { DetectionFrame } from "#types/detections";
+import { AnnotationGestureStateKind } from "#types/editing";
+import type { AnnotationEditingEngine } from "#types/editing";
+import { createAnnotationEditingEngine } from "#interactions/annotation-editing-engine";
 
 /**
  * These fixtures are written against the public shapes as they existed before
- * live ingestion, coverage finalization, and typed media errors were added.
+ * live ingestion, coverage finalization, typed media errors, and draft Undo
+ * were added.
  * They exist to fail `typecheck` if any of those additions ever becomes a
  * required member again, because that would break structurally typed consumer
  * code that never opted into the new capabilities.
@@ -127,7 +131,40 @@ const legacyStore: ColdDetectionFrameStore = {
   async clearDataset() {},
 };
 
+/** An editing engine implemented before multi-click draft Undo existed. */
+const legacyEditingEngine: AnnotationEditingEngine = {
+  getState: () => ({
+    activeDetectionId: null,
+    activeHandleId: null,
+    kind: AnnotationGestureStateKind.Idle,
+    pointerId: null,
+    preview: null,
+  }),
+  setCreationTool() {},
+  pointerDown() {},
+  pointerMove() {},
+  pointerUp() {},
+  keyDown() {},
+  beginHandleDrag() {},
+  deleteVertex: () => null,
+  cancel() {},
+  hasCreationTool: () => false,
+  subscribe: () => () => {},
+  subscribeFastTranslate: () => () => {},
+};
+
 describe("public contract compatibility", () => {
+  it("keeps editing engines written before draft Undo assignable", () => {
+    expect(legacyEditingEngine.undoCreation).toBeUndefined();
+  });
+
+  it("guarantees draft Undo on the built-in editing engine", () => {
+    const engine: Required<Pick<AnnotationEditingEngine, "undoCreation">> =
+      createAnnotationEditingEngine();
+
+    expect(engine.undoCreation()).toBe(false);
+  });
+
   it("keeps sources written before live ingestion assignable", () => {
     expect(legacyWritableSource.appendLiveFrame).toBeUndefined();
     expect(legacyWritableSource.finalizeCoverage).toBeUndefined();

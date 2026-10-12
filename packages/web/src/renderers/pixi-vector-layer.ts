@@ -29,6 +29,7 @@ import type {
   Graphics as PixiGraphics,
 } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
+import { detectionRenderOrder } from "./detection-render-order";
 
 interface RetainedVectorEntry {
   readonly display: PixiGraphics;
@@ -60,6 +61,7 @@ export interface PixiVectorLayer {
 
 export function createPixiVectorLayer(options: {
   readonly Container: new () => PixiContainer;
+  readonly container?: PixiContainer;
   readonly Graphics: new () => PixiGraphics;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly polygonStyle?: PolygonStyle | null;
@@ -70,7 +72,7 @@ export function createPixiVectorLayer(options: {
     detection: Detection,
   ) => Partial<AnnotationStyleContext>;
 }): PixiVectorLayer {
-  let container: PixiContainer | undefined;
+  let container = options.container;
   let polygonStyle =
     options.polygonStyle === undefined
       ? new BasePolygonStyle()
@@ -100,8 +102,8 @@ export function createPixiVectorLayer(options: {
     createContainer() {
       if (!container) {
         container = new options.Container();
-        container.sortableChildren = true;
       }
+      container.sortableChildren = true;
 
       return container;
     },
@@ -258,7 +260,10 @@ export function createPixiVectorLayer(options: {
       polygon,
       polyline,
       shapes,
-      zIndex: detection.zIndex ?? detectionIndex,
+      // Vector details stay above their own box even if the box is retained later.
+      zIndex: options.container
+        ? detectionRenderOrder(frame)[detectionIndex]! * 2 + 1
+        : (detection.zIndex ?? detectionIndex),
     };
   }
 

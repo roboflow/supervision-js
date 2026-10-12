@@ -426,6 +426,58 @@ describe("pixi interaction layer", () => {
     expect(display.cursor).toBe("pointer");
   });
 
+  it("picks geometry above a prepared mask when topmost geometry is requested", () => {
+    const onHover = vi.fn();
+    const mixedFrame: DetectionFrame = {
+      detections: [
+        { id: "box", rect: { x: 15, y: 20, width: 10, height: 10 } },
+        {
+          id: "mask",
+          zIndex: 99,
+          rect: { x: 60, y: 40, width: 120, height: 80 },
+          mask: {
+            counts: "04",
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 80,
+            width: 120,
+          },
+        },
+      ],
+      mediaTime: 0.1,
+    };
+    const maskPick = {
+      detection: mixedFrame.detections[1]!,
+      detectionIndex: 1,
+      frame: mixedFrame,
+      mediaTime: 0.1,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(mixedFrame),
+      interaction: { onHover, preferTopmost: true },
+      pickMaskDetectionAtPoint: () => maskPick,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: expect.objectContaining({ id: "box" }),
+        target: DetectionPickTarget.Box,
+      }),
+    );
+    display.emit("pointermove", createPointerEvent(display, 90, 70));
+    expect(onHover).toHaveBeenLastCalledWith(maskPick);
+    layer.destroy();
+  });
+
   it("lets keypoint picks outrank the prepared-mask fast path", () => {
     const onHover = vi.fn();
     const keypointFrame: DetectionFrame = {
