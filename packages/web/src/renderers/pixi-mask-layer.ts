@@ -141,6 +141,7 @@ export interface PixiMaskLayer {
     presentedFrameId?: PresentedFrameId | null,
     viewportScale?: number,
   ): void;
+  redrawViewportStyles(viewportScale: number): void;
   /** The state the last drawFrame or clearFrame left on screen. */
   getDrawnState(): PixiMaskLayerState;
   /** Puts the media time in front of the cook without drawing it. */
@@ -355,6 +356,12 @@ export function createPixiMaskLayer(options: {
       }
 
       hideSprite();
+    },
+
+    redrawViewportStyles(viewportScale) {
+      if (!isFillVisible) return;
+      const frame = activeIdMaskFrame ?? activeRgbaMaskFrame;
+      if (frame) screenStrokeRenderer?.render(frame, viewportScale);
     },
 
     getDrawnState() {

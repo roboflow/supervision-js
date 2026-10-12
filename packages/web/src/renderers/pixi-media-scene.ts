@@ -1097,8 +1097,9 @@ export async function createPixiMediaScene(
   };
 
   // A viewport-style redraw covers the layers whose geometry is a function of
-  // the viewport scale. Neither the mask raster nor the interaction hit map
-  // takes one, and the hit map is what decides the hover a pan must not move.
+  // the viewport scale. Mask outlines reuse the artifact already on screen;
+  // the mask raster and the interaction hit map stay untouched, so a pan
+  // does not change which detection is hovered.
   const viewportStyleRedrawLayers: FramePresentLayers = {
     ...annotationDrawLayers,
     drawBox: (mediaTime) => {
@@ -1107,7 +1108,7 @@ export async function createPixiMediaScene(
     },
     drawDepth: undefined,
     drawInteraction: undefined,
-    drawMask: undefined,
+    drawMask: () => maskLayer?.redrawViewportStyles(viewportScale),
   };
 
   let frameDrawTimings = createFrameDrawTimings();

@@ -3,6 +3,7 @@ import {
   annotationRenderers,
   AnnotationGestureStateKind,
   BaseFocusStyle,
+  BaseMaskStyle,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
   createMemoryColdDetectionFrameStore,
@@ -46,6 +47,8 @@ const pixiMock = vi.hoisted(() => ({
     clear: () => void;
     rect: () => void;
     circles: [number, number, number][];
+    moveTo: ReturnType<typeof vi.fn>;
+    stroke: ReturnType<typeof vi.fn<(style?: { width: number }) => unknown>>;
   }[],
   meshes: [] as {
     shader: { resources: Record<string, unknown> };
@@ -125,7 +128,10 @@ vi.mock("pixi.js", () => {
     poly = vi.fn(() => this);
     rect = vi.fn(() => this);
     roundRect = vi.fn(() => this);
-    stroke = vi.fn(() => this);
+    moveTo = vi.fn(() => this);
+    lineTo = vi.fn(() => this);
+    closePath = vi.fn(() => this);
+    stroke = vi.fn((_style?: { width: number }) => this);
     visible = true;
     constructor() {
       super();
@@ -244,7 +250,7 @@ const documentMock = {
     tagName === "div"
       ? { appendChild: vi.fn(), remove: vi.fn(), style: {} }
       : {
-          getContext: () => ({ drawImage: vi.fn() }),
+          getContext: () => ({ drawImage: vi.fn(), putImageData: vi.fn() }),
           height: 0,
           style: {},
           width: 0,
@@ -449,6 +455,67 @@ afterEach(() => {
 });
 
 describe("the prepared annotation window under push presentation", () => {
+  it.each([0, 100])(
+    "keeps a paused mask's screen stroke width through zoom without recooking detection %i",
+    async (detectionIndex) => {
+      vi.stubGlobal(
+        "ImageData",
+        class {
+          constructor(
+            readonly data: Uint8ClampedArray,
+            readonly width: number,
+            readonly height: number,
+          ) {}
+        },
+      );
+      const scene = await createScene({
+        detectionFrames: [
+          {
+            detections: [
+              ...Array.from({ length: detectionIndex }, (_, index) => ({
+                id: `box-${index}`,
+              })),
+              { id: "outlined-mask", mask: singlePixelMask },
+            ],
+            frameIndex: 0,
+            mediaTime: 1,
+          },
+        ],
+        maskStyle: new BaseMaskStyle({
+          stroke: { width: 2, widthUnit: "screen" },
+        }),
+        renderPreparation: { maskFrame: { prefetchFrameCount: 0 } },
+      });
+      try {
+        scene.present(1000);
+        await scene.settleCooks();
+        const graphics = pixiMock.graphics.find(
+          (item) => item.moveTo.mock.calls.length > 0,
+        )!;
+        expect(graphics).toBeDefined();
+        const presentation = scene.lastPresentation();
+        const preparations = scene.scene.getRenderPreparationProgress!();
+        const renders = scene.renderCount();
+        for (const scale of [2, 0.5, 4, 1]) {
+          scene.scene.setViewportTransform!({ scale });
+          await scene.settleCooks();
+          const width = graphics.stroke.mock.lastCall![0]!.width;
+          expect(width * scene.scene.getViewportTransform!().scale).toBeCloseTo(
+            2,
+          );
+          expect(scene.scene.getRenderPreparationProgress!()).toBe(
+            preparations,
+          );
+          expect(scene.lastPresentation()).toBe(presentation);
+        }
+        expect(scene.renderCount()).toBe(renders + 4);
+      } finally {
+        scene.scene.destroy();
+        scene.detectionTimeline.destroy();
+      }
+    },
+  );
+
   it("updates mask rasters above the video grid when display quality increases", async () => {
     vi.stubGlobal("window", { devicePixelRatio: 4 });
     const scene = await createScene({
