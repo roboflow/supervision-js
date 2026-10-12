@@ -304,8 +304,8 @@ export async function createPixiMediaScene(
   const stillFrame = frameChannel === undefined && options.stillFrame === true;
   const rendersOnChange = frameChannel !== undefined || stillFrame;
   let stillFrameTickerRunning = false;
-  /** What `previewOverlay` answered for the overlay on screen. */
-  let drawnPreviewOverlay: PreviewOverlayData | null = null;
+  /** The content of the `previewOverlay` answer the overlay on screen drew. */
+  let drawnPreviewOverlayContent: number | null = null;
   /** The editing state the overlay on screen was drawn from. */
   let drawnEditingState: AnnotationEditingState | undefined;
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
@@ -816,12 +816,11 @@ export async function createPixiMediaScene(
 
     // With no ticker to pick it up, an edit the host drives itself, such as a
     // cancel or a commit, reaches the screen through this notification. A
-    // pointer gesture draws its own state before the microtask runs, so only
-    // a state nothing drew yet is drawn here.
+    // pointer gesture draws and renders its own state before the microtask
+    // runs, which then finds nothing left to draw or render.
     if (rendersOnChange) {
       queueMicrotask(() => {
-        if (isDestroyed || isPresenting || state === drawnEditingState) return;
-        drawAnnotationOverlay(currentMediaTime, overlayNow());
+        if (isDestroyed || isPresenting) return;
         renderOnChange();
       });
     }
@@ -2590,8 +2589,13 @@ export async function createPixiMediaScene(
       mediaTime,
       viewportScale,
     );
+    const previewOverlay = options.previewOverlay?.() ?? null;
     drawnEditingState = editingState;
-    drawnPreviewOverlay = options.previewOverlay?.() ?? null;
+    // Only a scene that renders on change compares signatures.
+    if (rendersOnChange) {
+      drawnPreviewOverlayContent =
+        describePreviewOverlayContent(previewOverlay);
+    }
     annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,
@@ -2599,7 +2603,7 @@ export async function createPixiMediaScene(
       mediaWidth,
       now: overlayNowMs,
       pointer: interactionState?.pointerPoint ?? null,
-      previewOverlay: drawnPreviewOverlay,
+      previewOverlay,
       selectedDetectionIds: (interactionState?.selectedPicks ?? []).flatMap(
         ({ detection }) => (detection.id === undefined ? [] : [detection.id]),
       ),
@@ -2670,7 +2674,21 @@ export async function createPixiMediaScene(
   }
 
   function renderScene() {
+    drawOverlayForEditingState();
     renderScheduler.render(describeSceneRender());
+  }
+
+  /**
+   * The render signature names the editing state, so a render must not record
+   * a state the overlay has not drawn: the redraw that follows would match the
+   * recorded signature and be skipped, leaving the old preview on screen.
+   */
+  function drawOverlayForEditingState() {
+    const editingState = options.editingEngine?.getState();
+    if (editingState === undefined || editingState === drawnEditingState) {
+      return;
+    }
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
   }
 
   /**
@@ -2710,6 +2728,7 @@ export async function createPixiMediaScene(
     if (!rendersOnChange) return;
 
     settleFocusAnimation();
+    drawOverlayForEditingState();
     renderScheduler.renderOnChange(describeSceneRender());
   }
 
@@ -2785,11 +2804,9 @@ export async function createPixiMediaScene(
       interactionState?.marqueeRect,
       options.editingEngine?.getState(),
       options.editingEngine ? interactionState?.pointerPoint : null,
-      // The host's preview is read when the overlay draws, so its parts are
-      // what tell a redraw that it changed.
-      drawnPreviewOverlay?.hoverPolygons,
-      drawnPreviewOverlay?.draftPolygons,
-      drawnPreviewOverlay?.points,
+      // The host's preview is read when the overlay draws, and a host may edit
+      // its arrays in place, so its content is what tells a redraw it changed.
+      drawnPreviewOverlayContent,
     ];
   }
 
@@ -3233,6 +3250,41 @@ function elapsedSince(start: number) {
 
 function now() {
   return globalThis.performance?.now?.() ?? Date.now();
+}
+
+/**
+ * A key for what a preview overlay draws, hashed from its coordinates rather
+ * than its arrays, so a preview the host edits in place still changes it.
+ * Coordinates count to a 256th of a media pixel, finer than anything drawn.
+ */
+function describePreviewOverlayContent(
+  overlay: PreviewOverlayData | null,
+): number | null {
+  if (!overlay) return null;
+
+  let hash = 0x811c9dc5;
+  const mix = (value: number) => {
+    hash = Math.imul(hash ^ value, 0x01000193);
+  };
+  const mixPoint = (point: Point) => {
+    mix(Math.round(point.x * 256));
+    mix(Math.round(point.y * 256));
+  };
+
+  for (const polygons of [overlay.hoverPolygons, overlay.draftPolygons]) {
+    mix(polygons?.length ?? -1);
+    for (const polygon of polygons ?? []) {
+      mix(polygon.length);
+      for (const point of polygon) mixPoint(point);
+    }
+  }
+  mix(overlay.points?.length ?? -1);
+  for (const point of overlay.points ?? []) {
+    mixPoint(point);
+    mix(point.positive ? 1 : 0);
+  }
+
+  return hash;
 }
 
 /**

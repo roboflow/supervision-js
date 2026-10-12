@@ -98,6 +98,69 @@ describe("media renderer on a still image", () => {
     renderer.destroy();
   });
 
+  it("leaves nothing drawn after the last render when a move is canceled", async () => {
+    const editing = createEditingEngineStub();
+    const subject = {
+      id: "player-7",
+      rect: { height: 100, width: 50, x: 100, y: 90 },
+    };
+    const renderer = await createStillRenderer({
+      detectionFrames: [{ detections: [subject], frameIndex: 0, mediaTime: 0 }],
+      editingEngine: editing.engine,
+    });
+    const log = recordDrawsAndRenders();
+
+    editing.emitState({
+      activeDetectionId: subject.id,
+      activeHandleId: null,
+      kind: AnnotationGestureStateKind.Moving,
+      pointerId: 1,
+      preview: { ...subject, rect: { ...subject.rect, x: 140, y: 60 } },
+    });
+    await Promise.resolve();
+    expect(log.at(-1)).toBe("render");
+
+    log.length = 0;
+    editing.emitState({
+      activeDetectionId: null,
+      activeHandleId: null,
+      kind: AnnotationGestureStateKind.Idle,
+      pointerId: null,
+      preview: null,
+    });
+    await Promise.resolve();
+
+    expect(log).toContain("draw");
+    expect(log.at(-1)).toBe("render");
+
+    renderer.destroy();
+  });
+
+  it("repaints a preview the host edited in place once it refreshes", async () => {
+    const hover = [
+      { x: 1, y: 1 },
+      { x: 9, y: 1 },
+      { x: 9, y: 9 },
+    ];
+    const overlay: PreviewOverlayData = { hoverPolygons: [hover] };
+    const renderer = await createStillRenderer({
+      previewOverlay: () => overlay,
+    });
+    const settled = renderer.getRenderCount() ?? 0;
+
+    hover[1] = { x: 12, y: 1 };
+    await renderer.refresh();
+
+    expect(renderer.getRenderCount()).toBe(settled + 1);
+
+    hover.push({ x: 1, y: 9 });
+    await renderer.refresh();
+
+    expect(renderer.getRenderCount()).toBe(settled + 2);
+
+    renderer.destroy();
+  });
+
   it("repaints a preview overlay the host changed once it refreshes", async () => {
     let overlay: PreviewOverlayData | null = null;
     const renderer = await createStillRenderer({
@@ -117,6 +180,24 @@ describe("media renderer on a still image", () => {
     renderer.destroy();
   });
 });
+
+/**
+ * Logs every Graphics redraw and every render in order. A redraw logged after
+ * the last render is a change the screen never received.
+ */
+function recordDrawsAndRenders() {
+  const log: Array<"draw" | "render"> = [];
+  for (const graphics of pixiMock.graphicsInstances) {
+    graphics.clear.mockImplementation(() => {
+      log.push("draw");
+      return graphics;
+    });
+  }
+  pixiMock.render.mockImplementation(() => {
+    log.push("render");
+  });
+  return log;
+}
 
 function createEditingEngineStub() {
   let currentState: AnnotationEditingState = {
