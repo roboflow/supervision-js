@@ -210,6 +210,8 @@ vi.mock("pixi.js", () => {
   }
 
   class CanvasSource {
+    scaleMode = "linear";
+    style = { update: vi.fn() };
     destroy = pixiMock.canvasSourceDestroy;
     update = pixiMock.canvasSourceUpdate;
 

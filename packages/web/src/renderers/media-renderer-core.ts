@@ -134,6 +134,15 @@ export async function createMediaRendererCore(
   options: MediaRendererOptions,
   providers: MediaRendererCoreProviders,
 ): Promise<MediaRenderer> {
+  const pixelInspectionScale = options.pixelInspection?.minScale;
+  if (
+    pixelInspectionScale !== undefined &&
+    (!Number.isFinite(pixelInspectionScale) || pixelInspectionScale <= 0)
+  ) {
+    throw new RangeError(
+      "pixelInspection.minScale must be a finite number greater than zero.",
+    );
+  }
   const fit = options.fit ?? MediaRendererFit.Contain;
   const initialPlaybackRate = options.playbackRate ?? 1;
   if (!Number.isFinite(initialPlaybackRate) || initialPlaybackRate <= 0) {
@@ -1302,6 +1311,7 @@ export async function createMediaRendererCore(
       markerStyle: currentPresentation.markerStyle,
       percentageBarStyle: currentPresentation.percentageBarStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
+      pixelInspection: options.pixelInspection,
       orientedBoxStyle: currentPresentation.orientedBoxStyle,
       onPresentationUpdate(presentedSample) {
         if (!runtimeState.isDestroyed()) {

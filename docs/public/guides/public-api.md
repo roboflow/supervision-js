@@ -367,9 +367,40 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
 
+With an editing engine, retained boxes, polygons, polylines, keypoints, and
+shape decorations share detection order: higher `Detection.zIndex` is in front;
+missing values use the detection's frame index, and equal values follow frame
+order. Masks remain a prepared fill layer below this geometry, and labels and
+interaction overlays stay above it. Without an editing engine, the dense renderer
+keeps its separate geometry layers; `zIndex` orders detections within each layer.
+
+Set `interaction.preferTopmost: true` to pick that editable stack rather than
+prefer smaller shapes or subtargets in other detections. The same option is
+available to `pickDetectionAtPoint`. It interprets rectangles accompanying
+paths or masks as bounds, so they do not create a second box hit target; mask
+fills stay below vector geometry. Keypoints and edges retain priority within
+the chosen detection. Leave this option unset for the default smallest-object
+policy or when accompanying rectangles are independent box targets.
+
 Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
 keeps a selection drag alive when the engine is already in Select mode. To
 abort a gesture explicitly, call `engine.cancel()`.
+
+Route Undo to `engine.undoCreation()` before committed history. It removes one
+vertex from an active multi-click draft and returns `true`, including when the
+last vertex cancels the draft and releases its pointer. It never commits a
+preview. A `false` result means no multi-click draft owns Undo; it does not
+consume or cancel an active box, freehand, move, or resize gesture. Consult
+committed history only when `engine.getState().kind` is
+`AnnotationGestureStateKind.Idle`, cancelling an active gesture explicitly
+first if needed. Escape, tool changes, and media changes still cancel through
+`engine.cancel()`; draft vertices never enter persisted history.
+
+`createAnnotationEditingEngine()` returns a `DraftUndoAnnotationEditingEngine`
+that guarantees `undoCreation()`. The method is optional on the broader
+`AnnotationEditingEngine` interface so existing custom engines remain
+compatible; hosts using a custom engine check that capability before routing
+draft Undo to it.
 
 Browser-routed box creation, movement, and resizing stay inside the natural
 media dimensions in both previews and commits. Moving a box preserves its size
@@ -504,3 +535,25 @@ When adding exports, prefer one of these outcomes:
 - add to the primary API because most apps need it;
 - add to advanced API because integrations need it;
 - keep it internal until a real second use case appears.
+
+## Inspecting source pixels
+
+Pass `renderer: { pixelInspection: { minScale: 3 } }` to `createMediaSession()`
+(or `pixelInspection` to `createMediaRenderer()`) to display distinct source
+pixels at high zoom. The threshold is the actual media-to-screen scale in CSS
+pixels per natural media pixel, including fit and user zoom; it is independent
+of display pixel ratio. A positive, finite `minScale` is required.
+
+Media is smoothly sampled below the threshold, and distinct pixels are restored
+when zoom, container resizing, or a new frame crosses it. This policy affects
+only media display: annotations keep their configured styles, and `captureFrame()`
+still returns the presented source pixels. Brightness/contrast adjustments retain
+the configured renderer resolution, including on Retina displays. Omit the option for smooth sampling
+at every zoom.
+
+`renderer.setViewportTransform({ scale, x, y })` applies an exact transform in
+natural media pixels and container-relative CSS pixels. Explicit updates work
+while the viewport is locked and can restore scales outside the ordinary gesture
+zoom range. `setViewportLocked(true)` blocks pointer pan/zoom; toolbar resets and
+restored host state remain available. After unlocking, zoom gestures can move a
+restored scale gradually toward the ordinary range without jumping to its bounds.

@@ -301,6 +301,7 @@ export {
   type AnnotationHandleDefinition,
   type AnnotationOverlayStyle,
   type AnnotationPointerInput,
+  type DraftUndoAnnotationEditingEngine,
   type PreviewOverlayData,
   type PreviewOverlayPoint,
 } from "#types/editing";

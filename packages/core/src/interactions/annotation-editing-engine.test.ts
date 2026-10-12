@@ -17,9 +17,163 @@ import {
   type DetectionFrame,
   type AnnotationCreationTool,
   type Rect,
+  type Point,
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it("undoes draft vertices before a polygon can commit", () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const releasePointer = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      onCancel,
+      releasePointer,
+    });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polygon,
+      mode: "multiClick",
+      createDetection: (geometry) => ({
+        polygon: { points: geometry as Point[] },
+      }),
+    });
+    const points = [
+      { x: 10, y: 10 },
+      { x: 50, y: 10 },
+      { x: 50, y: 50 },
+    ];
+    points.forEach((point, index) =>
+      engine.pointerDown({ point, timestamp: index * 300, pointerId: 7 }),
+    );
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+    expect(engine.undoCreation()).toBe(true);
+    expect(engine.getState().preview?.polygon?.points).toEqual([
+      points[0],
+      points[1],
+      points[1],
+    ]);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(engine.undoCreation()).toBe(true);
+    expect(engine.undoCreation()).toBe(true);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(releasePointer).toHaveBeenCalledTimes(1);
+    expect(releasePointer).toHaveBeenCalledWith(7);
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(engine.undoCreation()).toBe(false);
+
+    points.forEach((point, index) =>
+      engine.pointerDown({
+        point,
+        timestamp: 2000 + index * 300,
+        pointerId: 8,
+      }),
+    );
+    engine.undoCreation();
+    const replacement = { x: 10, y: 50 };
+    engine.pointerDown({ point: replacement, timestamp: 4000, pointerId: 8 });
+    engine.keyDown("Enter");
+    expect(onCommit.mock.calls[0]?.[0].polygon.points).toEqual([
+      points[0],
+      points[1],
+      replacement,
+    ]);
+    expect(engine.undoCreation()).toBe(false);
+  });
+
+  it.each([AnnotationGeometryKind.Polygon, AnnotationGeometryKind.Polyline])(
+    "retains the minimum vertex guard after draft Undo (%s)",
+    (geometry) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      engine.setCreationTool({
+        geometry,
+        mode: "multiClick",
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      });
+      const minimum = geometry === AnnotationGeometryKind.Polygon ? 3 : 2;
+      for (let index = 0; index < minimum; index += 1)
+        engine.pointerDown({
+          point: { x: 10 + index * 30, y: 10 },
+          timestamp: index * 300,
+        });
+      engine.undoCreation();
+      engine.keyDown("Enter");
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(engine.undoCreation()).toBe(false);
+    },
+  );
+
+  it.each(["Escape", "tool change", "media cancel"])(
+    "discards Undo ownership on %s",
+    (reason) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const tool: AnnotationCreationTool = {
+        geometry: AnnotationGeometryKind.Polygon,
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      };
+      engine.setCreationTool(tool);
+      engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 0 });
+      if (reason === "Escape") engine.keyDown("Escape");
+      else if (reason === "tool change") engine.setCreationTool(null);
+      else engine.cancel();
+      expect(engine.undoCreation()).toBe(false);
+      expect(onCommit).not.toHaveBeenCalled();
+      engine.setCreationTool(tool);
+      engine.pointerDown({ point: { x: 90, y: 90 }, timestamp: 1000 });
+      expect(engine.getState().preview?.polygon?.points).toEqual([
+        { x: 90, y: 90 },
+        { x: 90, y: 90 },
+      ]);
+    },
+  );
+
+  it.each([undefined, 2])(
+    "breaks the double-click chain after Undo (detail: %s)",
+    (detail) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Polygon,
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      });
+      const points = [
+        { x: 10, y: 10 },
+        { x: 50, y: 10 },
+        { x: 50, y: 50 },
+        { x: 10, y: 50 },
+      ];
+      points.forEach((point, index) =>
+        engine.pointerDown({ point, timestamp: index * 300 }),
+      );
+      engine.undoCreation();
+      const replacement = { x: 30, y: 70 };
+      engine.pointerDown({ point: replacement, timestamp: 1100, detail });
+      expect(onCommit).not.toHaveBeenCalled();
+      engine.keyDown("Enter");
+      expect(onCommit.mock.calls[0]?.[0].polygon.points).toEqual([
+        ...points.slice(0, 3),
+        replacement,
+      ]);
+
+      points.forEach((point, index) =>
+        engine.pointerDown({ point, timestamp: 2000 + index * 300 }),
+      );
+      engine.undoCreation();
+      engine.pointerDown({ point: points[0]!, timestamp: 3100, detail });
+      expect(onCommit.mock.calls[1]?.[0].polygon.points).toEqual(
+        points.slice(0, 3),
+      );
+    },
+  );
+
   it("keeps a move alive when the unchanged creation tool is synchronized", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });

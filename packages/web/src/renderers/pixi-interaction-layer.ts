@@ -460,7 +460,11 @@ export function createPixiInteractionLayer(options: {
       viewportScale: options.getViewportScale?.() ?? 1,
     });
 
-    if (geometryPick && POINT_PRECISE_PICK_TARGETS.has(geometryPick.target)) {
+    if (
+      geometryPick &&
+      (options.interaction.preferTopmost ||
+        POINT_PRECISE_PICK_TARGETS.has(geometryPick.target))
+    ) {
       return geometryPick;
     }
 
