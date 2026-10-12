@@ -50,10 +50,10 @@ export function createPixiMaskBrushPreview(options: {
   sprite.width = editor.canvas.width;
   sprite.height = editor.canvas.height;
   sprite.alpha = options.preview.alpha ?? 0.4;
-  sprite.tint = options.preview.color ?? 0x22c55e;
   display.addChild(sprite, cursor);
 
   const updateTexture = () => {
+    sprite.tint = options.preview.color ?? 0x22c55e;
     source.update();
     scheduleInvalidation();
   };
@@ -90,6 +90,7 @@ export function createPixiMaskBrushPreview(options: {
   }
 
   function drawCursor() {
+    sprite.tint = options.preview.color ?? 0x22c55e;
     cursor.clear();
     const state = editor.getCursor();
     if (!state.point) return;
