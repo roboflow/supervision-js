@@ -56,6 +56,7 @@ describe("annotation editing engine", () => {
     expect(engine.undoCreation()).toBe(true);
     expect(engine.undoCreation()).toBe(true);
     expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(releasePointer).toHaveBeenCalledTimes(1);
     expect(releasePointer).toHaveBeenCalledWith(7);
     expect(onCancel).toHaveBeenCalledOnce();
     expect(engine.undoCreation()).toBe(false);
