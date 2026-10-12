@@ -97,6 +97,9 @@ export interface AnnotationEditingEngine {
   pointerMove(input: AnnotationPointerInput): void;
   pointerUp(input: AnnotationPointerInput): void;
   keyDown(key: string): void;
+  /** Remove the last multi-click draft vertex. Returns false when no path is active.
+   * Consumes the final vertex by cancelling the draft, without committing it. */
+  undoCreation(): boolean;
   beginHandleDrag(
     detection: Detection,
     handle: AnnotationHandleDefinition,

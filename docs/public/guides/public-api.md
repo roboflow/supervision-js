@@ -371,6 +371,13 @@ Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
 keeps a selection drag alive when the engine is already in Select mode. To
 abort a gesture explicitly, call `engine.cancel()`.
 
+Route Undo to `engine.undoCreation()` before committed history. It removes one
+vertex from an active multi-click draft and returns `true`, including when the
+last vertex cancels the draft and releases its pointer. It never commits a
+preview. A `false` result means no multi-click draft owns Undo, so the host may
+consult its own history. Escape, tool changes, and media changes still cancel
+through `engine.cancel()`; draft vertices never enter persisted history.
+
 Browser-routed box creation, movement, and resizing stay inside the natural
 media dimensions in both previews and commits. Moving a box preserves its size
 when it fits the media; a previously oversized box is fitted to the media on
