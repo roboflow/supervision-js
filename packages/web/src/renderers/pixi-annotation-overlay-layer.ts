@@ -540,6 +540,7 @@ function drawLoading(
     }
     const rect = getDetectionRect(detection);
     if (!rect) continue;
+    graphics.beginPath();
     graphics.arc(
       rect.x,
       rect.y,
