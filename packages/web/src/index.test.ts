@@ -1144,6 +1144,81 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("switches source sampling at the natural-pixel inspection threshold", async () => {
+    resetMocks();
+    const renderer = await createRenderer(false, false, {
+      pixelInspection: { minScale: 3 },
+    });
+    const media = pixiMock.spriteInstances[0]!;
+    const source = (
+      media.texture as {
+        source: {
+          scaleMode: string;
+          style: { update: ReturnType<typeof vi.fn> };
+        };
+      }
+    ).source;
+    renderer.setViewportTransform({ scale: 2.99 });
+    expect(source.scaleMode).toBe("linear");
+    renderer.setViewportTransform({ scale: 3 });
+    expect(source.scaleMode).toBe("nearest");
+    expect(source.style.update).toHaveBeenCalledTimes(1);
+    renderer.setRenderQuality({ maxDevicePixelRatio: 1 });
+    expect(source.scaleMode).toBe("nearest");
+    expect(source.style.update).toHaveBeenCalledTimes(1);
+    renderer.setViewportTransform({ scale: 1 });
+    expect(source.scaleMode).toBe("linear");
+    expect(source.style.update).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it("keeps a fractional restored viewport exact under locked gestures", async () => {
+    resetMocks();
+    const renderer = await createRenderer(false, false);
+    renderer.setViewportTransform({ scale: 30, x: 12.25, y: -7.75 });
+    renderer.setViewportLocked(true);
+    const before = renderer.getViewportTransform();
+    renderer.panViewportBy(4, 6);
+    renderer.zoomViewportAt({ x: 100, y: 100 }, 2);
+    renderer.zoomViewportFromWheel({ x: 100, y: 100 }, -50);
+    expect(renderer.getViewportTransform()).toEqual(before);
+    renderer.setViewportTransform({ scale: 0.025, x: 4.5, y: 6.25 });
+    expect(renderer.getViewportTransform()).toMatchObject({
+      scale: 0.025,
+      x: 4.5,
+      y: 6.25,
+      locked: true,
+    });
+    renderer.destroy();
+  });
+
+  it("keeps smooth media sampling by default at high zoom", async () => {
+    resetMocks();
+    const renderer = await createRenderer(false, false);
+    const media = pixiMock.spriteInstances[0]!;
+    const source = (
+      media.texture as {
+        source: {
+          scaleMode: string;
+          style: { update: ReturnType<typeof vi.fn> };
+        };
+      }
+    ).source;
+    renderer.setViewportTransform({ scale: 9 });
+    expect(source.scaleMode).toBe("linear");
+    renderer.destroy();
+  });
+
+  it.each([0, -1, Infinity, NaN])(
+    "rejects an invalid pixel inspection scale %s",
+    async (minScale) => {
+      resetMocks();
+      await expect(
+        createRenderer(false, false, { pixelInspection: { minScale } }),
+      ).rejects.toThrow("pixelInspection.minScale");
+    },
+  );
+
   it("keeps screen-sized region assets stable across paused viewport zoom", async () => {
     resetMocks();
     const asset = { height: 20, width: 40 };

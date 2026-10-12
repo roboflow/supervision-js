@@ -504,3 +504,25 @@ When adding exports, prefer one of these outcomes:
 - add to the primary API because most apps need it;
 - add to advanced API because integrations need it;
 - keep it internal until a real second use case appears.
+
+## Inspecting source pixels
+
+Pass `renderer: { pixelInspection: { minScale: 3 } }` to `createMediaSession()`
+(or `pixelInspection` to `createMediaRenderer()`) to display distinct source
+pixels at high zoom. The threshold is the actual media-to-screen scale in CSS
+pixels per natural media pixel, including fit and user zoom; it is independent
+of display pixel ratio. A positive, finite `minScale` is required.
+
+Media is smoothly sampled below the threshold, and distinct pixels are restored
+when zoom, container resizing, or a new frame crosses it. This policy affects
+only media display: annotations keep their configured styles, and `captureFrame()`
+still returns the presented source pixels. Brightness/contrast adjustments retain
+the configured renderer resolution, including on Retina displays. Omit the option for smooth sampling
+at every zoom.
+
+`renderer.setViewportTransform({ scale, x, y })` applies an exact transform in
+natural media pixels and container-relative CSS pixels. Explicit updates work
+while the viewport is locked and can restore scales outside the ordinary gesture
+zoom range. `setViewportLocked(true)` blocks pointer pan/zoom; toolbar resets and
+restored host state remain available. After unlocking, zoom gestures can move a
+restored scale gradually toward the ordinary range without jumping to its bounds.

@@ -40,6 +40,8 @@ const pixiMock = vi.hoisted(() => ({
 
 /** The dimensions a source advertises, and the ones its texture really has. */
 interface MockExternalSource {
+  scaleMode: string;
+  style: { update: ReturnType<typeof vi.fn> };
   height: number;
   pixelHeight: number;
   pixelWidth: number;
@@ -247,6 +249,8 @@ vi.mock("pixi.js", () => {
   }
 
   class CanvasSource {
+    scaleMode = "linear";
+    style = { update: vi.fn() };
     destroy = vi.fn();
     readonly height: number;
     readonly width: number;
@@ -278,6 +282,8 @@ vi.mock("pixi.js", () => {
   }
 
   class ExternalSource {
+    scaleMode = "linear";
+    style = { update: vi.fn() };
     height: number;
     pixelHeight: number;
     pixelWidth: number;
@@ -808,6 +814,25 @@ describe("push-presented Pixi scene", () => {
     expect(pixiMock.render).not.toHaveBeenCalled();
   });
 
+  it("keeps pixel inspection sampling across a compositor texture replacement", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      pixelInspection: { minScale: 3 },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setViewportTransform?.({ scale: 4 });
+    channel.present(presentedFrame(1000));
+    const source = pixiMock.externalSources[0]!;
+    expect(source.scaleMode).toBe("nearest");
+    expect(source.style.update).toHaveBeenCalledTimes(1);
+    scene.setViewportTransform?.({ scale: 2 });
+    expect(source.scaleMode).toBe("linear");
+    expect(source.style.update).toHaveBeenCalledTimes(2);
+    scene.destroy();
+  });
+
   it("renders once per presented frame and nothing else", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
@@ -1192,6 +1217,7 @@ describe("push-presented Pixi scene", () => {
     const presented = scene.getRenderCount?.();
 
     await applyDisplayAdjustment(scene);
+    expect(pixiMock.displayFilters[0]).toMatchObject({ resolution: "inherit" });
     const adjusted = scene.getRenderCount?.();
 
     await applyDisplayAdjustment(scene);

@@ -14,6 +14,7 @@ import type {
   MediaFrameRenderTimings,
   MediaRendererFit,
   MediaRendererPresentation,
+  MediaRendererOptions,
 } from "#types/media-renderer";
 import type {
   DetectionPickResult,
@@ -59,6 +60,7 @@ export interface MediaRendererSceneOptions {
   readonly backgroundColor: MediaRendererPresentation["backgroundColor"];
   readonly fit: MediaRendererFit;
   readonly maxDevicePixelRatio: number | undefined;
+  readonly pixelInspection?: MediaRendererOptions["pixelInspection"];
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
   readonly boxCornerStyle: BoxCornerStyle | null | undefined;
