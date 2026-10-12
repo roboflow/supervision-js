@@ -2,11 +2,11 @@ import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
   type AnnotationCreationTool,
-  type AnnotationEditingEngine,
   type AnnotationEditingEngineOptions,
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
   type AnnotationPointerInput,
+  type DraftUndoAnnotationEditingEngine,
 } from "#types/editing";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
@@ -57,7 +57,7 @@ type ActiveGesture =
 
 export function createAnnotationEditingEngine(
   options: AnnotationEditingEngineOptions = {},
-): AnnotationEditingEngine {
+): DraftUndoAnnotationEditingEngine {
   let tool: AnnotationCreationTool | null = null;
   let gesture: ActiveGesture | null = null;
   let state: AnnotationEditingState = idleState();

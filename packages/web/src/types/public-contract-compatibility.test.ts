@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { LiveMediaSession, MediaSession } from "#types/media-session";
 import type { MediaStreamRendererSourceOptions } from "#media/media-stream-media-source";
+import {
+  createAnnotationEditingEngine,
+  type DraftUndoAnnotationEditingEngine,
+} from "../editing";
 
 /**
  * These fixtures are written against the public browser shapes as they existed
@@ -36,6 +40,13 @@ const legacyMediaStreamOptions: MediaStreamRendererSourceOptions = {
 };
 
 describe("browser public contract compatibility", () => {
+  it("exposes the built-in draft Undo capability through the editing entrypoint", () => {
+    const engine: DraftUndoAnnotationEditingEngine =
+      createAnnotationEditingEngine();
+
+    expect(engine.undoCreation()).toBe(false);
+  });
+
   it("keeps controllers written before live ingestion assignable", () => {
     expect(typeof legacyMediaSessionStaysAssignable).toBe("function");
     expect(typeof liveMediaSessionGuaranteesIngestion).toBe("function");

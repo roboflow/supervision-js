@@ -2931,7 +2931,6 @@ function createEditingEngineHarness() {
     getState: createIdleEditingState,
     hasCreationTool: vi.fn(() => false),
     keyDown: vi.fn(),
-    undoCreation: vi.fn(() => false),
     pointerDown: vi.fn(),
     pointerMove: vi.fn(),
     pointerUp: vi.fn(),

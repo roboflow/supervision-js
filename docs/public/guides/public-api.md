@@ -378,6 +378,12 @@ preview. A `false` result means no multi-click draft owns Undo, so the host may
 consult its own history. Escape, tool changes, and media changes still cancel
 through `engine.cancel()`; draft vertices never enter persisted history.
 
+`createAnnotationEditingEngine()` returns a `DraftUndoAnnotationEditingEngine`
+that guarantees `undoCreation()`. The method is optional on the broader
+`AnnotationEditingEngine` interface so existing custom engines remain
+compatible; hosts using a custom engine check that capability before routing
+draft Undo to it.
+
 Browser-routed box creation, movement, and resizing stay inside the natural
 media dimensions in both previews and commits. Moving a box preserves its size
 when it fits the media; a previously oversized box is fitted to the media on
