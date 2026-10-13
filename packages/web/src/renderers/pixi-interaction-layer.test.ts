@@ -541,6 +541,53 @@ describe("pixi interaction layer", () => {
     ]);
   });
 
+  it("keeps duplicate-id detections distinct when Shift toggles an editing selection", () => {
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline({
+        ...frame,
+        detections: [
+          { id: "duplicate", rect: { x: 30, y: 30, width: 30, height: 30 } },
+          { id: "duplicate", rect: { x: 90, y: 30, width: 30, height: 30 } },
+        ],
+      }),
+      editingEngine: createAnnotationEditingEngine(),
+      interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+    });
+    const display = layer.createDisplay({
+      width: 150,
+      height: 100,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    const click = (x: number, shiftKey = false) => {
+      const event = createPointerEvent(display, x, 30, {
+        button: 0,
+        pointerId: 1,
+        shiftKey,
+      });
+      display.emit("pointerdown", event);
+      display.emit("pointerup", event);
+      display.emit("pointertap", event);
+    };
+    click(30);
+    click(90, true);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detectionIndex),
+    ).toEqual([0, 1]);
+    click(30, true);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detectionIndex),
+    ).toEqual([1]);
+    layer.setSelectedDetection({
+      detectionIndex: 1,
+      target: DetectionPickTarget.Label,
+    });
+    click(90, true);
+    expect(layer.getState().selectedPicks).toEqual([]);
+  });
+
   it("prefers exact mask picks without advertising an unsupported move", () => {
     const onHover = vi.fn();
     const maskFrame: DetectionFrame = {

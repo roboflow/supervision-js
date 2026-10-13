@@ -660,14 +660,25 @@ export function createPixiInteractionLayer(options: {
 
   function toggleSelectedPick(pick: DetectionPickResult | null) {
     if (!pick) return;
-    const index = selectedPicks.findIndex((candidate) =>
-      haveSameDetectionPickIdentities([candidate], [pick]),
+    const key = createSelectionKey(pick);
+    const index = selectedPicks.findIndex(
+      (candidate) => createSelectionKey(candidate) === key,
     );
     setSelectedPicks(
       index >= 0
         ? selectedPicks.filter((_, candidateIndex) => candidateIndex !== index)
         : [...selectedPicks, pick],
     );
+  }
+
+  function createSelectionKey(pick: DetectionPickResult) {
+    // Selection toggles the detection, regardless of whether its body, label,
+    // or keypoint was hit. Keep the picker's frame/index fallback for duplicate ids.
+    return createDetectionPickKey({
+      ...pick,
+      geometryIndex: undefined,
+      target: DetectionPickTarget.Box,
+    });
   }
 
   function getPoint(event: PixiInteractionPointerEvent) {
