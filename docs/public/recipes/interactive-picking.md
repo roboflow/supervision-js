@@ -98,3 +98,18 @@ session.renderer.setSelectedDetection({
 
 Use this for detection lists, keyboard navigation, or table-to-canvas selection
 without moving selection rendering into framework state.
+
+For multiple detections, enable `interaction.multiSelect`, retain every id from
+`onSelectionChange`, and restore the entire list:
+
+```ts
+session.renderer.setSelectedDetection({ detectionIds: ["first", "second"] });
+```
+
+The last valid id is the primary pick returned by this method. Duplicate,
+missing, and hidden ids are skipped; an empty array clears selection. A singular
+`detectionId` or `detectionIndex` replaces the selection with one detection.
+
+Shift-click toggles a detection without starting an editing move. Dragging from
+empty space selects detections intersecting the marquee. The host owns any
+class-assignment panel, while the renderer highlights every selected detection.

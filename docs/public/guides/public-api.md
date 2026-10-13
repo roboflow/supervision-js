@@ -384,6 +384,22 @@ fills stay below vector geometry. Keypoints and edges retain priority within
 the chosen detection. Leave this option unset for the default smallest-object
 policy or when accompanying rectangles are independent box targets.
 
+Enable `interaction.multiSelect` for Shift-click selection toggles and
+drag-selection from empty space. `onSelectionChange` reports the full ordered
+selection; `onSelect` reports its primary pick. Shift-clicking a detection in
+Select mode changes selection without starting a move. Shift-click and the
+secondary button still delete an editable polygon/polyline vertex when its
+selected vertex handle is hit; active creation tools keep their gesture priority.
+
+Restore host-owned selections with
+`session.renderer.setSelectedDetection({ detectionIds: selectedIds })`.
+Duplicate ids are ignored, missing or hidden detections are excluded, and the
+last valid id is the primary pick returned by the method. An empty list clears
+selection. `detectionIds` takes precedence over `detectionId` or
+`detectionIndex` when supplied together; singular selectors continue to select
+one detection. Use the full list rather than restoring only the primary pick
+after a refresh or application state update.
+
 Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
 keeps a selection drag alive when the engine is already in Select mode. To
 abort a gesture explicitly, call `engine.cancel()`.

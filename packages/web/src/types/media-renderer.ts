@@ -225,6 +225,7 @@ export interface MediaRenderer extends MediaRendererStateController {
    * presented while the encoder runs cannot change the result.
    */
   captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
+  /** Replaces selection; an ordered `detectionIds` list returns its last valid pick. */
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
