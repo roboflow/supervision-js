@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as core from "supervision-js-core";
 
 import {
   DetectionMaskEncoding,
@@ -18,12 +19,142 @@ import {
   createIdMaskFrame,
   createIdMaskPlane,
   createIdMaskRasterFrame,
+  createMaskScreenStrokes,
   createRegionMaskCoverageFrame,
   MAX_ID_MASK_PALETTE_ENTRIES,
   type CompositedMaskFrame,
 } from "./mask-frame-compositor";
 
 describe("mask frame compositor", () => {
+  it.each([
+    { detectionIndex: 0, widthUnit: "screen" },
+    { detectionIndex: 100, widthUnit: "screen" },
+    { detectionIndex: 0, widthUnit: "mask" },
+    { detectionIndex: 100, widthUnit: "mask" },
+  ] as const)(
+    "keeps $widthUnit stroke geometry and fill separate for detection $detectionIndex",
+    ({ detectionIndex, widthUnit }) => {
+      const instruction = {
+        alpha: 0.45,
+        color: 0xff0000,
+        detectionIndex,
+        mask: encodeBinaryMask(
+          new Uint8Array([1, 1, 1, 1, 0, 1, 1, 1, 1]),
+          3,
+          3,
+        ),
+        stroke: {
+          alpha: 1,
+          color: 0x00ff00,
+          width: 2,
+          widthUnit,
+          alignment: StrokeAlignment.Inside,
+        },
+      };
+      const raster = createIdMaskRasterFrame([instruction]);
+      const fill = compositeMaskFrame([instruction])!;
+      const strokes = createMaskScreenStrokes(
+        [instruction],
+        3,
+        3,
+        raster?.data,
+      )!;
+      expect(strokes[0]).toMatchObject({
+        detectionIndex,
+        width: 2,
+        alpha: 1,
+        color: 0x00ff00,
+        widthUnit,
+        alignment: StrokeAlignment.Inside,
+      });
+      expect(strokes[0]!.paths).toHaveLength(2);
+      expect(strokes[0]!.paths.map(signedArea).sort((a, b) => a - b)).toEqual([
+        -1, 9,
+      ]);
+      expect(readPixel(fill.data, fill.width, 1, 1)).toEqual([0, 0, 0, 0]);
+      expect(readPixel(fill.data, fill.width, 0, 0)).toEqual([255, 0, 0, 115]);
+      if (raster) expect(raster.hasStroke).toBe(false);
+    },
+  );
+
+  it("reuses the bounded ID raster for contours without materializing source polygons", () => {
+    const rasterize = vi
+      .spyOn(core, "rasterizePolygonToMask")
+      .mockImplementation(() => {
+        throw new Error("Prepared polygon contours must reuse the ID raster.");
+      });
+    try {
+      const instructions = [
+        {
+          alpha: 0.5,
+          color: 0xff0000,
+          detectionIndex: 0,
+          mask: encodeBinaryMask(new Uint8Array([1, 1, 1, 1]), 2, 2),
+          stroke: {
+            alpha: 1,
+            color: 0xff0000,
+            width: 2,
+            widthUnit: "screen" as const,
+            alignment: StrokeAlignment.Outside,
+          },
+        },
+        {
+          alpha: 0.5,
+          color: 0x00ff00,
+          detectionIndex: 1,
+          polygon: {
+            width: 2,
+            height: 2,
+            points: [
+              { x: 0, y: 1 },
+              { x: 2, y: 1 },
+              { x: 2, y: 2 },
+              { x: 0, y: 2 },
+            ],
+          },
+          stroke: { alpha: 1, color: 0x00ff00, width: 1 },
+        },
+      ];
+      const frame = createIdMaskRasterFrame(instructions)!;
+      const contours = createMaskScreenStrokes(
+        instructions,
+        frame.width,
+        frame.height,
+        frame.data,
+      )!;
+      expect(frame.strokeWidths[1]).toBe(0);
+      expect(frame.strokeWidths[2]).toBe(1);
+      expect(contours[0]).toMatchObject({
+        detectionIndex: 0,
+        width: 2,
+        alignment: StrokeAlignment.Outside,
+      });
+      expect(contours[0]!.paths).toHaveLength(1);
+      expect(rasterize).not.toHaveBeenCalled();
+    } finally {
+      rasterize.mockRestore();
+    }
+  });
+
+  it("retains disconnected islands at a diagonal pixel contact", () => {
+    const instruction = {
+      alpha: 1,
+      color: 0xff0000,
+      detectionIndex: 0,
+      mask: encodeBinaryMask(new Uint8Array([1, 0, 0, 1]), 2, 2),
+      stroke: {
+        alpha: 1,
+        color: 0xff0000,
+        width: 2,
+        widthUnit: "screen" as const,
+      },
+    };
+    const raster = createIdMaskRasterFrame([instruction])!;
+    const strokes = createMaskScreenStrokes([instruction], 2, 2, raster.data)!;
+    expect(strokes[0]!.paths.map(signedArea)).toEqual([1, 1]);
+    expect(strokes[0]!.paths.every((path) => path.length === 8)).toBe(true);
+  });
+
   it("carries an unaligned ID raster one byte per pixel", () => {
     const frame = createIdMaskRasterFrame([
       {
@@ -731,3 +862,12 @@ describe("rgba mask fallback", () => {
     expect(paintedGrid(frame!)).toEqual(["....", "00.0", "0..0"]);
   });
 });
+
+function signedArea(path: Float32Array) {
+  let area = 0;
+  for (let index = 0; index < path.length; index += 2) {
+    const next = (index + 2) % path.length;
+    area += path[index]! * path[next + 1]! - path[next]! * path[index + 1]!;
+  }
+  return area / 2;
+}

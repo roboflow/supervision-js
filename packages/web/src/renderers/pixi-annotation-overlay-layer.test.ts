@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Graphics, Polygon } from "pixi.js";
 
 import {
   AnnotationGestureStateKind,
@@ -36,6 +37,55 @@ function createGraphicsMock() {
 }
 
 describe("Pixi annotation overlay presentation", () => {
+  it.each([
+    { now: 0, viewportScale: 1 },
+    { now: 500, viewportScale: 2 },
+  ])(
+    "keeps loading arcs separate from other overlays at $viewportScale zoom",
+    ({ now, viewportScale }) => {
+      const graphics = new Graphics();
+      const detections = [
+        { id: "box-1", rect: { height: 20, width: 30, x: 40, y: 50 } },
+        { id: "box-2", rect: { height: 20, width: 30, x: 80, y: 70 } },
+      ];
+      const layer = createPixiAnnotationOverlayLayer();
+      layer.attachGraphics(graphics);
+      layer.draw({
+        frame: { detections, mediaTime: 0 },
+        marquee: null,
+        mediaHeight: 100,
+        mediaWidth: 100,
+        now,
+        pointer: null,
+        selectedDetectionIds: ["box-1"],
+        viewportScale,
+        visibility: { loadingDetectionIds: detections.map(({ id }) => id) },
+      });
+
+      const strokes = graphics.context.instructions
+        .filter((instruction) => instruction.action === "stroke")
+        .slice(-detections.length);
+      expect(strokes).toHaveLength(detections.length);
+      strokes.forEach((instruction, index) => {
+        const primitives = instruction.data.path.shapePath.shapePrimitives;
+        expect(primitives).toHaveLength(1);
+        const shape = primitives[0]!.shape;
+        expect(shape).toBeInstanceOf(Polygon);
+        if (!(shape instanceof Polygon))
+          throw new Error("Expected a loading arc");
+        expect(shape.closePath).toBe(false);
+        expect(shape.points.length).toBeGreaterThan(4);
+        const { x, y } = detections[index]!.rect;
+        for (let point = 0; point < shape.points.length; point += 2) {
+          expect(
+            Math.hypot(shape.points[point]! - x, shape.points[point + 1]! - y),
+          ).toBeCloseTo(10 / viewportScale, 8);
+        }
+      });
+      graphics.destroy();
+    },
+  );
+
   it("does not draw loading overlays for hidden detections", () => {
     const graphics = createGraphicsMock();
     const layer = createPixiAnnotationOverlayLayer();

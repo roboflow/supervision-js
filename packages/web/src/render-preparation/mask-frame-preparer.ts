@@ -2,6 +2,7 @@ import {
   compositeMaskFrame,
   createIdMaskPlane,
   createIdMaskRasterFrame,
+  createMaskScreenStrokes,
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
@@ -258,6 +259,11 @@ function createMainThreadMaskFramePreparer(
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
         regionMaskCoverage,
+        screenStrokes: createMaskScreenStrokes(
+          job.instructions,
+          preparedPixels.width,
+          preparedPixels.height,
+        ),
         source: canvas,
         width: preparedPixels.width,
       };
@@ -302,6 +308,12 @@ function createPreparedIdMaskFrame(
     kind: PreparedMaskFrameKind.IdMask,
     maxStrokeWidth: frame.maxStrokeWidth,
     raster: frame.data,
+    screenStrokes: createMaskScreenStrokes(
+      job.instructions,
+      frame.width,
+      frame.height,
+      frame.data,
+    ),
     regionMaskCoverage,
     sourceWidth: frame.sourceWidth,
     strokePalette: frame.strokePalette,
@@ -492,6 +504,7 @@ function createPreparedFrameFromWorkerResponse(
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
       raster: message.raster,
       regionMaskCoverage: message.regionMaskCoverage,
+      screenStrokes: message.screenStrokes,
       sourceWidth: message.sourceWidth,
       strokePalette: message.strokePalette,
       strokeAlignments: message.strokeAlignments,
@@ -510,6 +523,7 @@ function createPreparedFrameFromWorkerResponse(
       key: message.key,
       kind: PreparedMaskFrameKind.RgbaImage,
       regionMaskCoverage: message.regionMaskCoverage,
+      screenStrokes: message.screenStrokes,
       source: message.imageBitmap,
       width: message.imageBitmap.width,
     };
@@ -540,6 +554,7 @@ function createPreparedFrameFromWorkerResponse(
     key: message.key,
     kind: PreparedMaskFrameKind.RgbaImage,
     regionMaskCoverage: message.regionMaskCoverage,
+    screenStrokes: message.screenStrokes,
     source: canvas,
     width: message.imageData.width,
   };

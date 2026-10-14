@@ -15,6 +15,7 @@ import {
   type OrientedBoxStyle,
   type PercentageBarStyle,
   type PolygonStyle,
+  type PreviewOverlayData,
   type RegionAnnotationRenderer,
   type RegionRendererTarget,
   type ShapeStyle,
@@ -94,6 +95,7 @@ import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-laye
 import {
   AnnotationGestureStateKind,
   MediaInteractionMode,
+  type AnnotationEditingState,
 } from "supervision-js-core";
 import {
   createPixiSceneLayerSlot,
@@ -237,6 +239,11 @@ export interface MediaCompositorOptions {
  * sample it wants, hands it to `presentSample`, and Pixi's ticker paints the
  * scene every frame.
  *
+ * A still frame is pulled once and then renders on change the way push
+ * presentation does, with the sample it presents as one more change. The
+ * ticker runs only while a looping GIF region or a loading spinner is on the
+ * frame.
+ *
  * Push presentation engages when the opened source carries a presented-frame
  * channel. The producer then decides which frame is on screen and announces it,
  * so the ticker paints nothing and every render is an explicit answer to a
@@ -292,6 +299,18 @@ export async function createPixiMediaScene(
   const maxTextureSize = () =>
     (maxTextureSide ??= queryMaxTextureSize(app.renderer));
   const frameChannel = options.presentedFrames;
+  /**
+   * A still frame has nothing to play, so it renders on change exactly as push
+   * presentation does. The ticker runs only while something on the frame
+   * animates by the clock.
+   */
+  const stillFrame = frameChannel === undefined && options.stillFrame === true;
+  const rendersOnChange = frameChannel !== undefined || stillFrame;
+  let stillFrameTickerRunning = false;
+  /** The content of the `previewOverlay` answer the overlay on screen drew. */
+  let drawnPreviewOverlayContent: number | null = null;
+  /** The editing state the overlay on screen was drawn from. */
+  let drawnEditingState: AnnotationEditingState | undefined;
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
@@ -403,7 +422,11 @@ export async function createPixiMediaScene(
       hidden: currentVisibility?.labelsHidden === true || state.hidden,
     };
   };
+  // Editable geometry uses retained displays, so boxes and vectors can share
+  // one ordered parent without changing the dense, non-editing raster paths.
+  const retainedGeometry = options.editingEngine ? new Container() : undefined;
   const boxLayer = createPixiBoxLayer({
+    container: retainedGeometry,
     boxStyle: options.boxStyle,
     Container: options.editingEngine ? Container : undefined,
     detectionTimeline: annotationDetectionTimeline,
@@ -487,6 +510,7 @@ export async function createPixiMediaScene(
       : undefined;
   polygonLayer?.setPlaybackActive(isPlaybackActive);
   const vectorLayer = createPixiVectorLayer({
+    container: retainedGeometry,
     Container,
     Graphics,
     detectionTimeline: annotationDetectionTimeline,
@@ -552,6 +576,7 @@ export async function createPixiMediaScene(
         BlurFilter,
         BufferImageSource,
         Container,
+        Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
@@ -586,7 +611,7 @@ export async function createPixiMediaScene(
 
   await app.init({
     autoDensity: true,
-    autoStart: frameChannel === undefined,
+    autoStart: !rendersOnChange,
     backgroundColor: options.backgroundColor ?? 0x111111,
     /* Only the video-engine media path supplies a presented-frame channel, so
      * which reader opens the clip is also what decides which backend draws. */
@@ -613,7 +638,10 @@ export async function createPixiMediaScene(
     throw new Error("Unable to create staging canvas context.");
   }
 
-  const renderScheduler = createSceneRenderScheduler(() => app.render());
+  const renderScheduler = createSceneRenderScheduler(() => {
+    app.render();
+    syncStillFrameTicker();
+  });
   const maskBrushPreview = options.maskBrush
     ? createPixiMaskBrushPreview({
         CanvasSource,
@@ -622,7 +650,7 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         preview: options.maskBrush,
-        onInvalidate: frameChannel ? renderNow : undefined,
+        onInvalidate: rendersOnChange ? renderNow : undefined,
       })
     : undefined;
   let appliedPresentation: MediaRendererPresentation | undefined;
@@ -808,6 +836,17 @@ export async function createPixiMediaScene(
       labelLayer?.drawFrame(currentMediaTime, viewportScale);
       renderNow();
     }
+
+    // With no ticker to pick it up, an edit the host drives itself, such as a
+    // cancel or a commit, reaches the screen through this notification. A
+    // pointer gesture draws and renders its own state before the microtask
+    // runs, which then finds nothing left to draw or render.
+    if (rendersOnChange) {
+      queueMicrotask(() => {
+        if (isDestroyed || isPresenting) return;
+        renderOnChange();
+      });
+    }
   });
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Tab" && interactionLayer) {
@@ -992,12 +1031,24 @@ export async function createPixiMediaScene(
     options.onDisplayChange?.(display);
   };
 
+  const updateMediaSampling = () => {
+    if (!mediaSprite) return;
+    const threshold = options.pixelInspection?.minScale;
+    if (threshold === undefined) return;
+    const source = mediaSprite.texture.source;
+    const mode = viewportScale >= threshold ? "nearest" : "linear";
+    if (source.scaleMode === mode) return;
+    source.scaleMode = mode;
+    source.style.update();
+  };
+
   const applyViewportTransform = () => {
     if (!mediaScene || !baseFit) return;
     const transform = viewport.getTransform();
     viewportScale = baseFit.scale * transform.scale;
     maskLayer?.setViewportScale(viewportScale);
     polygonLayer?.setViewportScale(viewportScale);
+    updateMediaSampling();
     mediaScene.scale.set(viewportScale);
     const box = syncPresentationBox();
     mediaScene.position.set(
@@ -1065,8 +1116,7 @@ export async function createPixiMediaScene(
 
   let unsubscribeDetectionTimeline: (() => void) | undefined;
 
-  if (frameChannel) {
-    frameChannel.onPresentedFrame(handlePresentedFrame);
+  if (rendersOnChange) {
     document.addEventListener?.("visibilitychange", handleVisibilityChange);
     // A detection load landing moves what the window covers exactly as a cook
     // landing does. Nothing else brings that to a resting playhead: the layers
@@ -1074,7 +1124,11 @@ export async function createPixiMediaScene(
     unsubscribeDetectionTimeline = options.detectionTimeline.subscribe?.(
       handlePreparedWindowChange,
     );
-  } else {
+  }
+
+  if (frameChannel) {
+    frameChannel.onPresentedFrame(handlePresentedFrame);
+  } else if (!stillFrame) {
     app.ticker.add(updateMediaSceneFit);
     app.ticker.add(drawAnnotationOverlayNow);
     app.ticker.add(tickFocusLayer);
@@ -1163,12 +1217,15 @@ export async function createPixiMediaScene(
     advanceFocus: () => undefined,
     drawAnnotationOverlay: frameChannel
       ? presentLayers.drawAnnotationOverlay
-      : () => undefined,
+      : stillFrame
+        ? (mediaTime) => drawAnnotationOverlay(mediaTime, overlayNow())
+        : () => undefined,
   };
 
   // A viewport-style redraw covers the layers whose geometry is a function of
-  // the viewport scale. Neither the mask raster nor the interaction hit map
-  // takes one, and the hit map is what decides the hover a pan must not move.
+  // the viewport scale. Mask outlines reuse the artifact already on screen;
+  // the mask raster and the interaction hit map stay untouched, so a pan
+  // does not change which detection is hovered.
   const viewportStyleRedrawLayers: FramePresentLayers = {
     ...annotationDrawLayers,
     drawBox: (mediaTime) => {
@@ -1177,7 +1234,7 @@ export async function createPixiMediaScene(
     },
     drawDepth: undefined,
     drawInteraction: undefined,
-    drawMask: undefined,
+    drawMask: () => maskLayer?.redrawViewportStyles(viewportScale),
   };
 
   let frameDrawTimings = createFrameDrawTimings();
@@ -1222,7 +1279,7 @@ export async function createPixiMediaScene(
 
   return {
     getRenderCount() {
-      return frameChannel ? renderScheduler.getRenderCount() : null;
+      return rendersOnChange ? renderScheduler.getRenderCount() : null;
     },
 
     getPreparedAnnotationWindow() {
@@ -1270,7 +1327,9 @@ export async function createPixiMediaScene(
       if (currentHeatmapRenderers.length > 0) {
         heatmapSlot.setDisplay(ensureHeatmapLayer().createContainer());
       }
-      boxSlot.setDisplay(retainedBoxes ?? boxes);
+      boxSlot.setDisplay(
+        retainedGeometry ? undefined : (retainedBoxes ?? boxes),
+      );
       vectorDisplay = new Container();
       attachPolygonLayerDisplay();
       vectorDisplay.addChild(vectorLayer.createContainer());
@@ -1361,6 +1420,7 @@ export async function createPixiMediaScene(
             sample.timestamp,
           );
           updateMediaSceneFit();
+          renderOnChange();
 
           return {
             ...createPresentedSampleState(
@@ -1385,6 +1445,7 @@ export async function createPixiMediaScene(
           sample.timestamp,
         );
         const fitMs = measure(updateMediaSceneFit);
+        renderOnChange();
 
         return {
           ...createPresentedSampleState(
@@ -1463,6 +1524,8 @@ export async function createPixiMediaScene(
         const brightness = adjustments.brightness ?? 1;
         const contrast = adjustments.contrast ?? 1;
         const filter = new ColorMatrixFilter();
+        // Preserve the renderer's pixel grid through the adjustment pass.
+        filter.resolution = "inherit";
         filter.brightness(brightness, false);
         filter.contrast(contrast - 1, true);
         if (mediaSprite) mediaSprite.filters = [filter];
@@ -1536,6 +1599,7 @@ export async function createPixiMediaScene(
     },
 
     panViewportBy(dx, dy) {
+      if (viewport.getTransform().locked) return;
       const before = viewport.getTransform();
       viewport.panBy(dx, dy);
       const after = viewport.getTransform();
@@ -1546,7 +1610,7 @@ export async function createPixiMediaScene(
     },
 
     zoomViewportAt(point, factor) {
-      if (!baseFit) return;
+      if (!baseFit || viewport.getTransform().locked) return;
       viewport.zoomAt(
         { x: point.x - baseFit.x, y: point.y - baseFit.y },
         factor,
@@ -1562,7 +1626,7 @@ export async function createPixiMediaScene(
     },
 
     zoomViewportFromWheel(point, deltaY) {
-      if (!baseFit) return;
+      if (!baseFit || viewport.getTransform().locked) return;
       viewport.zoomFromWheel(
         { x: point.x - baseFit.x, y: point.y - baseFit.y },
         deltaY,
@@ -1968,6 +2032,7 @@ export async function createPixiMediaScene(
         BlurFilter,
         BufferImageSource,
         Container,
+        Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
@@ -2547,7 +2612,7 @@ export async function createPixiMediaScene(
 
     const { boxState, regionState } = drawAnnotationFrame(currentMediaTime);
 
-    if (frameChannel) {
+    if (rendersOnChange) {
       const signature = describeSceneRender();
       if (forceRender) renderScheduler.render(signature);
       else if (!renderScheduler.renderOnChange(signature)) return;
@@ -2577,7 +2642,7 @@ export async function createPixiMediaScene(
     }
 
     if (isFramePrepared(mediaTime)) {
-      maskLayer.drawFrame(mediaTime, presentedFrameId);
+      maskLayer.drawFrame(mediaTime, presentedFrameId, viewportScale);
       return;
     }
 
@@ -2618,6 +2683,13 @@ export async function createPixiMediaScene(
     const frame = annotationDetectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
     const editingState = options.editingEngine?.getState();
+    const previewOverlay = options.previewOverlay?.() ?? null;
+    drawnEditingState = editingState;
+    // Only a scene that renders on change compares signatures.
+    if (rendersOnChange) {
+      drawnPreviewOverlayContent =
+        describePreviewOverlayContent(previewOverlay);
+    }
     annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,
@@ -2625,7 +2697,7 @@ export async function createPixiMediaScene(
       mediaWidth,
       now: overlayNowMs,
       pointer: interactionState?.pointerPoint ?? null,
-      previewOverlay: options.previewOverlay?.() ?? null,
+      previewOverlay,
       selectedDetectionIds: (interactionState?.selectedPicks ?? []).flatMap(
         ({ detection }) => (detection.id === undefined ? [] : [detection.id]),
       ),
@@ -2657,8 +2729,9 @@ export async function createPixiMediaScene(
 
   /**
    * Milliseconds for animations that are not annotation geometry. A pull scene
-   * has a ticker and reads the wall clock; a push scene has the presented media
-   * time and nothing else, so its animations move only when the media does.
+   * has a ticker and reads the wall clock, as does a still frame while its
+   * ticker runs; a push scene has the presented media time and nothing else,
+   * so its animations move only when the media does.
    */
   function overlayNow() {
     return frameChannel ? currentMediaTime * MILLISECONDS_PER_SECOND : now();
@@ -2716,7 +2789,21 @@ export async function createPixiMediaScene(
   }
 
   function renderScene() {
+    drawOverlayForEditingState();
     renderScheduler.render(describeSceneRender());
+  }
+
+  /**
+   * The render signature names the editing state, so a render must not record
+   * a state the overlay has not drawn: the redraw that follows would match the
+   * recorded signature and be skipped, leaving the old preview on screen.
+   */
+  function drawOverlayForEditingState() {
+    const editingState = options.editingEngine?.getState();
+    if (editingState === undefined || editingState === drawnEditingState) {
+      return;
+    }
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
   }
 
   /**
@@ -2749,14 +2836,47 @@ export async function createPixiMediaScene(
   }
 
   function renderNow() {
-    if (frameChannel) renderScene();
+    if (rendersOnChange) renderScene();
   }
 
   function renderOnChange() {
-    if (!frameChannel) return;
+    if (!rendersOnChange) return;
 
     settleFocusAnimation();
+    drawOverlayForEditingState();
     renderScheduler.renderOnChange(describeSceneRender());
+  }
+
+  /**
+   * Runs the ticker on a still frame for as long as something on it moves by
+   * the clock: a looping GIF region or a loading spinner. Pixi renders on
+   * every tick it runs, and the overlay redraws so the spinner turns. Each
+   * render checks again, so the ticker stops with the render that removes the
+   * last of them.
+   */
+  function syncStillFrameTicker() {
+    if (!stillFrame || isDestroyed) return;
+
+    const animating =
+      hasPresentedSample &&
+      (regionLayer.hasAnimatedDisplay() || hasLoadingDetections());
+
+    if (animating === stillFrameTickerRunning) return;
+    stillFrameTickerRunning = animating;
+
+    if (animating) {
+      app.ticker.add(drawAnnotationOverlayNow);
+      app.ticker.start();
+    } else {
+      app.ticker.stop();
+      app.ticker.remove(drawAnnotationOverlayNow);
+    }
+  }
+
+  function hasLoadingDetections() {
+    const loading = currentVisibility?.loadingDetectionIds;
+    if (!loading) return false;
+    return "size" in loading ? loading.size > 0 : loading.length > 0;
   }
 
   /**
@@ -2799,6 +2919,9 @@ export async function createPixiMediaScene(
       interactionState?.marqueeRect,
       options.editingEngine?.getState(),
       options.editingEngine ? interactionState?.pointerPoint : null,
+      // The host's preview is read when the overlay draws, and a host may edit
+      // its arrays in place, so its content is what tells a redraw it changed.
+      drawnPreviewOverlayContent,
     ];
   }
 
@@ -2829,11 +2952,24 @@ export async function createPixiMediaScene(
       });
       detached.width = mediaWidth;
       detached.height = mediaHeight;
+      const source = sprite.texture.source;
+      const displayScaleMode = source.scaleMode;
       try {
+        // Capture retains its baseline sampling even when pixel inspection
+        // changes display sampling. Extraction is synchronous, so the shared
+        // source can be restored before another frame draws.
+        if (displayScaleMode !== "linear") {
+          source.scaleMode = "linear";
+          source.style.update();
+        }
         return app.renderer.extract.canvas(
           detached,
         ) as unknown as HTMLCanvasElement;
       } finally {
+        if (displayScaleMode !== "linear") {
+          source.scaleMode = displayScaleMode;
+          source.style.update();
+        }
         detached.destroy();
       }
     };
@@ -2850,6 +2986,7 @@ export async function createPixiMediaScene(
         // takes the new size's scale while still drawing the previous size's
         // quad, so a preview-sized frame paints the media oversized.
         sprite.texture = new Texture({ dynamic: true, source: externalSource });
+        updateMediaSampling();
         sizeMediaSprite();
         return externalSource;
       },
@@ -3229,6 +3366,41 @@ function elapsedSince(start: number) {
 
 function now() {
   return globalThis.performance?.now?.() ?? Date.now();
+}
+
+/**
+ * A key for what a preview overlay draws, hashed from its coordinates rather
+ * than its arrays, so a preview the host edits in place still changes it.
+ * Coordinates count to a 256th of a media pixel, finer than anything drawn.
+ */
+function describePreviewOverlayContent(
+  overlay: PreviewOverlayData | null,
+): number | null {
+  if (!overlay) return null;
+
+  let hash = 0x811c9dc5;
+  const mix = (value: number) => {
+    hash = Math.imul(hash ^ value, 0x01000193);
+  };
+  const mixPoint = (point: Point) => {
+    mix(Math.round(point.x * 256));
+    mix(Math.round(point.y * 256));
+  };
+
+  for (const polygons of [overlay.hoverPolygons, overlay.draftPolygons]) {
+    mix(polygons?.length ?? -1);
+    for (const polygon of polygons ?? []) {
+      mix(polygon.length);
+      for (const point of polygon) mixPoint(point);
+    }
+  }
+  mix(overlay.points?.length ?? -1);
+  for (const point of overlay.points ?? []) {
+    mixPoint(point);
+    mix(point.positive ? 1 : 0);
+  }
+
+  return hash;
 }
 
 /**

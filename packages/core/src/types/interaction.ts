@@ -34,6 +34,10 @@ export interface DetectionPickResult {
 }
 
 export interface DetectionPickOptions {
+  /** Pick editable geometry by zIndex, then frame order, rather than area.
+   *  Rects accompanying masks or paths are bounds, not independent box targets;
+   *  mask fills stay below vector geometry. Defaults to false. */
+  readonly preferTopmost?: boolean;
   readonly padding?: number;
   readonly polylinePadding?: number;
   readonly keypointPadding?: number;

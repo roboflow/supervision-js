@@ -1,3 +1,4 @@
+import { createPixiMaskScreenStrokeRenderer } from "#renderers/pixi-mask-screen-stroke";
 import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
   pickDetectionByMaskId,
@@ -47,6 +48,7 @@ import type { MaskHaloPassGroup, PixiMaskHaloRenderer } from "./pixi-mask-halo";
 import type {
   BufferImageSource as PixiBufferImageSource,
   Container as PixiContainer,
+  Graphics as PixiGraphics,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
   Sprite as PixiSprite,
@@ -137,7 +139,9 @@ export interface PixiMaskLayer {
   drawFrame(
     mediaTime: number,
     presentedFrameId?: PresentedFrameId | null,
+    viewportScale?: number,
   ): void;
+  redrawViewportStyles(viewportScale: number): void;
   /** The state the last drawFrame or clearFrame left on screen. */
   getDrawnState(): PixiMaskLayerState;
   /** Puts the media time in front of the cook without drawing it. */
@@ -218,6 +222,7 @@ export function createPixiMaskLayer(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
   readonly BufferImageSource?: BufferImageSourceConstructor;
   readonly Container?: ContainerConstructor;
+  readonly Graphics?: new () => PixiGraphics;
   readonly ImageSource: ImageSourceConstructor;
   readonly Mesh?: InjectedMeshConstructor<PixiMesh>;
   readonly MeshGeometry?: InjectedMeshGeometryConstructor;
@@ -262,6 +267,9 @@ export function createPixiMaskLayer(options: {
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
   let maskSprite: PixiSprite | undefined;
+  let maskContainer: PixiContainer | undefined;
+  let screenStrokeRenderer:
+    ReturnType<typeof createPixiMaskScreenStrokeRenderer> | undefined;
   let visibleMaskFrameKey: string | null = null;
   let activeIdMaskFrame: PreparedIdMaskFrame | null = null;
   let activeRgbaMaskFrame: PreparedRgbaMaskFrame | null = null;
@@ -326,7 +334,7 @@ export function createPixiMaskLayer(options: {
         return maskSprite;
       }
 
-      const maskContainer = new options.Container();
+      maskContainer = new options.Container();
 
       // The halo draws beneath the mask so the glow bleeds outward from the
       // silhouette while fills and borders stay crisp on top.
@@ -339,7 +347,7 @@ export function createPixiMaskLayer(options: {
       return maskContainer;
     },
 
-    drawFrame(mediaTime, presentedFrameId = null) {
+    drawFrame(mediaTime, presentedFrameId = null, viewportScale = 1) {
       const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
 
       if (preparedFrame?.maskFrame) {
@@ -347,11 +355,18 @@ export function createPixiMaskLayer(options: {
           preparedFrame.maskFrame,
           preparedFrame.detectionFrame.mediaTime,
           presentedFrameId,
+          viewportScale,
         );
         return;
       }
 
       hideSprite();
+    },
+
+    redrawViewportStyles(viewportScale) {
+      if (!isFillVisible) return;
+      const frame = activeIdMaskFrame ?? activeRgbaMaskFrame;
+      if (frame) screenStrokeRenderer?.render(frame, viewportScale);
     },
 
     getDrawnState() {
@@ -519,6 +534,7 @@ export function createPixiMaskLayer(options: {
       preparedRenderWindow.destroy();
       destroyTextures();
       idMaskRenderer?.destroy();
+      screenStrokeRenderer?.destroy();
       haloRenderer?.destroy();
     },
   };
@@ -527,6 +543,7 @@ export function createPixiMaskLayer(options: {
     maskFrame: PreparedMaskFrame,
     mediaTime: number,
     presentedFrameId: PresentedFrameId | null,
+    viewportScale: number,
   ) {
     visibleMaskMediaTime = mediaTime;
     visibleMaskFrameKey = maskFrame.key;
@@ -543,6 +560,21 @@ export function createPixiMaskLayer(options: {
       hideFill();
       return;
     }
+
+    if (
+      !screenStrokeRenderer &&
+      maskFrame.screenStrokes?.length &&
+      options.Graphics
+    ) {
+      screenStrokeRenderer = createPixiMaskScreenStrokeRenderer({
+        Graphics: options.Graphics,
+        mediaWidth,
+        mediaHeight,
+      });
+      screenStrokeRenderer.display.alpha = maskOpacity;
+      maskContainer?.addChild(screenStrokeRenderer.display);
+    }
+    screenStrokeRenderer?.render(maskFrame, viewportScale);
 
     if (maskFrame.kind === PreparedMaskFrameKind.IdMask && idMaskRenderer) {
       showIdMaskFrame(maskFrame);
@@ -744,6 +776,7 @@ export function createPixiMaskLayer(options: {
     }
 
     idMaskRenderer?.hide();
+    screenStrokeRenderer?.hide();
   }
 
   /**
@@ -766,6 +799,7 @@ export function createPixiMaskLayer(options: {
     }
 
     idMaskRenderer?.setOpacity(maskOpacity);
+    if (screenStrokeRenderer) screenStrokeRenderer.display.alpha = maskOpacity;
   }
 
   function destroyTexture(key: string) {

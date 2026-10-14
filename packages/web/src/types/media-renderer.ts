@@ -84,6 +84,14 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    * pixels, which can be useful for long videos or browsers under load.
    */
   readonly maxDevicePixelRatio?: number;
+  /**
+   * Show distinct source pixels when the media-to-screen scale reaches
+   * `minScale` CSS pixels per natural media pixel (including contain/cover
+   * fit). Below that positive, finite threshold, media is smoothly sampled.
+   * Omit to retain smooth sampling at every zoom. Annotation styles and the
+   * source pixels returned by captureFrame are unaffected.
+   */
+  readonly pixelInspection?: { readonly minScale: number };
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
@@ -233,12 +241,12 @@ export interface MediaRenderer extends MediaRendererStateController {
    */
   getActiveDepth?(): ActiveDepthMap | null;
   /**
-   * Explicit renders issued under the render-on-change policy, which only a
-   * media source that pushes presented frames runs under: the count moves when
-   * something on screen changed, so a paused, untouched renderer holds it
-   * still. It is `null` when the renderer pulls samples instead, because Pixi's
-   * ticker then paints every animation frame and no count describes that, so a
-   * `null` here is an answer rather than a failure.
+   * Explicit renders issued under the render-on-change policy, which a media
+   * source that pushes presented frames and a still image run under: the count
+   * moves when something on screen changed, so a paused, untouched renderer
+   * holds it still. It is `null` when the renderer pulls samples from media
+   * that plays, because Pixi's ticker then paints every animation frame and no
+   * count describes that, so a `null` here is an answer rather than a failure.
    */
   getRenderCount(): number | null;
   /**
@@ -249,11 +257,15 @@ export interface MediaRenderer extends MediaRendererStateController {
   getPreparedAnnotationWindow(): PreparedAnnotationWindowSnapshot | null;
   destroy(): void;
   getViewportTransform(): import("supervision-js-core").ViewportTransform;
+  /** Apply an exact natural-media-to-CSS transform, including while locked.
+   * The scale must be positive and finite. Locking suppresses pointer viewport
+   * gestures; it does not block explicit toolbar or restored viewport state. */
   setViewportTransform(
     transform: Partial<
       Omit<import("supervision-js-core").ViewportTransform, "locked">
     >,
   ): void;
+  /** Prevent pointer viewport gestures without blocking explicit transforms. */
   setViewportLocked(locked: boolean): void;
   /** Convert container-relative CSS pixels to natural media pixels. */
   screenToMedia(

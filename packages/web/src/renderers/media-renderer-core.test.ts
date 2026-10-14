@@ -79,6 +79,38 @@ describe("media renderer core", () => {
     );
   });
 
+  it.each([
+    [0, true],
+    [0.12, false],
+  ])(
+    "tells the scene whether a source of duration %s is a still frame",
+    async (duration, stillFrame) => {
+      resetMocks();
+
+      const createSceneMock = vi.fn(async () => createScene());
+      const renderer = await createMediaRendererCore(
+        {
+          autoPlay: false,
+          container: {} as HTMLElement,
+          source: createSource(
+            [createMockSample(0, duration) as unknown as DecodedVideoSample],
+            { duration },
+          ),
+        } satisfies MediaRendererOptions,
+        {
+          createScene: createSceneMock,
+          openMediaSource: vi.fn(),
+        },
+      );
+
+      expect(createSceneMock).toHaveBeenCalledWith(
+        expect.objectContaining({ stillFrame }),
+      );
+
+      renderer.destroy();
+    },
+  );
+
   it("does not enter buffering when render preparation is already ready", async () => {
     resetMocks();
 

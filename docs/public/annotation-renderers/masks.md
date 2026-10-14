@@ -28,7 +28,12 @@ session.setPresentation({
       style: new BaseMaskStyle({
         fillAlpha: 1,
         opacity: 0.72,
-        stroke: { alpha: 1, width: 2, alignment: StrokeAlignment.Outside },
+        stroke: {
+          alpha: 1,
+          width: 2,
+          widthUnit: "screen",
+          alignment: StrokeAlignment.Outside,
+        },
       }),
     }),
   ],
@@ -37,15 +42,21 @@ session.setPresentation({
 
 `opacity` applies to the complete mask layer and can be updated cheaply.
 `fillAlpha` is part of prepared fill styling and remains separate so an outline
-can stay opaque.
+can stay opaque. Use `widthUnit: "screen"` for outlines measured in CSS pixels,
+like box outlines, with the same thickness through zoom and across mask
+resolutions. The renderer prepares the pixel boundaries once, including holes
+and disconnected components, without changing the semantic mask. Use
+`widthUnit: "mask"` to retain the source-mask-pixel radius, with the total
+outline spanning twice that radius and scaling with the fitted media and zoom.
 
-`stroke.width` is the total outline width in CSS pixels. A width of `1` stays
+With `widthUnit` omitted, `stroke.width` is the total outline width in CSS
+pixels, drawn by the prepared mask shader. A width of `1` stays
 one screen pixel across fitted media sizes and camera zoom; fractional coverage
 can distribute that width over adjacent pixels. `stroke.alignment` defaults to
 `Outside`, preserving the mask interior. Choose `Center` or `Inside` to split
 the outline across the boundary or place it inside.
 
-This corrects the previous behavior, where mask widths grew on both sides of
+This corrects the previous default, where mask widths grew on both sides of
 the boundary and scaled with the fitted media. Existing outlines can therefore
 appear thinner and move outward. Browser rendering bounds the outline to 16
 mask texels per side; very small fitted media can reach that limit and show a

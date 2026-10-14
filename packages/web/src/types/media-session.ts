@@ -232,6 +232,8 @@ export interface MediaSessionRendererOptions {
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
+  /** Opt into distinct source pixels when zoomed in. */
+  readonly pixelInspection?: MediaRendererOptions["pixelInspection"];
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly diagnostics?: MediaRendererOptions["diagnostics"];

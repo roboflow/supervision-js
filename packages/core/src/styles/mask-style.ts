@@ -125,7 +125,7 @@ function serializeStroke(stroke: MaskStrokeStyle | undefined) {
     return "none";
   }
 
-  return `${stroke.color}:${stroke.alpha}:${stroke.width}:${stroke.alignment}`;
+  return `${stroke.color}:${stroke.alpha}:${stroke.width}:${stroke.alignment}${stroke.widthUnit ? `:${stroke.widthUnit}` : ""}`;
 }
 
 function normalizeStroke(
@@ -141,6 +141,7 @@ function normalizeStroke(
     alpha: stroke.alpha ?? DEFAULT_MASK_STROKE_ALPHA,
     color: stroke.color ?? fallbackColor,
     width: stroke.width ?? DEFAULT_MASK_STROKE_WIDTH,
+    ...(stroke.widthUnit === undefined ? {} : { widthUnit: stroke.widthUnit }),
   };
 }
 

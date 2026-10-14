@@ -1,3 +1,4 @@
+import { createPixiMaskScreenStrokeRenderer } from "#renderers/pixi-mask-screen-stroke";
 import {
   idMaskStrokeCoverageGlsl,
   idMaskStrokeCoverageWgsl,
@@ -167,6 +168,7 @@ export function createPixiInteractionPresentationLayer(options: {
     options.interactionStyle === undefined
       ? new BaseInteractionStyle()
       : options.interactionStyle;
+  let displayContainer: PixiContainer | undefined;
   let mediaHeight = 0;
   let mediaWidth = 0;
   let syntheticFrame: DetectionFrame | undefined;
@@ -176,6 +178,8 @@ export function createPixiInteractionPresentationLayer(options: {
   let strokePixelRatio = 1;
   let maskRenderer: InteractionMaskRenderer | undefined;
   let labelDisplay: PixiContainer | null = null;
+  let screenStrokeRenderer:
+    ReturnType<typeof createPixiMaskScreenStrokeRenderer> | undefined;
   let isDestroyed = false;
 
   const syntheticTimeline = createSyntheticTimeline(() => syntheticFrame);
@@ -222,6 +226,7 @@ export function createPixiInteractionPresentationLayer(options: {
       }
 
       container.addChild(boxGraphics, vectors);
+      displayContainer = container;
 
       return container;
     },
@@ -239,6 +244,7 @@ export function createPixiInteractionPresentationLayer(options: {
       syntheticFrame = undefined;
       activePicks = [];
       maskRenderer?.destroy();
+      screenStrokeRenderer?.destroy();
       labelLayer.destroy();
       labelDisplay = null;
       vectorLayer.destroy();
@@ -412,6 +418,7 @@ export function createPixiInteractionPresentationLayer(options: {
     syntheticFrame = undefined;
     activePicks = [];
     maskRenderer?.hide();
+    screenStrokeRenderer?.hide();
     boxLayer.setBoxStyle(null);
     boxLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer.setLabelStyle(null);
@@ -427,6 +434,7 @@ export function createPixiInteractionPresentationLayer(options: {
   function drawMasks(artifact: PixiInteractionMaskArtifact | null | undefined) {
     if (!maskRenderer || !artifact) {
       maskRenderer?.hide();
+      screenStrokeRenderer?.hide();
       return;
     }
 
@@ -462,6 +470,7 @@ export function createPixiInteractionPresentationLayer(options: {
 
     if (instructions.length === 0) {
       maskRenderer.hide();
+      screenStrokeRenderer?.hide();
       return;
     }
 
@@ -470,6 +479,30 @@ export function createPixiInteractionPresentationLayer(options: {
       artifact.texture,
       instructions,
       strokePixelRatio,
+    );
+    if (
+      !screenStrokeRenderer &&
+      instructions.some(
+        ({ instruction }) => instruction.stroke?.widthUnit !== undefined,
+      )
+    ) {
+      screenStrokeRenderer = createPixiMaskScreenStrokeRenderer({
+        Graphics: options.Graphics,
+        mediaWidth,
+        mediaHeight,
+      });
+      displayContainer?.addChildAt(
+        screenStrokeRenderer.display,
+        maskRenderer ? 1 : 0,
+      );
+    }
+    screenStrokeRenderer?.render(
+      artifact.frame,
+      viewportScale,
+      instructions.map(({ detectionIndex, instruction }) => ({
+        detectionIndex,
+        stroke: instruction.stroke,
+      })),
     );
   }
 
@@ -802,7 +835,11 @@ function createInteractionMaskRenderer(options: {
           instruction.alpha,
         );
 
-        if (instruction.stroke && instruction.stroke.width > 0) {
+        if (
+          instruction.stroke &&
+          instruction.stroke.widthUnit === undefined &&
+          instruction.stroke.width > 0
+        ) {
           writeIdMaskPaletteEntry(
             strokePalette,
             maskId,

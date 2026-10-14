@@ -14,6 +14,7 @@ import type {
   MediaFrameRenderTimings,
   MediaRendererFit,
   MediaRendererPresentation,
+  MediaRendererOptions,
 } from "#types/media-renderer";
 import type {
   DetectionPickResult,
@@ -60,6 +61,7 @@ export interface MediaRendererSceneOptions {
   readonly backgroundColor: MediaRendererPresentation["backgroundColor"];
   readonly fit: MediaRendererFit;
   readonly maxDevicePixelRatio: number | undefined;
+  readonly pixelInspection?: MediaRendererOptions["pixelInspection"];
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
   readonly boxCornerStyle: BoxCornerStyle | null | undefined;
@@ -102,6 +104,12 @@ export interface MediaRendererSceneOptions {
    * of what the renderer pulls, and renders only when something changed.
    */
   readonly presentedFrames?: PresentedFrameSource;
+  /**
+   * The media is a single frame with nothing to play. The scene then renders
+   * only when something changed, as under push presentation, and runs the
+   * ticker only while something on the frame animates.
+   */
+  readonly stillFrame?: boolean;
 }
 
 export interface PresentedMediaSample {

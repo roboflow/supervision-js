@@ -11,6 +11,9 @@ export interface ViewportController {
   getTransform(): ViewportTransform;
   screenToMedia(point: Point): Point;
   mediaToScreen(point: Point): Point;
+  /** Explicit viewport updates remain available while gestures are locked.
+   * Positive finite scales are applied exactly, so a view restored against a
+   * new fit is not constrained by the ordinary gesture zoom range. */
   setTransform(transform: Partial<Omit<ViewportTransform, "locked">>): void;
   setLocked(locked: boolean): void;
   panBy(dx: number, dy: number): void;

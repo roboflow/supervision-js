@@ -14,6 +14,7 @@ import type {
 import type { Graphics as PixiGraphics } from "pixi.js";
 import type { Container as PixiContainer } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
+import { detectionRenderOrder } from "./detection-render-order";
 
 export interface PixiBoxLayerState {
   /** The frame this layer resolved and drew. The timeline's answer for one
@@ -46,6 +47,7 @@ export function createPixiBoxLayer(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
   readonly Container?: new () => PixiContainer;
+  readonly container?: PixiContainer;
   readonly Graphics?: new () => PixiGraphics;
   readonly resolveContextState?: (
     detection: Detection,
@@ -62,7 +64,7 @@ export function createPixiBoxLayer(options: {
   let hasDrawnDetectionFrame = false;
   let isDirty = true;
   let lastViewportScale = 0;
-  let retainedContainer: PixiContainer | undefined;
+  let retainedContainer = options.container;
   const retainedEntries = new Map<string, PixiGraphics>();
   const invalidatedDetections = new Set<string>();
   const renderedRects = new Map<number, Rect>();
@@ -137,7 +139,9 @@ export function createPixiBoxLayer(options: {
             activeKeys.add(key);
             const display = ensureRetainedEntry(key);
             display.visible = true;
-            display.zIndex = detection.zIndex ?? detectionIndex;
+            display.zIndex = options.container
+              ? detectionRenderOrder(detectionFrame)[detectionIndex]! * 2
+              : (detection.zIndex ?? detectionIndex);
             display.position?.set?.(0, 0);
             display.clear();
             drawBoxInstruction(display, instruction, viewportScale);
