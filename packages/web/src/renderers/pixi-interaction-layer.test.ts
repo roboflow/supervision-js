@@ -19,7 +19,7 @@ import {
   MediaInteractionMode,
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
-import type { DetectionFrame } from "supervision-js-core";
+import type { DetectionFrame, Rect } from "supervision-js-core";
 
 const frame: DetectionFrame = {
   detections: [
@@ -46,6 +46,174 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it("toggles editing selections through real pointerdown/up events without moving geometry", () => {
+    const onCommit = vi.fn();
+    const capturePointer = vi.fn();
+    const onSelectionChange = vi.fn();
+    const editingEngine = createAnnotationEditingEngine({ onCommit });
+    const boxes: DetectionFrame = {
+      ...frame,
+      detections: [
+        { id: "first", rect: { x: 40, y: 40, width: 40, height: 40 } },
+        { id: "second", rect: { x: 120, y: 40, width: 40, height: 40 } },
+      ],
+    };
+    const layer = createPixiInteractionLayer({
+      Container,
+      Rectangle,
+      canInteract: () => true,
+      capturePointer,
+      detectionTimeline: createTimeline(boxes),
+      editingEngine,
+      interaction: {
+        mode: MediaInteractionMode.Always,
+        multiSelect: true,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      width: 200,
+      height: 100,
+    }) as Container;
+    const boundary = new EventBoundary(display);
+    const send = (type: string, x: number, shiftKey = false) => {
+      const event = new FederatedPointerEvent(boundary);
+      event.type = type;
+      event.pointerType = "mouse";
+      event.pointerId = 1;
+      event.button = 0;
+      event.shiftKey = shiftKey;
+      event.global.set(x, 40);
+      boundary.mapEvent(event);
+    };
+    const click = (x: number, shiftKey = false) => {
+      send("pointerdown", x, shiftKey);
+      send("pointerup", x, shiftKey);
+    };
+    layer.drawFrame(frame.mediaTime);
+    click(40);
+    capturePointer.mockClear();
+    onSelectionChange.mockClear();
+
+    send("pointerdown", 120, true);
+    expect(editingEngine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    send("pointermove", 125, true);
+    send("pointerup", 120, true);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual(["first", "second"]);
+    expect(onSelectionChange).toHaveBeenCalledOnce();
+    expect(capturePointer).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+
+    click(40, true);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual(["second"]);
+    click(120, true);
+    expect(layer.getState().selectedPicks).toEqual([]);
+    expect(onSelectionChange).toHaveBeenCalledTimes(3);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "keeps normal editing routing when multiSelect is %s and a creation tool is active",
+    (multiSelect) => {
+      const onCommit = vi.fn();
+      const editingEngine = createAnnotationEditingEngine({ onCommit });
+      const boxes: DetectionFrame = {
+        ...frame,
+        detections: [
+          { id: "first", rect: { x: 30, y: 30, width: 30, height: 30 } },
+          { id: "second", rect: { x: 90, y: 30, width: 30, height: 30 } },
+        ],
+      };
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline(boxes),
+        editingEngine,
+        interaction: { mode: MediaInteractionMode.Always, multiSelect },
+      });
+      const display = layer.createDisplay({
+        width: 160,
+        height: 120,
+      }) as FakeContainer;
+      layer.drawFrame(frame.mediaTime);
+      layer.setSelectedDetection({ detectionId: "first" });
+      if (multiSelect) {
+        editingEngine.setCreationTool({
+          geometry: AnnotationGeometryKind.Box,
+          createDetection: (rect) => ({ id: "created", rect: rect as Rect }),
+        });
+      }
+      const input = createPointerEvent(display, 90, 30, {
+        button: 0,
+        pointerId: 1,
+        shiftKey: true,
+      });
+      display.emit("pointerdown", input);
+      expect(editingEngine.getState().kind).toBe(
+        multiSelect
+          ? AnnotationGestureStateKind.Creating
+          : AnnotationGestureStateKind.Moving,
+      );
+      display.emit("pointerup", input);
+      display.emit("pointertap", input);
+      expect(
+        layer.getState().selectedPicks.map((pick) => pick.detection.id),
+      ).toEqual([multiSelect ? "first" : "second"]);
+      expect(onCommit).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["shift", "secondary"] as const)(
+    "preserves %s vertex deletion before multi-selection",
+    (modifier) => {
+      const onCommit = vi.fn();
+      const editingEngine = createAnnotationEditingEngine({ onCommit });
+      const polygon = {
+        id: "polygon",
+        polygon: {
+          points: [
+            { x: 20, y: 20 },
+            { x: 80, y: 20 },
+            { x: 80, y: 80 },
+            { x: 20, y: 80 },
+          ],
+        },
+      };
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline({ ...frame, detections: [polygon] }),
+        editingEngine,
+        interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+      });
+      const display = layer.createDisplay({
+        width: 120,
+        height: 100,
+      }) as FakeContainer;
+      layer.drawFrame(frame.mediaTime);
+      layer.setSelectedDetection({ detectionId: "polygon" });
+      const input = createPointerEvent(display, 20, 20, {
+        button: modifier === "shift" ? 0 : 2,
+        pointerId: 1,
+        shiftKey: modifier === "shift",
+      });
+      display.emit("pointerdown", input);
+      display.emit("pointerup", input);
+      if (modifier === "shift") display.emit("pointertap", input);
+      expect(onCommit).toHaveBeenCalledOnce();
+      expect(onCommit.mock.calls[0]?.[0].polygon.points).toHaveLength(3);
+      expect(
+        layer.getState().selectedPicks.map((pick) => pick.detection.id),
+      ).toEqual(["polygon"]);
+    },
+  );
+
   it.each(["move", "resize", "create"] as const)(
     "keeps a %s preview bounded and synchronized with captured moves outside the media",
     (gesture) => {
@@ -371,6 +539,53 @@ describe("pixi interaction layer", () => {
         detection: expect.objectContaining({ id: "ball-1" }),
       }),
     ]);
+  });
+
+  it("keeps duplicate-id detections distinct when Shift toggles an editing selection", () => {
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline({
+        ...frame,
+        detections: [
+          { id: "duplicate", rect: { x: 30, y: 30, width: 30, height: 30 } },
+          { id: "duplicate", rect: { x: 90, y: 30, width: 30, height: 30 } },
+        ],
+      }),
+      editingEngine: createAnnotationEditingEngine(),
+      interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+    });
+    const display = layer.createDisplay({
+      width: 150,
+      height: 100,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    const click = (x: number, shiftKey = false) => {
+      const event = createPointerEvent(display, x, 30, {
+        button: 0,
+        pointerId: 1,
+        shiftKey,
+      });
+      display.emit("pointerdown", event);
+      display.emit("pointerup", event);
+      display.emit("pointertap", event);
+    };
+    click(30);
+    click(90, true);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detectionIndex),
+    ).toEqual([0, 1]);
+    click(30, true);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detectionIndex),
+    ).toEqual([1]);
+    layer.setSelectedDetection({
+      detectionIndex: 1,
+      target: DetectionPickTarget.Label,
+    });
+    click(90, true);
+    expect(layer.getState().selectedPicks).toEqual([]);
   });
 
   it("prefers exact mask picks without advertising an unsupported move", () => {
@@ -1312,6 +1527,131 @@ describe("pixi interaction layer", () => {
     expect(layer.setSelectedDetection(null)).toBeNull();
     expect(layer.getState().selectedPick).toBeNull();
     expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
+
+  it("restores ordered host multi-selections, filters missing ids, and clears or narrows them", () => {
+    const onSelectionChange = vi.fn();
+    let activeFrame: DetectionFrame = {
+      ...frame,
+      detections: [
+        { id: "first", rect: { x: 30, y: 30, width: 20, height: 20 } },
+        { id: 1, rect: { x: 60, y: 30, width: 20, height: 20 } },
+        { id: "1", rect: { x: 90, y: 30, width: 20, height: 20 } },
+        { id: "hidden", rect: { x: 120, y: 30, width: 20, height: 20 } },
+      ],
+    };
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      canPickDetection: (detection) => detection.id !== "hidden",
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.Always,
+        multiSelect: true,
+        onSelectionChange,
+      },
+    });
+    layer.createDisplay({ width: 160, height: 80 });
+    layer.drawFrame(frame.mediaTime);
+    const selection = {
+      detectionId: "first",
+      detectionIds: ["first", "missing", "hidden", 1, "1", "first"],
+    };
+    expect(layer.setSelectedDetection(selection)?.detection.id).toBe("1");
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual(["first", 1, "1"]);
+    layer.setSelectedDetection(selection);
+    expect(onSelectionChange).toHaveBeenCalledOnce();
+
+    activeFrame = {
+      ...activeFrame,
+      detections: activeFrame.detections.map((detection) => ({
+        ...detection,
+        className: "updated",
+      })),
+    };
+    layer.drawFrame(frame.mediaTime);
+    layer.setSelectedDetection(selection);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.className),
+    ).toEqual(["updated", "updated", "updated"]);
+    expect(onSelectionChange).toHaveBeenCalledOnce();
+
+    // The primary pick is unchanged, but membership still changes.
+    layer.setSelectedDetection({ detectionId: "1" });
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual(["1"]);
+    expect(onSelectionChange).toHaveBeenCalledTimes(2);
+    layer.setSelectedDetection({ detectionIds: ["1", "first"] });
+    expect(layer.getState().selectedPick?.detection.id).toBe("first");
+    expect(layer.setSelectedDetection({ detectionIds: [] })).toBeNull();
+    expect(layer.getState().selectedPicks).toEqual([]);
+    expect(
+      layer.setSelectedDetection({ detectionIds: ["missing"] }),
+    ).toBeNull();
+    expect(layer.getState().selectedPicks).toEqual([]);
+  });
+
+  it("keeps marquee multi-selection through the editing-engine pointer sequence", () => {
+    const onCommit = vi.fn();
+    const onSelectionChange = vi.fn();
+    const editingEngine = createAnnotationEditingEngine({ onCommit });
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline({
+        ...frame,
+        detections: [
+          { id: "first", rect: { x: 30, y: 30, width: 20, height: 20 } },
+          { id: "second", rect: { x: 70, y: 30, width: 20, height: 20 } },
+          { id: "outside", rect: { x: 120, y: 30, width: 20, height: 20 } },
+        ],
+      }),
+      editingEngine,
+      interaction: {
+        mode: MediaInteractionMode.Always,
+        multiSelect: true,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      width: 160,
+      height: 80,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 5, 5, {
+        button: 0,
+        pointerId: 1,
+        shiftKey: true,
+      }),
+    );
+    display.emit(
+      "pointermove",
+      createPointerEvent(display, 90, 60, { pointerId: 1, shiftKey: true }),
+    );
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 90, 60, {
+        button: 0,
+        pointerId: 1,
+        shiftKey: true,
+      }),
+    );
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 90, 60, { shiftKey: true }),
+    );
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual(["first", "second"]);
+    expect(onSelectionChange).toHaveBeenCalledOnce();
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it("previews a dragged keypoint at the pointer before the gesture commits", () => {

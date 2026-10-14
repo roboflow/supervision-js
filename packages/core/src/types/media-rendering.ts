@@ -322,6 +322,10 @@ export interface AnnotationVisibility {
 }
 
 export interface MediaDisplayAdjustments {
+  /** Gamma correction; 1 is unchanged and larger values brighten midtones. */
+  readonly gamma?: number;
+  /** CLAHE for still images. Replaces manual contrast; ignored for video. */
+  readonly autoContrast?: boolean;
   /** Normalized contrast where 1 is unchanged. */
   readonly contrast?: number;
   /** Normalized brightness where 1 is unchanged. */

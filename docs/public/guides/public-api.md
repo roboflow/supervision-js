@@ -384,6 +384,22 @@ fills stay below vector geometry. Keypoints and edges retain priority within
 the chosen detection. Leave this option unset for the default smallest-object
 policy or when accompanying rectangles are independent box targets.
 
+Enable `interaction.multiSelect` for Shift-click selection toggles and
+drag-selection from empty space. `onSelectionChange` reports the full ordered
+selection; `onSelect` reports its primary pick. Shift-clicking a detection in
+Select mode changes selection without starting a move. Shift-click and the
+secondary button still delete an editable polygon/polyline vertex when its
+selected vertex handle is hit; active creation tools keep their gesture priority.
+
+Restore host-owned selections with
+`session.renderer.setSelectedDetection({ detectionIds: selectedIds })`.
+Duplicate ids are ignored, missing or hidden detections are excluded, and the
+last valid id is the primary pick returned by the method. An empty list clears
+selection. `detectionIds` takes precedence over `detectionId` or
+`detectionIndex` when supplied together; singular selectors continue to select
+one detection. Use the full list rather than restoring only the primary pick
+after a refresh or application state update.
+
 Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
 keeps a selection drag alive when the engine is already in Select mode. To
 abort a gesture explicitly, call `engine.cancel()`.
@@ -552,6 +568,14 @@ only media display: annotations keep their configured styles, and `captureFrame(
 still returns the presented source pixels. Brightness/contrast adjustments retain
 the configured renderer resolution, including on Retina displays. Omit the option for smooth sampling
 at every zoom.
+
+`renderer.setDisplayAdjustments({ brightness, contrast, gamma, autoContrast })`
+changes only media display. Brightness, contrast and gamma default to `1`; gamma
+above `1` brightens midtones. For still images, `autoContrast: true` applies
+Contrast Limited Adaptive Histogram Equalization (CLAHE) instead of manual
+contrast. Brightness and gamma remain active. Auto contrast is ignored for video;
+passing an empty object restores the unadjusted display. Source pixels and
+annotation styles are unchanged.
 
 `renderer.setViewportTransform({ scale, x, y })` applies an exact transform in
 natural media pixels and container-relative CSS pixels. Explicit updates work

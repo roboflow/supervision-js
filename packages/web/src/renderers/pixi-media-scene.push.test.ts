@@ -10,6 +10,7 @@ import {
   RegionRendererSourceKind,
   type DepthMap,
   type DetectionFrame,
+  type MediaDisplayAdjustments,
 } from "supervision-js-core";
 
 import type {
@@ -59,6 +60,7 @@ interface MockTextureInstance {
  */
 interface PaintedSprite {
   readonly destroy: ReturnType<typeof vi.fn>;
+  readonly filters?: unknown[];
   readonly quad: { height: number; width: number };
   readonly scale: { x: number; y: number };
 }
@@ -339,7 +341,31 @@ vi.mock("pixi.js", () => {
 
   class Destroyable {
     destroy = vi.fn();
+    resize = vi.fn();
+    update = vi.fn();
     style = {};
+  }
+
+  class Filter extends Stub {
+    static from(options: { resources: Record<string, unknown> }) {
+      const definitions = options.resources.inspectionUniforms as Record<
+        string,
+        { value: unknown }
+      >;
+      return {
+        destroy: vi.fn(),
+        resources: {
+          inspectionUniforms: {
+            uniforms: Object.fromEntries(
+              Object.entries(definitions).map(([name, definition]) => [
+                name,
+                definition.value,
+              ]),
+            ),
+          },
+        },
+      };
+    }
   }
 
   class UniformGroup {
@@ -365,7 +391,8 @@ vi.mock("pixi.js", () => {
     Container,
     defaultFilterVert: "default-filter-vertex",
     ExternalSource,
-    Filter: Stub,
+    Filter,
+    Matrix: class {},
     Graphics,
     ImageSource: Destroyable,
     Mesh,
@@ -384,7 +411,12 @@ vi.mock("pixi.js", () => {
 vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
 
 /** Shared so a test can see what the staging fallback drew into it. */
-const stagingContext = { drawImage: vi.fn() };
+const stagingContext = {
+  drawImage: vi.fn(),
+  getImageData: (_x: number, _y: number, width: number, height: number) => ({
+    data: new Uint8ClampedArray(width * height * 4).fill(100),
+  }),
+};
 
 function createBrushCanvas(): HTMLCanvasElement {
   const circles: Array<{ x: number; y: number; radius: number }> = [];
@@ -1231,6 +1263,58 @@ describe("push-presented Pixi scene", () => {
     ]);
   });
 
+  it("repaints Gamma and still-image Auto without filtering annotations, and Reset restores manual contrast", async () => {
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(undefined),
+      stillFrame: true,
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    const sample = { timestamp: 0, duration: 0, draw: vi.fn(), close: vi.fn() };
+    scene.presentSample(sample);
+    const original = scene.getRenderCount?.() ?? 0;
+    await applyDisplayAdjustment(scene, { gamma: 2, contrast: 1.8 });
+    expect(scene.getRenderCount?.()).toBe(original + 1);
+    const filtered = pixiMock.sprites.filter(
+      (sprite) => sprite.filters?.length,
+    );
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.filters).toHaveLength(2);
+
+    await applyDisplayAdjustment(scene, {
+      gamma: 2,
+      contrast: 1.8,
+      autoContrast: true,
+    });
+    expect(scene.getRenderCount?.()).toBe(original + 2);
+    expect(pixiMock.displayFilters.at(-1)).toMatchObject({
+      contrast: expect.any(Function),
+    });
+    const auto = pixiMock.displayFilters.at(-1) as {
+      contrast: ReturnType<typeof vi.fn>;
+    };
+    expect(auto.contrast).toHaveBeenCalledWith(0, true);
+    await applyDisplayAdjustment(scene, {
+      gamma: 2,
+      contrast: 1.8,
+      autoContrast: true,
+    });
+    expect(scene.getRenderCount?.()).toBe(original + 2);
+
+    await applyDisplayAdjustment(scene, {
+      gamma: 1,
+      contrast: 1.8,
+      autoContrast: false,
+    });
+    expect(scene.getRenderCount?.()).toBe(original + 3);
+    expect(filtered[0]?.filters).toHaveLength(1);
+    const manual = pixiMock.displayFilters.at(-1) as {
+      contrast: ReturnType<typeof vi.fn>;
+    };
+    expect(manual.contrast).toHaveBeenCalledWith(0.8, true);
+    scene.destroy();
+  });
+
   it("keeps the media on the staging canvas when the device refuses a decoded frame", async () => {
     // The refusal lands on the capability probe, which is the first copy the
     // scene asks for. Firefox refuses every one after it too, and the point of
@@ -1478,10 +1562,13 @@ describe("push-presented Pixi scene", () => {
  * against the real Pixi rather than the mock, so they go one at a time, and the
  * filter each one builds is what says the write landed.
  */
-async function applyDisplayAdjustment(scene: MediaRendererScene) {
+async function applyDisplayAdjustment(
+  scene: MediaRendererScene,
+  adjustments: MediaDisplayAdjustments = { brightness: 1.4, contrast: 0.8 },
+) {
   const built = pixiMock.displayFilters.length + 1;
 
-  scene.setDisplayAdjustments?.({ brightness: 1.4, contrast: 0.8 });
+  scene.setDisplayAdjustments?.(adjustments);
   await vi.waitFor(() => expect(pixiMock.displayFilters).toHaveLength(built));
 }
 

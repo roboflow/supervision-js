@@ -70,10 +70,18 @@ export type DetectionSelectionOptions = DetectionSelectionOptionsBase &
     | {
         readonly detectionId: string | number;
         readonly detectionIndex?: number;
+        readonly detectionIds?: never;
       }
     | {
         readonly detectionId?: string | number;
         readonly detectionIndex: number;
+        readonly detectionIds?: never;
+      }
+    | {
+        /** Ordered selection; takes precedence over singular selectors. */
+        readonly detectionIds: readonly (string | number)[];
+        readonly detectionId?: string | number;
+        readonly detectionIndex?: number;
       }
   );
 
