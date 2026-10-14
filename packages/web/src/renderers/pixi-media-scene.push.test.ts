@@ -1324,6 +1324,17 @@ describe("push-presented Pixi scene", () => {
       contrast: ReturnType<typeof vi.fn>;
     };
     expect(manual.contrast).toHaveBeenCalledWith(0.8, true);
+    await applyDisplayAdjustment(scene, { gamma: 2, autoContrast: true });
+    expect(scene.getRenderCount?.()).toBe(original + 4);
+    await applyDisplayAdjustment(scene, {});
+    expect(scene.getRenderCount?.()).toBe(original + 5);
+    const identity = pixiMock.displayFilters.at(-1) as {
+      brightness: ReturnType<typeof vi.fn>;
+      contrast: ReturnType<typeof vi.fn>;
+    };
+    expect(filtered[0]?.filters).toStrictEqual([identity]);
+    expect(identity.brightness).toHaveBeenCalledWith(1, false);
+    expect(identity.contrast).toHaveBeenCalledWith(0, true);
     scene.destroy();
   });
 
