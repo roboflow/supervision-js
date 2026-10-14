@@ -128,7 +128,6 @@ export function createPixiInteractionLayer(options: {
   let hoveredPick: DetectionPickResult | null = null;
   let hoveredPickKey: string | null = null;
   let selectedPick: DetectionPickResult | null = null;
-  let selectedPickKey: string | null = null;
   let selectedPicks: DetectionPickResult[] = [];
   let marqueeStart: DetectionPickPoint | null = null;
   let marqueeRect: PixiInteractionLayerState["marqueeRect"] = null;
@@ -191,11 +190,23 @@ export function createPixiInteractionLayer(options: {
         return null;
       }
 
-      const nextPick = createPickFromSelection(selection);
+      const nextPicks = selection.detectionIds
+        ? [...new Set(selection.detectionIds)].flatMap((detectionId) => {
+            const pick = createPickFromSelection({
+              detectionId,
+              mediaTime: selection.mediaTime,
+              point: selection.point,
+              target: selection.target,
+            });
+            return pick ? [pick] : [];
+          })
+        : [createPickFromSelection(selection)].filter(
+            (pick): pick is DetectionPickResult => pick !== null,
+          );
 
-      setSelectedPick(nextPick);
+      setSelectedPicks(nextPicks);
 
-      return nextPick;
+      return nextPicks.at(-1) ?? null;
     },
 
     getState() {
@@ -356,6 +367,21 @@ export function createPixiInteractionLayer(options: {
         return;
       }
 
+      if (
+        options.interaction.multiSelect &&
+        event.shiftKey &&
+        pick &&
+        !options.editingEngine.hasCreationTool() &&
+        options.editingEngine.getState().kind ===
+          AnnotationGestureStateKind.Idle
+      ) {
+        // Selection modifiers must run before the editing engine captures a
+        // move. The following pointertap belongs to this same toggle.
+        toggleSelectedPick(pick);
+        suppressNextTap = true;
+        return;
+      }
+
       // Keep selection owned by this layer. The editing engine deliberately
       // treats a click as a cancelled move, so it cannot establish selection
       // itself; selecting here also makes resize handles available on the next
@@ -397,7 +423,7 @@ export function createPixiInteractionLayer(options: {
     }
     if (!marqueeStart) return;
     if (didDragMarquee && marqueeRect && activeFrame) {
-      selectedPicks = activeFrame.detections.flatMap(
+      const nextPicks = activeFrame.detections.flatMap(
         (detection, detectionIndex) => {
           if (!canPickDetection(detection)) return [];
           const rect = getDetectionRect(detection);
@@ -418,10 +444,7 @@ export function createPixiInteractionLayer(options: {
           ];
         },
       );
-      selectedPick = selectedPicks.at(-1) ?? null;
-      selectedPickKey = createDetectionPickKey(selectedPick);
-      options.interaction.onSelect?.(selectedPick);
-      options.interaction.onSelectionChange?.(selectedPicks);
+      setSelectedPicks(nextPicks);
     }
     marqueeStart = null;
     marqueeRect = null;
@@ -565,7 +588,6 @@ export function createPixiInteractionLayer(options: {
       return;
     }
 
-    selectedPickKey = createDetectionPickKey(selectedPick);
     // A followed pick re-bases onto every new frame, so its full pick key
     // changes at playback rate. The scene's normal frame path consumes this
     // refreshed state immediately; emitting onStateChange here would redraw
@@ -601,17 +623,23 @@ export function createPixiInteractionLayer(options: {
   }
 
   function setSelectedPick(nextPick: DetectionPickResult | null) {
-    const nextKey = createDetectionPickKey(nextPick);
+    setSelectedPicks(nextPick ? [nextPick] : []);
+  }
 
-    if (nextKey === selectedPickKey) {
-      selectedPick = nextPick;
-      return;
-    }
+  function setSelectedPicks(nextPicks: DetectionPickResult[]) {
+    const unchanged =
+      selectedPicks.length === nextPicks.length &&
+      selectedPicks.every(
+        (pick, index) =>
+          createDetectionPickKey(pick) ===
+          createDetectionPickKey(nextPicks[index]!),
+      );
 
-    selectedPick = nextPick;
-    selectedPicks = nextPick ? [nextPick] : [];
-    selectedPickKey = nextKey;
-    options.interaction.onSelect?.(nextPick);
+    selectedPicks = nextPicks;
+    selectedPick = nextPicks.at(-1) ?? null;
+    if (unchanged) return;
+
+    options.interaction.onSelect?.(selectedPick);
     options.interaction.onSelectionChange?.(selectedPicks);
     notifyStateChange();
   }
@@ -632,19 +660,25 @@ export function createPixiInteractionLayer(options: {
 
   function toggleSelectedPick(pick: DetectionPickResult | null) {
     if (!pick) return;
-    const key = createDetectionPickKey(pick);
+    const key = createSelectionKey(pick);
     const index = selectedPicks.findIndex(
-      (candidate) => createDetectionPickKey(candidate) === key,
+      (candidate) => createSelectionKey(candidate) === key,
     );
-    selectedPicks =
+    setSelectedPicks(
       index >= 0
         ? selectedPicks.filter((_, candidateIndex) => candidateIndex !== index)
-        : [...selectedPicks, pick];
-    selectedPick = selectedPicks.at(-1) ?? null;
-    selectedPickKey = createDetectionPickKey(selectedPick);
-    options.interaction.onSelect?.(selectedPick);
-    options.interaction.onSelectionChange?.(selectedPicks);
-    notifyStateChange();
+        : [...selectedPicks, pick],
+    );
+  }
+
+  function createSelectionKey(pick: DetectionPickResult) {
+    // Selection toggles the detection, regardless of whether its body, label,
+    // or keypoint was hit. Keep the picker's frame/index fallback for duplicate ids.
+    return createDetectionPickKey({
+      ...pick,
+      geometryIndex: undefined,
+      target: DetectionPickTarget.Box,
+    });
   }
 
   function getPoint(event: PixiInteractionPointerEvent) {

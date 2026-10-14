@@ -110,7 +110,7 @@ console.log(state.status, state.activities);
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">03</span>
         <h3>Interaction and editing</h3>
-        <p>Renderer-synchronized picking plus host-owned editing engines, persistence, undo/redo policy, and annotation commits.</p>
+        <p>Renderer-synchronized picking, Shift-click and marquee selection, plus host-owned editing engines, persistence, undo/redo policy, and annotation commits. Restore the full selection through <code>setSelectedDetection({ detectionIds })</code>.</p>
         <a href="documents/Recipes.Interactive_Picking.html">Interactive picking</a>
       </article>
     </div>

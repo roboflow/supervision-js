@@ -59,6 +59,7 @@ import type {
   PresentedVideoFrame,
 } from "./presented-frame-channel";
 import { createSceneRenderScheduler } from "./scene-render-scheduler";
+import { createPixiMediaInspectionFilter } from "./pixi-media-inspection-filter";
 import type { SceneRenderSignature } from "./scene-render-scheduler";
 import { createPreparedAnnotationWindow } from "./prepared-annotation-window";
 import {
@@ -353,6 +354,10 @@ export async function createPixiMediaScene(
   let isScrubbing = false;
   let displayBrightness = 1;
   let displayContrast = 1;
+  let displayGamma = 1;
+  let displayAutoContrast = false;
+  let inspectionFilter:
+    ReturnType<typeof createPixiMediaInspectionFilter> | undefined;
   let viewportScale = 1;
   let hasPresentedSample = false;
   let mediaHeight = 0;
@@ -1412,6 +1417,7 @@ export async function createPixiMediaScene(
         if (!collectFrameTimings) {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           presentedSampleTimestamp = sample.timestamp;
+          refreshInspectionImage();
           stagingTextureSource?.update();
           stagingTexture?.update();
 
@@ -1437,6 +1443,7 @@ export async function createPixiMediaScene(
         const mediaUploadMs = measure(() => {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           presentedSampleTimestamp = sample.timestamp;
+          refreshInspectionImage();
           stagingTextureSource?.update();
           stagingTexture?.update();
         });
@@ -1521,14 +1528,32 @@ export async function createPixiMediaScene(
 
     setDisplayAdjustments(adjustments) {
       void import("pixi.js").then(({ ColorMatrixFilter }) => {
+        if (isDestroyed) return;
         const brightness = adjustments.brightness ?? 1;
         const contrast = adjustments.contrast ?? 1;
         const filter = new ColorMatrixFilter();
         // Preserve the renderer's pixel grid through the adjustment pass.
         filter.resolution = "inherit";
         filter.brightness(brightness, false);
-        filter.contrast(contrast - 1, true);
-        if (mediaSprite) mediaSprite.filters = [filter];
+        displayGamma = adjustments.gamma ?? 1;
+        displayAutoContrast = stillFrame && adjustments.autoContrast === true;
+        filter.contrast(displayAutoContrast ? 0 : contrast - 1, true);
+        if (mediaSprite) {
+          if (displayGamma !== 1 || displayAutoContrast) {
+            inspectionFilter ??= createPixiMediaInspectionFilter(
+              mediaSprite,
+              pixi,
+            );
+            inspectionFilter.update(
+              displayGamma,
+              displayAutoContrast,
+              hasPresentedSample ? stagingCanvas : null,
+            );
+            mediaSprite.filters = [inspectionFilter.filter, filter];
+          } else {
+            mediaSprite.filters = [filter];
+          }
+        }
         displayBrightness = brightness;
         displayContrast = contrast;
         renderOnChange();
@@ -1915,6 +1940,7 @@ export async function createPixiMediaScene(
       labelLayer?.setBackgroundAntialiasFilter(null);
       interactionPresentationLayer?.setBackgroundAntialiasFilter(null);
       annotationAntialiasLayer.destroy();
+      inspectionFilter?.destroy();
       mediaCompositor?.destroy();
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
@@ -2873,6 +2899,12 @@ export async function createPixiMediaScene(
     }
   }
 
+  function refreshInspectionImage() {
+    if (!stillFrame || !inspectionFilter) return;
+    inspectionFilter.invalidateImage();
+    inspectionFilter.update(displayGamma, displayAutoContrast, stagingCanvas);
+  }
+
   function hasLoadingDetections() {
     const loading = currentVisibility?.loadingDetectionIds;
     if (!loading) return false;
@@ -2905,6 +2937,8 @@ export async function createPixiMediaScene(
       app.renderer.resolution,
       displayBrightness,
       displayContrast,
+      displayGamma,
+      displayAutoContrast,
       ...RENDERED_PRESENTATION_FIELDS.map(
         (field) => appliedPresentation?.[field],
       ),
