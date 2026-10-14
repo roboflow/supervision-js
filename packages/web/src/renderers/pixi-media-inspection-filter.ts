@@ -184,6 +184,7 @@ export function createPixiMediaInspectionFilter(
           pixels[i * 4 + 3] = 255;
         }
         uniforms.uTiles.set([tilesX, tilesY]);
+        lutSource.resource = pixels.subarray(0, luts.length * 4);
         lutSource.resize(256, tilesX * tilesY);
         lutSource.update();
         hasHistogram = true;

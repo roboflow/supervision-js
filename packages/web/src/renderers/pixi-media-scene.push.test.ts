@@ -68,7 +68,9 @@ interface PaintedSprite {
 // Push mode asks Pixi for WebGPU, so the mock renderer carries a device: the
 // scene then composites through the GPU path production runs, not the staging
 // canvas fallback.
-vi.mock("pixi.js", () => {
+vi.mock("pixi.js", async (importOriginal) => {
+  const { BufferImageSource } =
+    await importOriginal<typeof import("pixi.js")>();
   class Stub {
     destroy = vi.fn();
   }
@@ -341,8 +343,6 @@ vi.mock("pixi.js", () => {
 
   class Destroyable {
     destroy = vi.fn();
-    resize = vi.fn();
-    update = vi.fn();
     style = {};
   }
 
@@ -355,6 +355,7 @@ vi.mock("pixi.js", () => {
       return {
         destroy: vi.fn(),
         resources: {
+          ...options.resources,
           inspectionUniforms: {
             uniforms: Object.fromEntries(
               Object.entries(definitions).map(([name, definition]) => [
@@ -385,7 +386,7 @@ vi.mock("pixi.js", () => {
     Application,
     Assets: { load: vi.fn(), unload: vi.fn() },
     BlurFilter: Stub,
-    BufferImageSource: Destroyable,
+    BufferImageSource,
     CanvasSource,
     ColorMatrixFilter,
     Container,
@@ -1280,6 +1281,13 @@ describe("push-presented Pixi scene", () => {
     );
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.filters).toHaveLength(2);
+    const inspection = filtered[0]?.filters?.[0] as {
+      resources: { inspectionUniforms: { uniforms: Record<string, unknown> } };
+    };
+    expect(inspection.resources.inspectionUniforms.uniforms).toMatchObject({
+      uGamma: 2,
+      uAuto: 0,
+    });
 
     await applyDisplayAdjustment(scene, {
       gamma: 2,
@@ -1287,6 +1295,10 @@ describe("push-presented Pixi scene", () => {
       autoContrast: true,
     });
     expect(scene.getRenderCount?.()).toBe(original + 2);
+    expect(inspection.resources.inspectionUniforms.uniforms).toMatchObject({
+      uGamma: 2,
+      uAuto: 1,
+    });
     expect(pixiMock.displayFilters.at(-1)).toMatchObject({
       contrast: expect.any(Function),
     });
@@ -1314,6 +1326,56 @@ describe("push-presented Pixi scene", () => {
     expect(manual.contrast).toHaveBeenCalledWith(0.8, true);
     scene.destroy();
   });
+
+  it.each([
+    { width: 3, height: 2, tiles: 6 },
+    { width: 2048, height: 1, tiles: 8 },
+  ])(
+    "uploads complete Auto lookup-table rows for $width×$height images",
+    async ({ width, height, tiles }) => {
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const { gpuUploadBufferImageResource } =
+        await vi.importActual<typeof import("pixi.js")>("pixi.js");
+      const scene = await createPixiMediaScene({
+        ...createSceneOptions(undefined),
+        stillFrame: true,
+      });
+      scene.initializeMedia({ width, height });
+      scene.presentSample({
+        timestamp: 0,
+        duration: 0,
+        draw: vi.fn(),
+        close: vi.fn(),
+      });
+      await applyDisplayAdjustment(scene, { gamma: 2, autoContrast: true });
+      const sprite = pixiMock.sprites.find(
+        (candidate) => candidate.filters?.length,
+      );
+      const inspection = sprite?.filters?.[0] as {
+        resources: { uLut: import("pixi.js").BufferImageSource };
+      };
+      const source = inspection.resources.uLut;
+      const writeTexture = vi.fn();
+      const gpu = {
+        device: { queue: { writeTexture } },
+      } as unknown as Parameters<typeof gpuUploadBufferImageResource.upload>[2];
+      gpuUploadBufferImageResource.upload(source, {} as GPUTexture, gpu);
+      const [, resource, layout, size] = writeTexture.mock.calls[0]!;
+      expect(resource).toBe(source.resource);
+      expect(layout).toEqual({
+        offset: 0,
+        rowsPerImage: tiles,
+        bytesPerRow: 256 * 4,
+      });
+      expect(size).toEqual({
+        width: 256,
+        height: tiles,
+        depthOrArrayLayers: 1,
+      });
+      expect(source.resource.byteLength).toBe(256 * tiles * 4);
+      scene.destroy();
+    },
+  );
 
   it("keeps the media on the staging canvas when the device refuses a decoded frame", async () => {
     // The refusal lands on the capability probe, which is the first copy the
