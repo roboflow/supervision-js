@@ -159,9 +159,19 @@ describe("prepared render window", () => {
     { kind: PreparedMaskFrameKind.IdMask, hasStroke: true },
     { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: false },
     { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: true },
+    {
+      kind: PreparedMaskFrameKind.RgbaImage,
+      hasStroke: true,
+      widthUnit: "screen" as const,
+    },
+    {
+      kind: PreparedMaskFrameKind.RgbaImage,
+      hasStroke: true,
+      widthUnit: "mask" as const,
+    },
   ])(
-    "keeps a prepared $kind mask with stroke=$hasStroke visible while zoom corrects its borders",
-    async ({ kind, hasStroke }) => {
+    "keeps a prepared $kind mask with stroke=$hasStroke, widthUnit=$widthUnit visible while zoom corrects its borders",
+    async ({ kind, hasStroke, widthUnit }) => {
       vi.useFakeTimers();
       resetMocks();
       try {
@@ -189,7 +199,7 @@ describe("prepared render window", () => {
         const renderWindow = createPreparedRenderWindow({
           detectionTimeline: createTimeline([frames[0]!]),
           maskStyle: new BaseMaskStyle({
-            stroke: hasStroke ? { width: 1 } : undefined,
+            stroke: hasStroke ? { width: 1, widthUnit } : undefined,
           }),
           onMaskFrameEvicted,
           onPreparedWindowChange,
@@ -227,7 +237,11 @@ describe("prepared render window", () => {
           maskStatus: PreparedRenderFrameMaskStatus.Prepared,
         });
 
-        if (kind === PreparedMaskFrameKind.RgbaImage && hasStroke) {
+        if (
+          kind === PreparedMaskFrameKind.RgbaImage &&
+          hasStroke &&
+          widthUnit === undefined
+        ) {
           expect(fakeWorker.messages.at(-1)).toMatchObject({
             job: { displayWidth: 4 },
           });
@@ -270,9 +284,19 @@ describe("prepared render window", () => {
     { kind: PreparedMaskFrameKind.IdMask, hasStroke: true },
     { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: false },
     { kind: PreparedMaskFrameKind.RgbaImage, hasStroke: true },
+    {
+      kind: PreparedMaskFrameKind.RgbaImage,
+      hasStroke: true,
+      widthUnit: "screen" as const,
+    },
+    {
+      kind: PreparedMaskFrameKind.RgbaImage,
+      hasStroke: true,
+      widthUnit: "mask" as const,
+    },
   ])(
-    "accepts an in-flight $kind mask with stroke=$hasStroke across zoom when its borders stay valid",
-    async ({ kind, hasStroke }) => {
+    "accepts an in-flight $kind mask with stroke=$hasStroke, widthUnit=$widthUnit across zoom when its borders stay valid",
+    async ({ kind, hasStroke, widthUnit }) => {
       vi.useFakeTimers();
       resetMocks();
       try {
@@ -298,7 +322,7 @@ describe("prepared render window", () => {
         const renderWindow = createPreparedRenderWindow({
           detectionTimeline: createTimeline([frames[0]!]),
           maskStyle: new BaseMaskStyle({
-            stroke: hasStroke ? { width: 1 } : undefined,
+            stroke: hasStroke ? { width: 1, widthUnit } : undefined,
           }),
           resolveMaskDisplayWidth: () => displayWidth,
           renderPreparation: {
@@ -313,7 +337,11 @@ describe("prepared render window", () => {
         renderWindow.invalidateMaskDisplayWidth();
         fakeWorker.completeNext();
         await flushMaskPreparationTimers(2);
-        if (kind === PreparedMaskFrameKind.RgbaImage && hasStroke) {
+        if (
+          kind === PreparedMaskFrameKind.RgbaImage &&
+          hasStroke &&
+          widthUnit === undefined
+        ) {
           expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
           expect(fakeWorker.messages).toHaveLength(2);
           expect(fakeWorker.messages[1]).toMatchObject({

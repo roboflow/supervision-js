@@ -531,6 +531,7 @@ export function createPreparedRenderWindow(options: {
         (instruction) =>
           instruction.visible !== false &&
           instruction.stroke !== undefined &&
+          instruction.stroke.widthUnit === undefined &&
           instruction.stroke.width > 0 &&
           instruction.stroke.alpha > 0,
       );
