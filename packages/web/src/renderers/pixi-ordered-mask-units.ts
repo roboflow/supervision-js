@@ -106,19 +106,6 @@ export function createPixiOrderedMaskUnits(
         opacity,
         unit.paint,
       );
-      const padding = unit.paint.hasStroke
-        ? (unit.paint.maxStrokeWidth + 1) / viewportScale
-        : 0;
-      const paddingX =
-        (padding * entry.sourceWidth) / (options.mediaWidth * entry.width);
-      const paddingY =
-        (padding * entry.sourceHeight) / (options.mediaHeight * entry.height);
-      unit.renderer.setCoverageBounds(
-        Math.max(-paddingX, -entry.x / entry.width),
-        Math.max(-paddingY, -entry.y / entry.height),
-        Math.min(1 + paddingX, (entry.sourceWidth - entry.x) / entry.width),
-        Math.min(1 + paddingY, (entry.sourceHeight - entry.y) / entry.height),
-      );
       unit.renderer.render(unit.paint, unit.texture, pixelRatio);
     }
     for (const [key, unit] of units) {

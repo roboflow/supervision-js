@@ -50,17 +50,25 @@ const nextFrame: DetectionFrame = {
 
 describe("pixi interaction layer", () => {
   it.each([
-    [4, "mask"],
-    [0, "polygon"],
-    [2, "polygon"],
+    [4, "mask", DetectionPickTarget.Mask, false],
+    [0, "polygon", DetectionPickTarget.Polygon, false],
+    [2, "polygon", DetectionPickTarget.Polygon, false],
+    [4, "mask", DetectionPickTarget.Keypoint, true],
   ] as const)(
     "picks the rendered topmost mask/geometry with mask zIndex %s",
-    (maskZ, expected) => {
+    (maskZ, expected, target, withKeypoint) => {
       const mask = encodeBinaryMask(new Uint8Array([1, 1, 1, 1]), 2, 2);
       const mixed: DetectionFrame = {
         mediaTime: 0,
         detections: [
-          { id: "mask", zIndex: maskZ, mask },
+          {
+            id: "mask",
+            zIndex: maskZ,
+            mask,
+            keypoints: withKeypoint
+              ? { points: [{ x: 15, y: 20 }], edges: [] }
+              : undefined,
+          },
           {
             id: "box",
             zIndex: 1,
@@ -103,6 +111,7 @@ describe("pixi interaction layer", () => {
       layer.drawFrame(0);
       display.emit("pointermove", createPointerEvent(display, 15, 20));
       expect(layer.getState().hoveredPick?.detection.id).toBe(expected);
+      expect(layer.getState().hoveredPick?.target).toBe(target);
       layer.destroy();
     },
   );

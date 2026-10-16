@@ -522,7 +522,7 @@ export function createPixiInteractionLayer(options: {
       if (
         geometryOrder > maskOrder ||
         (geometryOrder === maskOrder &&
-          geometryPick.detectionIndex > activeMaskPick.detectionIndex)
+          geometryPick.detectionIndex >= activeMaskPick.detectionIndex)
       )
         return geometryPick;
     }

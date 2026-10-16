@@ -6,6 +6,8 @@ import {
   DetectionMaskEncoding,
   MediaInteractionMode,
   RenderPreparationMode,
+  RenderPreparationArtifactKind,
+  RenderPreparationArtifactFrameStatus,
   StrokeAlignment,
   type Detection,
   type DetectionFrame,
@@ -46,6 +48,7 @@ let mediaSize = 256;
 let reversed = false;
 let onlyRed = false;
 let hidden = false;
+let hideGreen = false;
 let strokeWidth = 0;
 let strokeUnit: "screen" | "mask" = "screen";
 let alignment = StrokeAlignment.Outside;
@@ -53,6 +56,7 @@ let version = 0;
 let count = 2;
 let hovered: string | number | undefined;
 let preparedBytes = 0;
+let masksPrepared = false;
 const results: unknown[] = [];
 const maskContains = (id: string | number | undefined, x: number, y: number) =>
   id === "red"
@@ -149,7 +153,10 @@ function presentation() {
           fill: { alpha: 0.5, color: 0x0000ff },
           stroke: null,
         }),
-    visibility: { annotationsHidden: hidden },
+    visibility: {
+      annotationsHidden: hidden,
+      hiddenDetectionIds: hideGreen ? ["green"] : [],
+    },
   };
 }
 async function open(size: 64 | 256) {
@@ -195,6 +202,12 @@ async function open(size: 64 | 256) {
         mode: RenderPreparationMode.MainThread,
         maskFrame: { prefetchFrameCount: 0 },
         onDiagnostics: (d) => {
+          masksPrepared = d.artifacts.some(
+            (a) =>
+              a.kind === RenderPreparationArtifactKind.MaskFrame &&
+              a.activeFrame?.status ===
+                RenderPreparationArtifactFrameStatus.Prepared,
+          );
           preparedBytes = d.artifacts.reduce(
             (total, a) => total + (a.preparedBytes ?? 0),
             0,
@@ -247,7 +260,8 @@ function expected(x: number, y: number, time: number) {
       : d.polygon
         ? x >= 64 && x < 192 && y >= 64 && y < 192
         : x >= 144 && x < 176 && y >= 144 && y < 176;
-    if (onlyRed && d.id !== "red") continue;
+    if ((onlyRed && d.id !== "red") || (hideGreen && d.id === "green"))
+      continue;
     const scale = Math.abs(
       session.renderer.mediaToScreen({ x: mediaSize / 256, y: 0 }).x -
         session.renderer.mediaToScreen({ x: 0, y: 0 }).x,
@@ -309,6 +323,20 @@ async function probe(
   status.textContent = name;
   session.setPresentation(presentation());
   await session.refresh();
+  const deadline = performance.now() + 10_000;
+  while (
+    !hidden &&
+    !(
+      session.renderer.getPreparedAnnotationWindow()?.playheadPrepared ??
+      masksPrepared
+    )
+  ) {
+    if (performance.now() > deadline)
+      throw new Error(`${name}: mask preparation did not settle`);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+  }
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const canvas = stage.querySelector("canvas")!;
   const rect = canvas.getBoundingClientRect();
@@ -367,6 +395,9 @@ async function probe(
 async function run() {
   await open(256);
   await probe("initial");
+  hideGreen = true;
+  await probe("hidden-top-mask");
+  hideGreen = false;
   reversed = true;
   version += 1;
   await probe("reverse");
@@ -454,6 +485,9 @@ async function run() {
       JSON.stringify(scaled.sourceIds) ===
         JSON.stringify(resources().sourceIds),
   });
+  count = 130;
+  version += 1;
+  await probe("mask-index-over-255", [[210, 210]]);
   session.destroy();
   results.push({
     name: "final-destroy",

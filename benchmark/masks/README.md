@@ -32,3 +32,22 @@ stable for the checked-in fixture.
 Tracked summary findings live in [`findings.md`](findings.md) and
 [`findings.csv`](findings.csv). Regenerate the local detailed report before
 updating those files.
+
+## Detection-order session regression
+
+After `npm run build`, exercise the public media session with independent mask
+ordering on real WebGL and WebGPU scenes:
+
+```bash
+node benchmark/masks/run-gpu.mjs --order
+node benchmark/masks/run-gpu.mjs --order --webgpu
+```
+
+The regression uses frozen lossless video and synthetic masks, boxes and
+polygons. It checks pixel composition and DOM pointer picks across reordering,
+opacity, timed styles, holes, outline alignment, zoom, hide/show, source-size
+changes and detection indexes beyond 255. It also checks stable active mask
+resources through repeated updates and release on session destruction.
+The runner writes `latest-order-webgl.json` or `latest-order-webgpu.json` to
+`benchmark/masks/results/`. These resource payload counts do not measure
+browser or GPU-driver overhead.

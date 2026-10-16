@@ -382,17 +382,21 @@ same session renderer options. The renderer never writes application data.
 With an editing engine, retained boxes, polygons, polylines, keypoints, and
 shape decorations share detection order: higher `Detection.zIndex` is in front;
 missing values use the detection's frame index, and equal values follow frame
-order. Masks remain a prepared fill layer below this geometry, and labels and
-interaction overlays stay above it. Without an editing engine, the dense renderer
-keeps its separate geometry layers; `zIndex` orders detections within each layer.
+order. By default, masks remain a prepared fill layer below this geometry.
+Set `renderer.maskOrder: "detection"` to include independent masks in the same
+ordered stack, with or without an editing engine. Labels and interaction overlays
+stay above it. Without an editing engine or this opt-in, the dense renderer keeps
+its separate geometry layers; `zIndex` orders detections within each layer.
 
-Set `interaction.preferTopmost: true` to pick that editable stack rather than
-prefer smaller shapes or subtargets in other detections. The same option is
-available to `pickDetectionAtPoint`. It interprets rectangles accompanying
-paths or masks as bounds, so they do not create a second box hit target; mask
-fills stay below vector geometry. Keypoints and edges retain priority within
-the chosen detection. Leave this option unset for the default smallest-object
-policy or when accompanying rectangles are independent box targets.
+Set `interaction.preferTopmost: true` to pick that stack rather than prefer
+smaller shapes or subtargets in other detections. For standalone
+`pickDetectionAtPoint`, pass `{ preferTopmost: true, maskOrder: "detection" }`
+to use the same ordering. This policy interprets rectangles accompanying paths
+or masks as bounds, so they do not create a second box hit target. Mask fills
+stay below vector geometry when `maskOrder` is omitted. Keypoints and edges
+retain priority within the chosen detection. Leave `preferTopmost` unset for
+the default smallest-object policy or when accompanying rectangles are
+independent box targets.
 
 Enable `interaction.multiSelect` for Shift-click selection toggles and
 drag-selection from empty space. `onSelectionChange` reports the full ordered

@@ -431,17 +431,8 @@ vi.mock("pixi.js", () => {
   class MeshGeometry {
     destroy = pixiMock.meshGeometryDestroy;
 
-    constructor(
-      readonly options: { positions: Float32Array; uvs: Float32Array },
-    ) {
+    constructor(options: unknown) {
       pixiMock.meshGeometryOptions.push(options);
-    }
-
-    getBuffer(name: string) {
-      return {
-        data: name === "aPosition" ? this.options.positions : this.options.uvs,
-        update: vi.fn(),
-      };
     }
   }
 
