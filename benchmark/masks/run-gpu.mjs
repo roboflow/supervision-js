@@ -17,7 +17,9 @@ const chromePath =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const viteBin = path.join(rootDir, "node_modules/.bin/vite");
 const benchmarkPort = 5186;
-const benchmarkUrl = `http://127.0.0.1:${benchmarkPort}/benchmark/masks/gpu/index.html`;
+const orderProof = process.argv.includes("--order");
+const backend = process.argv.includes("--webgpu") ? "webgpu" : "webgl";
+const benchmarkUrl = `http://127.0.0.1:${benchmarkPort}/benchmark/masks/gpu/${orderProof ? `session-order.html?backend=${backend}` : "index.html"}`;
 const benchmarkTimeoutMs = 180_000;
 
 async function main() {
@@ -44,6 +46,17 @@ async function main() {
 
     const report = await waitForBenchmarkResult(cdp);
 
+    if (orderProof) {
+      await fs.writeFile(
+        path.join(outputDir, `latest-order-${backend}.json`),
+        `${JSON.stringify(report, null, 2)}\n`,
+      );
+      console.log(JSON.stringify(report, null, 2));
+      if (!report.passed)
+        throw new Error("Ordered mask session regression failed.");
+      return;
+    }
+
     await Promise.all([
       fs.writeFile(
         path.join(outputDir, "latest-gpu.json"),
@@ -55,12 +68,28 @@ async function main() {
     console.log(renderConsoleSummary(report));
   } finally {
     cdp?.close();
-    chrome?.process.kill("SIGTERM");
-    server.kill("SIGTERM");
+    await stopProcess(chrome?.process);
+    await stopProcess(server);
 
     if (tempProfileDir) {
-      await fs.rm(tempProfileDir, { force: true, recursive: true });
+      await fs.rm(tempProfileDir, {
+        force: true,
+        recursive: true,
+        maxRetries: 3,
+        retryDelay: 200,
+      });
     }
+  }
+}
+
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  await Promise.race([exited, delay(5000)]);
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await exited;
   }
 }
 
@@ -153,7 +182,11 @@ async function waitForPageWebSocketUrl(port) {
       const target = targets.find(
         (item) =>
           item.type === "page" &&
-          item.url?.includes("/benchmark/masks/gpu/index.html"),
+          item.url?.includes(
+            orderProof
+              ? "/benchmark/masks/gpu/session-order.html"
+              : "/benchmark/masks/gpu/index.html",
+          ),
       );
 
       if (target?.webSocketDebuggerUrl) {
@@ -225,8 +258,9 @@ async function waitForBenchmarkResult(cdp) {
 
   while (Date.now() - startedAt < benchmarkTimeoutMs) {
     const result = await cdp.send("Runtime.evaluate", {
-      expression:
-        "window.__SUPERVISION_MASK_GPU_BENCHMARK_RESULT__ ? JSON.stringify(window.__SUPERVISION_MASK_GPU_BENCHMARK_RESULT__) : null",
+      expression: orderProof
+        ? "(() => { const text=document.querySelector('#output')?.textContent; try { return JSON.parse(text)?.complete ? text : null; } catch { return null; } })()"
+        : "window.__SUPERVISION_MASK_GPU_BENCHMARK_RESULT__ ? JSON.stringify(window.__SUPERVISION_MASK_GPU_BENCHMARK_RESULT__) : null",
       returnByValue: true,
     });
     const value = result.result?.value;

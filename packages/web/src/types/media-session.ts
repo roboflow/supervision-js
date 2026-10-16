@@ -234,6 +234,8 @@ export interface MediaSessionRendererOptions {
   readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
   /** Opt into distinct source pixels when zoomed in. */
   readonly pixelInspection?: MediaRendererOptions["pixelInspection"];
+  /** Interleave masks with shapes in detection order; omitted, masks stay beneath geometry. */
+  readonly maskOrder?: MediaRendererOptions["maskOrder"];
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly diagnostics?: MediaRendererOptions["diagnostics"];
