@@ -423,6 +423,73 @@ describe("detection picker", () => {
     ).toBe("box");
   });
 
+  it("opts masks into the same zIndex/frame ordering while preserving holes and eligibility", () => {
+    const mask = encodeBinaryMask(Uint8Array.from([1, 0, 1, 1]), 2, 2);
+    const lowerMask = { id: "lower", mask, zIndex: -1 };
+    const box = {
+      id: "box",
+      rect: { x: 1, y: 1, width: 2, height: 2 },
+      zIndex: 0,
+    };
+    const polygon = {
+      id: "polygon",
+      polygon: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+      },
+      zIndex: 1,
+    };
+    const upperMask = { id: "upper", mask, zIndex: 2, locked: true };
+    const mixed = {
+      detections: [lowerMask, box, polygon, upperMask],
+      mediaTime: 0,
+    };
+    const options = { preferTopmost: true, maskOrder: "detection" as const };
+    expect(
+      pickDetectionAtPoint(mixed, { x: 0.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("upper");
+    expect(
+      pickDetectionAtPoint(mixed, { x: 1.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("polygon");
+    expect(
+      pickDetectionAtPoint(
+        mixed,
+        { x: 0.5, y: 0.5 },
+        { ...options, includeLocked: false },
+      )?.detection.id,
+    ).toBe("polygon");
+    expect(
+      pickDetectionAtPoint(
+        mixed,
+        { x: 0.5, y: 0.5 },
+        { ...options, filter: (detection) => detection.id !== "upper" },
+      )?.detection.id,
+    ).toBe("polygon");
+    const tied = {
+      detections: [lowerMask, box, polygon, { ...upperMask, zIndex: 1 }],
+      mediaTime: 0,
+    };
+    expect(
+      pickDetectionAtPoint(tied, { x: 0.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("upper");
+    expect(
+      pickDetectionAtPoint(
+        {
+          ...mixed,
+          detections: [upperMask, box, polygon, lowerMask].map(
+            ({ zIndex: _order, ...detection }) => detection,
+          ),
+        },
+        { x: 0.5, y: 0.5 },
+        options,
+      )?.detection.id,
+    ).toBe("lower");
+  });
+
   it("keeps masks below editable geometry and ignores derived bounds", () => {
     const mask = {
       id: "mask",

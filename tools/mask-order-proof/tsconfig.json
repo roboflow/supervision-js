@@ -1,0 +1,9 @@
+{
+  "extends": "../../packages/web/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["./*.ts"]
+}

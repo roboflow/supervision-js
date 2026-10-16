@@ -38,6 +38,8 @@ export interface DetectionPickOptions {
    *  Rects accompanying masks or paths are bounds, not independent box targets;
    *  mask fills stay below vector geometry. Defaults to false. */
   readonly preferTopmost?: boolean;
+  /** Include masks in detection order when preferTopmost is enabled. */
+  readonly maskOrder?: "detection";
   readonly padding?: number;
   readonly polylinePadding?: number;
   readonly keypointPadding?: number;

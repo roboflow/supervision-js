@@ -241,7 +241,7 @@ export function pickDetectionAtPoint(
       const layer =
         Number(left.result.target === DetectionPickTarget.Mask) -
         Number(right.result.target === DetectionPickTarget.Mask);
-      if (layer !== 0) return layer;
+      if (layer !== 0 && options.maskOrder !== "detection") return layer;
       const order =
         right.zIndex - left.zIndex ||
         right.result.detectionIndex - left.result.detectionIndex;
