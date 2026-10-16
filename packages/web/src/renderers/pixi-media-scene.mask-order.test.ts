@@ -82,7 +82,7 @@ describe("mask order through the media renderer", () => {
                 alpha: 1,
               }
             : undefined,
-      },
+      } satisfies MaskStyle,
       boxStyle: new BaseBoxStyle({
         fill: { alpha: 1, color: 0x0000ff },
         shouldRender: (detection) => Boolean(detection.rect),

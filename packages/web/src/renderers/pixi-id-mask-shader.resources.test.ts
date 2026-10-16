@@ -52,7 +52,7 @@ describe("pixi ID-mask shader resources", () => {
 
   it("retains its uniform group and allocated buffer across a shader rebuild", () => {
     const { owner, uniforms, gpuBuffers } = createResourceOwner();
-    const shader = owner.mesh.shader;
+    const shader = owner.mesh.shader!;
     const program = shader.gpuProgram;
     const buffer = uniforms.buffer;
 
@@ -60,10 +60,10 @@ describe("pixi ID-mask shader resources", () => {
     owner.clearTexture();
 
     expect(owner.mesh.shader).not.toBe(shader);
-    expect(owner.mesh.shader.resources.maskUniforms).toBe(uniforms);
+    expect(owner.mesh.shader!.resources.maskUniforms).toBe(uniforms);
     expect(uniforms.buffer).toBe(buffer);
     expect(buffer!.destroyed).toBe(false);
-    expect(owner.mesh.shader.gpuProgram).toBe(program);
+    expect(owner.mesh.shader!.gpuProgram).toBe(program);
     expect(program!.layout).not.toBeNull();
     for (const gpuBuffer of gpuBuffers) {
       expect(gpuBuffer.destroy).not.toHaveBeenCalled();
@@ -82,8 +82,8 @@ describe("pixi ID-mask shader resources", () => {
     const sharedBuffer = sharedUniforms.buffer!;
     const sharedGpuBuffer = gpuSystem.getGPUBuffer(sharedBuffer);
     const sharedGroup = new BindGroup({ uniforms: sharedUniforms });
-    owner.mesh.shader.groups[0] = sharedGroup;
-    owner.mesh.shader.groups[1] = sharedGroup;
+    owner.mesh.shader!.groups[0] = sharedGroup;
+    owner.mesh.shader!.groups[1] = sharedGroup;
     cleanups.push(() => {
       sharedGroup.destroy();
       sharedUniforms.buffer = undefined;
@@ -129,11 +129,9 @@ function createResourceOwner() {
     mediaHeight: 80,
     packedCoverage: true,
   });
-  const uniforms = owner.mesh.shader.resources.maskUniforms as UniformGroup;
-  const descriptorValues = Object.values(uniforms.uniformStructures).map(
-    (descriptor) => descriptor.value,
-  );
-  const source = owner.mesh.shader.resources.uTexture as ImageSource;
+  const uniforms = owner.mesh.shader!.resources.maskUniforms as UniformGroup;
+  const descriptorValues = Object.values(uniforms.uniforms);
+  const source = owner.mesh.shader!.resources.uTexture as ImageSource;
   const texture = new Texture({ source });
   owner.render(
     {
