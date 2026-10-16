@@ -10,7 +10,7 @@ import {
 
 import {
   createRenderer,
-  domMock,
+  flushPixiTicker,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -20,9 +20,10 @@ beforeEach(() => {
 });
 
 describe("media renderer on a still image", () => {
-  it.each([0, 150])(
-    "runs an opted-in %ims focus transition and stops when settled",
+  it.each([0, 150, NaN, Infinity, -Infinity])(
+    "runs an opted-in %sms focus transition and stops when settled",
     async (duration) => {
+      const animates = Number.isFinite(duration) && duration > 0;
       let visible = true;
       const style = () =>
         new BaseFocusStyle({
@@ -52,12 +53,10 @@ describe("media renderer on a still image", () => {
       const focus = findFocus();
       if (!focus) throw new Error("Expected the drawn focus layer");
       const tick = (time: number) => {
-        domMock.performanceNow.mockReturnValue(time);
-        const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
-        if (typeof callback !== "function")
-          throw new Error("Expected the renderer's animation callback");
-        callback();
-        pixiMock.render();
+        const renders = renderer.getRenderCount() ?? 0;
+        flushPixiTicker(time);
+        expect(renderer.getRenderCount()).toBe(renders + 1);
+        expect(pixiMock.render).toHaveBeenCalledTimes(renders + 1);
       };
 
       expect(focus.alpha).toBe(1);
@@ -66,7 +65,7 @@ describe("media renderer on a still image", () => {
       for (const [index, nextVisible] of [false, true].entries()) {
         visible = nextVisible;
         renderer.setPresentation({ focusStyle: style() });
-        if (duration > 0) {
+        if (animates) {
           await vi.waitFor(() =>
             expect(pixiMock.tickerStart).toHaveBeenCalledTimes(index + 1),
           );
@@ -82,7 +81,7 @@ describe("media renderer on a still image", () => {
         await vi.waitFor(() => expect(focus.alpha).toBe(nextVisible ? 1 : 0));
         expect(focus.visible).toBe(nextVisible);
       }
-      if (duration > 0) {
+      if (animates) {
         visible = false;
         renderer.setPresentation({ focusStyle: style() });
         await vi.waitFor(() =>
@@ -97,7 +96,7 @@ describe("media renderer on a still image", () => {
       const settled = renderer.getRenderCount();
       await renderer.refresh();
       expect(renderer.getRenderCount()).toBe(settled);
-      if (duration > 0) {
+      if (animates) {
         visible = true;
         renderer.setPresentation({ focusStyle: style() });
         await vi.waitFor(() =>

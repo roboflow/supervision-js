@@ -44,6 +44,8 @@ import { createMediaRendererRuntimeState } from "./media-renderer-state";
 
 const pixiMock = vi.hoisted(() => ({
   graphics: [] as {
+    alpha: number;
+    fill: ReturnType<typeof vi.fn>;
     clear: () => void;
     rect: () => void;
     circles: [number, number, number][];
@@ -1040,37 +1042,51 @@ describe("the prepared annotation window under push presentation", () => {
     },
   );
 
-  it("finishes an opted-in focus fade without another pushed media frame", async () => {
-    let visible = true;
-    const style = () =>
-      new BaseFocusStyle({
-        shouldRender: () => visible,
-        targetMode: FocusTargetMode.Ambient,
-        transitionDurationMs: 150,
+  it("settles default still-image focus before rendering an already prepared first frame", async () => {
+    const detectionTimeline = createTimeline([
+      { mediaTime: 0, detections: [{ id: "subject", rect: makeRect() }] },
+    ]);
+    await detectionTimeline.prepare(0);
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions({
+        detectionTimeline,
+        focusStyle: new BaseFocusStyle({
+          fill: { alpha: 0.5, color: 0x000000 },
+          targetMode: FocusTargetMode.Ambient,
+        }),
+        stillFrame: true,
+      }),
+    );
+    try {
+      scene.initializeMedia({ height: 240, width: 320 });
+      const prepared = scene.waitForRenderPreparation?.(0, {
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
       });
-    const scene = await createScene({ focusStyle: style() });
-    scene.present(1000);
-    await scene.settleCooks();
-    expect(pixiMock.tickerStart).not.toHaveBeenCalled();
-
-    visible = false;
-    scene.setPresentation({ focusStyle: style() });
-    await scene.settleCooks();
-    expect(pixiMock.tickerStart).toHaveBeenCalledOnce();
-    const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
-    if (!callback) throw new Error("Expected the focus ticker callback");
-    await vi.advanceTimersByTimeAsync(75);
-    callback();
-    expect(pixiMock.tickerStop).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(75);
-    callback();
-    expect(pixiMock.tickerStop).toHaveBeenCalledOnce();
-    expect(pixiMock.tickerRemove).toHaveBeenCalledWith(callback);
-    const settled = scene.renderCount();
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(scene.renderCount()).toBe(settled);
-    scene.scene.destroy();
-    scene.detectionTimeline.destroy();
+      await vi.advanceTimersByTimeAsync(0);
+      await prepared;
+      const renderedFocusAlphas: number[] = [];
+      pixiMock.render.mockImplementation(() => {
+        const focus = pixiMock.graphics.find((graphics) =>
+          graphics.fill.mock.calls.some(
+            ([fill]) => fill?.alpha === 0.5 && fill?.color === 0x000000,
+          ),
+        );
+        if (focus) renderedFocusAlphas.push(focus.alpha);
+      });
+      scene.presentSample({
+        timestamp: 0,
+        duration: 0,
+        draw: vi.fn(),
+        close: vi.fn(),
+      });
+      expect(renderedFocusAlphas).toEqual([1]);
+      expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+    } finally {
+      scene.destroy();
+      detectionTimeline.destroy();
+    }
   });
 
   it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {

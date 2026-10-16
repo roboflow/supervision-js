@@ -358,8 +358,8 @@ when that heat is absent or still loading.
 
 For still images and paused video, focus changes apply immediately by default.
 Set `transitionDurationMs` to opt into a fade when focus appears or disappears.
-The first ready frame always applies focus immediately. The value can be a
-number or a function of the focus context:
+With this option, focus on the initial resolved detection frame applies immediately.
+The value can be a number or a function of the focus context:
 
 ```ts
 focusStyle: new BaseFocusStyle({
@@ -369,8 +369,9 @@ focusStyle: new BaseFocusStyle({
 });
 ```
 
-A value of `0` applies changes immediately. A positive duration runs the
-renderer ticker only until the fade finishes.
+A positive finite duration repaints only until the fade finishes. Zero, negative,
+and non-finite values apply changes immediately. The fade also runs during video
+playback; annotation geometry continues to follow the presented media frames.
 
 ## Custom Styles
 

@@ -330,8 +330,14 @@ export function createPixiFocusLayer(options: {
         viewportScale: context.viewportScale,
       };
       const duration = focusStyle.transitionDurationMs;
-      transitionDurationMs =
+      const resolvedDuration =
         typeof duration === "function" ? duration(styleContext) : duration;
+      transitionDurationMs =
+        resolvedDuration === undefined
+          ? undefined
+          : Number.isFinite(resolvedDuration)
+            ? Math.max(0, resolvedDuration)
+            : 0;
       const isFirstFrame = !hasResolvedFrame;
       hasResolvedFrame = true;
       const resolvedInstruction = focusStyle.resolve(styleContext);

@@ -123,12 +123,6 @@ const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
   resolve: () => undefined,
 };
 
-/**
- * How far a focus change with no frame behind it moves the focus layer's fade.
- * It eases over elapsed milliseconds, and a push-presented scene only ever has
- * media time, so anything past a fade's length lands the overlay at once.
- */
-
 /** The presentation fields a render answers to that no renderer kind owns. */
 const RENDERED_PRESENTATION_TAIL = [
   "annotationAntialiasing",
@@ -622,6 +616,8 @@ export async function createPixiMediaScene(
     preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
+  // On-demand animation paints must go through the same scheduler as presents.
+  if (rendersOnChange) app.ticker.remove(app.render, app);
   const destroyBatchTextureBindings = installPixiBatchTextureBindings(
     pixi,
     app.renderer,
@@ -1113,8 +1109,7 @@ export async function createPixiMediaScene(
     drawAnnotationOverlay(currentMediaTime, overlayNow());
   const tickOnDemandAnimation = () => {
     drawAnnotationOverlayNow();
-    focusLayer?.tick(now());
-    syncAnimationTicker();
+    renderScene();
   };
   const tickFocusLayer = () => focusLayer?.tick(now());
   const handleVisibilityChange = () => {
@@ -2760,7 +2755,7 @@ export async function createPixiMediaScene(
   }
 
   /**
-   * Milliseconds for animations that are not annotation geometry. A pull scene
+   * Milliseconds for annotation-overlay animations. A pull scene
    * has a ticker and reads the wall clock, as does a still frame while its
    * ticker runs; a push scene has the presented media time and nothing else,
    * so its animations move only when the media does.
@@ -2797,12 +2792,18 @@ export async function createPixiMediaScene(
     } finally {
       isPresenting = false;
     }
+    // Starting Pixi's ticker reads the wall clock, outside the atomic present.
+    syncAnimationTicker();
     scheduleDepthUploadAhead(presented.mediaTimeS);
   }
 
   function advanceFocusAnimation(mediaTime: number) {
     if (!focusLayer) return;
-    if (focusLayer.getTransitionDuration() !== undefined) return;
+    const duration = focusLayer.getTransitionDuration();
+    if (duration !== undefined) {
+      if (duration <= 0) focusLayer.settle();
+      return;
+    }
 
     const mediaTimeMs = mediaTime * MILLISECONDS_PER_SECOND;
 
@@ -2815,7 +2816,7 @@ export async function createPixiMediaScene(
   }
 
   function updateFocusForRender() {
-    if (!rendersOnChange) return;
+    if (!rendersOnChange || (frameChannel && isPresenting)) return;
     if (focusLayer?.isAnimating()) focusLayer.tick(now());
     else focusLayer?.settle();
   }
@@ -2883,7 +2884,8 @@ export async function createPixiMediaScene(
    * a still-image overlay animates. The last tick stops the loop.
    */
   function syncAnimationTicker() {
-    if (!rendersOnChange || isDestroyed) return;
+    if (!rendersOnChange || isDestroyed || (frameChannel && isPresenting))
+      return;
 
     const animating =
       hasPresentedSample &&

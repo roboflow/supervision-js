@@ -39,7 +39,7 @@ export interface FocusDrawInstruction {
 }
 
 export interface FocusStyle {
-  /** Opt into timed transitions on still or paused media. Zero applies changes immediately. */
+  /** Opt into bounded fades, including on still or paused media. Nonpositive or non-finite values apply changes immediately. */
   readonly transitionDurationMs?: FocusStyleValue<number>;
   resolve(context: FocusStyleContext): FocusDrawInstruction | undefined;
 }
