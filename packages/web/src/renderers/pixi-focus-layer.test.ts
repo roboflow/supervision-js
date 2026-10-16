@@ -110,6 +110,45 @@ afterEach(() => {
 });
 
 describe("pixi focus layer", () => {
+  it("reverses an opted-in fade from its visible alpha", () => {
+    let visible = true;
+    const layer = createPixiFocusLayer({
+      Graphics,
+      focusStyle: new BaseFocusStyle({
+        shouldRender: () => visible,
+        targetMode: FocusTargetMode.Ambient,
+        transitionDurationMs: 150,
+      }),
+    });
+    const display = layer.createDisplay({ width: 120, height: 80 }) as Graphics;
+    const draw = () =>
+      layer.drawFrame({
+        frame,
+        hoveredPick: null,
+        mediaTime: frame.mediaTime,
+        selectedPick: null,
+      });
+    draw();
+    expect(display.alpha).toBe(1);
+    visible = false;
+    draw();
+    layer.tick(0);
+    layer.tick(75);
+    const interruptedAlpha = display.alpha;
+    expect(interruptedAlpha).toBeGreaterThan(0);
+    expect(interruptedAlpha).toBeLessThan(1);
+
+    visible = true;
+    draw();
+    layer.tick(75);
+    expect(display.alpha).toBe(interruptedAlpha);
+    layer.tick(225);
+    expect(display.alpha).toBe(1);
+    expect(layer.isAnimating()).toBe(false);
+    layer.destroy();
+    display.destroy();
+  });
+
   it("clips a held focus overlay after camera pan without rebuilding its cutout", () => {
     const viewport = { x: 10, y: 20, width: 80, height: 40 };
     const layer = createPixiFocusLayer({

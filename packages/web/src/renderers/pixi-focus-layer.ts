@@ -430,6 +430,10 @@ export function createPixiFocusLayer(options: {
       }
 
       focusStyle = nextFocusStyle;
+      if (focusStyle === null) {
+        setTargetAlpha(0);
+        settle();
+      }
     },
 
     syncViewportBounds,

@@ -82,11 +82,34 @@ describe("media renderer on a still image", () => {
         await vi.waitFor(() => expect(focus.alpha).toBe(nextVisible ? 1 : 0));
         expect(focus.visible).toBe(nextVisible);
       }
+      if (duration > 0) {
+        visible = false;
+        renderer.setPresentation({ focusStyle: style() });
+        await vi.waitFor(() =>
+          expect(pixiMock.tickerStart).toHaveBeenCalledTimes(3),
+        );
+        const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
+        renderer.setPresentation({ focusStyle: null });
+        expect(pixiMock.tickerStop).toHaveBeenCalledTimes(3);
+        expect(pixiMock.tickerRemove).toHaveBeenCalledWith(callback);
+      }
       await renderer.refresh();
       const settled = renderer.getRenderCount();
       await renderer.refresh();
       expect(renderer.getRenderCount()).toBe(settled);
-      renderer.destroy();
+      if (duration > 0) {
+        visible = true;
+        renderer.setPresentation({ focusStyle: style() });
+        await vi.waitFor(() =>
+          expect(pixiMock.tickerStart).toHaveBeenCalledTimes(4),
+        );
+        const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
+        renderer.destroy();
+        expect(pixiMock.tickerRemove).toHaveBeenCalledWith(callback);
+        expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
+      } else {
+        renderer.destroy();
+      }
     },
   );
 

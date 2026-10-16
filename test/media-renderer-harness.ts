@@ -206,6 +206,7 @@ vi.mock("pixi.js", () => {
     };
     screen = { height: 360, width: 640 };
     renderer = {
+      background: { color: 0 },
       name: "webgl",
       resolution: 1,
       screen: this.screen,

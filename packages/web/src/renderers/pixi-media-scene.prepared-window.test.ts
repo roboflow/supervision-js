@@ -56,6 +56,9 @@ const pixiMock = vi.hoisted(() => ({
   }[],
   render: vi.fn(),
   tickerAdd: vi.fn<(callback: () => void) => void>(),
+  tickerRemove: vi.fn(),
+  tickerStart: vi.fn(),
+  tickerStop: vi.fn(),
   onTextureDestroy: undefined as ((source: unknown) => void) | undefined,
 }));
 
@@ -99,7 +102,12 @@ vi.mock("pixi.js", () => {
       screen: this.screen,
     };
     stage = { addChild: vi.fn() };
-    ticker = { add: pixiMock.tickerAdd, remove: vi.fn() };
+    ticker = {
+      add: pixiMock.tickerAdd,
+      remove: pixiMock.tickerRemove,
+      start: pixiMock.tickerStart,
+      stop: pixiMock.tickerStop,
+    };
     cancelResize = vi.fn();
     destroy = vi.fn();
     init = vi.fn(async () => undefined);
@@ -455,6 +463,9 @@ beforeEach(() => {
   pixiMock.meshes.length = 0;
   pixiMock.render.mockClear();
   pixiMock.tickerAdd.mockClear();
+  pixiMock.tickerRemove.mockClear();
+  pixiMock.tickerStart.mockClear();
+  pixiMock.tickerStop.mockClear();
   pixiMock.onTextureDestroy = undefined;
 });
 
@@ -1028,6 +1039,39 @@ describe("the prepared annotation window under push presentation", () => {
       }
     },
   );
+
+  it("finishes an opted-in focus fade without another pushed media frame", async () => {
+    let visible = true;
+    const style = () =>
+      new BaseFocusStyle({
+        shouldRender: () => visible,
+        targetMode: FocusTargetMode.Ambient,
+        transitionDurationMs: 150,
+      });
+    const scene = await createScene({ focusStyle: style() });
+    scene.present(1000);
+    await scene.settleCooks();
+    expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+
+    visible = false;
+    scene.setPresentation({ focusStyle: style() });
+    await scene.settleCooks();
+    expect(pixiMock.tickerStart).toHaveBeenCalledOnce();
+    const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
+    if (!callback) throw new Error("Expected the focus ticker callback");
+    await vi.advanceTimersByTimeAsync(75);
+    callback();
+    expect(pixiMock.tickerStop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(75);
+    callback();
+    expect(pixiMock.tickerStop).toHaveBeenCalledOnce();
+    expect(pixiMock.tickerRemove).toHaveBeenCalledWith(callback);
+    const settled = scene.renderCount();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(scene.renderCount()).toBe(settled);
+    scene.scene.destroy();
+    scene.detectionTimeline.destroy();
+  });
 
   it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {
     const diagnostics: RenderPreparationDiagnostics[] = [];
