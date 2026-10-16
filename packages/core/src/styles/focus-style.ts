@@ -16,6 +16,8 @@ const DEFAULT_FOCUS_FILL_ALPHA = 0.45;
 const DEFAULT_FOCUS_CORNER_RADIUS = 8;
 
 export interface BaseFocusStyleOptions {
+  /** Opt into timed transitions on still or paused media. Zero applies changes immediately. */
+  readonly transitionDurationMs?: FocusStyleValue<number>;
   /**
    * Which interaction state should keep the media undimmed.
    */
@@ -46,9 +48,11 @@ export interface BaseFocusStyleOptions {
  */
 export class BaseFocusStyle implements FocusStyle {
   protected readonly options: BaseFocusStyleOptions;
+  readonly transitionDurationMs: FocusStyleValue<number> | undefined;
 
   constructor(options: BaseFocusStyleOptions = {}) {
     this.options = options;
+    this.transitionDurationMs = options.transitionDurationMs;
   }
 
   resolve(context: FocusStyleContext): FocusDrawInstruction | undefined {

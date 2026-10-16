@@ -179,10 +179,12 @@ paused, untouched, for ten seconds" in
 renders once the window has settled" in
 `packages/web/src/renderers/pixi-media-scene.prepared-window.test.ts`.
 
-Paused focus is static by policy. The focus layer's fade advances with the
-presented media time, so it fades while the media moves and settles at once when
-a hover or selection arrives with no frame behind it. No animation keeps the
-scene rendering on its own.
+Paused focus is static by default. A focus style may opt into a bounded
+`transitionDurationMs` fade; the renderer owns that clock and stops its Pixi
+ticker when the transition settles. The first ready frame applies focus
+immediately. Without that option, the focus layer's fade advances with
+presented media time and settles at once when a hover or selection arrives
+with no frame behind it; it does not keep the scene rendering on its own.
 
 ## The Prepared Annotation Window
 
@@ -310,6 +312,6 @@ the scene renders it on change through the same scheduler and signature as the
 push path, with the presented sample as one more change. It answers
 `getRenderCount()`, and a notification that describes what is already drawn
 renders nothing, as on a paused video. Pixi's ticker starts only while
-something on the frame moves by the clock, a looping GIF region or a loading
-spinner, and stops with the render that removes the last of them. The behavior is pinned in
+something on the frame moves by the clock: a looping GIF region, a loading
+spinner, or an opted-in focus transition, and stops with the render that removes the last of them. The behavior is pinned in
 `packages/web/src/renderers/media-renderer.still.test.ts`.

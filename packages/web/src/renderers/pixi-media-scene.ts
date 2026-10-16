@@ -128,7 +128,6 @@ const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
  * It eases over elapsed milliseconds, and a push-presented scene only ever has
  * media time, so anything past a fade's length lands the overlay at once.
  */
-const STATIC_FOCUS_SETTLE_MS = 10_000;
 
 /** The presentation fields a render answers to that no renderer kind owns. */
 const RENDERED_PRESENTATION_TAIL = [
@@ -307,7 +306,7 @@ export async function createPixiMediaScene(
    */
   const stillFrame = frameChannel === undefined && options.stillFrame === true;
   const rendersOnChange = frameChannel !== undefined || stillFrame;
-  let stillFrameTickerRunning = false;
+  let animationTickerRunning = false;
   /** The content of the `previewOverlay` answer the overlay on screen drew. */
   let drawnPreviewOverlayContent: number | null = null;
   /** The editing state the overlay on screen was drawn from. */
@@ -644,8 +643,9 @@ export async function createPixiMediaScene(
   }
 
   const renderScheduler = createSceneRenderScheduler(() => {
+    updateFocusForRender();
     app.render();
-    syncStillFrameTicker();
+    syncAnimationTicker();
   });
   const maskBrushPreview = options.maskBrush
     ? createPixiMaskBrushPreview({
@@ -1111,6 +1111,11 @@ export async function createPixiMediaScene(
 
   const drawAnnotationOverlayNow = () =>
     drawAnnotationOverlay(currentMediaTime, overlayNow());
+  const tickOnDemandAnimation = () => {
+    drawAnnotationOverlayNow();
+    focusLayer?.tick(now());
+    syncAnimationTicker();
+  };
   const tickFocusLayer = () => focusLayer?.tick(now());
   const handleVisibilityChange = () => {
     // A hidden tab loses its swapchain, and the configuration it comes back
@@ -1927,6 +1932,7 @@ export async function createPixiMediaScene(
       app.ticker.remove(updateMediaSceneFit);
       app.ticker.remove(drawAnnotationOverlayNow);
       app.ticker.remove(tickFocusLayer);
+      app.ticker.remove(tickOnDemandAnimation);
       document.removeEventListener?.(
         "visibilitychange",
         handleVisibilityChange,
@@ -2796,6 +2802,7 @@ export async function createPixiMediaScene(
 
   function advanceFocusAnimation(mediaTime: number) {
     if (!focusLayer) return;
+    if (focusLayer.getTransitionDuration() !== undefined) return;
 
     const mediaTimeMs = mediaTime * MILLISECONDS_PER_SECOND;
 
@@ -2807,11 +2814,10 @@ export async function createPixiMediaScene(
     focusLayer.tick(focusAnimationTimeMs);
   }
 
-  function settleFocusAnimation() {
-    if (!focusLayer) return;
-
-    focusAnimationTimeMs += STATIC_FOCUS_SETTLE_MS;
-    focusLayer.tick(focusAnimationTimeMs);
+  function updateFocusForRender() {
+    if (!rendersOnChange) return;
+    if (focusLayer?.isAnimating()) focusLayer.tick(now());
+    else focusLayer?.settle();
   }
 
   function renderScene() {
@@ -2868,34 +2874,32 @@ export async function createPixiMediaScene(
   function renderOnChange() {
     if (!rendersOnChange) return;
 
-    settleFocusAnimation();
     drawOverlayForEditingState();
     renderScheduler.renderOnChange(describeSceneRender());
   }
 
   /**
-   * Runs the ticker on a still frame for as long as something on it moves by
-   * the clock: a looping GIF region or a loading spinner. Pixi renders on
-   * every tick it runs, and the overlay redraws so the spinner turns. Each
-   * render checks again, so the ticker stops with the render that removes the
-   * last of them.
+   * Keep on-demand scenes ticking only while an opted-in focus transition or
+   * a still-image overlay animates. The last tick stops the loop.
    */
-  function syncStillFrameTicker() {
-    if (!stillFrame || isDestroyed) return;
+  function syncAnimationTicker() {
+    if (!rendersOnChange || isDestroyed) return;
 
     const animating =
       hasPresentedSample &&
-      (regionLayer.hasAnimatedDisplay() || hasLoadingDetections());
+      (focusLayer?.isAnimating() ||
+        (stillFrame &&
+          (regionLayer.hasAnimatedDisplay() || hasLoadingDetections())));
 
-    if (animating === stillFrameTickerRunning) return;
-    stillFrameTickerRunning = animating;
+    if (animating === animationTickerRunning) return;
+    animationTickerRunning = animating;
 
     if (animating) {
-      app.ticker.add(drawAnnotationOverlayNow);
+      app.ticker.add(tickOnDemandAnimation);
       app.ticker.start();
     } else {
       app.ticker.stop();
-      app.ticker.remove(drawAnnotationOverlayNow);
+      app.ticker.remove(tickOnDemandAnimation);
     }
   }
 

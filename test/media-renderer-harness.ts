@@ -69,6 +69,8 @@ const mockState = vi.hoisted(() => {
       on: ReturnType<typeof vi.fn>;
     }>,
     graphicsInstances: [] as Array<{
+      alpha: number;
+      cut: ReturnType<typeof vi.fn>;
       circle: ReturnType<typeof vi.fn>;
       closePath: ReturnType<typeof vi.fn>;
       clear: ReturnType<typeof vi.fn>;
@@ -322,6 +324,8 @@ vi.mock("pixi.js", () => {
   }
 
   class Graphics {
+    alpha = 1;
+    cut = vi.fn(() => this);
     circle = vi.fn(() => this);
     closePath = vi.fn(() => this);
     clear = vi.fn(() => this);

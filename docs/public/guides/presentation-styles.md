@@ -356,6 +356,22 @@ heatmap regions still cut out their actual shapes; rectangle-only detections
 remain dimmed. Heatmap cutouts use the current frame's visible heat and disappear
 when that heat is absent or still loading.
 
+For still images and paused video, focus changes apply immediately by default.
+Set `transitionDurationMs` to opt into a fade when focus appears or disappears.
+The first ready frame always applies focus immediately. The value can be a
+number or a function of the focus context:
+
+```ts
+focusStyle: new BaseFocusStyle({
+  targetMode: FocusTargetMode.Ambient,
+  transitionDurationMs: ({ frame }) =>
+    frame.detections.length > 200 ? 0 : 150,
+});
+```
+
+A value of `0` applies changes immediately. A positive duration runs the
+renderer ticker only until the fade finishes.
+
 ## Custom Styles
 
 Custom styles implement the same `resolve(detection, context)` contract as the
