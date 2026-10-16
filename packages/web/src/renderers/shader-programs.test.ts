@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Filter, GpuProgramOptions } from "pixi.js";
+import { UniformGroup, type Filter, type GpuProgramOptions } from "pixi.js";
 import { createPixiAnnotationAntialiasFilter } from "./pixi-annotation-antialias";
+import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
 
 /**
  * A Pixi shader built with a GLSL program alone draws nothing under the WebGPU
@@ -38,7 +39,9 @@ const shaderFiles = readRendererFiles().filter(
 const programs: readonly ShaderProgram[] = shaderFiles.flatMap((file) =>
   file === "pixi-annotation-antialias.ts"
     ? captureAnnotationPrograms(file)
-    : readShaderPrograms(file, readSource(file)),
+    : file === "pixi-id-mask-shader.ts"
+      ? captureMaskPrograms(file)
+      : readShaderPrograms(file, readSource(file)),
 );
 
 describe("shader programs", () => {
@@ -128,6 +131,46 @@ function captureAnnotationPrograms(file: string): readonly ShaderProgram[] {
     if (programs.length === 0)
       throw Error(
         `No AA program was captured for maskCoverage=${maskCoverage}`,
+      );
+    return programs;
+  });
+}
+
+function captureMaskPrograms(file: string): readonly ShaderProgram[] {
+  class Display {
+    readonly style = {};
+    destroy() {}
+  }
+  return [false, true].flatMap((packedCoverage) => {
+    const programs: ShaderProgram[] = [];
+    const renderer = createPixiIdMaskShaderRenderer({
+      ImageSource: Display as never,
+      Mesh: Display as never,
+      MeshGeometry: Display as never,
+      UniformGroup,
+      mediaWidth: 1,
+      mediaHeight: 1,
+      packedCoverage,
+      Shader: {
+        from(options) {
+          programs.push({
+            file: `${file} (${packedCoverage ? "packed" : "dense"})`,
+            fragment: captureStage(options.gpu.fragment),
+            vertex: captureStage(options.gpu.vertex),
+            glStages: Object.keys(options.gl),
+            resources: Object.keys(options.resources),
+            uniforms: Object.values(options.resources).flatMap((group) =>
+              group instanceof UniformGroup ? Object.keys(group.uniforms) : [],
+            ),
+          });
+          return new Display() as never;
+        },
+      },
+    });
+    renderer.destroy();
+    if (programs.length === 0)
+      throw Error(
+        `No mask program was captured for packedCoverage=${packedCoverage}`,
       );
     return programs;
   });
