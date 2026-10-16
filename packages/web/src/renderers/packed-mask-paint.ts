@@ -13,11 +13,17 @@ export function createPackedMaskPaint(
   mediaWidth: number,
   viewportScale: number,
   opacity = 1,
+  previous?: PixiIdMaskPaint,
 ): PixiIdMaskPaint {
-  const fillPalette = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
-  const strokePalette = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
-  const strokeWidths = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
-  const strokeAlignments = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
+  const fillPalette =
+    previous?.fillPalette ?? new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
+  const strokePalette =
+    previous?.strokePalette ??
+    new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
+  const strokeWidths =
+    previous?.strokeWidths ?? new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
+  const strokeAlignments =
+    previous?.strokeAlignments ?? new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
   // Pixi's mesh tint already premultiplies its own alpha. Keep this mesh opaque
   // and apply the public mask-style opacity once, alongside the paint alpha.
   paint(fillPalette, instruction.color, instruction.alpha * opacity);
@@ -32,7 +38,7 @@ export function createPackedMaskPaint(
     stroke?.widthUnit === "mask"
       ? (2 * stroke.width * mediaWidth * viewportScale) / coverage.sourceWidth
       : (stroke?.width ?? 0);
-  if (stroke) paint(strokePalette, stroke.color, stroke.alpha * opacity);
+  paint(strokePalette, stroke?.color ?? 0, (stroke?.alpha ?? 0) * opacity);
   strokeWidths[1] = width;
   strokeAlignments[1] = alignment;
   return {

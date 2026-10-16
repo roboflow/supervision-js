@@ -80,6 +80,13 @@ export interface PixiIdMaskShaderRenderer {
     texture: PixiTexture,
     strokePixelRatio?: number,
   ): void;
+  /** Extends a packed crop quad for live screen-space outlines without changing coverage. */
+  setCoverageBounds(
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+  ): void;
   setOpacity(opacity: number): void;
   setStrokePixelRatio(pixelRatio: number): void;
   destroy(): void;
@@ -152,6 +159,7 @@ export function createPixiIdMaskShaderRenderer(options: {
     uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
   });
   const mesh = new options.Mesh({ geometry, shader });
+  let coverageBounds = [0, 0, 1, 1];
 
   mesh.visible = false;
 
@@ -195,6 +203,34 @@ export function createPixiIdMaskShaderRenderer(options: {
       uniforms.uniforms.uMaxStrokeWidth = frame.maxStrokeWidth;
       uniforms.update();
       mesh.visible = true;
+    },
+
+    setCoverageBounds(left, top, right, bottom) {
+      if (
+        coverageBounds[0] === left &&
+        coverageBounds[1] === top &&
+        coverageBounds[2] === right &&
+        coverageBounds[3] === bottom
+      )
+        return;
+      coverageBounds = [left, top, right, bottom];
+      const positions = geometry.getBuffer("aPosition");
+      const uvs = geometry.getBuffer("aUV");
+      const positionData = positions.data as Float32Array;
+      const uvData = uvs.data as Float32Array;
+      positionData.set([
+        left * options.mediaWidth,
+        top * options.mediaHeight,
+        right * options.mediaWidth,
+        top * options.mediaHeight,
+        right * options.mediaWidth,
+        bottom * options.mediaHeight,
+        left * options.mediaWidth,
+        bottom * options.mediaHeight,
+      ]);
+      uvData.set([left, top, right, top, right, bottom, left, bottom]);
+      positions.update();
+      uvs.update();
     },
 
     setOpacity(opacity) {

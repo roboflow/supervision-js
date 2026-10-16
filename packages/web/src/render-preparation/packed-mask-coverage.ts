@@ -1,3 +1,4 @@
+import type { SerializableMaskInstruction } from "./mask-preparation-worker-protocol";
 import {
   computeDetectionMaskRect,
   decodeCompressedRleCounts,
@@ -102,4 +103,18 @@ export function readPackedMaskCoverage(
     coverage.data[row * coverage.textureWidth + (column >> 3)]! &
     (1 << (column & 7)),
   );
+}
+
+/** Keeps each visible semantic mask independent through the normal frame cook. */
+export function createPackedMaskCoverageEntries(
+  instructions: readonly SerializableMaskInstruction[],
+): readonly PreparedPackedMaskCoverage[] {
+  return instructions.flatMap((instruction) => {
+    if (!instruction.mask || instruction.visible === false) return [];
+    const entry = createPackedMaskCoverage(
+      instruction.mask,
+      instruction.detectionIndex,
+    );
+    return entry ? [entry] : [];
+  });
 }

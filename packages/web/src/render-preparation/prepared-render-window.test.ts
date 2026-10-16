@@ -823,6 +823,81 @@ describe("prepared render window", () => {
     }
   });
 
+  it("charges independent coverage and retains only an oversized active frame", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+    try {
+      const packedBytes = 9 * 1024 * 1024;
+      const backingBytes = packedBytes + 8192;
+      const fakeWorker = createFakeMaskPreparationWorker({
+        createCompleteData: () => ({
+          artifactKind: PreparedMaskFrameKind.IdMask,
+          fillPalette: new Float32Array(8),
+          strokePalette: new Float32Array(8),
+          strokeWidths: new Float32Array(2),
+          raster: new Uint8Array(4),
+          sourceWidth: 2,
+          width: 2,
+          height: 2,
+          packedMaskCoverage: [
+            {
+              data: new Uint8Array(packedBytes),
+              detectionIndex: 0,
+              width: 4096,
+              height: 18432,
+              textureWidth: 512,
+              sourceWidth: 4096,
+              sourceHeight: 18432,
+              x: 0,
+              y: 0,
+            },
+          ],
+        }),
+      });
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const evicted = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        independentMasks: true,
+        maxMaskFrameCacheSize: 3,
+        maxMaskFrameCacheBytes: 16 * 1024 * 1024,
+        resolveMaskFrameBackingBytes: () => backingBytes,
+        prefetchFrameCount: 0,
+        onMaskFrameEvicted: evicted,
+        renderPreparation: {
+          mode: RenderPreparationMode.Worker,
+          onDiagnostics: (value) => diagnostics.push(value),
+          workerFactory: { createWorker: () => fakeWorker.worker },
+        },
+      });
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(4);
+      expect(renderWindow.getFrame(0)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Prepared,
+      );
+      expect(diagnostics.at(-1)?.artifacts[0]).toMatchObject({
+        preparedCount: 1,
+        preparedBytes: packedBytes + backingBytes + 76,
+      });
+      expect(evicted).not.toHaveBeenCalled();
+      renderWindow.getFrame(0.04);
+      await flushMaskPreparationTimers(4);
+      expect(evicted).toHaveBeenCalledWith("0:0");
+      expect(renderWindow.getFrame(0.04)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Prepared,
+      );
+      expect(diagnostics.at(-1)?.artifacts[0]).toMatchObject({
+        preparedCount: 1,
+        preparedBytes: packedBytes + backingBytes + 76,
+      });
+      renderWindow.destroy();
+      expect(evicted.mock.calls.map(([key]) => key)).toEqual(["0:0"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("counts stroke alignment storage toward the retained frame budget", async () => {
     vi.useFakeTimers();
     resetMocks();

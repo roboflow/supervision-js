@@ -1,3 +1,4 @@
+import { createPackedMaskCoverageEntries } from "./packed-mask-coverage";
 import {
   compositeMaskFrame,
   createIdMaskPlane,
@@ -259,6 +260,9 @@ function createMainThreadMaskFramePreparer(
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
         regionMaskCoverage,
+        packedMaskCoverage: job.independentMasks
+          ? createPackedMaskCoverageEntries(job.instructions)
+          : undefined,
         screenStrokes: createMaskScreenStrokes(
           job.instructions,
           preparedPixels.width,
@@ -315,6 +319,9 @@ function createPreparedIdMaskFrame(
       frame.data,
     ),
     regionMaskCoverage,
+    packedMaskCoverage: job.independentMasks
+      ? createPackedMaskCoverageEntries(job.instructions)
+      : undefined,
     sourceWidth: frame.sourceWidth,
     strokePalette: frame.strokePalette,
     strokeAlignments: frame.strokeAlignments,
@@ -503,6 +510,7 @@ function createPreparedFrameFromWorkerResponse(
       kind: PreparedMaskFrameKind.IdMask,
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
       raster: message.raster,
+      packedMaskCoverage: message.packedMaskCoverage,
       regionMaskCoverage: message.regionMaskCoverage,
       screenStrokes: message.screenStrokes,
       sourceWidth: message.sourceWidth,
@@ -522,6 +530,7 @@ function createPreparedFrameFromWorkerResponse(
       idMaskPlane: message.idMaskPlane,
       key: message.key,
       kind: PreparedMaskFrameKind.RgbaImage,
+      packedMaskCoverage: message.packedMaskCoverage,
       regionMaskCoverage: message.regionMaskCoverage,
       screenStrokes: message.screenStrokes,
       source: message.imageBitmap,
@@ -553,6 +562,7 @@ function createPreparedFrameFromWorkerResponse(
     idMaskPlane: message.idMaskPlane,
     key: message.key,
     kind: PreparedMaskFrameKind.RgbaImage,
+    packedMaskCoverage: message.packedMaskCoverage,
     regionMaskCoverage: message.regionMaskCoverage,
     screenStrokes: message.screenStrokes,
     source: canvas,

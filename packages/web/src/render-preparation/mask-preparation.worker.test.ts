@@ -44,6 +44,50 @@ afterEach(() => {
 });
 
 describe("render-preparation worker", () => {
+  it.each([0, 300])(
+    "transfers independent overlapping coverage beyond palette IDs (%i)",
+    async (index) => {
+      vi.stubGlobal(
+        "ImageData",
+        class {
+          constructor(
+            readonly data: Uint8ClampedArray,
+            readonly width: number,
+            readonly height: number,
+          ) {}
+        },
+      );
+      const worker = await loadWorker();
+      const mask = encodeBinaryMask(new Uint8Array([1, 1, 1, 1]), 2, 2);
+      worker.send({
+        type: MaskPreparationWorkerMessageType.Prepare,
+        requestId: 1,
+        job: {
+          key: "independent",
+          independentMasks: true,
+          instructions: [index, index + 1].map((detectionIndex) => ({
+            alpha: 0.5,
+            color: 0xff0000,
+            detectionIndex,
+            mask,
+          })),
+        },
+      });
+      await worker.replied;
+      const { message, transfer } = worker.posted[0]! as {
+        message: MaskPreparationWorkerCompleteMessage;
+        transfer: Transferable[];
+      };
+      expect(
+        message.packedMaskCoverage?.map((entry) => entry.detectionIndex),
+      ).toEqual([index, index + 1]);
+      for (const entry of message.packedMaskCoverage ?? []) {
+        expect(entry.data[0]! & 3).toBe(3);
+        expect(transfer).toContain(entry.data.buffer);
+      }
+    },
+  );
+
   it.each([0, 100])(
     "transfers screen stroke paths for detection %i without baking their width into the mask",
     async (detectionIndex) => {

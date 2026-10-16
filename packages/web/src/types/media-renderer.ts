@@ -92,6 +92,12 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    * source pixels returned by captureFrame are unaffected.
    */
   readonly pixelInspection?: { readonly minScale: number };
+  /**
+   * Interleave raster masks with retained boxes and polygons by detection zIndex
+   * (frame order breaks ties). Omit to retain the dense mask-below-geometry path.
+   * Independent mask coverage costs one bit per cropped source pixel per mask.
+   */
+  readonly maskOrder?: "detection";
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;

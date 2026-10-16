@@ -1,3 +1,5 @@
+import { createPackedMaskCoverage } from "#render-preparation/packed-mask-coverage";
+import { pickPackedMaskAtPoint } from "#renderers/packed-mask-picker";
 import { describe, expect, it, vi } from "vitest";
 import "pixi.js/events";
 import {
@@ -14,6 +16,7 @@ import {
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
   DetectionMaskEncoding,
+  encodeBinaryMask,
   DetectionPickTarget,
   KeypointMarkerShape,
   MediaInteractionMode,
@@ -46,6 +49,64 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it.each([
+    [4, "mask"],
+    [0, "polygon"],
+    [2, "polygon"],
+  ] as const)(
+    "picks the rendered topmost mask/geometry with mask zIndex %s",
+    (maskZ, expected) => {
+      const mask = encodeBinaryMask(new Uint8Array([1, 1, 1, 1]), 2, 2);
+      const mixed: DetectionFrame = {
+        mediaTime: 0,
+        detections: [
+          { id: "mask", zIndex: maskZ, mask },
+          {
+            id: "box",
+            zIndex: 1,
+            rect: { x: 15, y: 20, width: 30, height: 30 },
+          },
+          {
+            id: "polygon",
+            zIndex: 2,
+            polygon: {
+              points: [
+                { x: 0, y: 0 },
+                { x: 30, y: 0 },
+                { x: 30, y: 40 },
+                { x: 0, y: 40 },
+              ],
+            },
+          },
+        ],
+      };
+      const coverage = [createPackedMaskCoverage(mask, 0)!];
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline(mixed),
+        interaction: { preferTopmost: true, maskOrder: "detection" },
+        pickMaskDetectionAtPoint: (point, _time, options) =>
+          pickPackedMaskAtPoint(
+            mixed,
+            coverage,
+            point,
+            { width: 120, height: 80 },
+            options,
+          ),
+      });
+      const display = layer.createDisplay({
+        width: 120,
+        height: 80,
+      }) as FakeContainer;
+      layer.drawFrame(0);
+      display.emit("pointermove", createPointerEvent(display, 15, 20));
+      expect(layer.getState().hoveredPick?.detection.id).toBe(expected);
+      layer.destroy();
+    },
+  );
+
   it("toggles editing selections through real pointerdown/up events without moving geometry", () => {
     const onCommit = vi.fn();
     const capturePointer = vi.fn();

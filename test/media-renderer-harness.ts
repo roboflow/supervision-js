@@ -322,6 +322,7 @@ vi.mock("pixi.js", () => {
   }
 
   class Graphics {
+    destroy = vi.fn();
     circle = vi.fn(() => this);
     closePath = vi.fn(() => this);
     clear = vi.fn(() => this);
@@ -430,8 +431,17 @@ vi.mock("pixi.js", () => {
   class MeshGeometry {
     destroy = pixiMock.meshGeometryDestroy;
 
-    constructor(options: unknown) {
+    constructor(
+      readonly options: { positions: Float32Array; uvs: Float32Array },
+    ) {
       pixiMock.meshGeometryOptions.push(options);
+    }
+
+    getBuffer(name: string) {
+      return {
+        data: name === "aPosition" ? this.options.positions : this.options.uvs,
+        update: vi.fn(),
+      };
     }
   }
 

@@ -1310,6 +1310,7 @@ export async function createMediaRendererCore(
         options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
       maskHaloStyle: currentPresentation.maskHaloStyle,
       maskStyle: currentPresentation.maskStyle,
+      maskOrder: options.maskOrder,
       markerStyle: currentPresentation.markerStyle,
       percentageBarStyle: currentPresentation.percentageBarStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
