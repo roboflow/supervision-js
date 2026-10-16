@@ -23,8 +23,8 @@ type Unit = {
   frameKey: string;
 };
 
-/** Per-mask palette, uniform, geometry and placeholder backing, reserved before upload. */
-export const PACKED_MASK_UNIT_BACKING_BYTES = 8 * 1024;
+/** Conservative reserve for known per-unit paint, CPU/GPU UBO, geometry and placeholder backing. */
+export const PACKED_MASK_UNIT_BACKING_BYTES = 16 * 1024;
 
 /** Only the active frame owns displays; prepared frames own and budget their coverage. */
 export function createPixiOrderedMaskUnits(
@@ -42,7 +42,7 @@ export function createPixiOrderedMaskUnits(
     readonly mediaHeight: number;
   },
 ) {
-  const units = new Map<string, Unit>();
+  const units = new Map<number, Unit>();
   options.container.sortableChildren = true;
   return { render, hide, clear, releaseFrame };
 
@@ -57,15 +57,12 @@ export function createPixiOrderedMaskUnits(
     opacity: number,
     pixelRatio: number,
   ) {
-    const retained = new Set<string>();
+    const retained = new Set<number>();
     const order = detectionRenderOrder(frame);
     for (const entry of coverage) {
       const detection = frame.detections[entry.detectionIndex];
       if (!detection) continue;
-      const key =
-        detection.id === undefined
-          ? `index:${entry.detectionIndex}`
-          : `${typeof detection.id}:${detection.id}`;
+      const key = entry.detectionIndex;
       const instruction = resolveInstruction(entry.detectionIndex);
       let unit = units.get(key);
       // A style can hide a mask without discarding its unchanged active coverage.
@@ -153,7 +150,7 @@ export function createPixiOrderedMaskUnits(
     for (const [key, unit] of units) destroyUnit(key, unit);
   }
 
-  function destroyUnit(key: string, unit: Unit) {
+  function destroyUnit(key: number, unit: Unit) {
     unit.renderer.hide();
     unit.renderer.clearTexture();
     unit.renderer.destroy();

@@ -46,8 +46,11 @@ node benchmark/masks/run-gpu.mjs --order --webgpu
 The regression uses frozen lossless video and synthetic masks, boxes and
 polygons. It checks pixel composition and DOM pointer picks across reordering,
 opacity, timed styles, holes, outline alignment, zoom, hide/show, source-size
-changes and detection indexes beyond 255. It also checks stable active mask
-resources through repeated updates and release on session destruction.
+changes, duplicate and mixed-type IDs, and detection indexes beyond 255.
+Translucent explicit-unit outlines are compared with dense-renderer controls.
+It also checks stable active resources through repeated updates and immediate
+retirement of mask textures and allocated UBO buffers as video coverage changes
+and sessions are destroyed.
 The runner writes `latest-order-webgl.json` or `latest-order-webgpu.json` to
 `benchmark/masks/results/`. These resource payload counts do not measure
 browser or GPU-driver overhead.

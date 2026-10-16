@@ -58,6 +58,55 @@ function style(opacity: number): MaskStyle {
 }
 
 describe("mask order through the media renderer", () => {
+  it("keeps duplicate and mixed-type IDs as distinct frame detections", async () => {
+    resetMocks();
+    const polygon = initialFrame.detections[2]!.polygon!;
+    const detections = [
+      { id: 7, mask },
+      { id: 7, mask },
+      ...[1, "1", 3, 3].map((id) => ({
+        id,
+        rect: { x: 32, y: 32, width: 64, height: 64 },
+      })),
+      ...[2, "2", 4, 4].map((id) => ({ id, polygon })),
+    ];
+    const renderer = await createRenderer(false, false, {
+      maskOrder: "detection",
+      labelStyle: null,
+      maskStyle: {
+        resolve: (detection, context) =>
+          detection.mask
+            ? {
+                mask: detection.mask,
+                color: context.detectionIndex === 0 ? 0xff0000 : 0x00ff00,
+                alpha: 1,
+              }
+            : undefined,
+      },
+      boxStyle: new BaseBoxStyle({
+        fill: { alpha: 1, color: 0x0000ff },
+        shouldRender: (detection) => Boolean(detection.rect),
+      }),
+      polygonStyle: new BasePolygonStyle({
+        fill: { alpha: 1, color: 0xffff00 },
+      }),
+      detectionFrames: [{ mediaTime: 0, detections }],
+      renderPreparation: { mode: RenderPreparationMode.MainThread },
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(visiblePaints()).toEqual([
+          0xff0000,
+          0x00ff00,
+          ...Array<number>(4).fill(0x0000ff),
+          ...Array<number>(4).fill(0xffff00),
+        ]),
+      );
+    } finally {
+      renderer.destroy();
+    }
+  });
+
   it("keeps 100 fully overlapping masks and alternating boxes in one active display set", async () => {
     resetMocks();
     const detections = Array.from({ length: 100 }, (_, index) => [

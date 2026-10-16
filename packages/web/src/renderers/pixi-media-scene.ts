@@ -434,6 +434,7 @@ export async function createPixiMediaScene(
       ? new Container()
       : undefined;
   const boxLayer = createPixiBoxLayer({
+    retainByIndex: options.maskOrder === "detection",
     container: retainedGeometry,
     boxStyle: options.boxStyle,
     Container: retainedGeometry ? Container : undefined,
@@ -518,6 +519,7 @@ export async function createPixiMediaScene(
       : undefined;
   polygonLayer?.setPlaybackActive(isPlaybackActive);
   const vectorLayer = createPixiVectorLayer({
+    retainByIndex: options.maskOrder === "detection",
     container: retainedGeometry,
     Container,
     Graphics,

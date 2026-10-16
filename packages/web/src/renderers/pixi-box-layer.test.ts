@@ -156,35 +156,39 @@ describe("pixi box layer", () => {
     expect(graphics.stroke).not.toHaveBeenCalled();
   });
 
-  it("retains boxes by id and translates one display without redrawing the frame", () => {
-    const retainedFrame: DetectionFrame = {
-      ...frame,
-      detections: frame.detections.map((detection, index) => ({
-        ...detection,
-        id: `box-${index}`,
-      })),
-    };
-    const layer = createPixiBoxLayer({
-      boxStyle: createBoxStyle(0xff0000),
-      Container: FakeContainer as never,
-      detectionTimeline: createTimeline(retainedFrame),
-      Graphics: FakeGraphics as never,
-    });
-    const container = layer.createContainer() as unknown as FakeContainer;
+  it.each([false, true])(
+    "translates a retained display without redrawing (retainByIndex: %s)",
+    (retainByIndex) => {
+      const retainedFrame: DetectionFrame = {
+        ...frame,
+        detections: frame.detections.map((detection, index) => ({
+          ...detection,
+          id: `box-${index}`,
+        })),
+      };
+      const layer = createPixiBoxLayer({
+        boxStyle: createBoxStyle(0xff0000),
+        retainByIndex,
+        Container: FakeContainer as never,
+        detectionTimeline: createTimeline(retainedFrame),
+        Graphics: FakeGraphics as never,
+      });
+      const container = layer.createContainer() as unknown as FakeContainer;
 
-    layer.drawFrame(0.1);
-    const display = container.children[0]!;
-    expect(layer.translateDetection("box-0", 7, -2)).toBe(true);
-    expect(display.position.set).toHaveBeenLastCalledWith(7, -2);
+      layer.drawFrame(0.1);
+      const display = container.children[0]!;
+      expect(layer.translateDetection("box-0", 7, -2)).toBe(true);
+      expect(display.position.set).toHaveBeenLastCalledWith(7, -2);
 
-    layer.drawFrame(0.1);
-    expect(display.clear).toHaveBeenCalledOnce();
+      layer.drawFrame(0.1);
+      expect(display.clear).toHaveBeenCalledOnce();
 
-    layer.invalidateDetection("box-0");
-    layer.drawFrame(0.1);
-    expect(display.clear).toHaveBeenCalledTimes(2);
-    expect(display.position.set).toHaveBeenLastCalledWith(0, 0);
-  });
+      layer.invalidateDetection("box-0");
+      layer.drawFrame(0.1);
+      expect(display.clear).toHaveBeenCalledTimes(2);
+      expect(display.position.set).toHaveBeenLastCalledWith(0, 0);
+    },
+  );
 });
 
 class FakeContainer {

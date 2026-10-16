@@ -43,6 +43,7 @@ export function createPackedMaskPaint(
   strokeAlignments[1] = alignment;
   return {
     fillPalette,
+    strokeOverFill: stroke?.widthUnit !== undefined,
     strokePalette,
     strokeWidths,
     strokeAlignments,

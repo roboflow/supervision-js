@@ -62,6 +62,8 @@ export interface PixiVectorLayer {
 export function createPixiVectorLayer(options: {
   readonly Container: new () => PixiContainer;
   readonly container?: PixiContainer;
+  /** Ordered rendering retains each frame detection independently of its public ID. */
+  readonly retainByIndex?: boolean;
   readonly Graphics: new () => PixiGraphics;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly polygonStyle?: PolygonStyle | null;
@@ -169,11 +171,11 @@ export function createPixiVectorLayer(options: {
     },
 
     invalidateDetection(id) {
-      invalidated.add(`id:${String(id)}`);
+      invalidated.add(keyForId(id));
     },
 
     translateDetection(id, x, y) {
-      const entry = entries.get(`id:${String(id)}`);
+      const entry = entries.get(keyForId(id));
 
       if (!entry) {
         return false;
@@ -200,6 +202,12 @@ export function createPixiVectorLayer(options: {
       container = undefined;
     },
   };
+
+  function keyForId(id: string | number) {
+    return options.retainByIndex
+      ? `index:${lastFrame?.detections.findIndex((detection) => detection.id === id) ?? -1}`
+      : `id:${String(id)}`;
+  }
 
   function ensureEntry(key: string) {
     let entry = entries.get(key);
@@ -255,7 +263,9 @@ export function createPixiVectorLayer(options: {
     }
 
     return {
-      key: detectionKey(detection, detectionIndex),
+      key: options.retainByIndex
+        ? `index:${detectionIndex}`
+        : detectionKey(detection, detectionIndex),
       keypoints,
       polygon,
       polyline,

@@ -1,4 +1,12 @@
-import { Application, BufferImageSource, Rectangle, Shader } from "pixi.js";
+import { encodeBinaryMask } from "supervision-js-core";
+import {
+  Application,
+  BufferImageSource,
+  Rectangle,
+  Shader,
+  UniformGroup,
+  type Buffer,
+} from "pixi.js";
 import {
   BaseBoxStyle,
   BasePolygonStyle,
@@ -25,6 +33,8 @@ const stage = document.querySelector<HTMLDivElement>("#stage")!;
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 const output = document.querySelector<HTMLPreElement>("#output")!;
 const shaders = new Set<Shader>();
+const observedBuffers = new Set<Buffer>();
+const observedSources = new Set<BufferImageSource>();
 let scene: WeakRef<Application>;
 const init = Application.prototype.init;
 Application.prototype.init = async function (options) {
@@ -37,6 +47,9 @@ Shader.from = function (options) {
   shaders.add(shader);
   const destroy = shader.destroy;
   shader.destroy = function (...args) {
+    const group = shader.resources.maskUniforms;
+    if (group instanceof UniformGroup && group.buffer)
+      observedBuffers.add(group.buffer);
     shaders.delete(shader);
     return destroy.apply(this, args);
   };
@@ -54,12 +67,18 @@ let strokeUnit: "screen" | "mask" = "screen";
 let alignment = StrokeAlignment.Outside;
 let version = 0;
 let count = 2;
+let identityCase = false;
+let ordered = true;
+let animatedMasks = false;
+let fillAlpha: number | undefined;
+let strokeAlpha = 1;
 let hovered: string | number | undefined;
+let hoveredIndex: number | undefined;
 let preparedBytes = 0;
 let masksPrepared = false;
 const results: unknown[] = [];
-const maskContains = (id: string | number | undefined, x: number, y: number) =>
-  id === "red"
+const maskContains = (d: Detection, x: number, y: number) =>
+  d.mask?.counts === red.counts
     ? x >= 40 && x < 168 && y >= 40 && y < 168
     : x >= 96 &&
       x < 224 &&
@@ -69,11 +88,45 @@ const maskContains = (id: string | number | undefined, x: number, y: number) =>
 const red = { ...redMask, encoding: DetectionMaskEncoding.CompressedRle };
 const green = { ...greenMask, encoding: DetectionMaskEncoding.CompressedRle };
 
-function detections(): Detection[] {
+const changedGreenPixels = new Uint8Array(256 * 256);
+for (let y = 96; y < 224; y++)
+  for (let x = 96; x < 224; x++) {
+    if (!(x >= 120 && x < 136 && y >= 120 && y < 136))
+      changedGreenPixels[y * 256 + x] = 1;
+  }
+changedGreenPixels[125 * 256 + 125] = 1;
+const changedGreen = encodeBinaryMask(changedGreenPixels, 256, 256);
+function detections(frameIndex = 0): Detection[] {
   const scale = mediaSize / 256;
+  if (identityCase) {
+    const rect = (x: number, y: number) => ({ x, y, width: 20, height: 20 });
+    const polygon = (x: number, y: number) => ({
+      points: [
+        { x: x - 10, y: y - 10 },
+        { x: x + 10, y: y - 10 },
+        { x: x + 10, y: y + 10 },
+        { x: x - 10, y: y + 10 },
+      ],
+    });
+    return [
+      { id: 7, mask: red },
+      { id: 7, mask: green },
+      { id: 1, rect: rect(20, 20) },
+      { id: "1", rect: rect(60, 20) },
+      { id: 3, rect: rect(200, 20) },
+      { id: 3, rect: rect(240, 20) },
+      { id: 2, polygon: polygon(110, 20) },
+      { id: "2", polygon: polygon(150, 20) },
+      { id: 4, polygon: polygon(20, 230) },
+      { id: 4, polygon: polygon(60, 230) },
+    ];
+  }
   if (count > 2)
     return Array.from({ length: count }, (_, i) => [
-      { id: `mask-${i}`, mask: green },
+      {
+        id: `mask-${i}`,
+        mask: animatedMasks && frameIndex % 2 ? changedGreen : green,
+      },
       {
         id: `box-${i}`,
         rect: {
@@ -116,13 +169,13 @@ function maskStyle(): MaskStyle {
     artifactKey: onlyRed ? "red-coverage" : "both-coverage",
     opacity,
     resolve: (d, context) =>
-      d.mask && (!onlyRed || d.id === "red")
+      d.mask && (!onlyRed || d.mask.counts === red.counts)
         ? {
             mask: d.mask,
-            color: d.id === "red" ? 0xff0000 : 0x00ff00,
-            alpha: context.mediaTime >= 1 ? 0.25 : 0.5,
+            color: d.mask.counts === red.counts ? 0xff0000 : 0x00ff00,
+            alpha: fillAlpha ?? (context.mediaTime >= 1 ? 0.25 : 0.5),
             stroke: {
-              alpha: 1,
+              alpha: strokeAlpha,
               color: 0,
               width: strokeWidth,
               widthUnit: strokeUnit,
@@ -143,7 +196,7 @@ function presentation() {
     boxStyle: onlyRed
       ? null
       : new BaseBoxStyle({
-          shouldRender: (d) => d.id?.toString().startsWith("box") === true,
+          shouldRender: (d) => Boolean(d.rect),
           fill: { alpha: 0.5, color: 0xffff00 },
           stroke: null,
         }),
@@ -181,7 +234,7 @@ async function open(size: 64 | 256) {
           [0, 0.5, 1, 1.5].map((mediaTime, frameIndex): DetectionFrame => ({
             mediaTime,
             frameIndex,
-            detections: detections(),
+            detections: detections(frameIndex),
           })),
       },
     },
@@ -190,12 +243,13 @@ async function open(size: 64 | 256) {
       autoPlay: false,
       loop: false,
       maxDevicePixelRatio: 1,
-      maskOrder: "detection",
+      maskOrder: ordered ? "detection" : undefined,
       interaction: {
         mode: MediaInteractionMode.Always,
         preferTopmost: true,
         onHover: (pick) => {
           hovered = pick?.detection.id;
+          hoveredIndex = pick?.detectionIndex;
         },
       },
       renderPreparation: {
@@ -226,6 +280,16 @@ function resources() {
         : [],
     ),
   );
+  for (const source of sources) observedSources.add(source);
+  const activeBuffers = new Set(
+    [...shaders].flatMap((shader) => {
+      const group = shader.resources.maskUniforms;
+      return group instanceof UniformGroup && group.buffer
+        ? [group.buffer]
+        : [];
+    }),
+  );
+  for (const buffer of activeBuffers) observedBuffers.add(buffer);
   const arrays = new Set(
     [...shaders].flatMap((s) => {
       const uniforms = s.resources.maskUniforms as
@@ -237,6 +301,14 @@ function resources() {
   );
   return {
     shaders: shaders.size,
+    liveMaskBuffers: [...activeBuffers].filter((buffer) => !buffer.destroyed)
+      .length,
+    retiredLiveBuffers: [...observedBuffers].filter(
+      (buffer) => !buffer.destroyed && !activeBuffers.has(buffer),
+    ).length,
+    retiredLiveSources: [...observedSources].filter(
+      (source) => !source.destroyed && !sources.has(source),
+    ).length,
     sources: sources.size,
     sourceIds: [...sources].map((s) => s.uid).sort((a, b) => a - b),
     coverageBytes: [...sources].reduce(
@@ -250,17 +322,35 @@ function resources() {
 }
 function expected(x: number, y: number, time: number) {
   const rgb = [255, 255, 255];
-  if (hidden) return { rgb, id: undefined };
+  if (hidden) return { rgb, id: undefined, index: undefined };
   let id: string | number | undefined;
-  for (const { d } of detections()
-    .map((d, i) => ({ d, order: d.zIndex ?? i }))
+  let index: number | undefined;
+  const blend = (color: number[], alpha: number) => {
+    rgb.forEach((value, channel) => {
+      rgb[channel] = value * (1 - alpha) + color[channel]! * alpha;
+    });
+  };
+  for (const { d, i } of detections(Math.round(time * 2))
+    .map((d, i) => ({ d, i, order: d.zIndex ?? i }))
     .sort((a, b) => a.order - b.order)) {
+    const points = d.polygon?.points;
+    const mx = (x * mediaSize) / 256,
+      my = (y * mediaSize) / 256;
     const hit = d.mask
-      ? maskContains(d.id, x, y)
-      : d.polygon
-        ? x >= 64 && x < 192 && y >= 64 && y < 192
-        : x >= 144 && x < 176 && y >= 144 && y < 176;
-    if ((onlyRed && d.id !== "red") || (hideGreen && d.id === "green"))
+      ? maskContains(d, x, y)
+      : points
+        ? mx >= Math.min(...points.map((p) => p.x)) &&
+          mx < Math.max(...points.map((p) => p.x)) &&
+          my >= Math.min(...points.map((p) => p.y)) &&
+          my < Math.max(...points.map((p) => p.y))
+        : d.rect
+          ? Math.abs(mx - d.rect.x) < d.rect.width / 2 &&
+            Math.abs(my - d.rect.y) < d.rect.height / 2
+          : false;
+    if (
+      (onlyRed && d.mask?.counts !== red.counts) ||
+      (hideGreen && d.id === "green")
+    )
       continue;
     const scale = Math.abs(
       session.renderer.mediaToScreen({ x: mediaSize / 256, y: 0 }).x -
@@ -286,28 +376,23 @@ function expected(x: number, y: number, time: number) {
       strokeWidth > 0 &&
       signedDistance >= -width * fraction &&
       signedDistance < width * (1 - fraction);
-    if (hit) id = d.id;
-    if (hit || outline) {
-      const color = outline
-        ? [0, 0, 0]
-        : d.mask
-          ? d.id === "red"
+    if (hit) {
+      id = d.id;
+      index = i;
+      blend(
+        d.mask
+          ? d.mask.counts === red.counts
             ? [255, 0, 0]
             : [0, 255, 0]
           : d.polygon
             ? [0, 0, 255]
-            : [255, 255, 0];
-      const alpha = outline
-        ? opacity
-        : d.mask
-          ? opacity * (time >= 1 ? 0.25 : 0.5)
-          : 0.5;
-      rgb.forEach((v, i) => {
-        rgb[i] = v * (1 - alpha) + color[i]! * alpha;
-      });
+            : [255, 255, 0],
+        d.mask ? opacity * (fillAlpha ?? (time >= 1 ? 0.25 : 0.5)) : 0.5,
+      );
     }
+    if (outline) blend([0, 0, 0], strokeAlpha * opacity);
   }
-  return { rgb, id };
+  return { rgb, id, index };
 }
 async function probe(
   name: string,
@@ -379,7 +464,9 @@ async function probe(
       error,
       picked: hovered ?? null,
       expectedId: want.id ?? null,
-      passed: error <= 2 && hovered === want.id,
+      pickedIndex: hoveredIndex ?? null,
+      expectedIndex: want.index ?? null,
+      passed: error <= 2 && hovered === want.id && hoveredIndex === want.index,
     });
   }
   const report = {
@@ -485,13 +572,86 @@ async function run() {
       JSON.stringify(scaled.sourceIds) ===
         JSON.stringify(resources().sourceIds),
   });
+  animatedMasks = true;
+  version += 1;
+  for (const time of [0, 0.5, 1, 1.5, 0]) {
+    await session.seek(time);
+    await probe("changing-video-masks", [[158, 158]]);
+    const current = resources();
+    results.push({
+      name: "retired-unit-resources",
+      passed:
+        current.retiredLiveBuffers === 0 &&
+        current.retiredLiveSources === 0 &&
+        (backend !== "webgpu" || current.liveMaskBuffers === 100),
+      resources: current,
+    });
+  }
+  animatedMasks = false;
   count = 130;
   version += 1;
   await probe("mask-index-over-255", [[210, 210]]);
   session.destroy();
   results.push({
     name: "final-destroy",
-    passed: shaders.size === 0 && stage.querySelectorAll("canvas").length === 0,
+    passed:
+      shaders.size === 0 &&
+      stage.querySelectorAll("canvas").length === 0 &&
+      resources().retiredLiveBuffers === 0 &&
+      resources().retiredLiveSources === 0,
+    resources: resources(),
+  });
+  count = 2;
+  identityCase = true;
+  opacity = 0.5;
+  version += 1;
+  await open(256);
+  await probe("duplicate-and-mixed-IDs", [
+    [50, 50],
+    [210, 210],
+    [20, 20],
+    [60, 20],
+    [200, 20],
+    [240, 20],
+    [110, 20],
+    [150, 20],
+    [20, 230],
+    [60, 230],
+  ]);
+  session.destroy();
+  identityCase = false;
+  onlyRed = true;
+  opacity = 1;
+  fillAlpha = 1;
+  strokeAlpha = 0.5;
+  for (const useOrder of [true, false]) {
+    ordered = useOrder;
+    await open(256);
+    for (const unit of ["screen", "mask"] as const) {
+      strokeUnit = unit;
+      strokeWidth = unit === "screen" ? 8 : 2;
+      for (const edge of [StrokeAlignment.Inside, StrokeAlignment.Center]) {
+        alignment = edge;
+        await probe(
+          `${ordered ? "ordered" : "dense"}-${unit}-${edge}-translucent-stroke`,
+          [
+            [41, 100],
+            [edge === StrokeAlignment.Inside ? 34 : 39, 100],
+            [50, 100],
+          ],
+        );
+      }
+    }
+    session.destroy();
+  }
+  results.push({
+    name: "all-owned-resources-destroyed",
+    passed:
+      shaders.size === 0 &&
+      resources().retiredLiveBuffers === 0 &&
+      resources().retiredLiveSources === 0 &&
+      stage.querySelectorAll("canvas").length === 0,
+    resources: resources(),
   });
   const passed = results.every((r) => {
     const result = r as {
