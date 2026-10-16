@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BaseFocusStyle, FocusTargetMode } from "supervision-js-core";
-import type { MediaRendererSource } from "supervision";
+import type { MediaRendererSource } from "#types/media-renderer";
 
 import {
   createRenderer,
@@ -51,7 +51,7 @@ describe("focus transitions on pushed video through the public renderer", () => 
     },
   );
 
-  it("advances default fades with presented media time without clock reads or a ticker", async () => {
+  it("preserves default media-time fades across redraws and settles presentation changes", async () => {
     const producer = createPushSource();
     const shouldRender = vi.fn(
       ({ mediaTime }: { mediaTime: number }) =>
@@ -69,6 +69,13 @@ describe("focus transitions on pushed video through the public renderer", () => 
     });
     try {
       await vi.waitFor(() => expect(shouldRender).toHaveBeenCalled());
+      const restoreVisibility = vi
+        .mocked(document.addEventListener)
+        .mock.calls.filter(([name]) => name === "visibilitychange")
+        .at(-1)?.[1];
+      if (typeof restoreVisibility !== "function") {
+        throw new Error("Expected the renderer's visibility listener");
+      }
       for (const time of [0.04, 0.08, 0.12]) {
         const renders = renderer.getRenderCount() ?? 0;
         domMock.performanceNow.mockClear();
@@ -79,7 +86,18 @@ describe("focus transitions on pushed video through the public renderer", () => 
         expect(domMock.performanceNow).not.toHaveBeenCalled();
         expect(findFocus().alpha).toBeGreaterThan(0);
         expect(findFocus().alpha).toBeLessThan(1);
+        const alpha = findFocus().alpha;
+        restoreVisibility.call(document, new Event("visibilitychange"));
+        expect(findFocus().alpha).toBe(alpha);
+        expect(renderer.getRenderCount()).toBe(renders + 2);
       }
+      renderer.setPresentation({
+        focusStyle: new BaseFocusStyle({
+          targetMode: FocusTargetMode.Ambient,
+          shouldRender: () => false,
+        }),
+      });
+      expect(findFocus().alpha).toBe(0);
       expect(pixiMock.tickerStart).not.toHaveBeenCalled();
       expect(pixiMock.render).toHaveBeenCalledTimes(
         renderer.getRenderCount() ?? -1,

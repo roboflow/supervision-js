@@ -235,21 +235,22 @@ export interface MediaCompositorOptions {
  *
  * A still frame is pulled once and then renders on change the way push
  * presentation does, with the sample it presents as one more change. The
- * ticker runs only while a looping GIF region or a loading spinner is on the
- * frame.
+ * ticker runs only while a GIF region, loading spinner, or opted-in focus
+ * transition animates.
  *
  * Push presentation engages when the opened source carries a presented-frame
  * channel. The producer then decides which frame is on screen and announces it,
- * so the ticker paints nothing and every render is an explicit answer to a
+ * so every render goes through the scheduler as an explicit answer to a
  * change: a presented frame, a layer turned on or off, restyling, hover or
  * selection, a viewport move, a resize, or the swapchain coming back after the
- * tab was hidden. A notification that describes what is already drawn renders
- * nothing, so a paused scene nobody touches renders nothing at all.
+ * tab was hidden, or an opted-in focus fade. A notification that describes what
+ * is already drawn renders nothing. Once a bounded focus fade settles, a paused
+ * scene nobody touches renders nothing at all.
  *
- * The focus layer's fade is not an exception to that. It advances with the
- * presented media time, so it fades during playback and is applied at once when
- * a hover or selection arrives with no frame behind it: paused focus is static,
- * and no animation keeps the scene rendering on its own.
+ * Default focus fades advance with presented media time. Hover, selection, and
+ * presentation changes settle them immediately; content and visibility redraws
+ * preserve their current alpha. An explicit duration instead animates alpha on
+ * wall time outside atomic presents, with a ticker that stops after the fade.
  */
 export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
@@ -2818,7 +2819,8 @@ export async function createPixiMediaScene(
   function updateFocusForRender() {
     if (!rendersOnChange || (frameChannel && isPresenting)) return;
     if (focusLayer?.isAnimating()) focusLayer.tick(now());
-    else focusLayer?.settle();
+    else if (stillFrame || focusLayer?.getTransitionDuration() !== undefined)
+      focusLayer?.settle();
   }
 
   function renderScene() {
@@ -2875,6 +2877,8 @@ export async function createPixiMediaScene(
   function renderOnChange() {
     if (!rendersOnChange) return;
 
+    if (frameChannel && focusLayer?.getTransitionDuration() === undefined)
+      focusLayer?.settle();
     drawOverlayForEditingState();
     renderScheduler.renderOnChange(describeSceneRender());
   }

@@ -180,16 +180,17 @@ paused, untouched, for ten seconds" in
 renders once the window has settled" in
 `packages/web/src/renderers/pixi-media-scene.prepared-window.test.ts`.
 
-Paused focus is static by default. A focus style may opt into a bounded
-`transitionDurationMs` fade. Its alpha advances on wall time outside the atomic
+A focus style may opt into a bounded `transitionDurationMs` fade. Its alpha
+advances on wall time outside the atomic
 present, including during playback, while annotation geometry stays tied to the
 presented media frame. The initial resolved detection frame applies opted-in
 focus immediately; later arrivals or replacement styles can transition. The
 renderer stops its Pixi ticker when the transition settles, and its final tick
 paints through the scheduler. Without that option, the focus layer's fade
-advances with presented media time and settles at once on an on-demand redraw;
-it does not keep the scene rendering on its own. Still-image focus also settles
-before the first render without an explicit duration.
+advances with presented media time. Explicit hover, selection, and presentation
+changes settle it immediately; content readiness, depth, and visibility redraws
+preserve its current alpha. It does not keep the scene rendering on its own.
+Still-image focus also settles before the first render without an explicit duration.
 
 ## The Prepared Annotation Window
 
