@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BaseFocusStyle,
+  FocusTargetMode,
   AnnotationGestureStateKind,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
@@ -8,6 +10,7 @@ import {
 
 import {
   createRenderer,
+  flushPixiTicker,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -17,6 +20,127 @@ beforeEach(() => {
 });
 
 describe("media renderer on a still image", () => {
+  it.each([0, 150, NaN, Infinity, -Infinity])(
+    "runs an opted-in %sms focus transition and stops when settled",
+    async (duration) => {
+      const animates = Number.isFinite(duration) && duration > 0;
+      let visible = true;
+      const style = () =>
+        new BaseFocusStyle({
+          targetMode: FocusTargetMode.Ambient,
+          fill: { alpha: 0.5, color: 0x000000 },
+          shouldRender: () => visible,
+          transitionDurationMs: duration,
+        });
+      const renderer = await createStillRenderer({
+        detectionFrames: [
+          {
+            detections: [
+              { id: "subject", rect: { x: 50, y: 50, width: 20, height: 20 } },
+            ],
+            mediaTime: 0,
+          },
+        ],
+        focusStyle: style(),
+      });
+      const findFocus = () =>
+        pixiMock.graphicsInstances.find((graphics) =>
+          graphics.fill.mock.calls.some(
+            ([fill]) => fill?.alpha === 0.5 && fill?.color === 0x000000,
+          ),
+        );
+      await vi.waitFor(() => expect(findFocus()).toBeDefined());
+      const focus = findFocus();
+      if (!focus) throw new Error("Expected the drawn focus layer");
+      const tick = (time: number) => {
+        const renders = renderer.getRenderCount() ?? 0;
+        flushPixiTicker(time);
+        expect(renderer.getRenderCount()).toBe(renders + 1);
+        expect(pixiMock.render).toHaveBeenCalledTimes(renders + 1);
+      };
+
+      expect(focus.alpha).toBe(1);
+      expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+
+      for (const [index, nextVisible] of [false, true].entries()) {
+        visible = nextVisible;
+        renderer.setPresentation({ focusStyle: style() });
+        if (animates) {
+          await vi.waitFor(() =>
+            expect(pixiMock.tickerStart).toHaveBeenCalledTimes(index + 1),
+          );
+          expect(focus.alpha).toBe(nextVisible ? 0 : 1);
+          tick(duration * index + duration / 2);
+          expect(focus.alpha).toBeGreaterThan(0);
+          expect(focus.alpha).toBeLessThan(1);
+          tick(duration * (index + 1));
+          expect(pixiMock.tickerStop).toHaveBeenCalledTimes(index + 1);
+        } else {
+          expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+        }
+        await vi.waitFor(() => expect(focus.alpha).toBe(nextVisible ? 1 : 0));
+        expect(focus.visible).toBe(nextVisible);
+      }
+      if (animates) {
+        visible = false;
+        renderer.setPresentation({ focusStyle: style() });
+        await vi.waitFor(() =>
+          expect(pixiMock.tickerStart).toHaveBeenCalledTimes(3),
+        );
+        const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
+        renderer.setPresentation({ focusStyle: null });
+        expect(pixiMock.tickerStop).toHaveBeenCalledTimes(3);
+        expect(pixiMock.tickerRemove).toHaveBeenCalledWith(callback);
+      }
+      await renderer.refresh();
+      const settled = renderer.getRenderCount();
+      await renderer.refresh();
+      expect(renderer.getRenderCount()).toBe(settled);
+      if (animates) {
+        visible = true;
+        renderer.setPresentation({ focusStyle: style() });
+        await vi.waitFor(() =>
+          expect(pixiMock.tickerStart).toHaveBeenCalledTimes(4),
+        );
+        const callback = pixiMock.tickerAdd.mock.calls.at(-1)?.[0];
+        renderer.destroy();
+        expect(pixiMock.tickerRemove).toHaveBeenCalledWith(callback);
+        expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
+      } else {
+        renderer.destroy();
+      }
+    },
+  );
+
+  it("applies ambient focus on the first rendered image without another display change", async () => {
+    const renderer = await createStillRenderer({
+      detectionFrames: [
+        {
+          detections: [
+            { id: "subject", rect: { x: 50, y: 50, width: 20, height: 20 } },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      focusStyle: new BaseFocusStyle({
+        targetMode: FocusTargetMode.Ambient,
+        fill: { alpha: 0.5, color: 0x000000 },
+      }),
+    });
+    const drawnFocus = () =>
+      pixiMock.graphicsInstances.find((graphics) =>
+        graphics.fill.mock.calls.some(
+          ([fill]) => fill?.alpha === 0.5 && fill?.color === 0x000000,
+        ),
+      );
+    await vi.waitFor(() => expect(drawnFocus()).toBeDefined());
+    const focus = drawnFocus();
+    expect(focus).toBeDefined();
+    expect(focus).toHaveProperty("alpha", 1);
+    expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
   it("renders the image once and leaves Pixi's ticker stopped", async () => {
     const renderer = await createStillRenderer();
 

@@ -123,13 +123,6 @@ const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
   resolve: () => undefined,
 };
 
-/**
- * How far a focus change with no frame behind it moves the focus layer's fade.
- * It eases over elapsed milliseconds, and a push-presented scene only ever has
- * media time, so anything past a fade's length lands the overlay at once.
- */
-const STATIC_FOCUS_SETTLE_MS = 10_000;
-
 /** The presentation fields a render answers to that no renderer kind owns. */
 const RENDERED_PRESENTATION_TAIL = [
   "annotationAntialiasing",
@@ -242,21 +235,22 @@ export interface MediaCompositorOptions {
  *
  * A still frame is pulled once and then renders on change the way push
  * presentation does, with the sample it presents as one more change. The
- * ticker runs only while a looping GIF region or a loading spinner is on the
- * frame.
+ * ticker runs only while a GIF region, loading spinner, or opted-in focus
+ * transition animates.
  *
  * Push presentation engages when the opened source carries a presented-frame
  * channel. The producer then decides which frame is on screen and announces it,
- * so the ticker paints nothing and every render is an explicit answer to a
+ * so every render goes through the scheduler as an explicit answer to a
  * change: a presented frame, a layer turned on or off, restyling, hover or
  * selection, a viewport move, a resize, or the swapchain coming back after the
- * tab was hidden. A notification that describes what is already drawn renders
- * nothing, so a paused scene nobody touches renders nothing at all.
+ * tab was hidden, or an opted-in focus fade. A notification that describes what
+ * is already drawn renders nothing. Once a bounded focus fade settles, a paused
+ * scene nobody touches renders nothing at all.
  *
- * The focus layer's fade is not an exception to that. It advances with the
- * presented media time, so it fades during playback and is applied at once when
- * a hover or selection arrives with no frame behind it: paused focus is static,
- * and no animation keeps the scene rendering on its own.
+ * Default focus fades advance with presented media time. Hover, selection, and
+ * presentation changes settle them immediately; content and visibility redraws
+ * preserve their current alpha. An explicit duration instead animates alpha on
+ * wall time outside atomic presents, with a ticker that stops after the fade.
  */
 export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
@@ -307,7 +301,7 @@ export async function createPixiMediaScene(
    */
   const stillFrame = frameChannel === undefined && options.stillFrame === true;
   const rendersOnChange = frameChannel !== undefined || stillFrame;
-  let stillFrameTickerRunning = false;
+  let animationTickerRunning = false;
   /** The content of the `previewOverlay` answer the overlay on screen drew. */
   let drawnPreviewOverlayContent: number | null = null;
   /** The editing state the overlay on screen was drawn from. */
@@ -623,6 +617,8 @@ export async function createPixiMediaScene(
     preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
+  // On-demand animation paints must go through the same scheduler as presents.
+  if (rendersOnChange) app.ticker.remove(app.render, app);
   const destroyBatchTextureBindings = installPixiBatchTextureBindings(
     pixi,
     app.renderer,
@@ -644,8 +640,9 @@ export async function createPixiMediaScene(
   }
 
   const renderScheduler = createSceneRenderScheduler(() => {
+    updateFocusForRender();
     app.render();
-    syncStillFrameTicker();
+    syncAnimationTicker();
   });
   const maskBrushPreview = options.maskBrush
     ? createPixiMaskBrushPreview({
@@ -1111,6 +1108,10 @@ export async function createPixiMediaScene(
 
   const drawAnnotationOverlayNow = () =>
     drawAnnotationOverlay(currentMediaTime, overlayNow());
+  const tickOnDemandAnimation = () => {
+    drawAnnotationOverlayNow();
+    renderScene();
+  };
   const tickFocusLayer = () => focusLayer?.tick(now());
   const handleVisibilityChange = () => {
     // A hidden tab loses its swapchain, and the configuration it comes back
@@ -1927,6 +1928,7 @@ export async function createPixiMediaScene(
       app.ticker.remove(updateMediaSceneFit);
       app.ticker.remove(drawAnnotationOverlayNow);
       app.ticker.remove(tickFocusLayer);
+      app.ticker.remove(tickOnDemandAnimation);
       document.removeEventListener?.(
         "visibilitychange",
         handleVisibilityChange,
@@ -2754,7 +2756,7 @@ export async function createPixiMediaScene(
   }
 
   /**
-   * Milliseconds for animations that are not annotation geometry. A pull scene
+   * Milliseconds for annotation-overlay animations. A pull scene
    * has a ticker and reads the wall clock, as does a still frame while its
    * ticker runs; a push scene has the presented media time and nothing else,
    * so its animations move only when the media does.
@@ -2791,11 +2793,18 @@ export async function createPixiMediaScene(
     } finally {
       isPresenting = false;
     }
+    // Starting Pixi's ticker reads the wall clock, outside the atomic present.
+    syncAnimationTicker();
     scheduleDepthUploadAhead(presented.mediaTimeS);
   }
 
   function advanceFocusAnimation(mediaTime: number) {
     if (!focusLayer) return;
+    const duration = focusLayer.getTransitionDuration();
+    if (duration !== undefined) {
+      if (duration <= 0) focusLayer.settle();
+      return;
+    }
 
     const mediaTimeMs = mediaTime * MILLISECONDS_PER_SECOND;
 
@@ -2807,11 +2816,11 @@ export async function createPixiMediaScene(
     focusLayer.tick(focusAnimationTimeMs);
   }
 
-  function settleFocusAnimation() {
-    if (!focusLayer) return;
-
-    focusAnimationTimeMs += STATIC_FOCUS_SETTLE_MS;
-    focusLayer.tick(focusAnimationTimeMs);
+  function updateFocusForRender() {
+    if (!rendersOnChange || (frameChannel && isPresenting)) return;
+    if (focusLayer?.isAnimating()) focusLayer.tick(now());
+    else if (stillFrame || focusLayer?.getTransitionDuration() !== undefined)
+      focusLayer?.settle();
   }
 
   function renderScene() {
@@ -2868,34 +2877,35 @@ export async function createPixiMediaScene(
   function renderOnChange() {
     if (!rendersOnChange) return;
 
-    settleFocusAnimation();
+    if (frameChannel && currentFocusStyle?.transitionDurationMs === undefined)
+      focusLayer?.settle();
     drawOverlayForEditingState();
     renderScheduler.renderOnChange(describeSceneRender());
   }
 
   /**
-   * Runs the ticker on a still frame for as long as something on it moves by
-   * the clock: a looping GIF region or a loading spinner. Pixi renders on
-   * every tick it runs, and the overlay redraws so the spinner turns. Each
-   * render checks again, so the ticker stops with the render that removes the
-   * last of them.
+   * Keep on-demand scenes ticking only while an opted-in focus transition or
+   * a still-image overlay animates. The last tick stops the loop.
    */
-  function syncStillFrameTicker() {
-    if (!stillFrame || isDestroyed) return;
+  function syncAnimationTicker() {
+    if (!rendersOnChange || isDestroyed || (frameChannel && isPresenting))
+      return;
 
     const animating =
       hasPresentedSample &&
-      (regionLayer.hasAnimatedDisplay() || hasLoadingDetections());
+      (focusLayer?.isAnimating() ||
+        (stillFrame &&
+          (regionLayer.hasAnimatedDisplay() || hasLoadingDetections())));
 
-    if (animating === stillFrameTickerRunning) return;
-    stillFrameTickerRunning = animating;
+    if (animating === animationTickerRunning) return;
+    animationTickerRunning = animating;
 
     if (animating) {
-      app.ticker.add(drawAnnotationOverlayNow);
+      app.ticker.add(tickOnDemandAnimation);
       app.ticker.start();
     } else {
       app.ticker.stop();
-      app.ticker.remove(drawAnnotationOverlayNow);
+      app.ticker.remove(tickOnDemandAnimation);
     }
   }
 

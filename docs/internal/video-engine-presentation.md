@@ -160,10 +160,11 @@ non-Chromium browsers: Safari 18.6 reports `hvc1` and `hev1` supported alongside
 
 ## Rendering Only On Change
 
-Under push presentation Pixi's ticker paints nothing. Every render is an
-explicit answer to something that changed: a presented frame, the prepared
-window advancing, a layer turned on or off, restyling, hover or selection, a
-viewport move, a resize, or the swapchain coming back after the tab was hidden.
+Under push presentation every render goes through the scene scheduler; Pixi's
+automatic application-render callback is detached. Every render answers something
+that changed: a presented frame, the prepared window advancing, a layer turned on
+or off, restyling, hover or selection, a viewport move, a resize, an opted-in focus
+fade, or the swapchain coming back after the tab was hidden.
 
 `scene-render-scheduler.ts` compares a description of everything a render would
 put on screen against what was last drawn, so a notification that describes the
@@ -179,10 +180,17 @@ paused, untouched, for ten seconds" in
 renders once the window has settled" in
 `packages/web/src/renderers/pixi-media-scene.prepared-window.test.ts`.
 
-Paused focus is static by policy. The focus layer's fade advances with the
-presented media time, so it fades while the media moves and settles at once when
-a hover or selection arrives with no frame behind it. No animation keeps the
-scene rendering on its own.
+A focus style may opt into a bounded `transitionDurationMs` fade. Its alpha
+advances on wall time outside the atomic
+present, including during playback, while annotation geometry stays tied to the
+presented media frame. The initial resolved detection frame applies opted-in
+focus immediately; later arrivals or replacement styles can transition. The
+renderer stops its Pixi ticker when the transition settles, and its final tick
+paints through the scheduler. Without that option, the focus layer's fade
+advances with presented media time. Explicit hover, selection, and presentation
+changes settle it immediately; content readiness, depth, and visibility redraws
+preserve its current alpha. It does not keep the scene rendering on its own.
+Still-image focus also settles before the first render without an explicit duration.
 
 ## The Prepared Annotation Window
 
@@ -310,6 +318,8 @@ the scene renders it on change through the same scheduler and signature as the
 push path, with the presented sample as one more change. It answers
 `getRenderCount()`, and a notification that describes what is already drawn
 renders nothing, as on a paused video. Pixi's ticker starts only while
-something on the frame moves by the clock, a looping GIF region or a loading
-spinner, and stops with the render that removes the last of them. The behavior is pinned in
+something on the frame moves by the clock: a looping GIF region, a loading
+spinner, or an opted-in focus transition. Each animation tick paints through the
+scheduler, which stops the ticker with the render that removes the last of them.
+The behavior is pinned in
 `packages/web/src/renderers/media-renderer.still.test.ts`.

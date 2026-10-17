@@ -44,6 +44,8 @@ import { createMediaRendererRuntimeState } from "./media-renderer-state";
 
 const pixiMock = vi.hoisted(() => ({
   graphics: [] as {
+    alpha: number;
+    fill: ReturnType<typeof vi.fn>;
     clear: () => void;
     rect: () => void;
     circles: [number, number, number][];
@@ -56,6 +58,9 @@ const pixiMock = vi.hoisted(() => ({
   }[],
   render: vi.fn(),
   tickerAdd: vi.fn<(callback: () => void) => void>(),
+  tickerRemove: vi.fn(),
+  tickerStart: vi.fn(),
+  tickerStop: vi.fn(),
   onTextureDestroy: undefined as ((source: unknown) => void) | undefined,
 }));
 
@@ -99,7 +104,12 @@ vi.mock("pixi.js", () => {
       screen: this.screen,
     };
     stage = { addChild: vi.fn() };
-    ticker = { add: pixiMock.tickerAdd, remove: vi.fn() };
+    ticker = {
+      add: pixiMock.tickerAdd,
+      remove: pixiMock.tickerRemove,
+      start: pixiMock.tickerStart,
+      stop: pixiMock.tickerStop,
+    };
     cancelResize = vi.fn();
     destroy = vi.fn();
     init = vi.fn(async () => undefined);
@@ -455,6 +465,9 @@ beforeEach(() => {
   pixiMock.meshes.length = 0;
   pixiMock.render.mockClear();
   pixiMock.tickerAdd.mockClear();
+  pixiMock.tickerRemove.mockClear();
+  pixiMock.tickerStart.mockClear();
+  pixiMock.tickerStop.mockClear();
   pixiMock.onTextureDestroy = undefined;
 });
 
@@ -1028,6 +1041,53 @@ describe("the prepared annotation window under push presentation", () => {
       }
     },
   );
+
+  it("settles default still-image focus before rendering an already prepared first frame", async () => {
+    const detectionTimeline = createTimeline([
+      { mediaTime: 0, detections: [{ id: "subject", rect: makeRect() }] },
+    ]);
+    await detectionTimeline.prepare(0);
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions({
+        detectionTimeline,
+        focusStyle: new BaseFocusStyle({
+          fill: { alpha: 0.5, color: 0x000000 },
+          targetMode: FocusTargetMode.Ambient,
+        }),
+        stillFrame: true,
+      }),
+    );
+    try {
+      scene.initializeMedia({ height: 240, width: 320 });
+      const prepared = scene.waitForRenderPreparation?.(0, {
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await prepared;
+      const renderedFocusAlphas: number[] = [];
+      pixiMock.render.mockImplementation(() => {
+        const focus = pixiMock.graphics.find((graphics) =>
+          graphics.fill.mock.calls.some(
+            ([fill]) => fill?.alpha === 0.5 && fill?.color === 0x000000,
+          ),
+        );
+        if (focus) renderedFocusAlphas.push(focus.alpha);
+      });
+      scene.presentSample({
+        timestamp: 0,
+        duration: 0,
+        draw: vi.fn(),
+        close: vi.fn(),
+      });
+      expect(renderedFocusAlphas).toEqual([1]);
+      expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+    } finally {
+      scene.destroy();
+      detectionTimeline.destroy();
+    }
+  });
 
   it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {
     const diagnostics: RenderPreparationDiagnostics[] = [];
