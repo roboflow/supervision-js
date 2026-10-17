@@ -332,12 +332,17 @@ export function createPixiFocusLayer(options: {
       const duration = focusStyle.transitionDurationMs;
       const resolvedDuration =
         typeof duration === "function" ? duration(styleContext) : duration;
-      transitionDurationMs =
+      const nextTransitionDurationMs =
         resolvedDuration === undefined
           ? undefined
           : Number.isFinite(resolvedDuration)
             ? Math.max(0, resolvedDuration)
             : 0;
+      if (nextTransitionDurationMs !== transitionDurationMs) {
+        transitionStartedAt = null;
+        transitionFromAlpha = currentAlpha;
+      }
+      transitionDurationMs = nextTransitionDurationMs;
       const isFirstFrame = !hasResolvedFrame;
       hasResolvedFrame = true;
       const resolvedInstruction = focusStyle.resolve(styleContext);

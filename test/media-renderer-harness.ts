@@ -266,7 +266,7 @@ vi.mock("pixi.js", () => {
       this.tickerListeners.push({
         callback: this.render,
         context: this,
-        priority: -50,
+        priority: -25,
       });
       this.tickerRunning = options.autoStart !== false;
     };
