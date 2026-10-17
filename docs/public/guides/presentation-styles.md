@@ -370,7 +370,9 @@ focusStyle: new BaseFocusStyle({
 });
 ```
 
-A positive finite duration bounds each fade. On still images and paused web video
+A positive finite duration bounds each fade while its resolved value stays
+unchanged. Changing that value restarts the fade from its current alpha.
+On still images and paused web video
 engine sources, the extra focus renders stop when the fade finishes. The default
 `src` video route keeps its regular render ticker even while paused. Zero, negative,
 and non-finite values apply changes without a fade. The fade also runs during

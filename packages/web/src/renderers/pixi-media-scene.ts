@@ -2877,7 +2877,7 @@ export async function createPixiMediaScene(
   function renderOnChange() {
     if (!rendersOnChange) return;
 
-    if (frameChannel && focusLayer?.getTransitionDuration() === undefined)
+    if (frameChannel && currentFocusStyle?.transitionDurationMs === undefined)
       focusLayer?.settle();
     drawOverlayForEditingState();
     renderScheduler.renderOnChange(describeSceneRender());

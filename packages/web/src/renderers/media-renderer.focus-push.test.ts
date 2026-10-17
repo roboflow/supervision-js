@@ -51,61 +51,81 @@ describe("focus transitions on pushed video through the public renderer", () => 
     },
   );
 
-  it("preserves default media-time fades across redraws and settles presentation changes", async () => {
-    const producer = createPushSource();
-    const shouldRender = vi.fn(
-      ({ mediaTime }: { mediaTime: number }) =>
-        mediaTime >= 0.04 && mediaTime < 0.12,
-    );
-    const renderer = await createRenderer(false, false, {
-      src: undefined,
-      source: producer.source,
-      detectionFrames: [detectionFrame],
-      focusStyle: new BaseFocusStyle({
-        targetMode: FocusTargetMode.Ambient,
-        fill: { alpha: 0.5, color: 0x000000 },
-        shouldRender,
-      }),
-    });
-    try {
-      await vi.waitFor(() => expect(shouldRender).toHaveBeenCalled());
-      const restoreVisibility = vi
-        .mocked(document.addEventListener)
-        .mock.calls.filter(([name]) => name === "visibilitychange")
-        .at(-1)?.[1];
-      if (typeof restoreVisibility !== "function") {
-        throw new Error("Expected the renderer's visibility listener");
-      }
-      for (const time of [0.04, 0.08, 0.12]) {
-        const renders = renderer.getRenderCount() ?? 0;
-        domMock.performanceNow.mockClear();
-        producer.present(time);
-        await vi.waitFor(() =>
-          expect(renderer.getRenderCount()).toBe(renders + 1),
-        );
-        expect(domMock.performanceNow).not.toHaveBeenCalled();
-        expect(findFocus().alpha).toBeGreaterThan(0);
-        expect(findFocus().alpha).toBeLessThan(1);
-        const alpha = findFocus().alpha;
-        restoreVisibility.call(document, new Event("visibilitychange"));
-        expect(findFocus().alpha).toBe(alpha);
-        expect(renderer.getRenderCount()).toBe(renders + 2);
-      }
-      renderer.setPresentation({
+  it.each([undefined, 300])(
+    "preserves default fades across redraws and updates to duration %s",
+    async (duration) => {
+      const producer = createPushSource();
+      const shouldRender = vi.fn(
+        ({ mediaTime }: { mediaTime: number }) =>
+          mediaTime >= 0.04 && mediaTime < 0.12,
+      );
+      const renderer = await createRenderer(false, false, {
+        src: undefined,
+        source: producer.source,
+        detectionFrames: [detectionFrame],
         focusStyle: new BaseFocusStyle({
           targetMode: FocusTargetMode.Ambient,
-          shouldRender: () => false,
+          fill: { alpha: 0.5, color: 0x000000 },
+          shouldRender,
         }),
       });
-      expect(findFocus().alpha).toBe(0);
-      expect(pixiMock.tickerStart).not.toHaveBeenCalled();
-      expect(pixiMock.render).toHaveBeenCalledTimes(
-        renderer.getRenderCount() ?? -1,
-      );
-    } finally {
-      renderer.destroy();
-    }
-  });
+      try {
+        await vi.waitFor(() => expect(shouldRender).toHaveBeenCalled());
+        const restoreVisibility = vi
+          .mocked(document.addEventListener)
+          .mock.calls.filter(([name]) => name === "visibilitychange")
+          .at(-1)?.[1];
+        if (typeof restoreVisibility !== "function") {
+          throw new Error("Expected the renderer's visibility listener");
+        }
+        for (const time of [0.04, 0.08, 0.12]) {
+          const renders = renderer.getRenderCount() ?? 0;
+          domMock.performanceNow.mockClear();
+          producer.present(time);
+          await vi.waitFor(() =>
+            expect(renderer.getRenderCount()).toBe(renders + 1),
+          );
+          expect(domMock.performanceNow).not.toHaveBeenCalled();
+          expect(findFocus().alpha).toBeGreaterThan(0);
+          expect(findFocus().alpha).toBeLessThan(1);
+          const alpha = findFocus().alpha;
+          restoreVisibility.call(document, new Event("visibilitychange"));
+          expect(findFocus().alpha).toBe(alpha);
+          expect(renderer.getRenderCount()).toBe(renders + 2);
+        }
+        const alpha = findFocus().alpha;
+        renderer.setPresentation({
+          focusStyle: new BaseFocusStyle({
+            targetMode: FocusTargetMode.Ambient,
+            shouldRender: () => false,
+            ...(duration === undefined
+              ? {}
+              : { transitionDurationMs: duration }),
+          }),
+        });
+        if (duration === undefined) {
+          expect(findFocus().alpha).toBe(0);
+          expect(pixiMock.tickerStart).not.toHaveBeenCalled();
+        } else {
+          await vi.waitFor(() =>
+            expect(pixiMock.tickerStart).toHaveBeenCalledOnce(),
+          );
+          expect(findFocus().alpha).toBe(alpha);
+          flushPixiTicker(150);
+          expect(findFocus().alpha).toBeGreaterThan(0);
+          expect(findFocus().alpha).toBeLessThan(alpha);
+          flushPixiTicker(300);
+          expect(findFocus().alpha).toBe(0);
+          expect(pixiMock.tickerStop).toHaveBeenCalledOnce();
+        }
+        expect(pixiMock.render).toHaveBeenCalledTimes(
+          renderer.getRenderCount() ?? -1,
+        );
+      } finally {
+        renderer.destroy();
+      }
+    },
+  );
 
   it("paints each bounded fade tick once through the scheduler outside atomic presents", async () => {
     const producer = createPushSource();
