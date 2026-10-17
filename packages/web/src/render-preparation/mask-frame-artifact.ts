@@ -1,3 +1,4 @@
+import type { PreparedPackedMaskCoverage } from "./packed-mask-coverage";
 import type { StrokeAlignment } from "supervision-js-core";
 
 export enum PreparedMaskFrameKind {
@@ -47,6 +48,7 @@ export interface PreparedIdMaskPlane {
 }
 
 export interface PreparedRgbaMaskFrame {
+  readonly packedMaskCoverage?: readonly PreparedPackedMaskCoverage[];
   readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
   readonly height: number;
   readonly idMaskPlane?: PreparedIdMaskPlane;
@@ -59,6 +61,7 @@ export interface PreparedRgbaMaskFrame {
 }
 
 export interface PreparedIdMaskFrame {
+  readonly packedMaskCoverage?: readonly PreparedPackedMaskCoverage[];
   readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
   readonly fillPalette: Float32Array<ArrayBuffer>;
   readonly hasStroke: boolean;

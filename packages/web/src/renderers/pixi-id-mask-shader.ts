@@ -6,6 +6,8 @@ import type {
 import {
   idMaskStrokeCoverageGlsl,
   idMaskStrokeCoverageWgsl,
+  createIdMaskStrokeCoverageGlsl,
+  createIdMaskStrokeCoverageWgsl,
 } from "#renderers/id-mask-stroke-coverage";
 import {
   ID_MASK_STROKE_WIDTH_LANES,
@@ -55,13 +57,29 @@ type UniformGroupConstructor = new (
   >,
 ) => PixiUniformGroup;
 
+/** Paint is independent of whether coverage is a dense ID plane or a packed binary crop. */
+export type PixiIdMaskPaint = Pick<
+  PreparedIdMaskFrame,
+  | "fillPalette"
+  | "strokePalette"
+  | "strokeWidths"
+  | "strokeAlignments"
+  | "hasStroke"
+  | "maxStrokeWidth"
+  | "width"
+  | "height"
+> & {
+  /** Explicit-unit outlines use the same source-over fill composition as vector strokes. */
+  readonly strokeOverFill?: boolean;
+};
+
 export interface PixiIdMaskShaderRenderer {
   readonly mesh: PixiIdMaskMesh;
   clearTexture(): void;
   releaseTexture(source: PixiImageSource): void;
   hide(): void;
   render(
-    frame: PreparedIdMaskFrame,
+    frame: PixiIdMaskPaint,
     texture: PixiTexture,
     strokePixelRatio?: number,
   ): void;
@@ -78,10 +96,13 @@ export function createPixiIdMaskShaderRenderer(options: {
   readonly UniformGroup: UniformGroupConstructor;
   readonly mediaHeight: number;
   readonly mediaWidth: number;
+  /** Independent one-bit coverage uses ID 1 with the same paint/outline shader. */
+  readonly packedCoverage?: boolean;
 }): PixiIdMaskShaderRenderer {
   const defaultStrokeAlignments = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
   const uniforms = new options.UniformGroup({
     uBorderEnabled: { type: "f32", value: 0 },
+    uStrokeOverFill: { type: "f32", value: 0 },
     uFillPalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
       type: "vec4<f32>",
@@ -152,7 +173,10 @@ export function createPixiIdMaskShaderRenderer(options: {
     destroy() {
       mesh.destroy();
       destroyShaderKeepingProgram(shader);
-      geometry.destroy();
+      const buffer = uniforms.buffer;
+      uniforms.buffer = undefined;
+      buffer?.destroy();
+      geometry.destroy(true);
       placeholderSource.destroy();
     },
 
@@ -175,6 +199,7 @@ export function createPixiIdMaskShaderRenderer(options: {
         frame.height,
       ]);
       uniforms.uniforms.uBorderEnabled = frame.hasStroke ? 1 : 0;
+      uniforms.uniforms.uStrokeOverFill = frame.strokeOverFill ? 1 : 0;
       uniforms.uniforms.uMaxStrokeWidth = frame.maxStrokeWidth;
       uniforms.update();
       mesh.visible = true;
@@ -204,13 +229,21 @@ export function createPixiIdMaskShaderRenderer(options: {
   function createShader() {
     return options.Shader.from({
       gl: {
-        fragment: idMaskFragmentShader,
+        fragment: createIdMaskFragmentShader(
+          options.packedCoverage
+            ? createIdMaskStrokeCoverageGlsl(packedMaskSampleCellGlsl)
+            : idMaskStrokeCoverageGlsl,
+        ),
         vertex: tintedMaskVertexGlsl,
       },
       gpu: {
         fragment: {
           entryPoint: "mainFragment",
-          source: idMaskFragmentWgsl,
+          source: createIdMaskFragmentWgsl(
+            options.packedCoverage
+              ? createIdMaskStrokeCoverageWgsl(packedMaskSampleCellWgsl)
+              : idMaskStrokeCoverageWgsl,
+          ),
         },
         vertex: {
           entryPoint: "mainVertex",
@@ -232,7 +265,8 @@ export function createPixiIdMaskShaderRenderer(options: {
   }
 }
 
-const idMaskFragmentShader = `#version 300 es
+function createIdMaskFragmentShader(strokeCoverage: string) {
+  return `#version 300 es
 precision highp float;
 precision highp int;
 
@@ -242,6 +276,7 @@ in vec4 vColor;
 uniform sampler2D uTexture;
 uniform vec2 uTextureSize;
 uniform float uBorderEnabled;
+uniform float uStrokeOverFill;
 uniform float uMaxStrokeWidth;
 uniform float uStrokePixelRatio;
 ${idMaskPaletteGlsl}
@@ -255,7 +290,7 @@ bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
 
-${idMaskStrokeCoverageGlsl}
+${strokeCoverage}
 
 void main(void) {
   vec2 position = vUV * uTextureSize;
@@ -283,6 +318,12 @@ void main(void) {
     float width = strokeWidthInTexels(centerId, pixelWidth);
     if (width > 0.0 && readStroke(centerId).a > 0.0) {
       float coverage = innerStrokeCoverage(centerId, sourceCell, cell, width, pixelWidth);
+      if (uStrokeOverFill > 0.5 && coverage > 0.0) {
+        vec4 stroke = premultiplyAlpha(readStroke(centerId) * vColor) * coverage;
+        vec4 fill = premultiplyAlpha(readFill(centerId) * vColor);
+        finalColor = stroke + fill * (1.0 - stroke.a);
+        return;
+      }
       if (coverage >= 1.0) {
         finalColor = premultiplyAlpha(readStroke(centerId) * vColor);
         return;
@@ -301,10 +342,13 @@ void main(void) {
   finalColor = premultiplyAlpha(readFill(centerId) * vColor);
 }
 `;
+}
 
-const idMaskFragmentWgsl = `
+function createIdMaskFragmentWgsl(strokeCoverage: string) {
+  return `
 struct MaskUniforms {
   uBorderEnabled: f32,
+  uStrokeOverFill: f32,
   ${idMaskFillPaletteWgslField}
   uMaxStrokeWidth: f32,
   uStrokePixelRatio: f32,
@@ -327,7 +371,7 @@ fn differs(left: f32, right: f32) -> bool {
   return abs(left - right) > 0.5;
 }
 
-${idMaskStrokeCoverageWgsl}
+${strokeCoverage}
 
 @fragment
 fn mainFragment(
@@ -357,6 +401,11 @@ fn mainFragment(
     let width = strokeWidthInTexels(centerId, pixelWidth);
     if (width > 0.0 && readStroke(centerId).a > 0.0) {
       let coverage = innerStrokeCoverage(centerId, sourceCell, cell, width, pixelWidth);
+      if (maskUniforms.uStrokeOverFill > 0.5 && coverage > 0.0) {
+        let stroke = premultiplyAlpha(readStroke(centerId) * vColor) * coverage;
+        let fill = premultiplyAlpha(readFill(centerId) * vColor);
+        return stroke + fill * (1.0 - stroke.a);
+      }
       if (coverage >= 1.0) {
         return premultiplyAlpha(readStroke(centerId) * vColor);
       }
@@ -371,5 +420,22 @@ fn mainFragment(
   }
 
   return premultiplyAlpha(readFill(centerId) * vColor);
+}
+`;
+}
+
+const packedMaskSampleCellGlsl = `
+float sampleMaskIdCell(ivec2 cell) {
+  if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, ivec2(uTextureSize)))) return 0.0;
+  int byteValue = int(floor(texelFetch(uTexture, ivec2(cell.x >> 3, cell.y), 0).r * 255.0 + 0.5));
+  return float((byteValue >> (cell.x & 7)) & 1);
+}
+`;
+
+const packedMaskSampleCellWgsl = `
+fn sampleMaskIdCell(cell: vec2<i32>) -> f32 {
+  if (any(cell < vec2<i32>(0)) || any(cell >= vec2<i32>(maskUniforms.uTextureSize))) { return 0.0; }
+  let byteValue = u32(floor(textureLoad(uTexture, vec2<i32>(cell.x >> 3, cell.y), 0).r * 255.0 + 0.5));
+  return f32((byteValue >> u32(cell.x & 7)) & 1u);
 }
 `;

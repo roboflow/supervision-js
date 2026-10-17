@@ -1,3 +1,4 @@
+import type { PreparedPackedMaskCoverage } from "./packed-mask-coverage";
 import type { DetectionMask, Point } from "supervision-js-core";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import type {
@@ -40,6 +41,7 @@ export type SerializableMaskInstruction =
     });
 
 export interface MaskFramePreparationJob {
+  readonly independentMasks?: boolean;
   readonly instructions: readonly SerializableMaskInstruction[];
   readonly key: string;
   /** Widest id raster to cook; absent, the instructions' own resolution. */
@@ -55,6 +57,7 @@ export interface MaskPreparationWorkerPrepareMessage {
 }
 
 export interface MaskPreparationWorkerCompleteMessage {
+  readonly packedMaskCoverage?: readonly PreparedPackedMaskCoverage[];
   readonly artifactKind?: PreparedMaskFrameKind;
   readonly fillPalette?: Float32Array<ArrayBuffer>;
   readonly hasStroke?: boolean;
