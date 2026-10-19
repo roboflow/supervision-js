@@ -8,11 +8,13 @@ import {
   type MaskStyle,
 } from "supervision-js-core";
 import {
+  createContainer,
   createRenderer,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
 import { RenderPreparationMode } from "#types/render-preparation";
+import { createStaticImageMediaSource } from "#media/static-image-media-source";
 
 const mask = encodeBinaryMask(new Uint8Array(64 * 64).fill(1), 64, 64);
 const initialFrame: DetectionFrame = {
@@ -58,6 +60,64 @@ function style(opacity: number): MaskStyle {
 }
 
 describe("mask order through the media renderer", () => {
+  it("updates still-image outlines on display-density changes without another frame or zoom", async () => {
+    resetMocks();
+    const previousPixelRatio = window.devicePixelRatio;
+    const previousResizeObserver = globalThis.ResizeObserver;
+    let resize!: () => void;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    window.devicePixelRatio = 1;
+    const container = createContainer();
+    const renderer = await createRenderer(false, false, {
+      container,
+      source: createStaticImageMediaSource({
+        width: 64,
+        height: 64,
+        draw() {},
+      }),
+      src: undefined,
+      maskOrder: "detection",
+      labelStyle: null,
+      maskStyle: style(1),
+      detectionFrames: [{ mediaTime: 0, detections: [{ id: "red", mask }] }],
+      renderPreparation: { mode: RenderPreparationMode.MainThread },
+    });
+    try {
+      await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(1));
+      const paint = liveMaskPaints()[0]!;
+      const sources = pixiMock.bufferImageSourceOptions.length;
+      const meshes = pixiMock.meshInstances.length;
+      expect(paint.uStrokePixelRatio).toBe(1);
+
+      // A wider letterbox leaves the image scale unchanged while DPR doubles.
+      Object.defineProperty(container, "clientWidth", { value: 800 });
+      window.devicePixelRatio = 2;
+      resize();
+      expect(paint.uStrokePixelRatio).toBe(2);
+
+      renderer.setRenderQuality({ maxDevicePixelRatio: 1 });
+      expect(paint.uStrokePixelRatio).toBe(1);
+      renderer.setRenderQuality({ maxDevicePixelRatio: 2 });
+      expect(paint.uStrokePixelRatio).toBe(2);
+      expect(liveMaskPaints()[0]).toBe(paint);
+      expect(pixiMock.bufferImageSourceOptions).toHaveLength(sources);
+      expect(pixiMock.meshInstances).toHaveLength(meshes);
+    } finally {
+      renderer.destroy();
+      window.devicePixelRatio = previousPixelRatio;
+      vi.stubGlobal("ResizeObserver", previousResizeObserver);
+    }
+  });
+
   it("keeps duplicate and mixed-type IDs as distinct frame detections", async () => {
     resetMocks();
     const polygon = initialFrame.detections[2]!.polygon!;
@@ -248,7 +308,11 @@ describe("mask order through the media renderer", () => {
   });
 });
 
-type Paint = { uFillPalette: Float32Array; uStrokePalette: Float32Array };
+type Paint = {
+  uFillPalette: Float32Array;
+  uStrokePalette: Float32Array;
+  uStrokePixelRatio: number;
+};
 type Display = {
   children?: Display[];
   sortableChildren?: boolean;

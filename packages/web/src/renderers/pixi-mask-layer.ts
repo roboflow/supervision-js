@@ -535,6 +535,9 @@ export function createPixiMaskLayer(options: {
       idMaskRenderer?.setStrokePixelRatio(
         resolveDisplayPixelRatio(display) * resolutionScale,
       );
+      const activeFrame = activeIdMaskFrame ?? activeRgbaMaskFrame;
+      if (activeFrame && orderedUnits && isFillVisible)
+        renderOrderedMasks(activeFrame, activeViewportScale);
       const nextWidth = resolveMaxRasterWidth();
       if (mediaWidth > 0 && previousWidth !== nextWidth) {
         preparedRenderWindow.invalidateRasterSize();
