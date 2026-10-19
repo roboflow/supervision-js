@@ -7,12 +7,97 @@ import type {
 import {
   createContainer,
   createMockSample,
+  flushAnimationFrame,
   mediaMock,
   pixiMock,
   resetMocks,
 } from "../../../test/media-renderer-harness";
 
 describe("media session consumer workflows", () => {
+  it("plays an ungated appendable session whose predictions have not arrived", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
+    const { createMediaSession, MediaRendererPlaybackState } =
+      await import("./index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "no-predictions-yet" },
+      },
+      media: "sample.mp4",
+      // A session with appendable detections waits for coverage by default, and
+      // this one is about what a host gets when it opts out.
+      playbackGate: false,
+      renderer: {
+        autoPlay: false,
+        loop: false,
+      },
+    });
+
+    await session.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(session.getState()).toMatchObject({ playbackBlocked: false });
+    expect(session.getState().renderer).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    session.destroy();
+  });
+
+  it("draws a still depth map the host hands the session, and swaps it later", async () => {
+    resetMocks();
+    const { annotationRenderers, createMediaSession, readDepthAt } =
+      await import("./index");
+    const depthMap = (disparity: number) => ({
+      height: 9,
+      kind: "disparity_px" as const,
+      samples: {
+        encoding: "scaled16" as const,
+        scale: 256,
+        values: new Uint16Array(16 * 9).fill(disparity * 256),
+      },
+      width: 16,
+    });
+    const session = await createMediaSession({
+      container: createContainer(),
+      depth: { map: depthMap(8) },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [annotationRenderers.depth({ colormap: "viridis" })],
+      },
+      renderer: { autoPlay: false, loop: false },
+    });
+    const readout = () => {
+      const active = session.renderer.getActiveDepth?.();
+
+      return active
+        ? readDepthAt(
+            active.map,
+            { x: 640, y: 360 },
+            { height: active.mediaHeight, width: active.mediaWidth },
+          )
+        : null;
+    };
+
+    expect(readout()).toMatchObject({ disparityPx: 8, x: 8, y: 4 });
+
+    await session.setDepth?.({ map: depthMap(20) });
+    expect(readout()).toMatchObject({ disparityPx: 20 });
+
+    await session.setDepth?.(null);
+    expect(readout()).toBeNull();
+
+    session.destroy();
+    await expect(session.setDepth?.(null)).rejects.toThrow(
+      "Media session has been destroyed.",
+    );
+  });
+
   it("creates a session, appends detections, seeks, updates styles, and destroys cleanly", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];
@@ -191,13 +276,6 @@ describe("media session consumer workflows", () => {
   it("forwards the mask halo renderer style from session presentation", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];
-    // Node lacks createImageBitmap; stubbing it lets the prepared pipeline
-    // take the PngIdMask path the halo depends on.
-    vi.stubGlobal(
-      "createImageBitmap",
-      vi.fn(async () => ({ close: vi.fn(), height: 2, width: 2 })),
-    );
-
     const { annotationRenderers, createMediaSession, DetectionMaskEncoding } =
       await import("./index");
     const haloResolve = vi.fn(() => ({
@@ -251,8 +329,6 @@ describe("media session consumer workflows", () => {
     });
 
     session.destroy();
-    // Restore the node default so later tests take the RGBA fallback again.
-    vi.stubGlobal("createImageBitmap", undefined);
   });
 
   it("forwards the box-corners renderer style from session presentation", async () => {
@@ -349,6 +425,67 @@ describe("media session consumer workflows", () => {
     await vi.waitFor(() => {
       expect(resolve).toHaveBeenCalled();
     });
+    session.destroy();
+  });
+
+  it("forwards the percentage-bar renderer style from session presentation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, createMediaSession, MediaSessionStatus } =
+      await import("./index");
+    const resolve = vi.fn(() => ({
+      background: { alpha: 0.8, color: 0x000000 },
+      backgroundRect: { height: 6, width: 20, x: 20, y: 8 },
+      fill: { alpha: 1, color: 0x00ff00 },
+      value: 0.75,
+      valueRect: { height: 6, width: 15, x: 17.5, y: 8 },
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [annotationRenderers.percentageBar({ style: { resolve } })],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(resolve).toHaveBeenCalled();
+    });
+
+    // The bar lowers into closed polygon paths, so a passing resolver is not
+    // enough: the vector layer must actually draw both the track and the value
+    // fill through Graphics#poly without the render pipeline erroring out.
+    const drawnPolys = pixiMock.graphicsInstances.flatMap((graphics) =>
+      graphics.poly.mock.calls.map(([points, closed]) => ({ closed, points })),
+    );
+
+    expect(drawnPolys).toContainEqual({
+      closed: true,
+      points: [10, 5, 30, 5, 30, 11, 10, 11],
+    });
+    expect(drawnPolys).toContainEqual({
+      closed: true,
+      points: [10, 5, 25, 5, 25, 11, 10, 11],
+    });
+
+    const state = session.getState();
+
+    expect(state.status).not.toBe(MediaSessionStatus.Error);
+    expect(state.errorMessage).toBeNull();
     session.destroy();
   });
 

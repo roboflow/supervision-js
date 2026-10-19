@@ -7,6 +7,10 @@
  * with npm, stages the core archive inside the web archive's `node_modules`,
  * and marks it as a bundled dependency. Public dependencies such as `pixi.js`
  * and `mediabunny` stay ordinary registry dependencies.
+ *
+ * The private video-engine workspace needs none of that: the browser build
+ * stages its output into `dist/web-video-engine`, so only its `file:` build
+ * dependency has to come off the manifest npm receives.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -31,6 +35,7 @@ const rootDir = path.resolve(
 const webPackageName = "supervision";
 const corePackageName = "supervision-js-core";
 const internalTrackerPackageName = "supervision-js-trackers";
+const videoEnginePackageName = "supervision-js-web-video-engine";
 
 function parseArgs(argv) {
   const options = { outDir: path.join(rootDir, "artifacts"), skipBuild: false };
@@ -150,7 +155,10 @@ function bundleCoreDependency(stagedManifestPath, coreVersion) {
   manifest.dependencies = dependencies;
   manifest.bundleDependencies = [corePackageName];
 
-  for (const [name, spec] of Object.entries(dependencies)) {
+  for (const [name, spec] of Object.entries({
+    ...dependencies,
+    ...(manifest.devDependencies ?? {}),
+  })) {
     if (typeof spec === "string" && spec.startsWith("file:")) {
       throw new Error(
         `Dependency ${name} still uses a repository-relative spec: ${spec}`,
@@ -161,12 +169,14 @@ function bundleCoreDependency(stagedManifestPath, coreVersion) {
   writeFileSync(stagedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-/** Removes monorepo-only build dependencies from the bundled core manifest. */
-function removeInternalBuildDependencies(stagedManifestPath) {
+/** Removes monorepo-only build dependencies from a staged manifest. */
+function removeInternalBuildDependencies(stagedManifestPath, names) {
   const manifest = readManifest(stagedManifestPath);
   const devDependencies = manifest.devDependencies ?? {};
 
-  delete devDependencies[internalTrackerPackageName];
+  for (const name of names) {
+    delete devDependencies[name];
+  }
 
   if (Object.keys(devDependencies).length === 0) {
     delete manifest.devDependencies;
@@ -196,6 +206,7 @@ function main() {
 
   if (!options.skipBuild) {
     runInherit("npm", ["run", "build", "-w", corePackageName], rootDir);
+    runInherit("npm", ["run", "build", "-w", videoEnginePackageName], rootDir);
     runInherit("npm", ["run", "build", "-w", webPackageName], rootDir);
   }
 
@@ -221,20 +232,21 @@ function main() {
     );
     copyPackageLicense(packageDir);
 
+    const webManifestPath = path.join(packageDir, "package.json");
     const coreManifestPath = path.join(
       packageDir,
       "node_modules",
       corePackageName,
       "package.json",
     );
-    removeInternalBuildDependencies(coreManifestPath);
+    removeInternalBuildDependencies(coreManifestPath, [
+      internalTrackerPackageName,
+    ]);
+    removeInternalBuildDependencies(webManifestPath, [videoEnginePackageName]);
 
     const coreManifest = readManifest(coreManifestPath);
 
-    bundleCoreDependency(
-      path.join(packageDir, "package.json"),
-      coreManifest.version,
-    );
+    bundleCoreDependency(webManifestPath, coreManifest.version);
 
     clearPreviousArchives(options.outDir);
     run(

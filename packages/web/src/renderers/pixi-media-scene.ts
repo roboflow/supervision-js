@@ -1,29 +1,36 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
+import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
   BasePolygonStyle,
-  type Detection,
-  type DetectionFrame,
-  type PolygonStyle,
-} from "supervision-js-core";
-import type { LabelStyle } from "supervision-js-core";
-import type { MaskHaloStyle, MaskStyle } from "supervision-js-core";
-import {
-  createViewportController,
-  resolveAnnotationStyleState,
-} from "supervision-js-core";
-import type { AnnotationVisibility } from "supervision-js-core";
-import type {
-  BoxCornerStyle,
-  EllipseStyle,
-  MarkerStyle,
-  RegionAnnotationRenderer,
-  RegionRendererTarget,
-  ShapeStyle,
-} from "supervision-js-core";
-import {
   RegionRendererCoverageKind,
   RegionRendererSourceKind,
+  type BoxCornerStyle,
+  type Detection,
+  type DetectionFrame,
+  type DepthAnnotationRenderer,
+  type HeatmapAnnotationRenderer,
+  type EllipseStyle,
+  type MarkerStyle,
+  type MaskHaloStyle,
+  type OrientedBoxStyle,
+  type PercentageBarStyle,
+  type PolygonStyle,
+  type PreviewOverlayData,
+  type RegionAnnotationRenderer,
+  type RegionRendererTarget,
+  type ShapeStyle,
 } from "supervision-js-core";
+import type { FocusStyle } from "supervision-js-core";
+import type { LabelStyle } from "supervision-js-core";
+import type { MaskStyle } from "supervision-js-core";
+import {
+  annotationRendererKinds,
+  createViewportController,
+  resolveAnnotationRendererStyleFields,
+  resolveAnnotationStyleState,
+  type AnnotationRendererStyleField,
+} from "supervision-js-core";
+import type { AnnotationVisibility } from "supervision-js-core";
 import type { Point } from "supervision-js-core";
 import type {
   MediaRendererScene,
@@ -31,40 +38,158 @@ import type {
   MediaRendererSceneTimelineContext,
   PresentedMediaSample,
 } from "./media-renderer-scene";
+import type {
+  MediaFrameRenderTimings,
+  MediaRendererPresentation,
+} from "#types/media-renderer";
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import { captureCanvasMediaFrame } from "./media-frame-capture";
+import {
+  drawFramePresentLayers,
+  measureFramePresentLayers,
+  presentVideoFrame,
+} from "./pixi-frame-present";
+import type {
+  FramePresentLayers,
+  FramePresentStep,
+  FramePresentTargets,
+} from "./pixi-frame-present";
+import type {
+  PresentedFrameId,
+  PresentedVideoFrame,
+} from "./presented-frame-channel";
+import { createSceneRenderScheduler } from "./scene-render-scheduler";
+import { createPixiMediaInspectionFilter } from "./pixi-media-inspection-filter";
+import type { SceneRenderSignature } from "./scene-render-scheduler";
+import { createPreparedAnnotationWindow } from "./prepared-annotation-window";
+import {
+  createMaskHaloPreparationStyle,
+  resolvePaintedMaskHalo,
+} from "./pixi-mask-halo";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
+import { queryMaxTextureSize } from "./depth-textures";
+import { createPixiDepthLayer } from "./pixi-depth-layer";
+import { createPixiHeatmapLayer } from "./pixi-heatmap-layer";
+import { installPixiBatchTextureBindings } from "./pixi-batch-texture-bindings";
+import { installPixiFilterBindings } from "./pixi-filter-bindings";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
+import { createPixiAnnotationAntialiasLayer } from "./pixi-annotation-antialias-layer";
+import { resolvePixiAnnotationAntialiasResolution } from "./pixi-annotation-antialias";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
-import { createPixiMaskLayer } from "./pixi-mask-layer";
+import {
+  createPixiMaskLayer,
+  ID_MASK_PREPARATION_STYLE,
+} from "./pixi-mask-layer";
 import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
 import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
+import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
+import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
+import type { DepthFrameProvider } from "#render-preparation/depth/source";
 import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
 } from "./pixi-region-layer";
-import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 import {
   AnnotationGestureStateKind,
   MediaInteractionMode,
+  type AnnotationEditingState,
 } from "supervision-js-core";
 import {
   createPixiSceneLayerSlot,
   PixiSceneLayerKind,
-  syncPixiSceneLayerChildren,
 } from "./pixi-scene-layer-slot";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
-import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type {
   Application as PixiApplication,
   CanvasSource as PixiCanvasSource,
   Container as PixiContainer,
+  ExternalSource as PixiExternalSource,
   Graphics as PixiGraphics,
   Texture as PixiTexture,
 } from "pixi.js";
+
+const MILLISECONDS_PER_SECOND = 1000;
+
+/**
+ * Coverage-only presentations still need a prepared artifact. Nothing here
+ * draws a fill; it exists only to keep preparation running.
+ */
+const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
+  artifactKey: "region-mask-coverage-only",
+  resolve: () => undefined,
+};
+
+/**
+ * How far a focus change with no frame behind it moves the focus layer's fade.
+ * It eases over elapsed milliseconds, and a push-presented scene only ever has
+ * media time, so anything past a fade's length lands the overlay at once.
+ */
+const STATIC_FOCUS_SETTLE_MS = 10_000;
+
+/** The presentation fields a render answers to that no renderer kind owns. */
+const RENDERED_PRESENTATION_TAIL = [
+  "annotationAntialiasing",
+  "annotationOverlayStyle",
+  "backgroundColor",
+  "focusStyle",
+  "interactionStyle",
+  "renderers",
+  "visibility",
+] as const;
+
+/**
+ * Presentation fields a render answers to. The style half comes from the
+ * renderer registry, so a renderer kind added there joins it on its own.
+ */
+const RENDERED_PRESENTATION_FIELDS: readonly (keyof MediaRendererPresentation)[] =
+  [
+    ...resolveAnnotationRendererStyleFields(annotationRendererKinds),
+    ...RENDERED_PRESENTATION_TAIL,
+  ];
+
+/**
+ * A presentation field neither half names is applied and then never repainted:
+ * `setPresentation` ends in `renderOnChange`, which draws only when the
+ * signature these fields build differs from the one on screen.
+ */
+type UnrenderedPresentationField = Exclude<
+  keyof MediaRendererPresentation,
+  AnnotationRendererStyleField | (typeof RENDERED_PRESENTATION_TAIL)[number]
+>;
+
+const _renderedPresentationFieldsAreExhaustive: [
+  UnrenderedPresentationField,
+] extends [never]
+  ? true
+  : never = true;
+
+type FrameDrawTimings = {
+  -readonly [
+    Key in
+      "boxMs" | "depthMs" | "focusMs" | "interactionMs" | "labelMs" | "maskMs"
+  ]: MediaFrameRenderTimings[Key];
+};
+
+/** Several steps share a bucket: the public timings name fewer than the walk draws. */
+const FRAME_DRAW_TIMING_BUCKETS: Partial<
+  Record<FramePresentStep, keyof FrameDrawTimings>
+> = {
+  drawBox: "boxMs",
+  drawDepth: "depthMs",
+  drawFocus: "focusMs",
+  drawHeatmap: "maskMs",
+  drawInteraction: "interactionMs",
+  drawInteractionPresentation: "interactionMs",
+  drawLabel: "labelMs",
+  drawMask: "maskMs",
+  drawPolygon: "boxMs",
+  drawRegion: "boxMs",
+  drawVector: "boxMs",
+};
 
 export function observePixiContainerResize(
   container: HTMLElement,
@@ -84,14 +209,65 @@ type TextureUploadSource = {
   update(): void;
 };
 
+type MediaCompositor = {
+  upload(frame: VideoFrame, rotation?: PresentedVideoFrame["rotation"]): void;
+  destroy(): void;
+};
+
+/** The binding a compositor points at whichever texture holds the last frame. */
+export interface MediaGpuTextureSource {
+  resize(width: number, height: number, resolution: number): void;
+  updateGPUTexture(texture: GPUTexture): void;
+}
+
+export interface MediaCompositorOptions {
+  readonly device: GPUDevice;
+  readonly height: number;
+  readonly width: number;
+  /**
+   * Puts the compositor's first texture on screen and returns the binding every
+   * later texture replaces it through.
+   */
+  readonly attach: (texture: GPUTexture) => MediaGpuTextureSource;
+  /** Runs after a decode of a new size swapped the texture underneath. */
+  readonly onTextureReplaced: () => void;
+}
+
+/**
+ * Two ways to drive the same layer stack.
+ *
+ * Pull presentation is the default: the renderer asks the media source for the
+ * sample it wants, hands it to `presentSample`, and Pixi's ticker paints the
+ * scene every frame.
+ *
+ * A still frame is pulled once and then renders on change the way push
+ * presentation does, with the sample it presents as one more change. The
+ * ticker runs only while a looping GIF region or a loading spinner is on the
+ * frame.
+ *
+ * Push presentation engages when the opened source carries a presented-frame
+ * channel. The producer then decides which frame is on screen and announces it,
+ * so the ticker paints nothing and every render is an explicit answer to a
+ * change: a presented frame, a layer turned on or off, restyling, hover or
+ * selection, a viewport move, a resize, or the swapchain coming back after the
+ * tab was hidden. A notification that describes what is already drawn renders
+ * nothing, so a paused scene nobody touches renders nothing at all.
+ *
+ * The focus layer's fade is not an exception to that. It advances with the
+ * presented media time, so it fades during playback and is applied at once when
+ * a hover or selection arrives with no frame behind it: paused focus is static,
+ * and no animation keeps the scene rendering on its own.
+ */
 export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
 ): Promise<MediaRendererScene> {
+  const pixi = await import("pixi.js");
   const {
     AlphaMask,
     Application,
     Assets,
     BlurFilter,
+    BufferImageSource,
     CanvasSource,
     Container,
     defaultFilterVert,
@@ -100,266 +276,231 @@ export async function createPixiMediaScene(
     ImageSource,
     Mesh,
     MeshGeometry,
+    PrepareSystem,
     Rectangle,
     Sprite,
     Shader,
     Text,
     Texture,
     UniformGroup,
-  } = await import("pixi.js");
+    extensions,
+  } = pixi;
+  // The package build drops side-effect-only imports, so register explicitly.
+  extensions.add(PrepareSystem);
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
-  let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
-  let currentBoxCornerStyle: BoxCornerStyle | null =
-    options.boxCornerStyle ?? null;
+  /**
+   * WebGPU takes any bytesPerRow, so id rasters of any width go up one byte per
+   * pixel. WebGL rejects a single-channel upload whose width is not a multiple
+   * of four (measured: GL_INVALID_OPERATION, blank texture), and the layer pays
+   * four channels there instead. The renderer is only known after init.
+   */
+  const acceptsUnalignedTextureRows = () => app.renderer?.name === "webgpu";
+  let maxTextureSide: number | undefined;
+  const maxTextureSize = () =>
+    (maxTextureSide ??= queryMaxTextureSize(app.renderer));
+  const frameChannel = options.presentedFrames;
+  /**
+   * A still frame has nothing to play, so it renders on change exactly as push
+   * presentation does. The ticker runs only while something on the frame
+   * animates by the clock.
+   */
+  const stillFrame = frameChannel === undefined && options.stillFrame === true;
+  const rendersOnChange = frameChannel !== undefined || stillFrame;
+  let stillFrameTickerRunning = false;
+  /** The content of the `previewOverlay` answer the overlay on screen drew. */
+  let drawnPreviewOverlayContent: number | null = null;
+  /** The editing state the overlay on screen was drawn from. */
+  let drawnEditingState: AnnotationEditingState | undefined;
+  let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
-  let currentMarkerStyle: MarkerStyle | null = options.markerStyle ?? null;
+  let annotationAntialiasing = options.annotationAntialiasing ?? false;
+  let annotationAntialiasResolution = 1;
+  const annotationAntialiasLayer = createPixiAnnotationAntialiasLayer({
+    Container,
+    Filter,
+    defaultFilterVert,
+    getEnabled: () => Boolean(annotationAntialiasing),
+  });
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
-  let currentRegionRenderers = [...options.regionRenderers];
+  let currentBoxCornerStyle: BoxCornerStyle | null =
+    options.boxCornerStyle ?? null;
+  let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
+  let currentMarkerStyle: MarkerStyle | null = options.markerStyle ?? null;
+  let currentOrientedBoxStyle: OrientedBoxStyle | null =
+    options.orientedBoxStyle ?? null;
+  let currentPercentageBarStyle: PercentageBarStyle | null =
+    options.percentageBarStyle ?? null;
+  let currentRegionRenderers: readonly RegionAnnotationRenderer[] =
+    options.regionRenderers;
+  let currentHeatmapRenderers: readonly HeatmapAnnotationRenderer[] =
+    options.heatmapRenderers ?? [];
+  let currentDepthRenderers: readonly DepthAnnotationRenderer[] =
+    options.depthRenderers ?? [];
+  let depthSource: DepthFrameProvider | null = null;
+  let unsubscribeDepthSource: (() => void) | undefined;
   let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
     currentRegionRenderers,
   );
-  // Halo-only presentations still need prepared id-mask artifacts; this
-  // invisible style drives preparation without drawing any fill or border.
-  const haloOnlyMaskStyle: MaskStyle = {
-    artifactKey: "mask-halo-only:v1",
-    resolve: (detection) =>
-      detection.mask
-        ? { alpha: 0, color: 0x000000, mask: detection.mask }
-        : undefined,
-  };
-  const createVisibilityMaskHaloStyle = (
-    style: MaskHaloStyle,
-  ): MaskHaloStyle => ({
-    resolve(detection, context) {
-      const state = resolveContextState(detection);
-
-      if (state.hidden) {
-        return undefined;
-      }
-
-      return style.resolve(detection, { ...context, ...state });
-    },
-  });
-  const resolveArtifactMaskStyle = (): MaskStyle | null => {
-    const exactRegionRenderers = currentRegionRenderers.filter(
-      usesExactMaskCoverage,
-    );
-
-    if (exactRegionRenderers.length === 0) {
-      return (
-        currentMaskStyle ?? (currentMaskHaloStyle ? haloOnlyMaskStyle : null)
-      );
-    }
-
-    const visibleMaskStyle = currentMaskStyle;
-    return {
-      artifactKey: `region-mask-coverage:v3:${visibleMaskStyle?.artifactKey ?? "none"}:${regionMaskCoverageKey}`,
-      opacity: visibleMaskStyle?.opacity,
-      resolve(detection, context) {
-        const visibleInstruction = visibleMaskStyle?.resolve(
-          detection,
-          context,
-        );
-
-        if (visibleInstruction) {
-          return visibleInstruction;
-        }
-
-        if (!detection.mask) {
-          return undefined;
-        }
-
-        return { alpha: 0, color: 0, mask: detection.mask };
-      },
-    };
-  };
-
-  function usesExactMaskCoverage(renderer: RegionAnnotationRenderer) {
-    return (
-      renderer.source.kind === RegionRendererSourceKind.Media &&
-      renderer.source.coverage?.kind === RegionRendererCoverageKind.Mask
-    );
-  }
-
-  function resolveRegionMaskCoverageKey(
-    renderers: readonly RegionAnnotationRenderer[],
-  ) {
-    return JSON.stringify(
-      renderers.filter(usesExactMaskCoverage).map(({ target }) => ({
-        className: target.className,
-        id: target.id,
-        sourceId: target.sourceId,
-      })),
-    );
-  }
-
-  function matchesStaticRegionTarget(
-    target: RegionRendererTarget,
-    detection: Detection,
-  ) {
-    return (
-      matchesStaticTargetValue(target.id, detection.id) &&
-      matchesStaticTargetValue(target.className, detection.className) &&
-      matchesStaticTargetValue(target.sourceId, detection.sourceId)
-    );
-  }
-
-  function matchesStaticTargetValue(
-    configured: string | number | readonly (string | number)[] | undefined,
-    actual: string | number | undefined,
-  ) {
-    if (configured === undefined) return true;
-    if (actual === undefined) return false;
-    return Array.isArray(configured)
-      ? configured.some((value) => value === actual)
-      : configured === actual;
-  }
-
-  function resolveArtifactMaskInstructions(options: {
-    readonly frame: DetectionFrame;
-    readonly maskStyle: MaskStyle;
-    readonly mediaTime: number;
-  }) {
-    const instructions: SerializableMaskInstruction[] = [];
-    const exactRegionRenderers = currentRegionRenderers.filter(
-      usesExactMaskCoverage,
-    );
-    const visibleArtifactStyle =
-      currentMaskStyle ?? (currentMaskHaloStyle ? haloOnlyMaskStyle : null);
-    const orderedDetections = options.frame.detections
-      .map((detection, detectionIndex) => ({ detection, detectionIndex }))
-      .sort(
-        (left, right) =>
-          (left.detection.zIndex ?? left.detectionIndex) -
-          (right.detection.zIndex ?? right.detectionIndex),
-      );
-
-    for (const { detection, detectionIndex } of orderedDetections) {
-      const context = {
-        detectionIndex,
-        frame: options.frame,
-        mediaTime: options.mediaTime,
-      };
-      const state = resolveContextState(detection);
-
-      if (state.hidden) continue;
-
-      const visibleInstruction = visibleArtifactStyle?.resolve(detection, {
-        ...context,
-        ...state,
-      });
-      const regionCoverageMask =
-        detection.mask &&
-        exactRegionRenderers.some((renderer) =>
-          matchesStaticRegionTarget(renderer.target, detection),
-        )
-          ? detection.mask
-          : undefined;
-
-      if (!visibleInstruction && !regionCoverageMask) continue;
-
-      instructions.push({
-        ...(visibleInstruction ?? {
-          alpha: 0,
-          color: 0,
-          mask: regionCoverageMask!,
-          visible: false,
-        }),
-        detectionIndex,
-        regionCoverageMask,
-      });
-    }
-
-    return instructions;
-  }
-
   let currentPolygonStyle: PolygonStyle | null =
     options.polygonStyle === undefined
       ? new BasePolygonStyle()
       : options.polygonStyle;
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
+  let isPlaybackActive = true;
+  let isScrubbing = false;
+  let displayBrightness = 1;
+  let displayContrast = 1;
+  let displayGamma = 1;
+  let displayAutoContrast = false;
+  let inspectionFilter:
+    ReturnType<typeof createPixiMediaInspectionFilter> | undefined;
   let viewportScale = 1;
   let hasPresentedSample = false;
   let mediaHeight = 0;
   let mediaWidth = 0;
   let visibilityVersion = 0;
+  let maskHaloVersion = 0;
+  let haloPreparationStyleCache: {
+    readonly source: MaskHaloStyle;
+    readonly style: MaskStyle;
+    readonly version: number;
+  } | null = null;
   let visibilityMaskStyleCache: {
     readonly source: MaskStyle;
     readonly style: MaskStyle;
     readonly version: number;
   } | null = null;
-  // While a move, resize, vertex or keypoint gesture edits a detection, the
-  // base layers hide it and the annotation overlay draws the live preview in
-  // its place, so the edit never shows next to its own stale copy. Masks have
-  // no overlay preview and stay drawn.
+  let regionCoverageStyleCache: {
+    readonly key: string;
+    readonly source: MaskStyle;
+    readonly style: MaskStyle;
+  } | null = null;
+  const annotationWindow = createPreparedAnnotationWindow({
+    detectionTimeline: options.detectionTimeline,
+    getLayers: () =>
+      [maskLayer, polygonLayer, heatmapLayer, depthLayer].filter(
+        (layer): layer is NonNullable<typeof layer> => layer !== undefined,
+      ),
+    getPlayheadMediaTime: () => currentMediaTime,
+    renderPreparation: options.renderPreparation,
+  });
+  const annotationDetectionTimeline = options.detectionTimeline;
+  /** What the window answered for the media time the layers last drew. */
+  let drawnReadiness: string | null = null;
+  let isPresenting = false;
+  let isDestroyed = false;
+  let displayFrameHandle: number | null = null;
+  let deferredPresentedFrame: PresentedVideoFrame | null = null;
+  /**
+   * The detection under an editing gesture. The base layers hide it while the
+   * annotation overlay draws its live preview, so an edit never shows beside a
+   * stale copy of itself.
+   *
+   * Only those layers hide it. Labels, regions and masks read the plain
+   * visibility state because nothing previews them; picking reads it because
+   * the gesture's own selection would otherwise be dropped mid-drag; focus
+   * reads it because its pick is retargeted at the preview.
+   */
   let editingDetectionId: string | number | null = null;
   const resolveContextState = (
     detection: DetectionFrame["detections"][number],
   ) => {
     const state = resolveAnnotationStyleState(detection, currentVisibility);
+
     return editingDetectionId !== null &&
       detection.id === editingDetectionId &&
       !state.hidden
       ? { ...state, hidden: true }
       : state;
   };
-  // Labels have no overlay preview either: they stay drawn and follow a move
-  // through the fast-translate path, like regions.
   const resolveLabelContextState = (
     detection: DetectionFrame["detections"][number],
   ) => {
     const state = resolveAnnotationStyleState(detection, currentVisibility);
+
     return {
       ...state,
       hidden: currentVisibility?.labelsHidden === true || state.hidden,
     };
   };
-  // The vector layer consumes one shape style; renderer kinds that lower to
-  // shape instructions compose with the internal hook here.
-  function resolveVectorShapeStyle(): ShapeStyle | null {
-    const kindShapeStyle = resolveAnnotationShapeStyle({
-      boxCornerStyle: currentBoxCornerStyle,
-      ellipseStyle: currentEllipseStyle,
-      markerStyle: currentMarkerStyle,
-    });
-    const baseShapeStyle = options.shapeStyle ?? null;
-
-    if (!kindShapeStyle || !baseShapeStyle) {
-      return kindShapeStyle ?? baseShapeStyle;
-    }
-
-    return {
-      resolve(detection, context) {
-        const combined = [
-          ...(baseShapeStyle.resolve(detection, context) ?? []),
-          ...(kindShapeStyle.resolve(detection, context) ?? []),
-        ];
-
-        return combined.length > 0 ? combined : undefined;
-      },
-    };
-  }
-
-  let mediaSprite: InstanceType<typeof Sprite> | undefined;
-  let stagingTexture: PixiTexture | undefined;
-  let stagingTextureSource: TextureUploadSource | undefined;
-
+  // Editable geometry uses retained displays, so boxes and vectors can share
+  // one ordered parent without changing the dense, non-editing raster paths.
+  const retainedGeometry =
+    options.editingEngine || options.maskOrder === "detection"
+      ? new Container()
+      : undefined;
   const boxLayer = createPixiBoxLayer({
+    retainByIndex: options.maskOrder === "detection",
+    container: retainedGeometry,
     boxStyle: options.boxStyle,
-    Container: options.editingEngine ? Container : undefined,
-    detectionTimeline: options.detectionTimeline,
-    Graphics: options.editingEngine ? Graphics : undefined,
+    Container: retainedGeometry ? Container : undefined,
+    detectionTimeline: annotationDetectionTimeline,
+    Graphics: retainedGeometry ? Graphics : undefined,
     resolveContextState,
   });
+  let heatmapLayer: ReturnType<typeof createPixiHeatmapLayer> | undefined;
+  const ensureHeatmapLayer = () =>
+    (heatmapLayer ??= createPixiHeatmapLayer({
+      CanvasSource,
+      Container,
+      ImageSource,
+      Sprite,
+      Texture,
+      detectionTimeline: annotationDetectionTimeline,
+      isVisible: (detection) =>
+        !resolveAnnotationStyleState(detection, currentVisibility).hidden,
+      // A partial heatmap changes pixels before the all-ready token changes.
+      onPreparedWindowChange: () => redrawAnnotationsNow(true),
+      onTextureRelease: (texture) => focusLayer?.releaseMaskTexture(texture),
+      prepareTexture: (texture) => app.renderer.prepare.upload(texture),
+      renderPreparation: options.renderPreparation,
+      renderers: currentHeatmapRenderers,
+    }));
+  let depthLayer: ReturnType<typeof createPixiDepthLayer> | undefined;
+  const ensureDepthLayer = () =>
+    (depthLayer ??= createPixiDepthLayer({
+      BufferImageSource,
+      Container,
+      ImageSource,
+      Mesh,
+      MeshGeometry,
+      Shader,
+      UniformGroup,
+      acceptsUnalignedTextureRows,
+      getMediaSize: () => ({ height: mediaHeight, width: mediaWidth }),
+      maxTextureSize,
+      prepareTexture: (source) => {
+        app.renderer?.texture?.initSource?.(source);
+      },
+      hidden: currentVisibility?.annotationsHidden === true,
+      renderers: currentDepthRenderers,
+      source: depthSource,
+    }));
+  let depthUploadTimer: ReturnType<typeof setTimeout> | undefined;
+  let depthUploadMediaTime = 0;
+  /**
+   * A task of its own after the present, so the frame just rendered is not
+   * held back by the upload and the present that draws the next frame only
+   * binds its texture.
+   */
+  const scheduleDepthUploadAhead = (mediaTime: number) => {
+    if (!depthLayer || !depthSource) return;
+    depthUploadMediaTime = mediaTime;
+    depthUploadTimer ??= setTimeout(() => {
+      depthUploadTimer = undefined;
+      if (!isDestroyed) depthLayer?.uploadAhead(depthUploadMediaTime);
+    }, 0);
+  };
   let polygonLayer =
     options.polygonStyle !== undefined &&
     currentPolygonStyle &&
-    !options.editingEngine
+    !retainedGeometry
       ? createPixiPolygonLayer({
+          BufferImageSource,
           Container,
           ImageSource,
           Mesh,
@@ -368,16 +509,21 @@ export async function createPixiMediaScene(
           Sprite,
           Texture,
           UniformGroup,
+          acceptsUnalignedTextureRows,
           detectionTimeline: options.detectionTimeline,
+          onPreparedWindowChange: handlePreparedWindowChange,
           polygonStyle: currentPolygonStyle,
           renderPreparation: options.renderPreparation,
           resolveContextState,
         })
       : undefined;
+  polygonLayer?.setPlaybackActive(isPlaybackActive);
   const vectorLayer = createPixiVectorLayer({
+    retainByIndex: options.maskOrder === "detection",
+    container: retainedGeometry,
     Container,
     Graphics,
-    detectionTimeline: options.detectionTimeline,
+    detectionTimeline: annotationDetectionTimeline,
     polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
@@ -401,10 +547,17 @@ export async function createPixiMediaScene(
     Sprite,
     Texture,
     UniformGroup,
-    detectionTimeline: options.detectionTimeline,
-    getActiveRegionMaskCoverage: () =>
-      maskLayer?.getActiveRegionMaskCoverage() ?? null,
-    getMediaTexture: () => (hasPresentedSample ? stagingTexture : undefined),
+    detectionTimeline: annotationDetectionTimeline,
+    getAnnotationAntialiasing: () => Boolean(annotationAntialiasing),
+    getAntialiasResolution: () => annotationAntialiasResolution,
+    getViewportBounds: resolveViewportBounds,
+    getActiveRegionMaskCoverage: (detectionFrameTime) =>
+      maskLayer?.getActiveRegionMaskCoverage(detectionFrameTime) ?? null,
+    // Under GPU compositing the decoded frame lands in a texture the
+    // compositor swaps onto the media sprite, leaving the canvas that
+    // stagingTexture wraps empty.
+    getMediaTexture: () =>
+      hasPresentedSample ? mediaSprite?.texture : undefined,
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
       const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
@@ -415,11 +568,10 @@ export async function createPixiMediaScene(
       options.onPresentationUpdate?.(
         createPresentedSampleState(currentMediaTime, boxState, regionState),
       );
+      renderNow();
     },
     onAssetError: options.diagnostics?.onAssetError,
     regionRenderers: currentRegionRenderers,
-    // Regions (badges, icons) have no overlay preview: they stay drawn and
-    // follow a move through the fast-translate path instead.
     resolveContextState: (detection) =>
       resolveAnnotationStyleState(detection, currentVisibility),
   });
@@ -428,62 +580,68 @@ export async function createPixiMediaScene(
     options.annotationOverlayStyle,
     options.keypointStyle,
   );
-  const maskBrushPreview = options.maskBrush
-    ? createPixiMaskBrushPreview({
-        CanvasSource,
-        Container,
-        Graphics,
-        Sprite,
-        Texture,
-        preview: options.maskBrush,
-      })
-    : undefined;
-  let maskLayer = resolveArtifactMaskStyle()
+  const initialMaskPreparationStyle = resolveMaskPreparationStyle();
+  let maskLayer = initialMaskPreparationStyle
     ? createPixiMaskLayer({
         BlurFilter,
+        BufferImageSource,
         Container,
-        Rectangle,
+        Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         Sprite,
         Texture,
         UniformGroup,
+        acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
-        maskHaloStyle: currentMaskHaloStyle
-          ? createVisibilityMaskHaloStyle(currentMaskHaloStyle)
-          : null,
-        maskStyle: createVisibilityMaskStyle(resolveArtifactMaskStyle()!),
-        onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
+        maskHaloStyle: resolveVisibilityMaskHaloStyle(),
+        maskStyle: initialMaskPreparationStyle,
+        orderedContainer:
+          options.maskOrder === "detection" ? retainedGeometry : undefined,
+        onPreparedWindowChange: handlePreparedWindowChange,
+        onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
         resolveInstructions: resolveArtifactMaskInstructions,
       })
     : undefined;
+
+  maskLayer?.setFillVisible(currentMaskStyle !== null);
   let labelLayer = options.labelStyle
     ? createPixiLabelLayer({
         Container,
         Graphics,
         Text,
-        detectionTimeline: options.detectionTimeline,
+        detectionTimeline: annotationDetectionTimeline,
         labelStyle: options.labelStyle,
+        getRenderedBoxes: () => boxLayer.getRenderedBoxes(),
         resolveContextState: resolveLabelContextState,
       })
     : undefined;
 
   await app.init({
     autoDensity: true,
+    autoStart: !rendersOnChange,
     backgroundColor: options.backgroundColor ?? 0x111111,
-    preference: RENDER_ENGINE_PREFERENCE,
-    resizeTo: options.container,
+    /* Only the video-engine media path supplies a presented-frame channel, so
+     * which reader opens the clip is also what decides which backend draws. */
+    preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
+  const destroyBatchTextureBindings = installPixiBatchTextureBindings(
+    pixi,
+    app.renderer,
+  );
+  const destroyFilterBindings = installPixiFilterBindings(pixi, app.renderer);
 
   const rendererCanvas = app.canvas;
   rendererCanvas.style.display = "block";
-  rendererCanvas.style.height = "100%";
-  rendererCanvas.style.width = "100%";
-  options.container.appendChild(rendererCanvas);
+  rendererCanvas.style.position = "absolute";
+  const backdrop = createSceneBackdrop(options.backgroundColor);
+  backdrop.appendChild(rendererCanvas);
+  options.container.appendChild(backdrop);
 
   const stagingCanvas = document.createElement("canvas");
   const stagingContext = stagingCanvas.getContext("2d");
@@ -492,11 +650,33 @@ export async function createPixiMediaScene(
     throw new Error("Unable to create staging canvas context.");
   }
 
+  const renderScheduler = createSceneRenderScheduler(() => {
+    app.render();
+    syncStillFrameTicker();
+  });
+  const maskBrushPreview = options.maskBrush
+    ? createPixiMaskBrushPreview({
+        CanvasSource,
+        Container,
+        Graphics,
+        Sprite,
+        Texture,
+        preview: options.maskBrush,
+        onInvalidate: rendersOnChange ? renderNow : undefined,
+      })
+    : undefined;
+  let appliedPresentation: MediaRendererPresentation | undefined;
+  let mediaCompositor: MediaCompositor | undefined;
+  let presentedFrameSerial = 0;
+  let focusAnimationTimeMs = 0;
+  let focusAnimationMediaTimeMs: number | null = null;
   let mediaScene: PixiContainer | undefined;
   let vectorDisplay: PixiContainer | undefined;
   let polygonDisplay: PixiContainer | undefined;
   let timelineContext: MediaRendererSceneTimelineContext | undefined;
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
+  const depthSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Depth);
+  const heatmapSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Heatmap);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
   const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
   const vectorSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Vector);
@@ -506,10 +686,16 @@ export async function createPixiMediaScene(
   const interactionSlot = createPixiSceneLayerSlot(
     PixiSceneLayerKind.Interaction,
   );
+  const interactionLabelSlot = createPixiSceneLayerSlot(
+    PixiSceneLayerKind.Label,
+    interactionSlot.order,
+  );
   const handleSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Handle);
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
     mediaSlot,
+    depthSlot,
+    heatmapSlot,
     maskSlot,
     boxSlot,
     vectorSlot,
@@ -518,24 +704,49 @@ export async function createPixiMediaScene(
     previewSlot,
     handleSlot,
     interactionSlot,
+    interactionLabelSlot,
     labelSlot,
   ];
   const viewport = createViewportController({ scale: 1 });
   /**
-   * Timestamp of the sample whose pixels are on the staging canvas. Unlike
+   * Timestamp of the sample whose pixels are on screen. Unlike
    * `currentMediaTime`, presentation and selection updates never move it.
    */
   let presentedSampleTimestamp: number | null = null;
+  /**
+   * Surface holding those pixels. The GPU compositor keeps them in a texture no
+   * canvas ever sees, so a capture has to read them back through Pixi.
+   */
+  let readPresentedSurface = () => stagingCanvas;
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
+  let presentationBox = { height: 0, left: 0, top: 0, width: 0 };
+  /**
+   * Read only when the observer says the box moved. The fit is recomputed on
+   * every presented sample, and reading the element there would put a forced
+   * layout in the frame path.
+   */
+  const containerSize = { height: 0, width: 0 };
+  const measureContainer = () => {
+    containerSize.width = options.container.clientWidth || containerSize.width;
+    containerSize.height =
+      options.container.clientHeight || containerSize.height;
+  };
+  let currentMaxDevicePixelRatio = options.maxDevicePixelRatio;
+  let presentationResolution = resolvePixiResolution(
+    currentMaxDevicePixelRatio,
+  );
+  let rasterDisplay: MediaRendererDisplay | undefined;
+  let appliedResolution: number | undefined;
   const interactionLayer =
     options.interaction || options.editingEngine
       ? createPixiInteractionLayer({
           Container,
           Rectangle,
           canInteract: options.canInteract,
-          detectionTimeline: options.detectionTimeline,
-          interaction: options.interaction ?? {
-            mode: MediaInteractionMode.Always,
+          detectionTimeline: annotationDetectionTimeline,
+          interaction: {
+            ...(options.interaction ?? { mode: MediaInteractionMode.Always }),
+            maskOrder: options.maskOrder,
           },
           canPickDetection: (detection) =>
             !resolveAnnotationStyleState(detection, currentVisibility).hidden,
@@ -551,12 +762,15 @@ export async function createPixiMediaScene(
             width: mediaWidth,
           }),
           onStateChange: () => {
+            if (isDestroyed) return;
             drawFocusLayer(currentMediaTime);
             drawInteractionPresentationLayer(currentMediaTime);
-            drawAnnotationOverlay();
+            drawAnnotationOverlay(currentMediaTime, overlayNow());
+            renderOnChange();
           },
-          pickMaskDetectionAtPoint: (point, mediaTime) =>
-            maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
+          pickMaskDetectionAtPoint: (point, mediaTime, pickOptions) =>
+            maskLayer?.pickDetectionAtPoint(point, mediaTime, pickOptions) ??
+            null,
           pickLabelDetectionAtPoint: (point, mediaTime) =>
             labelLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
           releasePointer: (pointerId) => {
@@ -577,9 +791,9 @@ export async function createPixiMediaScene(
         Text,
         UniformGroup,
         interactionStyle: options.interactionStyle,
-        // The detection under an editing gesture is drawn live by the base
-        // layers (move) or the overlay preview (reshape); its hover/selection
-        // redraw would sit at the stale position.
+        // A detection under an editing gesture is drawn by the overlay
+        // preview, so its hover or selection redraw would sit at the position
+        // the gesture already left.
         isDetectionVisible: (detection) =>
           !resolveAnnotationStyleState(detection, currentVisibility).hidden &&
           !isUnderEditingGesture(detection),
@@ -591,6 +805,8 @@ export async function createPixiMediaScene(
       fastTranslatedDetectionId = id;
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
+      heatmapLayer?.translateDetection(id, dx, dy);
+      renderNow();
     });
   const redrawDetectionLayers = (id: string | number) => {
     boxLayer.invalidateDetection(id);
@@ -601,6 +817,8 @@ export async function createPixiMediaScene(
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
   };
   const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
+    // The brush paints into the detection's own mask and the overlay previews
+    // no mask, so hiding it would blank the stroke as it is drawn.
     const nextEditingId =
       (state.kind === AnnotationGestureStateKind.Moving ||
         state.kind === AnnotationGestureStateKind.Resizing) &&
@@ -609,22 +827,39 @@ export async function createPixiMediaScene(
       !state.preview.mask
         ? state.activeDetectionId
         : null;
+
     if (nextEditingId !== editingDetectionId) {
       const previous = editingDetectionId;
       editingDetectionId = nextEditingId;
       if (previous !== null) redrawDetectionLayers(previous);
       if (nextEditingId !== null) redrawDetectionLayers(nextEditingId);
       drawInteractionPresentationLayer(currentMediaTime);
+      renderNow();
     }
+
     if (
       state.kind === AnnotationGestureStateKind.Idle &&
       fastTranslatedDetectionId !== null
     ) {
-      regionLayer.translateDetection(fastTranslatedDetectionId, 0, 0);
-      labelLayer?.translateDetection(fastTranslatedDetectionId, 0, 0);
+      const id = fastTranslatedDetectionId;
       fastTranslatedDetectionId = null;
+      regionLayer.translateDetection(id, 0, 0);
+      labelLayer?.translateDetection(id, 0, 0);
+      heatmapLayer?.translateDetection(id, 0, 0);
       regionLayer.drawFrame(currentMediaTime, viewportScale);
       labelLayer?.drawFrame(currentMediaTime, viewportScale);
+      renderNow();
+    }
+
+    // With no ticker to pick it up, an edit the host drives itself, such as a
+    // cancel or a commit, reaches the screen through this notification. A
+    // pointer gesture draws and renders its own state before the microtask
+    // runs, which then finds nothing left to draw or render.
+    if (rendersOnChange) {
+      queueMicrotask(() => {
+        if (isDestroyed || isPresenting) return;
+        renderOnChange();
+      });
     }
   });
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -632,12 +867,14 @@ export async function createPixiMediaScene(
       interactionLayer.cycleSelection(event.shiftKey ? -1 : 1);
       event.preventDefault();
       drawInteractionPresentationLayer(currentMediaTime);
-      drawAnnotationOverlay();
+      drawAnnotationOverlay(currentMediaTime, overlayNow());
+      renderOnChange();
       return;
     }
 
     options.editingEngine?.keyDown(event.key);
-    drawAnnotationOverlay();
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
+    renderOnChange();
   };
   const handleContextMenu = (event: Event) => {
     if (options.editingEngine) event.preventDefault();
@@ -651,31 +888,45 @@ export async function createPixiMediaScene(
   }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
+        AlphaMask,
         Container,
         Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         UniformGroup,
+        getHeatmapRenderers: () => currentHeatmapRenderers,
+        getAnnotationAntialiasing: () => Boolean(annotationAntialiasing),
+        getViewportBounds: resolveViewportBounds,
         focusStyle: options.focusStyle,
         isDetectionVisible: (detection) =>
           !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
+  let mediaSprite: InstanceType<typeof Sprite> | undefined;
+  let stagingTexture: PixiTexture | undefined;
+  let stagingTextureSource: TextureUploadSource | undefined;
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
 
   const syncSceneChildren = () => {
-    syncPixiSceneLayerChildren(mediaScene, layerSlots);
+    labelLayer?.setBackgroundAntialiasFilter(
+      annotationAntialiasLayer.getFxaaFilter(),
+    );
+    interactionPresentationLayer?.setBackgroundAntialiasFilter(
+      annotationAntialiasLayer.getFxaaFilter(),
+    );
+    annotationAntialiasLayer.sync(mediaScene, layerSlots);
   };
 
   const updateMediaSceneFit = () => {
     if (!mediaScene || mediaWidth <= 0 || mediaHeight <= 0) {
+      syncPresentationBox();
       return;
     }
 
-    const screenWidth = app.screen.width || options.container.clientWidth;
-    const screenHeight = app.screen.height || options.container.clientHeight;
+    const { height: screenHeight, width: screenWidth } = containerSize;
 
     const fit = calculatePixiSceneFit({
       fit: options.fit,
@@ -697,14 +948,141 @@ export async function createPixiMediaScene(
     }
   };
 
+  /**
+   * A canvas hands the compositor one damage rect: its whole box. A canvas
+   * spanning the container therefore repaints the letterbox margin at present
+   * rate, so the canvas is sized to the picture and positioned inside the
+   * container, leaving the margin to the backdrop.
+   *
+   * The box follows the picture under pan and zoom rather than growing to the
+   * container, so the margin keeps its exemption at every viewport transform.
+   */
+  const syncPresentationBox = () => {
+    const { height: containerHeight, width: containerWidth } = containerSize;
+    if (containerWidth <= 0 || containerHeight <= 0) return presentationBox;
+
+    const transform = viewport.getTransform();
+    const pictureScale = baseFit ? baseFit.scale * transform.scale : 0;
+    const span = baseFit
+      ? {
+          left: Math.max(0, Math.floor(baseFit.x + transform.x)),
+          top: Math.max(0, Math.floor(baseFit.y + transform.y)),
+          right: Math.min(
+            containerWidth,
+            Math.ceil(baseFit.x + transform.x + mediaWidth * pictureScale),
+          ),
+          bottom: Math.min(
+            containerHeight,
+            Math.ceil(baseFit.y + transform.y + mediaHeight * pictureScale),
+          ),
+        }
+      : { left: 0, top: 0, right: containerWidth, bottom: containerHeight };
+    const next = {
+      left: span.left,
+      top: span.top,
+      width: Math.max(1, span.right - span.left),
+      height: Math.max(1, span.bottom - span.top),
+    };
+
+    if (
+      next.left === presentationBox.left &&
+      next.top === presentationBox.top &&
+      next.width === presentationBox.width &&
+      next.height === presentationBox.height &&
+      presentationResolution === appliedResolution
+    ) {
+      return presentationBox;
+    }
+
+    presentationBox = next;
+    appliedResolution = presentationResolution;
+    rendererCanvas.style.left = `${next.left}px`;
+    rendererCanvas.style.top = `${next.top}px`;
+    app.renderer.resize(next.width, next.height, presentationResolution);
+    syncAnnotationAntialiasResolution();
+    return presentationBox;
+  };
+
+  const syncAnnotationAntialiasResolution = () => {
+    annotationAntialiasResolution = resolvePixiAnnotationAntialiasResolution(
+      presentationResolution,
+      containerSize,
+      maxTextureSize(),
+      annotationAntialiasing === 2 ? 2 : 1,
+    );
+    annotationAntialiasLayer.setResolution(annotationAntialiasResolution);
+    regionLayer.setAntialiasResolution(annotationAntialiasResolution);
+    syncMaskRasterDisplay();
+  };
+
+  function syncMaskRasterDisplay() {
+    if (!rasterDisplay) return;
+    const scale = annotationAntialiasing
+      ? annotationAntialiasResolution / presentationResolution
+      : 1;
+    maskLayer?.setRasterDisplay(rasterDisplay, scale);
+    polygonLayer?.setRasterDisplay(rasterDisplay, scale);
+  }
+
+  const syncDisplaySizing = () => {
+    if (!baseFit || mediaWidth <= 0 || mediaHeight <= 0) return;
+    const display: MediaRendererDisplay = {
+      boxWidth: mediaWidth * baseFit.scale,
+      boxHeight: mediaHeight * baseFit.scale,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      maxDevicePixelRatio: presentationResolution,
+    };
+    const previous = rasterDisplay;
+    if (
+      previous?.boxWidth === display.boxWidth &&
+      previous.boxHeight === display.boxHeight &&
+      resolveDisplayPixelRatio(previous) === resolveDisplayPixelRatio(display)
+    ) {
+      return;
+    }
+    rasterDisplay = display;
+    syncMaskRasterDisplay();
+    options.onDisplayChange?.(display);
+  };
+
+  const updateMediaSampling = () => {
+    if (!mediaSprite) return;
+    const threshold = options.pixelInspection?.minScale;
+    if (threshold === undefined) return;
+    const source = mediaSprite.texture.source;
+    const mode = viewportScale >= threshold ? "nearest" : "linear";
+    if (source.scaleMode === mode) return;
+    source.scaleMode = mode;
+    source.style.update();
+  };
+
   const applyViewportTransform = () => {
     if (!mediaScene || !baseFit) return;
     const transform = viewport.getTransform();
     viewportScale = baseFit.scale * transform.scale;
+    maskLayer?.setViewportScale(viewportScale);
+    polygonLayer?.setViewportScale(viewportScale);
+    updateMediaSampling();
     mediaScene.scale.set(viewportScale);
-    mediaScene.position.set(baseFit.x + transform.x, baseFit.y + transform.y);
+    const box = syncPresentationBox();
+    mediaScene.position.set(
+      baseFit.x + transform.x - box.left,
+      baseFit.y + transform.y - box.top,
+    );
+    focusLayer?.syncViewportBounds();
+    regionLayer.syncViewportBounds();
     maskBrushPreview?.setViewportScale(viewportScale);
   };
+
+  function resolveViewportBounds() {
+    if (!mediaScene || viewportScale <= 0) return undefined;
+    return {
+      x: -mediaScene.x / viewportScale,
+      y: -mediaScene.y / viewportScale,
+      width: app.renderer.screen.width / viewportScale,
+      height: app.renderer.screen.height / viewportScale,
+    };
+  }
 
   const mediaPointToScreen = (point: Point): Point => {
     const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
@@ -718,17 +1096,6 @@ export async function createPixiMediaScene(
     };
   };
 
-  const redrawViewportStyles = () => {
-    boxLayer.invalidate();
-    boxLayer.drawFrame(currentMediaTime, viewportScale);
-    polygonLayer?.drawFrame(currentMediaTime, viewportScale);
-    vectorLayer.drawFrame(currentMediaTime, viewportScale);
-    regionLayer.drawFrame(currentMediaTime, viewportScale);
-    labelLayer?.drawFrame(currentMediaTime, viewportScale);
-    drawFocusLayer(currentMediaTime);
-    drawInteractionPresentationLayer(currentMediaTime);
-  };
-
   // Pixi's ResizePlugin listens to the window resize event, which does not
   // fire when an application drawer or split pane changes only this element's
   // dimensions. Resize Pixi and recompute the contain/cover transform in the
@@ -736,17 +1103,203 @@ export async function createPixiMediaScene(
   const disconnectContainerResizeObserver = observePixiContainerResize(
     options.container,
     () => {
-      app.resize();
+      measureContainer();
+      presentationResolution = resolvePixiResolution(
+        currentMaxDevicePixelRatio,
+      );
+      syncPresentationBox();
       updateMediaSceneFit();
+      syncDisplaySizing();
+      drawInteractionPresentationLayer(currentMediaTime);
+      renderOnChange();
     },
   );
 
-  app.ticker.add(updateMediaSceneFit);
-  app.ticker.add(drawAnnotationOverlay);
+  measureContainer();
+  syncPresentationBox();
+
+  const drawAnnotationOverlayNow = () =>
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
   const tickFocusLayer = () => focusLayer?.tick(now());
-  app.ticker.add(tickFocusLayer);
+  const handleVisibilityChange = () => {
+    // A hidden tab loses its swapchain, and the configuration it comes back
+    // with has nothing in it. Nothing about the scene changed, so only an
+    // unconditional render puts the picture back.
+    if (!document.hidden) renderScene();
+  };
+
+  let unsubscribeDetectionTimeline: (() => void) | undefined;
+
+  if (rendersOnChange) {
+    document.addEventListener?.("visibilitychange", handleVisibilityChange);
+    // A detection load landing moves what the window covers exactly as a cook
+    // landing does. Nothing else brings that to a resting playhead: the layers
+    // read the timeline only while drawing, and this is what makes the draw.
+    unsubscribeDetectionTimeline = options.detectionTimeline.subscribe?.(
+      handlePreparedWindowChange,
+    );
+  }
+
+  if (frameChannel) {
+    frameChannel.onPresentedFrame(handlePresentedFrame);
+  } else if (!stillFrame) {
+    app.ticker.add(updateMediaSceneFit);
+    app.ticker.add(drawAnnotationOverlayNow);
+    app.ticker.add(tickFocusLayer);
+  }
+
+  const uploadFrameToStagingCanvas = (
+    frame: VideoFrame,
+    rotation: PresentedVideoFrame["rotation"] = 0,
+  ) => {
+    drawPresentedVideoFrame(
+      stagingContext,
+      frame,
+      rotation,
+      mediaWidth,
+      mediaHeight,
+    );
+    stagingTextureSource?.update();
+    stagingTexture?.update();
+  };
+
+  const presentLayers: FramePresentLayers = {
+    drawDepth: (mediaTime) => depthLayer?.drawFrame(mediaTime),
+    drawHeatmap: (mediaTime) => heatmapLayer?.drawFrame(mediaTime),
+    advanceFocus: advanceFocusAnimation,
+    drawAnnotationOverlay: (mediaTime) =>
+      drawAnnotationOverlay(mediaTime, mediaTime * MILLISECONDS_PER_SECOND),
+    drawBox: (mediaTime) => boxLayer.drawFrame(mediaTime, viewportScale),
+    drawFocus: drawFocusLayer,
+    drawInteraction: (mediaTime) => interactionLayer?.drawFrame(mediaTime),
+    drawInteractionPresentation: drawInteractionPresentationLayer,
+    drawLabel: (mediaTime) => labelLayer?.drawFrame(mediaTime, viewportScale),
+    drawMask: drawMaskFrame,
+    drawPolygon: drawPolygonFrame,
+    drawRegion: (mediaTime) => regionLayer.drawFrame(mediaTime, viewportScale),
+    drawVector: (mediaTime) => vectorLayer.drawFrame(mediaTime, viewportScale),
+  };
+
+  const framePresentTargets: FramePresentTargets = {
+    adoptMediaTime(mediaTime) {
+      currentMediaTime = mediaTime;
+      hasPresentedSample = true;
+      presentedFrameSerial += 1;
+      drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
+      if (collectFrameTimings) openPresentTimings();
+    },
+    completePresentation(mediaTime, boxState, regionState) {
+      const state = createPresentedSampleState(
+        mediaTime,
+        boxState,
+        regionState,
+      );
+      options.onPresentationUpdate?.(
+        collectFrameTimings
+          ? { ...state, renderTimings: closePresentTimings() }
+          : state,
+      );
+    },
+    fitMediaScene: () => {
+      if (!collectFrameTimings) {
+        updateMediaSceneFit();
+        return;
+      }
+      presentFitMs += measure(updateMediaSceneFit);
+    },
+    layers: collectFrameTimings
+      ? measureFramePresentLayers(presentLayers, measureDrawStep)
+      : presentLayers,
+    render: renderPresent,
+    uploadFrame: (presented) => {
+      if (!collectFrameTimings) {
+        mediaCompositor?.upload(presented.frame, presented.rotation ?? 0);
+        presentedSampleTimestamp = currentMediaTime;
+        return;
+      }
+      presentMediaUploadMs += measure(() => {
+        mediaCompositor?.upload(presented.frame, presented.rotation ?? 0);
+        presentedSampleTimestamp = currentMediaTime;
+      });
+    },
+  };
+
+  // A content redraw updates editing geometry at the same media time without
+  // advancing the focus animation.
+  const annotationDrawLayers: FramePresentLayers = {
+    ...presentLayers,
+    advanceFocus: () => undefined,
+    drawAnnotationOverlay: frameChannel
+      ? presentLayers.drawAnnotationOverlay
+      : stillFrame
+        ? (mediaTime) => drawAnnotationOverlay(mediaTime, overlayNow())
+        : () => undefined,
+  };
+
+  // A viewport-style redraw covers the layers whose geometry is a function of
+  // the viewport scale. Mask outlines reuse the artifact already on screen;
+  // the mask raster and the interaction hit map stay untouched, so a pan
+  // does not change which detection is hovered.
+  const viewportStyleRedrawLayers: FramePresentLayers = {
+    ...annotationDrawLayers,
+    drawBox: (mediaTime) => {
+      boxLayer.invalidate();
+      return boxLayer.drawFrame(mediaTime, viewportScale);
+    },
+    drawDepth: undefined,
+    drawInteraction: undefined,
+    drawMask: () => maskLayer?.redrawViewportStyles(viewportScale),
+  };
+
+  let frameDrawTimings = createFrameDrawTimings();
+  let presentStartMs = 0;
+  let presentFitMs = 0;
+  let presentMediaUploadMs = 0;
+
+  function openPresentTimings() {
+    frameDrawTimings = createFrameDrawTimings();
+    presentFitMs = 0;
+    presentMediaUploadMs = 0;
+    presentStartMs = now();
+  }
+
+  /** The present's costs, its render call included: the submit to the
+   *  compositor happens inside this block, so nothing outside it can time it. */
+  function closePresentTimings(): MediaFrameRenderTimings {
+    return {
+      ...frameDrawTimings,
+      fitMs: presentFitMs,
+      mediaUploadMs: presentMediaUploadMs,
+      totalMs: elapsedSince(presentStartMs),
+    };
+  }
+
+  function measureDrawStep<T>(step: FramePresentStep, draw: () => T): T {
+    const start = now();
+    const drawn = draw();
+    const bucket = FRAME_DRAW_TIMING_BUCKETS[step];
+    if (bucket) frameDrawTimings[bucket] += elapsedSince(start);
+    return drawn;
+  }
+
+  const measuredAnnotationDrawLayers = measureFramePresentLayers(
+    annotationDrawLayers,
+    measureDrawStep,
+  );
+
+  const redrawViewportStyles = () => {
+    drawFramePresentLayers(viewportStyleRedrawLayers, currentMediaTime);
+  };
 
   return {
+    getRenderCount() {
+      return rendersOnChange ? renderScheduler.getRenderCount() : null;
+    },
+
+    getPreparedAnnotationWindow() {
+      return frameChannel ? annotationWindow.getSnapshot() : null;
+    },
+
     rendererBackend: String(app.renderer.name ?? "unknown"),
 
     initializeMedia({ width, height }) {
@@ -782,7 +1335,15 @@ export async function createPixiMediaScene(
       mediaSprite.height = mediaHeight;
       if (!retainedBoxes) boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
-      boxSlot.setDisplay(retainedBoxes ?? boxes);
+      if (currentDepthRenderers.length > 0) {
+        depthSlot.setDisplay(ensureDepthLayer().createContainer());
+      }
+      if (currentHeatmapRenderers.length > 0) {
+        heatmapSlot.setDisplay(ensureHeatmapLayer().createContainer());
+      }
+      boxSlot.setDisplay(
+        retainedGeometry ? undefined : (retainedBoxes ?? boxes),
+      );
       vectorDisplay = new Container();
       attachPolygonLayerDisplay();
       vectorDisplay.addChild(vectorLayer.createContainer());
@@ -816,6 +1377,9 @@ export async function createPixiMediaScene(
           ? interactionDisplay
           : undefined,
       );
+      interactionLabelSlot.setDisplay(
+        interactionPresentationLayer?.getLabelDisplay() ?? undefined,
+      );
       attachFocusLayerDisplay();
       attachMaskLayerDisplay();
       attachLabelLayerDisplay();
@@ -825,12 +1389,27 @@ export async function createPixiMediaScene(
       stagingTextureSource = canvasSource;
       stagingTexture = texture;
       updateMediaSceneFit();
+      syncDisplaySizing();
+      if (frameChannel) mediaCompositor = createSceneMediaCompositor();
+    },
+
+    setPlaybackActive(active) {
+      isPlaybackActive = active;
+      maskLayer?.setPlaybackActive(active);
+      polygonLayer?.setPlaybackActive(active);
+      depthSource?.setPlaybackActive?.(active);
+    },
+
+    setScrubbing(scrubbing) {
+      isScrubbing = scrubbing;
+      depthSource?.setScrubbing?.(scrubbing);
     },
 
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
       polygonLayer?.setTimelineContext(context);
+      depthSource?.setLoop?.(context.loop);
     },
 
     presentSample(sample) {
@@ -838,28 +1417,25 @@ export async function createPixiMediaScene(
         throw new Error("Pixi media scene has not been initialized.");
       }
 
+      isPresenting = true;
       try {
         currentMediaTime = sample.timestamp;
         hasPresentedSample = true;
+        presentedFrameSerial += 1;
 
         if (!collectFrameTimings) {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           presentedSampleTimestamp = sample.timestamp;
+          refreshInspectionImage();
           stagingTextureSource?.update();
           stagingTexture?.update();
-          maskLayer?.drawFrame(sample.timestamp);
-          const boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
-          polygonLayer?.drawFrame(sample.timestamp, viewportScale);
-          vectorLayer.drawFrame(sample.timestamp, viewportScale);
-          const regionState = regionLayer.drawFrame(
+
+          const { boxState, regionState } = drawFramePresentLayers(
+            annotationDrawLayers,
             sample.timestamp,
-            viewportScale,
           );
-          interactionLayer?.drawFrame(sample.timestamp);
-          drawFocusLayer(sample.timestamp);
-          drawInteractionPresentationLayer(sample.timestamp);
-          labelLayer?.drawFrame(sample.timestamp, viewportScale);
           updateMediaSceneFit();
+          renderOnChange();
 
           return {
             ...createPresentedSampleState(
@@ -872,58 +1448,20 @@ export async function createPixiMediaScene(
         }
 
         const totalStart = now();
-        let mediaUploadMs = 0;
-        let maskMs = 0;
-        let boxMs = 0;
-        let interactionMs = 0;
-        let labelMs = 0;
-        let fitMs = 0;
-        let focusMs = 0;
-
-        mediaUploadMs = measure(() => {
+        frameDrawTimings = createFrameDrawTimings();
+        const mediaUploadMs = measure(() => {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           presentedSampleTimestamp = sample.timestamp;
+          refreshInspectionImage();
           stagingTextureSource?.update();
           stagingTexture?.update();
         });
-        maskMs = measure(() => {
-          maskLayer?.drawFrame(sample.timestamp);
-        });
-        let boxState: PixiBoxLayerState | undefined;
-        let regionState: PixiRegionLayerState | undefined;
-
-        boxMs = measure(() => {
-          boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
-          polygonLayer?.drawFrame(sample.timestamp, viewportScale);
-          vectorLayer.drawFrame(sample.timestamp, viewportScale);
-          regionState = regionLayer.drawFrame(sample.timestamp, viewportScale);
-        });
-        interactionMs = measure(() => {
-          interactionLayer?.drawFrame(sample.timestamp);
-          drawInteractionPresentationLayer(sample.timestamp);
-        });
-        focusMs = measure(() => {
-          drawFocusLayer(sample.timestamp);
-        });
-        labelMs = measure(() => {
-          labelLayer?.drawFrame(sample.timestamp, viewportScale);
-        });
-        fitMs = measure(updateMediaSceneFit);
-
-        if (!boxState) {
-          throw new Error("Unable to draw Pixi box layer.");
-        }
-
-        const renderTimings = {
-          boxMs,
-          fitMs,
-          focusMs,
-          interactionMs,
-          labelMs,
-          maskMs,
-          mediaUploadMs,
-          totalMs: elapsedSince(totalStart),
-        };
+        const { boxState, regionState } = drawFramePresentLayers(
+          measuredAnnotationDrawLayers,
+          sample.timestamp,
+        );
+        const fitMs = measure(updateMediaSceneFit);
+        renderOnChange();
 
         return {
           ...createPresentedSampleState(
@@ -932,10 +1470,17 @@ export async function createPixiMediaScene(
             regionState,
           ),
           duration: sample.duration,
-          renderTimings,
+          renderTimings: {
+            ...frameDrawTimings,
+            fitMs,
+            mediaUploadMs,
+            totalMs: elapsedSince(totalStart),
+          },
         };
       } finally {
+        isPresenting = false;
         sample.close();
+        scheduleDepthUploadAhead(currentMediaTime);
       }
     },
 
@@ -950,32 +1495,77 @@ export async function createPixiMediaScene(
         capture: captureOptions,
         createCanvas: () => document.createElement("canvas"),
         mediaTime: presentedSampleTimestamp,
-        source: stagingCanvas,
+        source: readPresentedSurface(),
       });
     },
 
-    waitForRenderPreparation(mediaTime, gateOptions) {
+    getRenderPreparationProgress() {
+      return (
+        (maskLayer?.getPreparationProgress() ?? 0) +
+        (polygonLayer?.getPreparationProgress() ?? 0) +
+        (depthLayer?.getPreparationProgress() ?? 0)
+      );
+    },
+
+    needsRenderPreparationWait(mediaTime, gateOptions) {
+      return (
+        maskLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
+          true ||
+        polygonLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
+          true ||
+        depthLayer?.needsRenderPreparationWait(mediaTime, gateOptions) === true
+      );
+    },
+
+    waitForRenderPreparation(mediaTime, gateOptions, signal) {
       return Promise.all([
-        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions),
-        polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions),
+        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
+        polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
+        depthLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
       ]).then(() => undefined);
     },
 
     setRenderQuality(maxDevicePixelRatio) {
-      const resolution = resolvePixiResolution(maxDevicePixelRatio);
-      const screenWidth = options.container.clientWidth || app.screen.width;
-      const screenHeight = options.container.clientHeight || app.screen.height;
-
-      app.renderer.resize(screenWidth, screenHeight, resolution);
+      currentMaxDevicePixelRatio = maxDevicePixelRatio;
+      presentationResolution = resolvePixiResolution(maxDevicePixelRatio);
+      syncPresentationBox();
       updateMediaSceneFit();
+      syncDisplaySizing();
+      drawInteractionPresentationLayer(currentMediaTime);
+      renderOnChange();
     },
 
     setDisplayAdjustments(adjustments) {
       void import("pixi.js").then(({ ColorMatrixFilter }) => {
+        if (isDestroyed) return;
+        const brightness = adjustments.brightness ?? 1;
+        const contrast = adjustments.contrast ?? 1;
         const filter = new ColorMatrixFilter();
-        filter.brightness(adjustments.brightness ?? 1, false);
-        filter.contrast((adjustments.contrast ?? 1) - 1, true);
-        if (mediaSprite) mediaSprite.filters = [filter];
+        // Preserve the renderer's pixel grid through the adjustment pass.
+        filter.resolution = "inherit";
+        filter.brightness(brightness, false);
+        displayGamma = adjustments.gamma ?? 1;
+        displayAutoContrast = stillFrame && adjustments.autoContrast === true;
+        filter.contrast(displayAutoContrast ? 0 : contrast - 1, true);
+        if (mediaSprite) {
+          if (displayGamma !== 1 || displayAutoContrast) {
+            inspectionFilter ??= createPixiMediaInspectionFilter(
+              mediaSprite,
+              pixi,
+            );
+            inspectionFilter.update(
+              displayGamma,
+              displayAutoContrast,
+              hasPresentedSample ? stagingCanvas : null,
+            );
+            mediaSprite.filters = [inspectionFilter.filter, filter];
+          } else {
+            mediaSprite.filters = [filter];
+          }
+        }
+        displayBrightness = brightness;
+        displayContrast = contrast;
+        renderOnChange();
       });
     },
 
@@ -1003,6 +1593,7 @@ export async function createPixiMediaScene(
       });
       applyViewportTransform();
       redrawViewportStyles();
+      renderOnChange();
     },
 
     setViewportLocked(locked) {
@@ -1042,16 +1633,18 @@ export async function createPixiMediaScene(
     },
 
     panViewportBy(dx, dy) {
+      if (viewport.getTransform().locked) return;
       const before = viewport.getTransform();
       viewport.panBy(dx, dy);
       const after = viewport.getTransform();
       viewport.setTransform({ x: Math.round(after.x), y: Math.round(after.y) });
       if (before === viewport.getTransform()) return;
       applyViewportTransform();
+      renderOnChange();
     },
 
     zoomViewportAt(point, factor) {
-      if (!baseFit) return;
+      if (!baseFit || viewport.getTransform().locked) return;
       viewport.zoomAt(
         { x: point.x - baseFit.x, y: point.y - baseFit.y },
         factor,
@@ -1063,10 +1656,11 @@ export async function createPixiMediaScene(
       });
       applyViewportTransform();
       redrawViewportStyles();
+      renderOnChange();
     },
 
     zoomViewportFromWheel(point, deltaY) {
-      if (!baseFit) return;
+      if (!baseFit || viewport.getTransform().locked) return;
       viewport.zoomFromWheel(
         { x: point.x - baseFit.x, y: point.y - baseFit.y },
         deltaY,
@@ -1078,12 +1672,23 @@ export async function createPixiMediaScene(
       });
       applyViewportTransform();
       redrawViewportStyles();
+      renderOnChange();
     },
 
     setPresentation(presentation, mediaTime) {
+      appliedPresentation = presentation;
       currentMediaTime = mediaTime;
+      if (
+        annotationAntialiasing !==
+        (presentation.annotationAntialiasing ?? false)
+      ) {
+        annotationAntialiasing = presentation.annotationAntialiasing ?? false;
+        syncAnnotationAntialiasResolution();
+        syncSceneChildren();
+      }
       if (presentation.backgroundColor !== undefined) {
         app.renderer.background.color = presentation.backgroundColor;
+        applyBackdropColor(backdrop, presentation.backgroundColor);
       }
       annotationOverlayLayer.setStyle(presentation.annotationOverlayStyle);
       if (presentation.visibility !== undefined) {
@@ -1092,17 +1697,20 @@ export async function createPixiMediaScene(
           presentation.visibility,
         );
         currentVisibility = presentation.visibility;
+        // Depth has no classes or detection ids, so only hiding all
+        // annotations reaches it.
+        depthLayer?.setHidden(
+          presentation.visibility.annotationsHidden === true,
+        );
+        heatmapLayer?.invalidate();
         boxLayer.invalidate();
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
         polygonLayer?.setPolygonStyle(currentPolygonStyle);
-        if (maskVisibilityChanged && resolveArtifactMaskStyle()) {
+        if (maskVisibilityChanged && resolveMaskPreparationStyle()) {
           visibilityVersion += 1;
-          maskLayer?.setMaskStyle(
-            createVisibilityMaskStyle(resolveArtifactMaskStyle()!),
-          );
+          syncMaskPreparation();
         }
-        interactionLayer?.drawFrame(mediaTime);
       }
       boxLayer.setBoxStyle(presentation.boxStyle);
       if (presentation.polygonStyle !== undefined) {
@@ -1128,24 +1736,12 @@ export async function createPixiMediaScene(
         keypointStyle: presentation.keypointStyle,
       });
       annotationOverlayLayer.setKeypointStyle(presentation.keypointStyle);
-      const nextRegionRenderers =
-        presentation.renderers?.filter(
-          (renderer): renderer is RegionAnnotationRenderer =>
-            renderer.kind === "region",
-        ) ?? [];
-      const nextRegionMaskCoverageKey =
-        resolveRegionMaskCoverageKey(nextRegionRenderers);
-      const regionMaskCoverageChanged =
-        nextRegionMaskCoverageKey !== regionMaskCoverageKey;
-
-      currentRegionRenderers = nextRegionRenderers;
-      regionMaskCoverageKey = nextRegionMaskCoverageKey;
-      regionLayer.setRenderers(currentRegionRenderers);
-
       if (
         presentation.boxCornerStyle !== undefined ||
         presentation.ellipseStyle !== undefined ||
-        presentation.markerStyle !== undefined
+        presentation.markerStyle !== undefined ||
+        presentation.orientedBoxStyle !== undefined ||
+        presentation.percentageBarStyle !== undefined
       ) {
         if (presentation.boxCornerStyle !== undefined) {
           currentBoxCornerStyle = presentation.boxCornerStyle;
@@ -1156,8 +1752,54 @@ export async function createPixiMediaScene(
         if (presentation.markerStyle !== undefined) {
           currentMarkerStyle = presentation.markerStyle;
         }
+        if (presentation.orientedBoxStyle !== undefined) {
+          currentOrientedBoxStyle = presentation.orientedBoxStyle;
+        }
+        if (presentation.percentageBarStyle !== undefined) {
+          currentPercentageBarStyle = presentation.percentageBarStyle;
+        }
         vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
       }
+
+      currentRegionRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is RegionAnnotationRenderer =>
+            renderer.kind === "region",
+        ) ?? [];
+      currentHeatmapRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is HeatmapAnnotationRenderer =>
+            renderer.kind === "heatmap",
+        ) ?? [];
+      if (currentHeatmapRenderers.length > 0) {
+        const layer = ensureHeatmapLayer();
+        layer.setRenderers(currentHeatmapRenderers);
+        heatmapSlot.setDisplay(layer.createContainer());
+        syncSceneChildren();
+      } else {
+        heatmapLayer?.setRenderers([]);
+      }
+      currentDepthRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is DepthAnnotationRenderer =>
+            renderer.kind === "depth",
+        ) ?? [];
+      if (currentDepthRenderers.length > 0) {
+        const layer = ensureDepthLayer();
+        layer.setRenderers(currentDepthRenderers);
+        depthSlot.setDisplay(layer.createContainer());
+        syncSceneChildren();
+      } else {
+        depthLayer?.setRenderers([]);
+      }
+      const nextRegionMaskCoverageKey = resolveRegionMaskCoverageKey(
+        currentRegionRenderers,
+      );
+      const regionMaskCoverageChanged =
+        nextRegionMaskCoverageKey !== regionMaskCoverageKey;
+
+      regionMaskCoverageKey = nextRegionMaskCoverageKey;
+      regionLayer.setRenderers(currentRegionRenderers);
 
       if (
         presentation.maskStyle !== undefined ||
@@ -1169,24 +1811,25 @@ export async function createPixiMediaScene(
         }
 
         if (presentation.maskHaloStyle !== undefined) {
+          const previousMaskHaloStyle = currentMaskHaloStyle;
+
           currentMaskHaloStyle = presentation.maskHaloStyle;
+
+          if (
+            previousMaskHaloStyle &&
+            currentMaskHaloStyle &&
+            admitsDifferentMaskCoverage(
+              previousMaskHaloStyle,
+              currentMaskHaloStyle,
+            )
+          ) {
+            maskHaloVersion += 1;
+          }
         }
 
-        const artifactStyle = resolveArtifactMaskStyle();
-        const nextMaskLayer = artifactStyle
-          ? ensureMaskLayer(artifactStyle)
-          : maskLayer;
+        syncMaskPreparation();
 
-        nextMaskLayer?.setMaskStyle(
-          artifactStyle ? createVisibilityMaskStyle(artifactStyle) : null,
-        );
-        nextMaskLayer?.setMaskHaloStyle(
-          currentMaskHaloStyle
-            ? createVisibilityMaskHaloStyle(currentMaskHaloStyle)
-            : null,
-        );
-
-        if (artifactStyle) {
+        if (currentMaskStyle || currentMaskHaloStyle) {
           attachMaskLayerDisplay();
           syncSceneChildren();
         }
@@ -1211,11 +1854,13 @@ export async function createPixiMediaScene(
       );
 
       if (presentation.focusStyle !== undefined) {
+        currentFocusStyle = presentation.focusStyle;
         const nextFocusLayer = presentation.focusStyle
           ? ensureFocusLayer(presentation.focusStyle)
           : focusLayer;
 
         nextFocusLayer?.setFocusStyle(presentation.focusStyle);
+        syncMaskPreparation();
 
         if (presentation.focusStyle) {
           attachFocusLayerDisplay();
@@ -1224,24 +1869,41 @@ export async function createPixiMediaScene(
       }
 
       if (mediaWidth <= 0 || mediaHeight <= 0) {
+        renderOnChange();
         return;
       }
 
-      maskLayer?.drawFrame(mediaTime);
-      const boxState = boxLayer.drawFrame(mediaTime, viewportScale);
-      polygonLayer?.drawFrame(mediaTime, viewportScale);
-      vectorLayer.drawFrame(mediaTime, viewportScale);
-      const regionState = regionLayer.drawFrame(mediaTime, viewportScale);
-      interactionLayer?.drawFrame(mediaTime);
-      drawFocusLayer(mediaTime);
-      drawInteractionPresentationLayer(mediaTime);
-      labelLayer?.drawFrame(mediaTime, viewportScale);
+      const { boxState, regionState } = drawAnnotationFrame(mediaTime);
+      renderOnChange();
 
       return createPresentedSampleState(mediaTime, boxState, regionState);
     },
 
+    setDepthSource(source) {
+      unsubscribeDepthSource?.();
+      depthSource = source;
+      source?.setPlaybackActive?.(isPlaybackActive);
+      source?.setScrubbing?.(isScrubbing);
+      if (timelineContext) source?.setLoop?.(timelineContext.loop);
+      // A clip's exact frame lands after its frame was presented. The layer's
+      // content key is in the render signature, so each of these redraws
+      // renders only when the depth on screen changed.
+      unsubscribeDepthSource = source?.subscribe?.(() => {
+        if (hasPresentedSample) redrawAnnotationsNow();
+      });
+      depthLayer?.setDepthSource(source);
+      if (hasPresentedSample) redrawAnnotationsNow();
+    },
+
+    getActiveDepth() {
+      return depthLayer?.getActiveDepth() ?? null;
+    },
+
+    prefetchDepth(mediaTime) {
+      depthLayer?.prefetch(mediaTime);
+    },
+
     setSelectedDetection(selection, mediaTime) {
-      currentMediaTime = selection?.mediaTime ?? mediaTime;
       const pick =
         interactionLayer?.setSelectedDetection(
           selection === null
@@ -1254,16 +1916,41 @@ export async function createPixiMediaScene(
 
       drawFocusLayer(currentMediaTime);
       drawInteractionPresentationLayer(currentMediaTime);
+      renderOnChange();
 
       return pick;
     },
 
     destroy() {
+      if (isDestroyed) return;
+      isDestroyed = true;
+      if (displayFrameHandle !== null) {
+        cancelDisplayFrame(displayFrameHandle);
+        displayFrameHandle = null;
+      }
+      deferredPresentedFrame?.frame.close();
+      deferredPresentedFrame = null;
+      unsubscribeDetectionTimeline?.();
       disconnectContainerResizeObserver();
       app.cancelResize?.();
       app.ticker.remove(updateMediaSceneFit);
-      app.ticker.remove(drawAnnotationOverlay);
+      app.ticker.remove(drawAnnotationOverlayNow);
       app.ticker.remove(tickFocusLayer);
+      document.removeEventListener?.(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+      // Registering replaces the consumer, which is the only way to stop being
+      // one. A frame that arrives after this still has to be closed, or it pins
+      // a decoder buffer in a producer that outlives the scene.
+      frameChannel?.onPresentedFrame((presented) => presented.frame.close());
+      destroyBatchTextureBindings();
+      destroyFilterBindings();
+      labelLayer?.setBackgroundAntialiasFilter(null);
+      interactionPresentationLayer?.setBackgroundAntialiasFilter(null);
+      annotationAntialiasLayer.destroy();
+      inspectionFilter?.destroy();
+      mediaCompositor?.destroy();
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
       focusLayer?.destroy();
@@ -1272,6 +1959,10 @@ export async function createPixiMediaScene(
       labelLayer?.destroy();
       vectorLayer.destroy();
       regionLayer.destroy();
+      heatmapLayer?.destroy();
+      unsubscribeDepthSource?.();
+      clearTimeout(depthUploadTimer);
+      depthLayer?.destroy();
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
@@ -1289,15 +1980,23 @@ export async function createPixiMediaScene(
           textureSource: true,
         },
       );
+      backdrop.remove();
     },
   };
 
+  /**
+   * What the layers put on screen for this present, read back from the layers.
+   * The timeline's answer for one media time is not fixed: a load landing moves
+   * it, and the frame that was drawn is the one a viewer is looking at.
+   */
   function createPresentedSampleState(
     mediaTime: number,
     boxState: PixiBoxLayerState,
     regionState?: PixiRegionLayerState,
   ): PresentedMediaSample {
-    const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+    const detectionFrame = boxState.activeDetectionFrame;
+    const maskState = maskLayer?.getDrawnState();
+    const drawnMaskFrameTime = maskState?.drawnFrameTime ?? null;
 
     return {
       activeDetectionCount: countPresentedDetections(
@@ -1306,10 +2005,16 @@ export async function createPixiMediaScene(
         boxState,
         regionState,
       ),
-      activeDetectionFrameIndex: detectionFrame?.frameIndex ?? null,
-      activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,
+      activeDetectionFrameIndex: boxState.activeDetectionFrameIndex,
+      activeDetectionFrameTime: boxState.activeDetectionFrameTime,
       detectionBuffer: options.detectionTimeline.getState(),
+      drawnMaskFrameTime,
+      maskHeldStale:
+        drawnMaskFrameTime !== null &&
+        boxState.activeDetectionFrameTime !== null &&
+        drawnMaskFrameTime !== boxState.activeDetectionFrameTime,
       mediaTime,
+      presentedFrameSerial,
     };
   }
 
@@ -1356,28 +2061,37 @@ export async function createPixiMediaScene(
     return visibleDetectionIndexes.size;
   }
 
-  function ensureMaskLayer(maskStyle: NonNullable<typeof options.maskStyle>) {
+  function ensureMaskLayer(preparationStyle: MaskStyle) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
         BlurFilter,
+        BufferImageSource,
         Container,
-        Rectangle,
+        Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         Sprite,
         Texture,
         UniformGroup,
+        acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
-        maskHaloStyle: currentMaskHaloStyle
-          ? createVisibilityMaskHaloStyle(currentMaskHaloStyle)
-          : null,
-        maskStyle: createVisibilityMaskStyle(maskStyle),
-        onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
+        maskHaloStyle: resolveVisibilityMaskHaloStyle(),
+        maskStyle: preparationStyle,
+        orderedContainer:
+          options.maskOrder === "detection" ? retainedGeometry : undefined,
+        onPreparedWindowChange: handlePreparedWindowChange,
+        onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
         resolveInstructions: resolveArtifactMaskInstructions,
       });
+
+      syncMaskRasterDisplay();
+      maskLayer.setViewportScale(viewportScale);
+
+      maskLayer.setPlaybackActive(isPlaybackActive);
 
       if (timelineContext) {
         maskLayer.setTimelineContext(timelineContext);
@@ -1387,13 +2101,325 @@ export async function createPixiMediaScene(
     return maskLayer;
   }
 
+  /**
+   * The id-mask artifact is what the focus cutout samples as well as what the
+   * mask fill draws, so preparation has to keep running while either one is on.
+   */
+  function resolveMaskPreparationStyle() {
+    const baseStyle =
+      currentMaskStyle ??
+      (currentMaskHaloStyle
+        ? resolveHaloPreparationStyle(currentMaskHaloStyle)
+        : null) ??
+      (currentFocusStyle ? ID_MASK_PREPARATION_STYLE : null) ??
+      (regionMaskCoverageKey ? REGION_COVERAGE_ONLY_MASK_STYLE : null);
+
+    if (!baseStyle) {
+      return null;
+    }
+
+    return createVisibilityMaskStyle(
+      regionMaskCoverageKey
+        ? keyArtifactByRegionCoverage(baseStyle)
+        : baseStyle,
+    );
+  }
+
+  /**
+   * Whether two halo styles disagree about which detections belong in the
+   * prepared coverage. `resolve` is caller-supplied, so admission is observable
+   * only by running it against real detections: a swap that restyles the glow
+   * leaves the cooked artifacts valid, one that moves the admission boundary
+   * does not.
+   *
+   * Only the buffered window is asked, so a prepared frame the buffer has
+   * already rolled past can survive an admission change that touches it and
+   * nothing buffered. An empty buffer is evidence of nothing and counts as
+   * changed.
+   */
+  function admitsDifferentMaskCoverage(
+    previousStyle: MaskHaloStyle,
+    nextStyle: MaskHaloStyle,
+  ) {
+    if (previousStyle === nextStyle) {
+      return false;
+    }
+
+    const frames = options.detectionTimeline.getBufferedFrames();
+
+    if (frames.length === 0) {
+      return true;
+    }
+
+    for (const frame of frames) {
+      for (const [detectionIndex, detection] of frame.detections.entries()) {
+        const state = resolveContextState(detection);
+
+        if (state.hidden) {
+          continue;
+        }
+
+        const context = {
+          detectionIndex,
+          frame,
+          mediaTime: frame.mediaTime,
+          ...state,
+        };
+
+        if (
+          !resolvePaintedMaskHalo(previousStyle, detection, context) !==
+          !resolvePaintedMaskHalo(nextStyle, detection, context)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Cooks run the halo style, so a restyle that kept the artifact key still has
+   * to reach the queue: the key decides which artifacts survive, the closure
+   * decides what the next cook admits.
+   */
+  function resolveHaloPreparationStyle(haloStyle: MaskHaloStyle): MaskStyle {
+    if (
+      haloPreparationStyleCache?.source === haloStyle &&
+      haloPreparationStyleCache.version === maskHaloVersion
+    ) {
+      return haloPreparationStyleCache.style;
+    }
+
+    const style = createMaskHaloPreparationStyle(
+      haloStyle,
+      `mask-halo-only:${maskHaloVersion}`,
+    );
+
+    haloPreparationStyleCache = {
+      source: haloStyle,
+      style,
+      version: maskHaloVersion,
+    };
+
+    return style;
+  }
+
+  function syncMaskPreparation() {
+    const preparationStyle = resolveMaskPreparationStyle();
+
+    if (!preparationStyle) {
+      maskLayer?.setFillVisible(false);
+      maskLayer?.setMaskStyle(null);
+      maskLayer?.setMaskHaloStyle(null);
+      return;
+    }
+
+    const layer = ensureMaskLayer(preparationStyle);
+
+    layer.setFillVisible(currentMaskStyle !== null);
+    layer.setMaskStyle(preparationStyle);
+    layer.setMaskHaloStyle(resolveVisibilityMaskHaloStyle());
+  }
+
+  /**
+   * Which targets crop to their own mask, as the identity the prepared
+   * artifact is keyed by: changing that set has to invalidate frames cooked
+   * for the previous one, and the coverage planes are not part of the style.
+   */
+  function resolveRegionMaskCoverageKey(
+    renderers: readonly RegionAnnotationRenderer[],
+  ) {
+    const exactTargets = renderers
+      .filter(usesExactMaskCoverage)
+      .map(({ target }) => ({
+        className: target.className,
+        id: target.id,
+        sourceId: target.sourceId,
+      }));
+
+    return exactTargets.length > 0 ? JSON.stringify(exactTargets) : "";
+  }
+
+  function keyArtifactByRegionCoverage(style: MaskStyle): MaskStyle {
+    if (
+      regionCoverageStyleCache?.source === style &&
+      regionCoverageStyleCache.key === regionMaskCoverageKey
+    ) {
+      return regionCoverageStyleCache.style;
+    }
+
+    const keyedStyle: MaskStyle = {
+      ...style,
+      artifactKey:
+        style.artifactKey === undefined
+          ? undefined
+          : `${style.artifactKey}:region-coverage:${regionMaskCoverageKey}`,
+    };
+
+    regionCoverageStyleCache = {
+      key: regionMaskCoverageKey,
+      source: style,
+      style: keyedStyle,
+    };
+
+    return keyedStyle;
+  }
+
+  function usesExactMaskCoverage(renderer: RegionAnnotationRenderer) {
+    return (
+      renderer.source.kind === RegionRendererSourceKind.Media &&
+      renderer.source.coverage?.kind === RegionRendererCoverageKind.Mask
+    );
+  }
+
+  function matchesStaticRegionTarget(
+    target: RegionRendererTarget,
+    detection: Detection,
+  ) {
+    return (
+      matchesStaticTargetValue(target.id, detection.id) &&
+      matchesStaticTargetValue(target.className, detection.className) &&
+      matchesStaticTargetValue(target.sourceId, detection.sourceId)
+    );
+  }
+
+  function matchesStaticTargetValue(
+    configured: string | number | readonly (string | number)[] | undefined,
+    actual: string | number | undefined,
+  ) {
+    if (configured === undefined) {
+      return true;
+    }
+
+    if (actual === undefined) {
+      return false;
+    }
+
+    return Array.isArray(configured)
+      ? configured.some((value) => value === actual)
+      : configured === actual;
+  }
+
+  /**
+   * Coverage rides on the same prepared frame as the visible masks, so a
+   * target that crops to its own mask without drawing one still needs an
+   * instruction. That instruction says it is invisible, and the compositor
+   * keeps it out of both the composite and the id raster.
+   */
+  function resolveArtifactMaskInstructions(instructionOptions: {
+    readonly frame: DetectionFrame;
+    readonly maskStyle: MaskStyle;
+    readonly mediaTime: number;
+  }) {
+    const instructions: SerializableMaskInstruction[] = [];
+    const exactRegionRenderers = currentRegionRenderers.filter(
+      usesExactMaskCoverage,
+    );
+    const orderedDetections = instructionOptions.frame.detections
+      .map((detection, detectionIndex) => ({ detection, detectionIndex }))
+      .sort(
+        (left, right) =>
+          (left.detection.zIndex ?? left.detectionIndex) -
+          (right.detection.zIndex ?? right.detectionIndex),
+      );
+
+    for (const { detection, detectionIndex } of orderedDetections) {
+      const visibleInstruction = instructionOptions.maskStyle.resolve(
+        detection,
+        {
+          detectionIndex,
+          frame: instructionOptions.frame,
+          mediaTime: instructionOptions.mediaTime,
+        },
+      );
+      const regionCoverageMask =
+        detection.mask &&
+        !resolveContextState(detection).hidden &&
+        exactRegionRenderers.some((renderer) =>
+          matchesStaticRegionTarget(renderer.target, detection),
+        )
+          ? detection.mask
+          : undefined;
+
+      if (!visibleInstruction && !regionCoverageMask) {
+        continue;
+      }
+
+      instructions.push({
+        ...(visibleInstruction ?? {
+          alpha: 0,
+          color: 0,
+          mask: regionCoverageMask!,
+          visible: false,
+        }),
+        detectionIndex,
+        regionCoverageMask,
+      });
+    }
+
+    return instructions;
+  }
+
+  function resolveVisibilityMaskHaloStyle(): MaskHaloStyle | null {
+    const style = currentMaskHaloStyle;
+
+    if (!style) {
+      return null;
+    }
+
+    return {
+      resolve(detection, context) {
+        const state = resolveContextState(detection);
+
+        if (state.hidden) {
+          return undefined;
+        }
+
+        return style.resolve(detection, { ...context, ...state });
+      },
+    };
+  }
+
+  /**
+   * The vector layer takes one shape style, and the ellipse, marker,
+   * box-corner, and oriented-box renderer kinds all lower to shape
+   * instructions, so they are composed onto whatever style the caller passed.
+   */
+  function resolveVectorShapeStyle(): ShapeStyle | null {
+    const kindShapeStyle = resolveAnnotationShapeStyle({
+      boxCornerStyle: currentBoxCornerStyle,
+      ellipseStyle: currentEllipseStyle,
+      markerStyle: currentMarkerStyle,
+      orientedBoxStyle: currentOrientedBoxStyle,
+      percentageBarStyle: currentPercentageBarStyle,
+    });
+    const baseShapeStyle = options.shapeStyle ?? null;
+
+    if (!kindShapeStyle || !baseShapeStyle) {
+      return kindShapeStyle ?? baseShapeStyle;
+    }
+
+    return {
+      resolve(detection, context) {
+        const combined = [
+          ...(baseShapeStyle.resolve(detection, context) ?? []),
+          ...(kindShapeStyle.resolve(detection, context) ?? []),
+        ];
+
+        return combined.length > 0 ? combined : undefined;
+      },
+    };
+  }
+
   function ensurePolygonLayer(polygonStyle: PolygonStyle) {
-    if (options.editingEngine) {
+    if (retainedGeometry) {
       return undefined;
     }
 
     if (!polygonLayer) {
       polygonLayer = createPixiPolygonLayer({
+        BufferImageSource,
         Container,
         ImageSource,
         Mesh,
@@ -1402,11 +2428,16 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         UniformGroup,
+        acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
+        onPreparedWindowChange: handlePreparedWindowChange,
         polygonStyle,
         renderPreparation: options.renderPreparation,
         resolveContextState,
       });
+      polygonLayer.setPlaybackActive(isPlaybackActive);
+      syncMaskRasterDisplay();
+      polygonLayer.setViewportScale(viewportScale);
 
       if (timelineContext) {
         polygonLayer.setTimelineContext(timelineContext);
@@ -1461,14 +2492,19 @@ export async function createPixiMediaScene(
   ) {
     if (!focusLayer) {
       focusLayer = createPixiFocusLayer({
+        AlphaMask,
         Container,
         Graphics,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         UniformGroup,
         focusStyle,
+        getHeatmapRenderers: () => currentHeatmapRenderers,
+        getAnnotationAntialiasing: () => Boolean(annotationAntialiasing),
+        getViewportBounds: resolveViewportBounds,
         isDetectionVisible: (detection) =>
           !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       });
@@ -1495,35 +2531,49 @@ export async function createPixiMediaScene(
     );
   }
 
+  function releaseMaskTextureBindings(texture: PixiTexture) {
+    focusLayer?.releaseMaskTexture(texture);
+    interactionPresentationLayer?.releaseMaskTexture(texture);
+    regionLayer.releaseMaskTexture(texture);
+  }
+
   function drawFocusLayer(mediaTime: number) {
     if (!focusLayer) {
       return;
     }
 
     const editingKind = options.editingEngine?.getState().kind;
+
     if (
       editingKind === AnnotationGestureStateKind.Creating ||
       editingKind === AnnotationGestureStateKind.DragSelecting
     ) {
-      focusLayer.drawFrame({
-        frame: undefined,
-        hoveredPick: null,
-        mediaTime,
-        selectedPick: null,
-      });
+      drawFocusWithNothingToCut(mediaTime, null);
       return;
     }
 
-    const frame = options.detectionTimeline.selectFrame(mediaTime);
+    if (isFocusArtifactOwed(mediaTime)) {
+      drawFocusWithNothingToCut(
+        mediaTime,
+        maskLayer?.getDrawnState().drawnFrameTime ?? null,
+        true,
+      );
+      return;
+    }
+
+    const frame = annotationDetectionTimeline.selectFrame(mediaTime);
 
     const interactionState = interactionLayer?.getState();
 
     focusLayer.drawFrame({
       frame,
+      heatmapArtifacts: heatmapLayer?.getActiveFocusArtifacts(frame) ?? [],
       hoveredPick: withEditingPreview(
         filterVisiblePick(interactionState?.hoveredPick ?? null),
       ),
-      idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
+      idMaskArtifact:
+        maskLayer?.getActiveIdMaskFrameTexture(frame?.mediaTime ?? null) ??
+        null,
       mediaTime,
       selectedPick: withEditingPreview(
         filterVisiblePick(interactionState?.selectedPick ?? null),
@@ -1532,59 +2582,476 @@ export async function createPixiMediaScene(
     });
   }
 
+  function drawFocusWithNothingToCut(
+    mediaTime: number,
+    heldMaskFrameTime: number | null,
+    isMaskArtifactOwed = false,
+  ) {
+    focusLayer?.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime,
+      hoveredPick: null,
+      isMaskArtifactOwed,
+      mediaTime,
+      selectedPick: null,
+    });
+  }
+
   function drawInteractionPresentationLayer(mediaTime: number) {
     if (!interactionPresentationLayer) {
       return;
     }
 
-    const frame = options.detectionTimeline.selectFrame(mediaTime);
+    const frame = annotationDetectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
 
     interactionPresentationLayer.drawFrame({
       frame,
-      hoveredPick: filterVisiblePick(interactionState?.hoveredPick ?? null),
-      idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
+      hoveredPick: interactionState?.hoveredPick ?? null,
+      idMaskArtifact:
+        maskLayer?.getActiveIdMaskFrameTexture(frame?.mediaTime ?? null) ??
+        null,
       mediaTime,
-      selectedPick: filterVisiblePick(interactionState?.selectedPick ?? null),
-      selectedPicks: interactionState?.selectedPicks.filter(
-        ({ detection }) =>
-          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
-      ),
+      selectedPick: interactionState?.selectedPick ?? null,
+      selectedPicks: interactionState?.selectedPicks,
+      strokePixelRatio: annotationAntialiasing
+        ? annotationAntialiasResolution
+        : presentationResolution,
       viewportScale,
     });
   }
 
-  function handleActiveIdMaskFramePresented() {
-    regionLayer.drawFrame(currentMediaTime, viewportScale);
-    drawFocusLayer(currentMediaTime);
-    drawInteractionPresentationLayer(currentMediaTime);
+  /**
+   * A cook landed, so what the window covers may have moved. A result for a
+   * frame that is not on screen stays in the window; a window that reaches the
+   * frame on screen gets there as a redraw of that frame, which is the only way
+   * anything a cook produced is ever drawn.
+   */
+  function handlePreparedWindowChange() {
+    if (isPresenting || isDestroyed) {
+      return;
+    }
+
+    if (
+      annotationWindow.getReadinessToken(currentMediaTime) === drawnReadiness
+    ) {
+      return;
+    }
+
+    redrawAnnotationsNow();
   }
 
-  function drawAnnotationOverlay() {
-    const frame = options.detectionTimeline.selectFrame(currentMediaTime);
+  /** Redraws the frame on screen whether or not its readiness moved. */
+  function redrawAnnotationsNow(forceRender = false) {
+    if (isPresenting || isDestroyed || !hasPresentedSample) {
+      return;
+    }
+
+    const { boxState, regionState } = drawAnnotationFrame(currentMediaTime);
+
+    if (rendersOnChange) {
+      const signature = describeSceneRender();
+      if (forceRender) renderScheduler.render(signature);
+      else if (!renderScheduler.renderOnChange(signature)) return;
+    }
+
+    options.onPresentationUpdate?.(
+      createPresentedSampleState(currentMediaTime, boxState, regionState),
+    );
+  }
+
+  function drawAnnotationFrame(mediaTime: number) {
+    drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
+
+    return drawFramePresentLayers(annotationDrawLayers, mediaTime);
+  }
+
+  /**
+   * Drawing an uncovered frame is drawing nothing, and the cook still has to be
+   * pointed at it or the window would never reach it.
+   */
+  function drawMaskFrame(
+    mediaTime: number,
+    presentedFrameId: PresentedFrameId | null,
+  ) {
+    if (!maskLayer) {
+      return;
+    }
+
+    if (isFramePrepared(mediaTime)) {
+      maskLayer.drawFrame(mediaTime, presentedFrameId, viewportScale);
+      return;
+    }
+
+    maskLayer.clearFrame();
+    maskLayer.prepareFrame(mediaTime);
+  }
+
+  function drawPolygonFrame(mediaTime: number) {
+    if (!polygonLayer) {
+      return;
+    }
+
+    if (isFramePrepared(mediaTime)) {
+      polygonLayer.drawFrame(mediaTime, viewportScale);
+      return;
+    }
+
+    polygonLayer.clearFrame();
+    polygonLayer.prepareFrame(mediaTime, viewportScale);
+  }
+
+  function isFramePrepared(mediaTime: number) {
+    return (
+      !frameChannel || annotationWindow.getPreparedFrame(mediaTime) !== null
+    );
+  }
+
+  /**
+   * Focus reads the id raster the mask cook produces. While that cook is owed,
+   * the vector outline focus falls back to costs more than the frame budget
+   * holds, for a picture the cooked raster supersedes a frame later.
+   */
+  function isFocusArtifactOwed(mediaTime: number) {
+    return maskLayer !== undefined && !maskLayer.isArtifactPrepared(mediaTime);
+  }
+
+  function drawAnnotationOverlay(mediaTime: number, overlayNowMs: number) {
+    const frame = annotationDetectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
     const editingState = options.editingEngine?.getState();
-    labelLayer?.drawCreationPreview(
-      editingState?.kind === AnnotationGestureStateKind.Creating
-        ? editingState.preview
-        : null,
-      currentMediaTime,
-      viewportScale,
-    );
+    const previewOverlay = options.previewOverlay?.() ?? null;
+    drawnEditingState = editingState;
+    // Only a scene that renders on change compares signatures.
+    if (rendersOnChange) {
+      drawnPreviewOverlayContent =
+        describePreviewOverlayContent(previewOverlay);
+    }
     annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,
       mediaHeight,
       mediaWidth,
-      now: now(),
+      now: overlayNowMs,
       pointer: interactionState?.pointerPoint ?? null,
-      previewOverlay: options.previewOverlay?.() ?? null,
+      previewOverlay,
       selectedDetectionIds: (interactionState?.selectedPicks ?? []).flatMap(
         ({ detection }) => (detection.id === undefined ? [] : [detection.id]),
       ),
       viewportScale,
       visibility: currentVisibility,
     });
+    const editingBox = annotationOverlayLayer.getRenderedEditingBox();
+    const creationPreview =
+      editingState?.kind === AnnotationGestureStateKind.Creating
+        ? editingState.preview
+        : null;
+    labelLayer?.drawCreationPreview(
+      creationPreview,
+      mediaTime,
+      viewportScale,
+      editingBox && editingBox.detection === creationPreview
+        ? editingBox.rect
+        : undefined,
+    );
+    if (editingState?.activeDetectionId != null) {
+      labelLayer?.updateEditingBox(
+        editingState.activeDetectionId,
+        editingBox?.detection.id === editingState.activeDetectionId
+          ? editingBox.rect
+          : undefined,
+      );
+    }
+  }
+
+  /**
+   * Milliseconds for animations that are not annotation geometry. A pull scene
+   * has a ticker and reads the wall clock, as does a still frame while its
+   * ticker runs; a push scene has the presented media time and nothing else,
+   * so its animations move only when the media does.
+   */
+  function overlayNow() {
+    return frameChannel ? currentMediaTime * MILLISECONDS_PER_SECOND : now();
+  }
+
+  function handlePresentedFrame(presented: PresentedVideoFrame) {
+    if (!mediaCompositor || isDestroyed) {
+      presented.frame.close();
+      return;
+    }
+
+    // The producer may outrun the display refresh. Keep only its newest frame
+    // for the next refresh, and never acknowledge a superseded frame as
+    // presented: neither its pixels nor its annotations reached the canvas.
+    if (displayFrameHandle !== null) {
+      deferredPresentedFrame?.frame.close();
+      deferredPresentedFrame = presented;
+      return;
+    }
+
+    presentFrameNow(presented);
+  }
+
+  function presentFrameNow(presented: PresentedVideoFrame) {
+    // Scheduling a cook notifies, and a notification that drew or rendered
+    // here would put a second render inside one present.
+    isPresenting = true;
+
+    try {
+      presentVideoFrame(presented, framePresentTargets);
+    } finally {
+      isPresenting = false;
+    }
+    scheduleDepthUploadAhead(presented.mediaTimeS);
+  }
+
+  function advanceFocusAnimation(mediaTime: number) {
+    if (!focusLayer) return;
+
+    const mediaTimeMs = mediaTime * MILLISECONDS_PER_SECOND;
+
+    if (focusAnimationMediaTimeMs !== null) {
+      focusAnimationTimeMs += Math.abs(mediaTimeMs - focusAnimationMediaTimeMs);
+    }
+
+    focusAnimationMediaTimeMs = mediaTimeMs;
+    focusLayer.tick(focusAnimationTimeMs);
+  }
+
+  function settleFocusAnimation() {
+    if (!focusLayer) return;
+
+    focusAnimationTimeMs += STATIC_FOCUS_SETTLE_MS;
+    focusLayer.tick(focusAnimationTimeMs);
+  }
+
+  function renderScene() {
+    drawOverlayForEditingState();
+    renderScheduler.render(describeSceneRender());
+  }
+
+  /**
+   * The render signature names the editing state, so a render must not record
+   * a state the overlay has not drawn: the redraw that follows would match the
+   * recorded signature and be skipped, leaving the old preview on screen.
+   */
+  function drawOverlayForEditingState() {
+    const editingState = options.editingEngine?.getState();
+    if (editingState === undefined || editingState === drawnEditingState) {
+      return;
+    }
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
+  }
+
+  /**
+   * Renders a present at most once per display refresh. Frames arrive as
+   * messages from the producer's own thread, so a main thread that falls
+   * behind keeps only the latest frame for the next refresh. Coalescing before
+   * the atomic present is important: a skipped frame must not upload pixels,
+   * draw annotations, or advance the producer's presented playhead.
+   */
+  function renderPresent() {
+    renderScene();
+    displayFrameHandle = requestDisplayFrame(flushDeferredPresentedFrame);
+  }
+
+  function flushDeferredPresentedFrame() {
+    displayFrameHandle = null;
+    const deferred = deferredPresentedFrame;
+    deferredPresentedFrame = null;
+
+    if (!deferred) {
+      return;
+    }
+
+    if (isDestroyed) {
+      deferred.frame.close();
+      return;
+    }
+
+    presentFrameNow(deferred);
+  }
+
+  function renderNow() {
+    if (rendersOnChange) renderScene();
+  }
+
+  function renderOnChange() {
+    if (!rendersOnChange) return;
+
+    settleFocusAnimation();
+    drawOverlayForEditingState();
+    renderScheduler.renderOnChange(describeSceneRender());
+  }
+
+  /**
+   * Runs the ticker on a still frame for as long as something on it moves by
+   * the clock: a looping GIF region or a loading spinner. Pixi renders on
+   * every tick it runs, and the overlay redraws so the spinner turns. Each
+   * render checks again, so the ticker stops with the render that removes the
+   * last of them.
+   */
+  function syncStillFrameTicker() {
+    if (!stillFrame || isDestroyed) return;
+
+    const animating =
+      hasPresentedSample &&
+      (regionLayer.hasAnimatedDisplay() || hasLoadingDetections());
+
+    if (animating === stillFrameTickerRunning) return;
+    stillFrameTickerRunning = animating;
+
+    if (animating) {
+      app.ticker.add(drawAnnotationOverlayNow);
+      app.ticker.start();
+    } else {
+      app.ticker.stop();
+      app.ticker.remove(drawAnnotationOverlayNow);
+    }
+  }
+
+  function refreshInspectionImage() {
+    if (!stillFrame || !inspectionFilter) return;
+    inspectionFilter.invalidateImage();
+    inspectionFilter.update(displayGamma, displayAutoContrast, stagingCanvas);
+  }
+
+  function hasLoadingDetections() {
+    const loading = currentVisibility?.loadingDetectionIds;
+    if (!loading) return false;
+    return "size" in loading ? loading.size > 0 : loading.length > 0;
+  }
+
+  /**
+   * Everything a render would put on screen, as values that can be compared.
+   * Styles are opaque resolvers, so they are compared by identity: handing the
+   * scene a new style object is the only signal it has that styling changed.
+   */
+  function describeSceneRender(): SceneRenderSignature {
+    const interactionState = interactionLayer?.getState();
+    const transform = viewport.getTransform();
+
+    return [
+      presentedFrameSerial,
+      currentMediaTime,
+      annotationWindow.getReadinessToken(currentMediaTime),
+      // A new depth map lands without a new presented frame or presentation.
+      depthLayer?.getContentKey(),
+      viewportScale,
+      baseFit?.x,
+      baseFit?.y,
+      transform.scale,
+      transform.x,
+      transform.y,
+      app.screen.width,
+      app.screen.height,
+      app.renderer.resolution,
+      displayBrightness,
+      displayContrast,
+      displayGamma,
+      displayAutoContrast,
+      ...RENDERED_PRESENTATION_FIELDS.map(
+        (field) => appliedPresentation?.[field],
+      ),
+      // Styles above compare by identity; mask opacity is applied after
+      // preparation, so a host can move it inside a style object it keeps.
+      currentMaskStyle?.opacity,
+      interactionState?.hoveredPick?.detection,
+      interactionState?.hoveredPick?.detectionIndex,
+      interactionState?.selectedPick?.detection,
+      interactionState?.selectedPick?.detectionIndex,
+      interactionState?.selectedPicks,
+      interactionState?.marqueeRect,
+      options.editingEngine?.getState(),
+      options.editingEngine ? interactionState?.pointerPoint : null,
+      // The host's preview is read when the overlay draws, and a host may edit
+      // its arrays in place, so its content is what tells a redraw it changed.
+      drawnPreviewOverlayContent,
+    ];
+  }
+
+  /**
+   * Puts presented pixels on the media sprite. WebGPU takes the decoded frame
+   * straight into a texture Pixi samples; anywhere else, and on a WebGPU that
+   * will not convert a decoded frame, the frame goes through the staging
+   * canvas the pull path already uses.
+   */
+  function createSceneMediaCompositor(): MediaCompositor {
+    const device = (
+      app.renderer as { readonly gpu?: { readonly device?: GPUDevice } }
+    ).gpu?.device;
+    const sprite = mediaSprite;
+
+    if (!device || !sprite || !acceptsVideoFrameUpload(device)) {
+      return { destroy: () => undefined, upload: uploadFrameToStagingCanvas };
+    }
+
+    // Extract through a detached stand-in sprite: the scene's media sprite
+    // carries the contain-fit transform, which bakes display scaling into a
+    // media-sized canvas, and the GPU-external texture reads back black when
+    // extracted directly. A parentless sprite at media size reads the frame
+    // one-to-one, matching what the staging canvas holds on the other path.
+    readPresentedSurface = () => {
+      const detached: InstanceType<typeof Sprite> = new Sprite({
+        texture: sprite.texture,
+      });
+      detached.width = mediaWidth;
+      detached.height = mediaHeight;
+      const source = sprite.texture.source;
+      const displayScaleMode = source.scaleMode;
+      try {
+        // Capture retains its baseline sampling even when pixel inspection
+        // changes display sampling. Extraction is synchronous, so the shared
+        // source can be restored before another frame draws.
+        if (displayScaleMode !== "linear") {
+          source.scaleMode = "linear";
+          source.style.update();
+        }
+        return app.renderer.extract.canvas(
+          detached,
+        ) as unknown as HTMLCanvasElement;
+      } finally {
+        if (displayScaleMode !== "linear") {
+          source.scaleMode = displayScaleMode;
+          source.style.update();
+        }
+        detached.destroy();
+      }
+    };
+
+    return createMediaCompositor({
+      attach: (texture) => {
+        const externalSource: PixiExternalSource = new pixi.ExternalSource({
+          renderer: app.renderer,
+          resource: texture,
+        });
+
+        // A decode of another size resizes this source in place, and only a
+        // dynamic texture forwards that to the sprite. Without it the sprite
+        // takes the new size's scale while still drawing the previous size's
+        // quad, so a preview-sized frame paints the media oversized.
+        sprite.texture = new Texture({ dynamic: true, source: externalSource });
+        updateMediaSampling();
+        sizeMediaSprite();
+        return externalSource;
+      },
+      device,
+      height: mediaHeight,
+      onTextureReplaced: sizeMediaSprite,
+      width: mediaWidth,
+    });
+  }
+
+  /**
+   * The media sprite covers the media's own dimensions whatever the decode
+   * delivers, so annotations keep drawing in media coordinates at canvas
+   * resolution instead of inheriting the texture's size.
+   */
+  function sizeMediaSprite() {
+    if (!mediaSprite) return;
+
+    mediaSprite.width = mediaWidth;
+    mediaSprite.height = mediaHeight;
   }
 
   function ensureLabelLayer(
@@ -1595,8 +3062,9 @@ export async function createPixiMediaScene(
         Container,
         Graphics,
         Text,
-        detectionTimeline: options.detectionTimeline,
+        detectionTimeline: annotationDetectionTimeline,
         labelStyle,
+        getRenderedBoxes: () => boxLayer.getRenderedBoxes(),
         resolveContextState: resolveLabelContextState,
       });
     }
@@ -1610,6 +3078,47 @@ export async function createPixiMediaScene(
     }
 
     labelSlot.setDisplay(labelLayer.createContainer());
+  }
+
+  function editingPreviewFor(detection: Detection): Detection | null {
+    const state = options.editingEngine?.getState();
+
+    return state !== undefined &&
+      (state.kind === AnnotationGestureStateKind.Moving ||
+        state.kind === AnnotationGestureStateKind.Resizing) &&
+      state.preview !== null &&
+      detection.id !== undefined &&
+      state.activeDetectionId === detection.id
+      ? state.preview
+      : null;
+  }
+
+  function isUnderEditingGesture(detection: Detection) {
+    return editingPreviewFor(detection) !== null;
+  }
+
+  /**
+   * Ambient focus falls back to the whole frame when it sees no pick, so a
+   * pick whose detection is hidden has to read as no pick at all.
+   */
+  function filterVisiblePick<T extends { readonly detection: Detection }>(
+    pick: T | null,
+  ): T | null {
+    return pick &&
+      !resolveAnnotationStyleState(pick.detection, currentVisibility).hidden
+      ? pick
+      : null;
+  }
+
+  /** Point a pick at the live editing preview so focus follows the gesture. */
+  function withEditingPreview<T extends { readonly detection: Detection }>(
+    pick: T | null,
+  ): T | null {
+    if (!pick) return null;
+
+    const preview = editingPreviewFor(pick.detection);
+
+    return preview ? { ...pick, detection: preview } : pick;
   }
 
   function createVisibilityMaskStyle(style: MaskStyle): MaskStyle {
@@ -1640,40 +3149,6 @@ export async function createPixiMediaScene(
     };
 
     return visibilityMaskStyle;
-  }
-
-  function filterVisiblePick<T extends { readonly detection: Detection }>(
-    pick: T | null,
-  ): T | null {
-    return pick &&
-      !resolveAnnotationStyleState(pick.detection, currentVisibility).hidden
-      ? pick
-      : null;
-  }
-
-  function editingPreviewFor(detection: Detection): Detection | null {
-    const state = options.editingEngine?.getState();
-    return state &&
-      (state.kind === AnnotationGestureStateKind.Moving ||
-        state.kind === AnnotationGestureStateKind.Resizing) &&
-      state.preview &&
-      detection.id !== undefined &&
-      state.activeDetectionId === detection.id
-      ? state.preview
-      : null;
-  }
-
-  function isUnderEditingGesture(detection: Detection) {
-    return editingPreviewFor(detection) !== null;
-  }
-
-  /** Point a pick at the live editing preview so focus follows the gesture. */
-  function withEditingPreview<T extends { readonly detection: Detection }>(
-    pick: T | null,
-  ): T | null {
-    if (!pick) return null;
-    const preview = editingPreviewFor(pick.detection);
-    return preview ? { ...pick, detection: preview } : pick;
   }
 }
 
@@ -1718,6 +3193,212 @@ function haveEqualVisibilityValues<T>(
   );
 }
 
+/**
+ * Copies presented frames into a GPU texture Pixi samples, with no CPU readback
+ * in between. A decode whose size changed gets a new texture, and the swap is
+ * all-or-nothing: exactly one of the two textures survives it.
+ */
+export function createMediaCompositor(
+  options: MediaCompositorOptions,
+): MediaCompositor {
+  const { device } = options;
+  let gpuTexture = createFrameTexture(device, options.width, options.height);
+  const textureSource = options.attach(gpuTexture);
+  let rotationCanvas: OffscreenCanvas | undefined;
+
+  return {
+    destroy() {
+      gpuTexture.destroy();
+    },
+
+    upload(frame, rotation = 0) {
+      const [width, height] = presentedFrameSize(frame, rotation);
+
+      if (width !== gpuTexture.width || height !== gpuTexture.height) {
+        const replacement = createFrameTexture(device, width, height);
+        const retired = gpuTexture;
+
+        try {
+          textureSource.updateGPUTexture(replacement);
+        } catch (error) {
+          // A source that refused the swap is still sampling the texture on
+          // screen, so the replacement is the one nothing is left holding.
+          replacement.destroy();
+          throw error;
+        }
+
+        gpuTexture = replacement;
+        // A proxy decode is the same picture at a lower resolution, and the
+        // region crops address this texture in media coordinates, so the source
+        // keeps the media's dimensions and takes the decode's as its
+        // resolution. The pixel size it ends up stating is the replacement's
+        // own, and it has to be: a renderer reuses whatever it bound to the
+        // source for as long as that size holds, so a swap leaving the size
+        // untouched leaves the retired texture bound, and a destroyed texture
+        // reached by a submitted command buffer takes the whole scene off the
+        // screen.
+        textureSource.resize(
+          options.width,
+          options.height,
+          width / options.width,
+        );
+        options.onTextureReplaced();
+        retired.destroy();
+      }
+
+      device.queue.copyExternalImageToTexture(
+        { source: uploadSource(frame, rotation) },
+        { texture: gpuTexture },
+        { height, width },
+      );
+    },
+  };
+
+  function uploadSource(
+    frame: VideoFrame,
+    rotation: NonNullable<PresentedVideoFrame["rotation"]>,
+  ): VideoFrame | OffscreenCanvas {
+    if (rotation === 0) return frame;
+
+    const [width, height] = presentedFrameSize(frame, rotation);
+    if (!rotationCanvas) rotationCanvas = new OffscreenCanvas(width, height);
+    rotationCanvas.width = width;
+    rotationCanvas.height = height;
+    const context = rotationCanvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Unable to create a rotation canvas context.");
+    }
+
+    drawPresentedVideoFrame(context, frame, rotation, width, height);
+    return rotationCanvas;
+  }
+}
+
+/**
+ * Draws raw decoded pixels in their display orientation. A `VideoFrame` does
+ * not carry a track display matrix to a canvas or GPU upload, so a pushed
+ * frame has to be transformed before it joins the already-oriented cache path.
+ */
+function drawPresentedVideoFrame(
+  context: Pick<
+    CanvasRenderingContext2D,
+    "drawImage" | "restore" | "rotate" | "save" | "scale" | "translate"
+  >,
+  frame: VideoFrame,
+  rotation: NonNullable<PresentedVideoFrame["rotation"]>,
+  width: number,
+  height: number,
+): void {
+  if (rotation === 0) {
+    context.drawImage(frame, 0, 0, width, height);
+    return;
+  }
+
+  context.save();
+  context.translate(width / 2, height / 2);
+  context.rotate((rotation * Math.PI) / 180);
+  const aspectRatioChange = rotation % 180 === 0 ? 1 : width / height;
+  context.scale(1 / aspectRatioChange, aspectRatioChange);
+  context.drawImage(frame, -width / 2, -height / 2, width, height);
+  context.restore();
+}
+
+function presentedFrameSize(
+  frame: VideoFrame,
+  rotation: NonNullable<PresentedVideoFrame["rotation"]>,
+): [number, number] {
+  return rotation % 180 === 0
+    ? [frame.displayWidth, frame.displayHeight]
+    : [frame.displayHeight, frame.displayWidth];
+}
+
+/**
+ * Whether this device's queue takes a decoded frame as a copy source.
+ *
+ * Chrome converts a VideoFrame. Firefox's converter accepts only ImageBitmap,
+ * HTMLImageElement, HTMLCanvasElement and OffscreenCanvas, and rejects the
+ * frame with a TypeError thrown from inside the present. The present abandons
+ * the steps after the upload, so the media sprite keeps a texture nothing ever
+ * wrote to while the redraw at the resting playhead keeps putting annotations
+ * over it: the scene then reads as a working library over a broken video,
+ * which is worse than an error. Answering here instead routes those frames
+ * through the staging canvas, which every non-WebGPU scene already uses.
+ *
+ * The answer is a property of the browser rather than of the decode, so it is
+ * asked once when the compositor is built and never per frame: a browser that
+ * takes the frame pays one one-pixel copy each time media is opened, and
+ * nothing at all while it plays.
+ */
+export function acceptsVideoFrameUpload(device: GPUDevice): boolean {
+  if (
+    typeof VideoFrame !== "function" ||
+    typeof OffscreenCanvas !== "function"
+  ) {
+    return false;
+  }
+
+  let probe: VideoFrame | undefined;
+  let texture: GPUTexture | undefined;
+
+  try {
+    const canvas = new OffscreenCanvas(1, 1);
+    const context = canvas.getContext("2d");
+
+    if (!context) return false;
+
+    context.fillRect(0, 0, 1, 1);
+    probe = new VideoFrame(canvas, { timestamp: 0 });
+    texture = createFrameTexture(device, 1, 1);
+    device.queue.copyExternalImageToTexture(
+      { source: probe },
+      { texture },
+      { height: 1, width: 1 },
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    probe?.close();
+    texture?.destroy();
+  }
+}
+
+function createFrameTexture(device: GPUDevice, width: number, height: number) {
+  return device.createTexture({
+    format: "rgba8unorm",
+    size: { height, width },
+    usage:
+      GPUTextureUsage.COPY_DST |
+      GPUTextureUsage.RENDER_ATTACHMENT |
+      GPUTextureUsage.TEXTURE_BINDING,
+  });
+}
+
+/** The next display refresh, or null where there is no animation frame. */
+function requestDisplayFrame(callback: () => void): number | null {
+  return typeof globalThis.requestAnimationFrame === "function"
+    ? globalThis.requestAnimationFrame(callback)
+    : null;
+}
+
+function cancelDisplayFrame(handle: number) {
+  if (typeof globalThis.cancelAnimationFrame === "function") {
+    globalThis.cancelAnimationFrame(handle);
+  }
+}
+
+function createFrameDrawTimings(): FrameDrawTimings {
+  return {
+    boxMs: 0,
+    depthMs: 0,
+    focusMs: 0,
+    interactionMs: 0,
+    labelMs: 0,
+    maskMs: 0,
+  };
+}
+
 function measure(work: () => void) {
   const start = now();
   work();
@@ -1732,16 +3413,67 @@ function now() {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
-function resolvePixiResolution(maxDevicePixelRatio: number | undefined) {
-  const devicePixelRatio = window.devicePixelRatio || 1;
+/**
+ * A key for what a preview overlay draws, hashed from its coordinates rather
+ * than its arrays, so a preview the host edits in place still changes it.
+ * Coordinates count to a 256th of a media pixel, finer than anything drawn.
+ */
+function describePreviewOverlayContent(
+  overlay: PreviewOverlayData | null,
+): number | null {
+  if (!overlay) return null;
 
-  if (
-    maxDevicePixelRatio === undefined ||
-    !Number.isFinite(maxDevicePixelRatio) ||
-    maxDevicePixelRatio <= 0
-  ) {
-    return devicePixelRatio;
+  let hash = 0x811c9dc5;
+  const mix = (value: number) => {
+    hash = Math.imul(hash ^ value, 0x01000193);
+  };
+  const mixPoint = (point: Point) => {
+    mix(Math.round(point.x * 256));
+    mix(Math.round(point.y * 256));
+  };
+
+  for (const polygons of [overlay.hoverPolygons, overlay.draftPolygons]) {
+    mix(polygons?.length ?? -1);
+    for (const polygon of polygons ?? []) {
+      mix(polygon.length);
+      for (const point of polygon) mixPoint(point);
+    }
+  }
+  mix(overlay.points?.length ?? -1);
+  for (const point of overlay.points ?? []) {
+    mixPoint(point);
+    mix(point.positive ? 1 : 0);
   }
 
-  return Math.min(devicePixelRatio, maxDevicePixelRatio);
+  return hash;
+}
+
+/**
+ * Fills the container and paints the margin around the canvas in the colour the
+ * renderer clears to. The scene owns this element so the canvas is positioned
+ * against a box it controls, whatever CSS the host puts on the container.
+ */
+function createSceneBackdrop(backgroundColor: number | undefined) {
+  const backdrop = document.createElement("div");
+  backdrop.style.height = "100%";
+  backdrop.style.overflow = "hidden";
+  backdrop.style.position = "relative";
+  backdrop.style.width = "100%";
+  applyBackdropColor(backdrop, backgroundColor);
+  return backdrop;
+}
+
+function applyBackdropColor(
+  backdrop: HTMLElement,
+  backgroundColor: number | undefined,
+) {
+  const color = (backgroundColor ?? 0x111111) >>> 0;
+  backdrop.style.backgroundColor = `#${color.toString(16).padStart(6, "0")}`;
+}
+
+export function resolvePixiResolution(maxDevicePixelRatio: number | undefined) {
+  return resolveDisplayPixelRatio({
+    devicePixelRatio: window.devicePixelRatio,
+    maxDevicePixelRatio,
+  });
 }

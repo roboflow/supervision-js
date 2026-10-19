@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createWriteStream } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
@@ -14,7 +14,9 @@ import {
 import { readJsonlArray, readJsonlRecords } from "./jsonl.mjs";
 
 const ENDPOINT = "https://serverless.roboflow.com/sam3/concept_segment";
-const FRAME_RATE = 30;
+const FRAMES_MANIFEST_FILE = "frames.meta.json";
+/** Frame rate the version 1 extractor forced onto every source. */
+const LEGACY_FRAME_RATE = 30;
 const DEFAULT_PROMPTS = [
   "white team player",
   "yellow team player",
@@ -32,14 +34,16 @@ if (options.help) {
   process.exit(0);
 }
 
-if (!options.input || !options.rawOutput) {
+if (!options.rawOutput || (!options.input && !options.normalizeOnly)) {
   printHelp();
-  throw new Error("--input and --raw-output are required.");
+  throw new Error(
+    "--raw-output is required, and --input unless --normalize-only is set.",
+  );
 }
 
 const apiKey = process.env.ROBOFLOW_API_KEY;
 
-if (!apiKey) {
+if (!apiKey && !options.normalizeOnly) {
   throw new Error(
     "ROBOFLOW_API_KEY is required. The key must come from the environment and must not be written into fixture files.",
   );
@@ -48,11 +52,19 @@ if (!apiKey) {
 await main(options, apiKey);
 
 async function main(runOptions, apiKeyValue) {
+  const sourceVideo = await readSourceVideoMetadata(runOptions);
   const completedFrameIndexes = await readCompletedFrameIndexes(
     runOptions.rawOutput,
   );
 
   await mkdir(path.dirname(runOptions.rawOutput), { recursive: true });
+
+  // Normalization is a pure function of the raw capture, so a committed capture
+  // rebuilds the fixture byte for byte.
+  if (runOptions.normalizeOnly) {
+    await writeNormalizedDetections(runOptions, sourceVideo);
+    return;
+  }
 
   const rawStream = createWriteStream(runOptions.rawOutput, { flags: "a" });
 
@@ -68,7 +80,14 @@ async function main(runOptions, apiKeyValue) {
         const rawRecord = await callSam3(frame, runOptions, apiKeyValue);
         rawStream.write(`${JSON.stringify(rawRecord)}\n`);
         if ("error" in rawRecord) {
-          throw new Error(`SAM3 request failed for frame ${frame.frameIndex}.`);
+          const { status, statusText, body } = rawRecord.error;
+          const detail =
+            typeof body === "string"
+              ? body.slice(0, 300)
+              : JSON.stringify(body).slice(0, 300);
+          throw new Error(
+            `SAM3 request failed for frame ${frame.frameIndex}: ${status} ${statusText} ${detail}`,
+          );
         }
 
         console.log(`wrote raw SAM3 response for frame ${frame.frameIndex}`);
@@ -87,6 +106,10 @@ async function main(runOptions, apiKeyValue) {
     });
   }
 
+  await writeNormalizedDetections(runOptions, sourceVideo);
+}
+
+async function writeNormalizedDetections(runOptions, sourceVideo) {
   if (runOptions.detectionsOutput) {
     const rawRecords = await readRawRecords(runOptions.rawOutput);
     const detectionsFixture = normalizeSam3Responses(rawRecords, {
@@ -95,6 +118,7 @@ async function main(runOptions, apiKeyValue) {
       rawOutput: runOptions.rawOutput,
       sampleName: runOptions.sampleName,
       sourceFile: runOptions.sourceFile,
+      sourceVideo,
     });
     validateMaskDerivedRects(detectionsFixture.frames);
 
@@ -111,10 +135,54 @@ async function main(runOptions, apiKeyValue) {
   }
 }
 
+/**
+ * Frame times, frame rate, and frame count of the original media, written by
+ * extract-frames.mjs. Version 1 fixtures were extracted from a forced 30fps
+ * proxy and have no manifest sidecar.
+ */
+async function readSourceVideoMetadata(runOptions) {
+  const manifestPath =
+    runOptions.framesMeta ??
+    path.join(path.dirname(runOptions.input), FRAMES_MANIFEST_FILE);
+
+  try {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+
+    return {
+      duration: numberOrNull(manifest.video?.duration),
+      firstTimestamp: numberOrNull(manifest.video?.firstTimestamp) ?? 0,
+      frameCount: numberOrNull(manifest.video?.frameCount),
+      frameRate: numberOrNull(manifest.video?.frameRate) ?? LEGACY_FRAME_RATE,
+      height: numberOrNull(manifest.video?.height),
+      width: numberOrNull(manifest.video?.width),
+    };
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") {
+      throw error;
+    }
+
+    if (runOptions.framesMeta) {
+      throw new Error(`Unable to read ${runOptions.framesMeta}.`, {
+        cause: error,
+      });
+    }
+
+    return {
+      duration: null,
+      firstTimestamp: 0,
+      frameCount: null,
+      frameRate: LEGACY_FRAME_RATE,
+      height: null,
+      width: null,
+    };
+  }
+}
+
 function parseArgs(args) {
   const parsed = {
     concurrency: 1,
     format: "rle",
+    framesMeta: undefined,
     limit: undefined,
     modelId: "sam3/sam3_final",
     nmsIouThreshold: 0.5,
@@ -131,6 +199,9 @@ function parseArgs(args) {
       case "--help":
       case "-h":
         parsed.help = true;
+        break;
+      case "--normalize-only":
+        parsed.normalizeOnly = true;
         break;
       case "--input":
         parsed.input = readFlagValue(args, (index += 1), arg);
@@ -172,6 +243,9 @@ function parseArgs(args) {
         break;
       case "--format":
         parsed.format = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--frames-meta":
+        parsed.framesMeta = readFlagValue(args, (index += 1), arg);
         break;
       case "--model-id":
         parsed.modelId = readFlagValue(args, (index += 1), arg);
@@ -273,8 +347,12 @@ Options:
   --concurrency <count>              default: 1
   SAM3 output_prob_thresh is fixed at ${OUTPUT_PROB_THRESH}
   --format <format>                  default: rle
+  --frames-meta <path>                default: ${FRAMES_MANIFEST_FILE} next to --input
   --model-id <id>                    default: sam3/sam3_final
   --nms-iou-threshold <0..1>          default: 0.5
+  --normalize-only                   rebuild --detections-output from an
+                                     existing --raw-output; no model call, no
+                                     --input, no ROBOFLOW_API_KEY
   --sample-name <name>
   --source-file <filename>`);
 }
@@ -301,7 +379,7 @@ function normalizeExtractedFrame(value) {
     typeof value.mediaTime === "number"
       ? value.mediaTime
       : typeof frameIndex === "number"
-        ? frameIndex / FRAME_RATE
+        ? frameIndex / LEGACY_FRAME_RATE
         : undefined;
   const image = isRecord(value.image) ? value.image : undefined;
   const imageValue =
@@ -324,6 +402,7 @@ function normalizeExtractedFrame(value) {
   return {
     decodedDuration: numberOrNull(value.decodedDuration),
     decodedTimestamp: numberOrNull(value.decodedTimestamp),
+    endTime: numberOrNull(value.endTime),
     frameIndex,
     height: numberOrNull(value.height),
     imageBase64: stripDataUrlPrefix(imageValue),
@@ -454,6 +533,7 @@ async function callSam3(frame, runOptions, apiKeyValue) {
     timing: {
       decodedDuration: frame.decodedDuration,
       decodedTimestamp: frame.decodedTimestamp,
+      endTime: frame.endTime,
       requestedMediaTime: frame.requestedMediaTime,
       sampleQueryTime: frame.sampleQueryTime,
     },
@@ -487,6 +567,7 @@ async function callSam3(frame, runOptions, apiKeyValue) {
 }
 
 function normalizeSam3Responses(rawRecords, context) {
+  const frameRate = context.sourceVideo.frameRate;
   const frames = [];
 
   for (const rawRecord of rawRecords) {
@@ -501,7 +582,7 @@ function normalizeSam3Responses(rawRecords, context) {
     }
 
     const mediaTime =
-      numberOrNull(rawRecord.mediaTime) ?? frameIndex / FRAME_RATE;
+      numberOrNull(rawRecord.mediaTime) ?? frameIndex / frameRate;
     const decodedDuration = numberOrNull(rawRecord.timing?.decodedDuration);
 
     frames.push({
@@ -509,9 +590,10 @@ function normalizeSam3Responses(rawRecords, context) {
         prompts: getPromptsForRawRecord(rawRecord, context.prompts),
       }),
       endTime:
-        decodedDuration === null
-          ? (frameIndex + 1) / FRAME_RATE
-          : mediaTime + decodedDuration,
+        numberOrNull(rawRecord.timing?.endTime) ??
+        (decodedDuration === null
+          ? (frameIndex + 1) / frameRate
+          : mediaTime + decodedDuration),
       frameIndex,
       mediaTime,
     });
@@ -531,7 +613,7 @@ function normalizeSam3Responses(rawRecords, context) {
   return {
     frames,
     inference: {
-      frameRate: FRAME_RATE,
+      frameRate,
       mask: {
         height,
         width,
@@ -550,11 +632,21 @@ function normalizeSam3Responses(rawRecords, context) {
     }),
     version: 2,
     video: {
-      duration: frames.length === 0 ? 0 : frames.at(-1).endTime,
+      duration:
+        context.sourceVideo.duration ??
+        (frames.length === 0 ? 0 : frames.at(-1).endTime),
       file: context.sourceFile ?? "source media",
-      frameRate: FRAME_RATE,
-      height: numberOrNull(firstFrameMetadata?.height) ?? height,
-      width: numberOrNull(firstFrameMetadata?.width) ?? width,
+      firstTimestamp: context.sourceVideo.firstTimestamp,
+      frameCount: context.sourceVideo.frameCount ?? frames.length,
+      frameRate,
+      height:
+        context.sourceVideo.height ??
+        numberOrNull(firstFrameMetadata?.height) ??
+        height,
+      width:
+        context.sourceVideo.width ??
+        numberOrNull(firstFrameMetadata?.width) ??
+        width,
     },
   };
 }

@@ -1,0 +1,1362 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { MediaRendererPlaybackState } from "#types/media-renderer";
+import { createMediaRendererTransport } from "./media-renderer-transport";
+import type {
+  PresentedFrameChannel,
+  PresentedFrameChannelStatus,
+  PresentedFramePlayhead,
+} from "./presented-frame-channel";
+
+/** An NTSC track: 30000 ticks a second, one frame every 1001 of them. */
+const TICK_RATE = 30000;
+const TICKS_PER_FRAME = 1001;
+const FRAME_COUNT = 300;
+
+describe("media renderer transport", () => {
+  it.each([false, true])(
+    "keeps a pending autoplay request through a display resize (%s)",
+    async (changed) => {
+      const producer = createProducer();
+      producer.setStatus("READY");
+      let releaseReadiness = () => {};
+      const readiness = new Promise<void>((resolve) => {
+        releaseReadiness = resolve;
+      });
+      const transport = createMediaRendererTransport({
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+        waitForReadiness: () => readiness,
+      });
+
+      const autoplay = transport.play();
+      await transport.resizeOutput(async () => changed);
+      releaseReadiness();
+      await autoplay;
+
+      expect(producer.channel.play).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not restart pending autoplay after a pause during resize", async () => {
+    const producer = createProducer();
+    producer.setStatus("READY");
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    let finishResize!: (changed: boolean) => void;
+    const resizeResult = new Promise<boolean>((resolve) => {
+      finishResize = resolve;
+    });
+    const resize = vi.fn(() => resizeResult);
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: () => readiness,
+    });
+
+    const autoplay = transport.play();
+    const resizing = transport.resizeOutput(resize);
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledOnce());
+    transport.pause();
+    finishResize(false);
+    releaseReadiness();
+
+    await expect(resizing).rejects.toMatchObject({ name: "AbortError" });
+    await autoplay;
+    expect(producer.channel.play).not.toHaveBeenCalled();
+    expect(producer.channel.pause).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a presentation-gated frame held through a no-op resize", async () => {
+    const producer = createProducer();
+    const frameGuard = new AbortController();
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      invalidatePresentedFrame: () => frameGuard.abort(),
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => readiness,
+    });
+    const presenting = transport.protectPresentation(
+      secondsAt(1),
+      frameGuard.signal,
+    );
+
+    expect(presenting).not.toBeNull();
+    await transport.resizeOutput(async () => false);
+    producer.play(1);
+
+    expect({
+      landedIndex: producer.landedIndex,
+      releases: vi.mocked(producer.channel.endInteractiveSeek).mock.calls
+        .length,
+    }).toEqual({ landedIndex: 0, releases: 0 });
+
+    releaseReadiness();
+    await presenting;
+    producer.play(1);
+
+    expect({
+      landedIndex: producer.landedIndex,
+      releases: vi.mocked(producer.channel.endInteractiveSeek).mock.calls
+        .length,
+    }).toEqual({ landedIndex: 0, releases: 0 });
+
+    await transport.didPresentFrame();
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+    producer.play(1);
+
+    expect(producer.landedIndex).toBe(1);
+  });
+
+  it.each([false, true])(
+    "waits for resized output only when dimensions changed (%s)",
+    async (changed) => {
+      const producer = createProducer();
+      let accept!: () => void;
+      const accepted = new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+      const waitFor = vi.fn(() => accepted);
+      const cancel = vi.fn();
+      const transport = createMediaRendererTransport({
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+        beginPresentedFrameNavigation: () => ({ waitFor, cancel }),
+      });
+      let done = false;
+      const resizing = transport
+        .resizeOutput(async () => changed)
+        .then(() => {
+          done = true;
+        });
+      if (changed) {
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(done).toBe(false);
+        accept();
+      }
+      await resizing;
+      expect(done).toBe(true);
+      expect(waitFor).toHaveBeenCalledTimes(changed ? 1 : 0);
+      if (changed) {
+        expect(waitFor).toHaveBeenCalledWith(
+          producer.channel.getPlayhead().frame,
+        );
+      }
+      expect(cancel).toHaveBeenCalledTimes(changed ? 0 : 1);
+    },
+  );
+
+  it("does not acknowledge resize after a newer navigation", async () => {
+    const producer = createProducer();
+    let finish!: (changed: boolean) => void;
+    const resized = new Promise<boolean>((resolve) => {
+      finish = resolve;
+    });
+    const waitFor = vi.fn(async () => undefined);
+    const cancel = vi.fn();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      beginPresentedFrameNavigation: () => ({ waitFor, cancel }),
+    });
+    const resize = vi.fn(() => resized);
+    const resizing = transport.resizeOutput(resize);
+    const result = expect(resizing).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.waitFor(() => expect(resize).toHaveBeenCalledOnce());
+    transport.scrub(secondsAt(200));
+    finish(true);
+    await result;
+    expect(waitFor).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels an old commit ticket when a newer scrub arrives before its command completes", async () => {
+    const producer = createProducer();
+    let finishCommit = () => {};
+    const committed = new Promise<void>((resolve) => {
+      finishCommit = resolve;
+    });
+    vi.mocked(producer.channel.commit).mockReturnValueOnce(committed);
+    const waitFor = vi.fn(() => new Promise<void>(() => undefined));
+    const cancel = vi.fn();
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: () => ({ waitFor, cancel }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    const oldCommit = transport.commit(secondsAt(12));
+    await vi.waitFor(() =>
+      expect(producer.channel.commit).toHaveBeenCalledOnce(),
+    );
+    transport.scrub(secondsAt(200));
+    finishCommit();
+    await oldCommit;
+
+    expect(waitFor).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(producer.channel.scrub).toHaveBeenLastCalledWith(
+      secondsAt(200) * 1000,
+      "gesture",
+    );
+  });
+
+  it("does not submit an old release target after a newer scrub", async () => {
+    const producer = createProducer();
+    let release!: () => void;
+    vi.mocked(producer.channel.endInteractiveSeek).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    transport.scrub(secondsAt(12));
+    const oldRelease = transport.commit(secondsAt(12));
+    transport.scrub(secondsAt(250));
+    release();
+    await oldRelease;
+    expect(producer.channel.commit).not.toHaveBeenCalled();
+    expect(producer.channel.scrub).toHaveBeenLastCalledWith(
+      secondsAt(250) * 1000,
+      "gesture",
+    );
+    await transport.commit(secondsAt(250));
+    expect(producer.channel.commit).toHaveBeenCalledExactlyOnceWith(
+      secondsAt(250) * 1000,
+    );
+  });
+
+  it.each(["commit", "scrub", "pause"] as const)(
+    "does not submit a step superseded by a newer %s while releasing a drag",
+    async (action) => {
+      const producer = createProducer();
+      let release!: () => void;
+      vi.mocked(producer.channel.endInteractiveSeek).mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const transport = createMediaRendererTransport({
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+      });
+
+      transport.scrub(secondsAt(12));
+      const oldStep = transport.step(1);
+      if (action === "commit") await transport.commit(secondsAt(200));
+      else if (action === "scrub") transport.scrub(secondsAt(200));
+      else transport.pause();
+      release();
+      await oldStep;
+
+      expect(producer.channel.step).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels an old step ticket when a newer commit arrives before its command completes", async () => {
+    const producer = createProducer();
+    let finishStep = () => {};
+    vi.mocked(producer.channel.step).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishStep = () => {
+            producer.land(1);
+            resolve();
+          };
+        }),
+    );
+    vi.mocked(producer.channel.commit).mockImplementationOnce(async () => {
+      producer.land(7);
+    });
+    const oldWaitFor = vi.fn(() => new Promise<void>(() => undefined));
+    const oldCancel = vi.fn();
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: vi
+        .fn()
+        .mockReturnValueOnce({ cancel: oldCancel, waitFor: oldWaitFor })
+        .mockReturnValueOnce({ cancel: vi.fn(), waitFor: vi.fn() }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    const oldStep = transport.step(1);
+    await vi.waitFor(() =>
+      expect(producer.channel.step).toHaveBeenCalledOnce(),
+    );
+    await transport.commit(secondsAt(7));
+    finishStep();
+    await oldStep;
+
+    expect(oldWaitFor).not.toHaveBeenCalled();
+    expect(oldCancel).toHaveBeenCalledOnce();
+  });
+
+  it("does not submit a step superseded while releasing a readiness freeze", async () => {
+    const producer = createProducer();
+    let releaseFreeze!: () => void;
+    vi.mocked(producer.channel.endInteractiveSeek).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFreeze = resolve;
+        }),
+    );
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      holdForReadiness: () => new Promise<void>(() => undefined),
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    producer.play(1);
+
+    const oldStep = transport.step(1);
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce(),
+    );
+    transport.pause();
+    releaseFreeze();
+    await oldStep;
+
+    expect(producer.channel.step).not.toHaveBeenCalled();
+  });
+
+  it("publishes a playhead time that names the frame it came from", () => {
+    const producer = createProducer();
+    const published: number[] = [];
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: (mediaTime) => published.push(mediaTime),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    for (let index = 0; index < FRAME_COUNT; index += 1) {
+      producer.land(index);
+    }
+
+    expect(published.map(frameNamedBy)).toStrictEqual(
+      Array.from({ length: FRAME_COUNT }, (_, index) => index),
+    );
+  });
+
+  it("reports a seek the settled playback state cannot show", () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    const seeking: boolean[] = [];
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: (next) => seeking.push(next),
+    });
+
+    producer.setStatus("PAUSED");
+    producer.setSeeking(true);
+    producer.land(120);
+    const duringSeek = {
+      playbackState: playbackStates.at(-1),
+      seeking: seeking.at(-1),
+    };
+    producer.setSeeking(false);
+    producer.land(120);
+
+    expect(duringSeek).toStrictEqual({
+      playbackState: MediaRendererPlaybackState.Paused,
+      seeking: true,
+    });
+    expect(seeking.at(-1)).toBe(false);
+  });
+
+  it("reports a gesture apart from the settle it lands in", () => {
+    const producer = createProducer();
+    const seeking: boolean[] = [];
+    const scrubbing: boolean[] = [];
+
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: (next) => scrubbing.push(next),
+      onSeeking: (next) => seeking.push(next),
+    });
+
+    transport.scrub(secondsAt(120));
+    producer.setSeeking(true);
+    producer.land(120);
+
+    expect({
+      scrubbing: scrubbing.at(-1),
+      seeking: seeking.at(-1),
+    }).toStrictEqual({ scrubbing: true, seeking: true });
+  });
+
+  /**
+   * The producer answers on its own thread, so nothing it says lands between
+   * the hand going down and the drag that follows. A settle reported just
+   * before would otherwise stand for the whole drag.
+   */
+  it("says the hand is down without waiting for the producer to speak", async () => {
+    const producer = createProducer();
+    const seeking: boolean[] = [];
+    const scrubbing: boolean[] = [];
+
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: (next) => scrubbing.push(next),
+      onSeeking: (next) => seeking.push(next),
+    });
+
+    producer.setStatus("PAUSED");
+    producer.setSeeking(true);
+
+    transport.scrub(secondsAt(200));
+    const withHandDown = scrubbing.at(-1);
+
+    await transport.commit(secondsAt(200));
+
+    expect({ afterCommit: scrubbing.at(-1), withHandDown }).toStrictEqual({
+      afterCommit: false,
+      withHandDown: true,
+    });
+    expect(seeking.at(-1)).toBe(true);
+  });
+
+  it("stops reporting a wait once a producer already at speed is asked to play", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: () => readiness,
+    });
+
+    const playing = transport.play();
+    releaseReadiness();
+    await playing;
+
+    // The producer was already running, so it reports no change of its own.
+    // Nothing else retires the wait the hold published on its way in.
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Playing);
+  });
+
+  it("tells the gate that a play a pause superseded is never coming", async () => {
+    const producer = createProducer();
+    let abandoned = false;
+    let enterWait = () => {};
+    const waitEntered = new Promise<void>((resolve) => {
+      enterWait = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: (_mediaTime, signal) => {
+        enterWait();
+
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => {
+            abandoned = true;
+            resolve();
+          });
+        });
+      },
+    });
+
+    const playing = transport.play();
+
+    await waitEntered;
+    transport.pause();
+    await playing;
+
+    expect(abandoned).toBe(true);
+  });
+
+  it("leaves no gate hold behind when a play supersedes one still releasing a drag", async () => {
+    const producer = createProducer();
+    const readinessSignals: AbortSignal[] = [];
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: (_mediaTime, signal) => {
+        readinessSignals.push(signal);
+
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve());
+        });
+      },
+    });
+
+    transport.scrub(0.1);
+
+    const superseded = transport.play();
+    const current = transport.play();
+
+    await Promise.resolve();
+    transport.pause();
+    await Promise.all([superseded, current]);
+
+    expect({
+      abandonedCount: readinessSignals.filter((signal) => signal.aborted)
+        .length,
+      startedCount: readinessSignals.length,
+    }).toEqual({ abandonedCount: 1, startedCount: 1 });
+  });
+
+  it.each([
+    [
+      "commit",
+      (transport: ReturnType<typeof createMediaRendererTransport>) =>
+        transport.commit(secondsAt(12)),
+    ],
+    [
+      "step",
+      (transport: ReturnType<typeof createMediaRendererTransport>) =>
+        transport.step(1),
+    ],
+  ])(
+    "keeps a settling %s pending until the scene accepts its landing",
+    async (_name, navigate) => {
+      const producer = createProducer();
+      if (_name === "commit") {
+        vi.mocked(producer.channel.commit).mockImplementationOnce(async () => {
+          producer.land(12);
+        });
+      } else {
+        vi.mocked(producer.channel.step).mockImplementationOnce(async () => {
+          producer.land(1);
+        });
+      }
+      let accept = () => {};
+      const accepted = new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+      const waitFor = vi.fn(() => accepted);
+      const transport = createMediaRendererTransport({
+        beginPresentedFrameNavigation: () => ({
+          cancel: vi.fn(),
+          waitFor,
+        }),
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+      });
+      let settled = false;
+
+      const committing = navigate(transport).then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() =>
+        expect(waitFor).toHaveBeenCalledWith(
+          producer.channel.getPlayhead().frame,
+          ...(_name === "commit" ? [false] : []),
+        ),
+      );
+
+      expect(settled).toBe(false);
+
+      accept();
+      await committing;
+      expect(settled).toBe(true);
+    },
+  );
+
+  it("opts into current-frame acknowledgment only for an unchanged commit", async () => {
+    const producer = createProducer();
+    const waitFor = vi.fn(async () => undefined);
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: () => ({
+        cancel: vi.fn(),
+        waitFor,
+      }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    await transport.commit(secondsAt(0));
+
+    expect(waitFor).toHaveBeenCalledExactlyOnceWith(
+      producer.channel.getPlayhead().frame,
+      true,
+    );
+  });
+
+  it("settles a boundary step without waiting for a frame the producer does not emit", async () => {
+    const producer = createProducer();
+    const cancel = vi.fn();
+    const waitFor = vi.fn(() => new Promise<void>(() => undefined));
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: () => ({ cancel, waitFor }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    await expect(transport.step(-1)).resolves.toBeUndefined();
+
+    expect(producer.channel.step).toHaveBeenCalledExactlyOnceWith(-1);
+    expect(producer.landedIndex).toBe(0);
+    expect(waitFor).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("advances every frame in an unopposed concurrent step burst", async () => {
+    const producer = createProducer();
+    vi.mocked(producer.channel.step).mockImplementation(async (direction) => {
+      producer.land(producer.landedIndex + direction);
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    await Promise.all(Array.from({ length: 4 }, () => transport.step(1)));
+
+    expect(producer.channel.step).toHaveBeenCalledTimes(4);
+    expect(producer.landedIndex).toBe(4);
+  });
+
+  it("keeps the newer presentation hold when an older guard aborts", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    let releaseFirst = () => {};
+    let releaseSecond = () => {};
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let calls = 0;
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => (++calls === 1 ? first : second),
+    });
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    const older = transport.protectPresentation(1, firstAbort.signal);
+    const newer = transport.protectPresentation(2, secondAbort.signal);
+
+    firstAbort.abort();
+    releaseFirst();
+    await older;
+    producer.setStatus("PAUSED");
+
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Buffering);
+
+    releaseSecond();
+    await newer;
+  });
+
+  it("resumes a ready presentation hold only after the scene acknowledges its frame", async () => {
+    const producer = createProducer();
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => readiness,
+    });
+    const presenting = transport.protectPresentation(
+      1,
+      new AbortController().signal,
+    );
+
+    releaseReadiness();
+    await presenting;
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.didPresentFrame();
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("still waits for scene acknowledgment when the presentation guard rejects", async () => {
+    const producer = createProducer();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () =>
+        Promise.reject(new Error("annotation source failed")),
+    });
+
+    await transport.protectPresentation(1, new AbortController().signal);
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.didPresentFrame();
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("transfers a ready hold to a replacement that needs no wait", async () => {
+    const producer = createProducer();
+    let releaseFirst = () => {};
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => (++calls === 1 ? first : null),
+    });
+    const firstAbort = new AbortController();
+    const older = transport.protectPresentation(1, firstAbort.signal);
+
+    firstAbort.abort();
+    expect(transport.protectPresentation(2, new AbortController().signal)).toBe(
+      null,
+    );
+    releaseFirst();
+    await older;
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.didPresentFrame();
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("returns a failed frontier release to the protected presentation channel", async () => {
+    const producer = createProducer();
+    const failure = new Error("producer did not resume");
+    vi.mocked(producer.channel.endInteractiveSeek).mockRejectedValueOnce(
+      failure,
+    );
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => Promise.resolve(),
+    });
+
+    await transport.protectPresentation(1, new AbortController().signal);
+
+    await expect(transport.didPresentFrame()).rejects.toBe(failure);
+  });
+
+  it.each(["play", "pause"] as const)(
+    "%s settles a navigation ticket it supersedes",
+    async (action) => {
+      const producer = createProducer();
+      let releaseNavigation = () => {};
+      const invalidatePresentedFrame = vi.fn(() => releaseNavigation());
+      const beginPresentedFrameNavigation = vi.fn(() => {
+        const accepted = new Promise<void>((resolve) => {
+          releaseNavigation = resolve;
+        });
+        return {
+          cancel: releaseNavigation,
+          waitFor: () => accepted,
+        };
+      });
+      const transport = createMediaRendererTransport({
+        beginPresentedFrameNavigation,
+        channel: producer.channel,
+        invalidatePresentedFrame,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+      });
+      let seekSettled = false;
+      const seeking = transport.commit(secondsAt(12)).then(() => {
+        seekSettled = true;
+      });
+      await vi.waitFor(() =>
+        expect(beginPresentedFrameNavigation).toHaveBeenCalledOnce(),
+      );
+      expect(seekSettled).toBe(false);
+
+      if (action === "play") await transport.play();
+      else transport.pause();
+      await seeking;
+
+      expect(seekSettled).toBe(true);
+      expect(invalidatePresentedFrame).toHaveBeenCalledTimes(2);
+    },
+  );
+});
+
+const secondsAt = (index: number) => (index * TICKS_PER_FRAME) / TICK_RATE;
+
+/**
+ * The frame whose own published second is exactly `mediaTime`, or -1 for a time
+ * that falls between two frames. Equality, with no tolerance to hide behind:
+ * a position that lands between frames is the defect this asserts against.
+ */
+function frameNamedBy(mediaTime: number): number {
+  for (let index = 0; index < FRAME_COUNT; index += 1) {
+    if (secondsAt(index) === mediaTime) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+describe("mid-playback readiness holds", () => {
+  it("stops the picture at the first frame nothing can annotate and starts it again when the annotations land", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    let coveredThroughSeconds = 2;
+    let releaseWait = () => {};
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: (mediaTime) =>
+        mediaTime > coveredThroughSeconds
+          ? new Promise<void>((resolve) => {
+              releaseWait = resolve;
+            })
+          : null,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    const held = {
+      pastCoverage: secondsAt(producer.landedIndex) > coveredThroughSeconds,
+      playbackState: playbackStates.at(-1),
+      withinOneFrameOfCoverage:
+        secondsAt(producer.landedIndex - 1) <= coveredThroughSeconds,
+    };
+
+    coveredThroughSeconds = 10;
+    releaseWait();
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalled(),
+    );
+
+    producer.play(120);
+
+    expect(held).toStrictEqual({
+      pastCoverage: true,
+      playbackState: MediaRendererPlaybackState.Buffering,
+      withinOneFrameOfCoverage: true,
+    });
+    expect(producer.landedIndex).toBe(120);
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Playing);
+  });
+
+  it("lets the picture go when a producer stops answering, and does not stop it again for every frame after", async () => {
+    const producer = createProducer();
+    // The gate bounds its own wait and remembers the source it gave up on, so
+    // the second question it is asked answers no rather than waiting again.
+    let gaveUp = false;
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () =>
+        gaveUp
+          ? null
+          : Promise.resolve().then(() => {
+              gaveUp = true;
+            }),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalled(),
+    );
+    producer.play(120);
+
+    expect(producer.landedIndex).toBe(120);
+    expect(producer.channel.beginInteractiveSeek).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the producer again when the wait it was holding for fails", async () => {
+    const producer = createProducer();
+    let held = 0;
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () =>
+        (held += 1) === 1
+          ? Promise.reject(new Error("Detection source is gone."))
+          : null,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalled(),
+    );
+    producer.play(120);
+
+    expect(producer.landedIndex).toBe(120);
+  });
+
+  it("leaves a producer alone when nothing can say whether waiting would help", () => {
+    const producer = createProducer();
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: async () => undefined,
+    });
+
+    producer.play(120);
+
+    expect(producer.landedIndex).toBe(120);
+    expect(producer.channel.beginInteractiveSeek).not.toHaveBeenCalled();
+  });
+
+  it("hands a drag the hold rather than resuming under it", async () => {
+    const producer = createProducer();
+    let releaseWait = () => {};
+
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () =>
+        new Promise<void>((resolve) => {
+          releaseWait = resolve;
+        }),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    transport.scrub(secondsAt(200));
+    releaseWait();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.commit(secondsAt(200));
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalled();
+  });
+
+  it("gives the producer back when a pause supersedes a play that took a hold over", async () => {
+    const producer = createProducer();
+    let enterWait = () => {};
+    const waitEntered = new Promise<void>((resolve) => {
+      enterWait = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () => new Promise<void>(() => {}),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: (_mediaTime, signal) => {
+        enterWait();
+
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve());
+        });
+      },
+    });
+
+    producer.land(1);
+
+    const playing = transport.play();
+
+    await waitEntered;
+    transport.pause();
+    await playing;
+
+    expect(producer.channel.beginInteractiveSeek).toHaveBeenCalledOnce();
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("reports paused when the producer was already paused by a presentation gate", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    const frameGuard = new AbortController();
+    let releasePresentation = () => {};
+    const presentationReady = new Promise<void>((resolve) => {
+      releasePresentation = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      invalidatePresentedFrame: () => frameGuard.abort(),
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => presentationReady,
+    });
+    const presenting = transport.protectPresentation(
+      secondsAt(1),
+      frameGuard.signal,
+    );
+
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Buffering);
+
+    transport.pause();
+    const afterFirstPause = playbackStates.at(-1);
+    releasePresentation();
+    await presenting;
+    transport.pause();
+    const afterSecondPause = playbackStates.at(-1);
+
+    vi.mocked(producer.channel.commit).mockImplementationOnce(async () => {
+      producer.setStatus("SEEKING");
+      producer.setStatus("PAUSED");
+    });
+    await transport.commit(secondsAt(1));
+
+    expect({
+      afterFirstPause,
+      afterSecondPause,
+      afterSeek: playbackStates.at(-1),
+      producerStatus: producer.channel.getStatus(),
+    }).toStrictEqual({
+      afterFirstPause: MediaRendererPlaybackState.Paused,
+      afterSecondPause: MediaRendererPlaybackState.Paused,
+      afterSeek: MediaRendererPlaybackState.Paused,
+      producerStatus: "PAUSED",
+    });
+  });
+
+  it("does not restart a looping producer whose pause command still reads ended", () => {
+    const producer = createProducer();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: true,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    producer.setStatus("ENDED");
+    vi.mocked(producer.channel.play).mockClear();
+    vi.mocked(producer.channel.pause).mockImplementationOnce(() => undefined);
+
+    transport.pause();
+
+    expect(producer.channel.play).not.toHaveBeenCalled();
+  });
+
+  it("does not replace an errored producer state while its pause command is pending", () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+    producer.setStatus("ERRORED");
+    vi.mocked(producer.channel.pause).mockImplementationOnce(() => undefined);
+
+    transport.pause();
+
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Error);
+  });
+
+  it("gives the producer back when the wait a play made fails under it", async () => {
+    const producer = createProducer();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () => new Promise<void>(() => {}),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: () =>
+        Promise.reject(new Error("Annotations are gone.")),
+    });
+
+    producer.land(1);
+
+    await expect(transport.play()).rejects.toThrow("Annotations are gone.");
+
+    expect(producer.channel.beginInteractiveSeek).toHaveBeenCalledOnce();
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+});
+
+function createProducer() {
+  const listeners = new Set<() => void>();
+  const stateListeners = new Set<() => void>();
+  let playhead = landingAt(0);
+  let seeking = false;
+  let frozen = false;
+  let status: PresentedFrameChannelStatus = "PLAYING";
+  const channel: PresentedFrameChannel = {
+    // The engine's own latch: a mechanical pause arms it, a second one is a
+    // no-op, and the release resumes only what the latch paused.
+    beginInteractiveSeek: vi.fn(() => {
+      if (frozen || status !== "PLAYING") {
+        return;
+      }
+
+      frozen = true;
+      status = "PAUSED";
+      announce();
+    }),
+    commit: vi.fn(async () => undefined),
+    endInteractiveSeek: vi.fn(async () => {
+      if (!frozen) {
+        return;
+      }
+
+      frozen = false;
+      status = "PLAYING";
+      announce();
+    }),
+    getDurationMs: () => secondsAt(FRAME_COUNT) * 1000,
+    getPlaybackRate: () => 1,
+    getPlayhead: () => playhead,
+    getSeeking: () => seeking,
+    getStatus: () => status,
+    onPresentedFrame: vi.fn(),
+    pause: vi.fn(() => {
+      frozen = false;
+      if (status === "PAUSED") {
+        return;
+      }
+
+      status = "PAUSED";
+      announce();
+    }),
+    play: vi.fn(async () => undefined),
+    scrub: vi.fn(),
+    setPlaybackRate: vi.fn(),
+    step: vi.fn(async () => undefined),
+    subscribe: (signal, listener) => {
+      if (signal === "time") {
+        listeners.add(listener);
+      } else {
+        stateListeners.add(listener);
+      }
+
+      return () => {
+        listeners.delete(listener);
+        stateListeners.delete(listener);
+      };
+    },
+  };
+
+  const announce = () => {
+    for (const listener of stateListeners) {
+      listener();
+    }
+  };
+
+  return {
+    channel,
+
+    get landedIndex() {
+      return playhead.frame.index;
+    },
+
+    land(index: number) {
+      playhead = landingAt(index);
+
+      for (const listener of listeners) {
+        listener();
+      }
+      announce();
+    },
+
+    /** Walks frames forward, stopping wherever the producer is frozen. */
+    play(throughIndex: number) {
+      for (
+        let index = playhead.frame.index + 1;
+        index <= throughIndex && !frozen;
+        index += 1
+      ) {
+        this.land(index);
+      }
+    },
+
+    setSeeking(next: boolean) {
+      seeking = next;
+      announce();
+    },
+
+    setStatus(next: PresentedFrameChannelStatus) {
+      status = next;
+      announce();
+    },
+  };
+}
+
+function landingAt(index: number): PresentedFramePlayhead {
+  return {
+    frame: { index, ticks: index * TICKS_PER_FRAME },
+    mediaTimeS: secondsAt(index),
+  };
+}

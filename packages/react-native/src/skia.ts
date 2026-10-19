@@ -326,6 +326,9 @@ export function createReactNativeSkiaVectorFrame(
   }
 
   for (const polyline of polylines) {
+    if (polyline.shadowStroke) {
+      drawPath(polyline.points, false, undefined, polyline.shadowStroke);
+    }
     drawPath(polyline.points, false, undefined, polyline.stroke);
   }
 

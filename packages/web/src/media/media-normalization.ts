@@ -9,6 +9,7 @@ import type {
 
 import { collectInputMetadata } from "#media/media-metadata";
 import {
+  DEFAULT_NORMALIZATION_FRAME_RATE,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   type MediaNormalizationAudioOptions,
@@ -49,7 +50,6 @@ const MIME_TYPES = {
   [MediaNormalizationContainer.WebM]: "video/webm",
 } as const;
 
-const DEFAULT_FRAME_RATE = 30;
 const DEFAULT_KEY_FRAME_INTERVAL = 1;
 const MEDIA_NORMALIZATION_ABORT_MESSAGE = "Media normalization was aborted.";
 
@@ -281,6 +281,8 @@ export async function normalizeMediaProgressively(
       mimeType,
       rendererSource: createMediabunnyMediaRendererSource({
         formats: [WEBM],
+        frameClockUnavailableReason:
+          "the media is still being converted, so not all of its frames are known yet. Normalize without stream: true, or open the converted file once conversion completes.",
         metadata: {
           duration: inputMetadata.duration,
         },
@@ -394,7 +396,7 @@ function buildVideoOptions(
         ? MediaNormalizationVideoCodec.Avc
         : MediaNormalizationVideoCodec.Vp9)) as VideoCodec,
     forceTranscode: options.forceTranscode ?? true,
-    frameRate: options.frameRate ?? DEFAULT_FRAME_RATE,
+    frameRate: options.frameRate ?? DEFAULT_NORMALIZATION_FRAME_RATE,
     keyFrameInterval: options.keyFrameInterval ?? DEFAULT_KEY_FRAME_INTERVAL,
   };
 }

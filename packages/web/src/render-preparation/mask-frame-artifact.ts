@@ -1,6 +1,20 @@
+import type { PreparedPackedMaskCoverage } from "./packed-mask-coverage";
+import type { StrokeAlignment } from "supervision-js-core";
+
 export enum PreparedMaskFrameKind {
-  PngIdMask = "pngIdMask",
+  IdMask = "idMask",
   RgbaImage = "rgbaImage",
+}
+
+/**
+ * How an id raster is laid out for the texture it is uploaded into. WebGPU
+ * takes any bytesPerRow, so ids go up one byte per pixel. WebGL aligns every
+ * uploaded row to four bytes and rejects a single-channel upload whose width
+ * is not a multiple of four, which is what the four-channel layout is for.
+ */
+export enum IdMaskTextureFormat {
+  R8 = "r8unorm",
+  Rgba8 = "rgba8unorm",
 }
 
 export interface PreparedRegionMaskCoverageEntry {
@@ -20,14 +34,24 @@ export interface PreparedRegionMaskCoverageFrame {
   readonly entries: readonly PreparedRegionMaskCoverageEntry[];
 }
 
-export interface PreparedRgbaMaskFrame {
+/**
+ * The uncomposited detection-id plane carried alongside the RGBA composite, so
+ * id-keyed effects such as the mask halo still have a plane to read when the id
+ * raster could not be cooked. It carries its own size because it honors the
+ * same raster cap as the id raster while the composite is cooked at the
+ * instructions' own resolution.
+ */
+export interface PreparedIdMaskPlane {
+  readonly data: Uint8Array<ArrayBuffer>;
   readonly height: number;
-  /**
-   * The uncomposited detection-id plane when preparation falls back to an
-   * RGBA image. This keeps id-based effects available without requiring PNG
-   * encoding or ImageBitmap support.
-   */
-  readonly idMaskData?: Uint8Array<ArrayBuffer>;
+  readonly width: number;
+}
+
+export interface PreparedRgbaMaskFrame {
+  readonly packedMaskCoverage?: readonly PreparedPackedMaskCoverage[];
+  readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
+  readonly height: number;
+  readonly idMaskPlane?: PreparedIdMaskPlane;
   readonly key: string;
   readonly kind: PreparedMaskFrameKind.RgbaImage;
   readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
@@ -36,20 +60,45 @@ export interface PreparedRgbaMaskFrame {
   close(): void;
 }
 
-export interface PreparedPngIdMaskFrame {
+export interface PreparedIdMaskFrame {
+  readonly packedMaskCoverage?: readonly PreparedPackedMaskCoverage[];
+  readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
   readonly fillPalette: Float32Array<ArrayBuffer>;
   readonly hasStroke: boolean;
   readonly height: number;
   readonly key: string;
-  readonly kind: PreparedMaskFrameKind.PngIdMask;
+  readonly kind: PreparedMaskFrameKind.IdMask;
+  /** Largest outside stroke extent in CSS pixels. */
   readonly maxStrokeWidth: number;
-  readonly png: Uint8Array<ArrayBuffer>;
+  readonly raster: Uint8Array<ArrayBuffer>;
   readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
-  readonly source: ImageBitmap;
+  /** Original mask-plane width before optional raster reduction. */
+  readonly sourceWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
+  readonly strokeAlignments?: Float32Array<ArrayBuffer>;
+  /** Total stroke width in CSS pixels per palette ID. */
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
   close(): void;
 }
 
-export type PreparedMaskFrame = PreparedPngIdMaskFrame | PreparedRgbaMaskFrame;
+export interface PreparedMaskScreenStroke {
+  readonly detectionIndex: number;
+  readonly color: number;
+  readonly alpha: number;
+  readonly width: number;
+  readonly widthUnit?: "mask" | "screen";
+  readonly alignment?: StrokeAlignment;
+  /** Closed contours in this artifact's raster coordinates, including holes. */
+  readonly paths: readonly Float32Array<ArrayBuffer>[];
+}
+
+export type PreparedMaskFrame = PreparedIdMaskFrame | PreparedRgbaMaskFrame;
+
+export function readIdMaskRasterValue(
+  frame: PreparedIdMaskFrame,
+  x: number,
+  y: number,
+) {
+  return frame.raster[y * frame.width + x] ?? 0;
+}

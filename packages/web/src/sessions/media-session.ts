@@ -112,6 +112,7 @@ export async function createMediaSession(
     const sessionDefaults = resolveMediaSessionDefaults({
       detections: options.detections,
       mode: options.mode,
+      playbackGate: options.playbackGate,
       renderer: options.renderer,
     });
 
@@ -179,11 +180,13 @@ export async function createMediaSession(
       ...options.renderer,
       ...sessionMedia.rendererSourceOption,
       backgroundColor: initialPresentation.backgroundColor,
+      annotationAntialiasing: initialPresentation.annotationAntialiasing,
       annotationOverlayStyle: initialPresentation.annotationOverlayStyle,
       boxStyle: initialPresentation.boxStyle,
       boxCornerStyle: initialPresentation.boxCornerStyle,
       ellipseStyle: initialPresentation.ellipseStyle,
       container: options.container,
+      depth: options.depth,
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
@@ -194,6 +197,8 @@ export async function createMediaSession(
       maskHaloStyle: initialPresentation.maskHaloStyle,
       maskStyle: initialPresentation.maskStyle,
       markerStyle: initialPresentation.markerStyle,
+      orientedBoxStyle: initialPresentation.orientedBoxStyle,
+      percentageBarStyle: initialPresentation.percentageBarStyle,
       polygonStyle: initialPresentation.polygonStyle,
       polylineStyle: initialPresentation.polylineStyle,
       renderers: initialPresentation.renderers,
@@ -324,6 +329,9 @@ export async function createMediaSession(
     };
 
     return {
+      frameClock: renderer.frameClock ?? null,
+      frameNavigation: renderer.frameNavigation ?? null,
+      setDisplay: renderer.setDisplay?.bind(renderer),
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,
       renderer,
@@ -499,6 +507,17 @@ export async function createMediaSession(
         renderer.setPresentation(
           resolveRendererPresentation(currentPresentation),
         );
+      },
+
+      async setDepth(depth) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+        if (!renderer.setDepth) {
+          throw new Error("This renderer does not draw depth.");
+        }
+
+        await renderer.setDepth(depth);
       },
 
       setRenderQuality(quality) {

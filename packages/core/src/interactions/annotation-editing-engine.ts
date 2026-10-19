@@ -2,11 +2,11 @@ import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
   type AnnotationCreationTool,
-  type AnnotationEditingEngine,
   type AnnotationEditingEngineOptions,
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
   type AnnotationPointerInput,
+  type DraftUndoAnnotationEditingEngine,
 } from "#types/editing";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
@@ -30,7 +30,7 @@ type ActiveGesture =
   | {
       kind: "path";
       points: Point[];
-      lastTimestamp: number;
+      lastTimestamp: number | null;
       pointerId: number | null;
     }
   | {
@@ -57,7 +57,7 @@ type ActiveGesture =
 
 export function createAnnotationEditingEngine(
   options: AnnotationEditingEngineOptions = {},
-): AnnotationEditingEngine {
+): DraftUndoAnnotationEditingEngine {
   let tool: AnnotationCreationTool | null = null;
   let gesture: ActiveGesture | null = null;
   let state: AnnotationEditingState = idleState();
@@ -69,6 +69,7 @@ export function createAnnotationEditingEngine(
   return {
     getState: () => state,
     setCreationTool(nextTool) {
+      if (nextTool === tool) return;
       if (gesture) cancel();
       tool = nextTool;
     },
@@ -88,13 +89,11 @@ export function createAnnotationEditingEngine(
           setPreview(resolveBoxPreview(gesture));
           break;
         case "move": {
-          const dx = input.point.x - gesture.start.point.x;
-          const dy = input.point.y - gesture.start.point.y;
           const moved =
             gesture.moved || exceedsMoveThreshold(gesture.start, input);
           gesture = { ...gesture, current: input, moved };
           if (moved) {
-            const preview = offsetDetection(gesture.detection, dx, dy);
+            const { preview, dx, dy } = resolveMovePreview(gesture, input);
             setPreview(preview);
             if (gesture.detection.id !== undefined) {
               options.onFastTranslate?.(gesture.detection.id, dx, dy);
@@ -118,6 +117,7 @@ export function createAnnotationEditingEngine(
                 gesture.detection,
                 gesture.handle,
                 input.point,
+                input.mediaDimensions ?? gesture.start.mediaDimensions,
               ),
             );
           }
@@ -162,11 +162,11 @@ export function createAnnotationEditingEngine(
           rect.height < 1 ||
           (duration < CLICK_CANCEL_MS && diagonal <= CLICK_CANCEL_DIAGONAL)
         ) {
-          cancel();
+          rejectCreation();
           return;
         }
         if (tool?.shouldCommit?.(rect) === false) {
-          cancel();
+          rejectCreation();
           return;
         }
         commit(preview, null);
@@ -175,7 +175,7 @@ export function createAnnotationEditingEngine(
       if (active.kind === "freehand") {
         const points = [...active.points, input.point];
         if (points.length < 2 || tool?.shouldCommit?.(points) === false) {
-          cancel();
+          rejectCreation();
           return;
         }
         commit(tool!.createDetection(points), null);
@@ -186,11 +186,7 @@ export function createAnnotationEditingEngine(
           setState(idleState());
           return;
         }
-        const preview = offsetDetection(
-          active.detection,
-          input.point.x - active.start.point.x,
-          input.point.y - active.start.point.y,
-        );
+        const { preview } = resolveMovePreview(active, input);
         commit(preview, active.detection);
         return;
       }
@@ -202,6 +198,7 @@ export function createAnnotationEditingEngine(
         active.detection,
         active.handle,
         input.point,
+        input.mediaDimensions ?? active.start.mediaDimensions,
       );
       commit(preview, active.detection);
     },
@@ -211,6 +208,15 @@ export function createAnnotationEditingEngine(
       } else if (key === "Enter" && gesture?.kind === "path") {
         commitPath();
       }
+    },
+    undoCreation() {
+      if (gesture?.kind !== "path") return false;
+      gesture.points.pop();
+      gesture.lastTimestamp = null;
+      const last = gesture.points.at(-1);
+      if (!last) cancel();
+      else setPreview(resolvePathPreview([...gesture.points, last]));
+      return true;
     },
     beginHandleDrag(detection, handle, input) {
       if (detection.locked || detection.mask) return;
@@ -311,9 +317,10 @@ export function createAnnotationEditingEngine(
         input.point.y - gesture.points[0]!.y,
       ) * scale();
     const doubleClick =
-      input.detail !== undefined
+      gesture.lastTimestamp !== null &&
+      (input.detail !== undefined
         ? input.detail >= 2
-        : input.timestamp - gesture.lastTimestamp < CLICK_CANCEL_MS;
+        : input.timestamp - gesture.lastTimestamp < CLICK_CANCEL_MS);
     if (
       gesture.points.length >= minimum &&
       ((tool.geometry === AnnotationGeometryKind.Polygon &&
@@ -347,10 +354,14 @@ export function createAnnotationEditingEngine(
   }
 
   function resolveBoxPreview(active: Extract<ActiveGesture, { kind: "box" }>) {
-    const left = Math.min(active.start.point.x, active.current.point.x);
-    const right = Math.max(active.start.point.x, active.current.point.x);
-    const top = Math.min(active.start.point.y, active.current.point.y);
-    const bottom = Math.max(active.start.point.y, active.current.point.y);
+    const dimensions =
+      active.current.mediaDimensions ?? active.start.mediaDimensions;
+    const start = boundPoint(active.start.point, dimensions);
+    const current = boundPoint(active.current.point, dimensions);
+    const left = Math.min(start.x, current.x);
+    const right = Math.max(start.x, current.x);
+    const top = Math.min(start.y, current.y);
+    const bottom = Math.max(start.y, current.y);
     const rect: Rect = {
       x: (left + right) / 2,
       y: (top + bottom) / 2,
@@ -358,6 +369,49 @@ export function createAnnotationEditingEngine(
       height: bottom - top,
     };
     return tool!.createDetection(rect);
+  }
+
+  function resolveMovePreview(
+    active: Extract<ActiveGesture, { kind: "move" }>,
+    input: AnnotationPointerInput,
+  ) {
+    let dx = input.point.x - active.start.point.x;
+    let dy = input.point.y - active.start.point.y;
+    let rect = active.detection.rect;
+    const dimensions = input.mediaDimensions ?? active.start.mediaDimensions;
+    if (rect && dimensions) {
+      const width = Math.min(rect.width, dimensions.width);
+      const height = Math.min(rect.height, dimensions.height);
+      const x = Math.max(
+        width / 2,
+        Math.min(rect.x + dx, dimensions.width - width / 2),
+      );
+      const y = Math.max(
+        height / 2,
+        Math.min(rect.y + dy, dimensions.height - height / 2),
+      );
+      dx = x - rect.x;
+      dy = y - rect.y;
+      rect = { ...rect, x, y, width, height };
+    }
+    const preview = offsetDetection(active.detection, dx, dy);
+    return {
+      preview: rect && dimensions ? { ...preview, rect } : preview,
+      dx,
+      dy,
+    };
+  }
+
+  function boundPoint(
+    point: Point,
+    dimensions: AnnotationPointerInput["mediaDimensions"],
+  ) {
+    return dimensions
+      ? {
+          x: Math.max(0, Math.min(point.x, dimensions.width)),
+          y: Math.max(0, Math.min(point.y, dimensions.height)),
+        }
+      : point;
   }
 
   function resolvePathPreview(points: readonly Point[]) {
@@ -405,6 +459,12 @@ export function createAnnotationEditingEngine(
           : null),
       preview,
     });
+  }
+
+  function rejectCreation() {
+    const onRejected = tool?.onRejected;
+    cancel();
+    onRejected?.();
   }
 
   function cancel() {

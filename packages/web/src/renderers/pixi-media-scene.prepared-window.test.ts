@@ -1,0 +1,1590 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  annotationRenderers,
+  AnnotationGestureStateKind,
+  BaseFocusStyle,
+  BaseMaskStyle,
+  createArrayDetectionFrameSource,
+  createBufferedDetectionTimeline,
+  createMemoryColdDetectionFrameStore,
+  createWritableDetectionFrameSource,
+  DetectionMaskEncoding,
+  encodeCompressedRleCounts,
+  FocusTargetMode,
+  MediaInteractionMode,
+  PlaybackGateReach,
+} from "supervision-js-core";
+import type {
+  AnnotationEditingEngine,
+  AnnotationEditingState,
+  BufferedDetectionTimeline,
+  DetectionFrame,
+  DetectionMask,
+  FocusStyle,
+  MaskHaloStyle,
+  MaskStyle,
+  PolygonStyle,
+} from "supervision-js-core";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+import {
+  RenderPreparationArtifactFrameStatus,
+  RenderPreparationArtifactKind,
+  type RenderPreparationDiagnostics,
+  type RenderPreparationOptions,
+} from "#types/render-preparation";
+
+import type {
+  MediaRendererSceneOptions,
+  PresentedMediaSample,
+} from "./media-renderer-scene";
+import type { MediaRendererPresentation } from "#types/media-renderer";
+import type { PresentedVideoFrame } from "./presented-frame-channel";
+import { MediaRendererFit } from "#types/media-renderer";
+import { createMediaRendererRuntimeState } from "./media-renderer-state";
+
+const pixiMock = vi.hoisted(() => ({
+  graphics: [] as {
+    clear: () => void;
+    rect: () => void;
+    circles: [number, number, number][];
+    moveTo: ReturnType<typeof vi.fn>;
+    stroke: ReturnType<typeof vi.fn<(style?: { width: number }) => unknown>>;
+  }[],
+  meshes: [] as {
+    shader: { resources: Record<string, unknown> };
+    visible: boolean;
+  }[],
+  render: vi.fn(),
+  tickerAdd: vi.fn<(callback: () => void) => void>(),
+  onTextureDestroy: undefined as ((source: unknown) => void) | undefined,
+}));
+
+vi.mock("pixi.js", () => {
+  class Stub {}
+
+  class Application {
+    canvas = {
+      addEventListener: vi.fn(),
+      height: 360,
+      removeEventListener: vi.fn(),
+      style: {},
+      width: 640,
+    };
+    screen = { height: 360, width: 640 };
+    renderer = {
+      background: { color: 0 },
+      extract: { canvas: vi.fn() },
+      filter: { applyFilter: vi.fn() },
+      prepare: { upload: vi.fn(async () => undefined) },
+      gpu: {
+        device: {
+          createTexture: (descriptor: {
+            size: { height: number; width: number };
+          }) => ({
+            destroy: vi.fn(),
+            height: descriptor.size.height,
+            width: descriptor.size.width,
+          }),
+          queue: { copyExternalImageToTexture: vi.fn() },
+        },
+      },
+      name: "webgpu",
+      resize: vi.fn((width: number, height: number, resolution: number) => {
+        Object.assign(this.screen, { width, height });
+        this.renderer.resolution = resolution;
+        this.canvas.width = Math.round(width * resolution);
+        this.canvas.height = Math.round(height * resolution);
+      }),
+      resolution: 1,
+      screen: this.screen,
+    };
+    stage = { addChild: vi.fn() };
+    ticker = { add: pixiMock.tickerAdd, remove: vi.fn() };
+    cancelResize = vi.fn();
+    destroy = vi.fn();
+    init = vi.fn(async () => undefined);
+    render = pixiMock.render;
+    resize = vi.fn();
+  }
+
+  class Container {
+    children: unknown[] = [];
+    destroy = vi.fn();
+    on = vi.fn();
+    position = { set: vi.fn() };
+    scale = { set: vi.fn() };
+    addChild(...children: unknown[]) {
+      this.children.push(...children);
+      return children[0];
+    }
+    removeChild() {
+      return undefined;
+    }
+  }
+
+  class Graphics extends Container {
+    circles: [number, number, number][] = [];
+    clear = vi.fn(() => {
+      this.circles = [];
+      return this;
+    });
+    circle = vi.fn((x: number, y: number, radius: number) => {
+      this.circles.push([x, y, radius]);
+      return this;
+    });
+    cut = vi.fn(() => this);
+    fill = vi.fn(() => this);
+    poly = vi.fn(() => this);
+    rect = vi.fn(() => this);
+    roundRect = vi.fn(() => this);
+    moveTo = vi.fn(() => this);
+    lineTo = vi.fn(() => this);
+    closePath = vi.fn(() => this);
+    stroke = vi.fn((_style?: { width: number }) => this);
+    visible = true;
+    constructor() {
+      super();
+      pixiMock.graphics.push(this as never);
+    }
+  }
+
+  class Sprite {
+    alpha = 1;
+    height = 0;
+    texture: unknown;
+    visible = false;
+    width = 0;
+    constructor(options: { texture?: unknown } = {}) {
+      this.texture = options.texture;
+    }
+    destroy = vi.fn();
+    removeFromParent = vi.fn();
+  }
+
+  class Texture {
+    static readonly EMPTY = new Texture();
+    readonly source: unknown;
+    constructor(public readonly options: { source?: unknown } = {}) {
+      this.source = options.source;
+    }
+    update = vi.fn();
+    destroy = vi.fn(() => pixiMock.onTextureDestroy?.(this.source));
+  }
+
+  class CanvasSource {
+    constructor(public readonly options: unknown) {}
+    update = vi.fn();
+  }
+
+  class ImageSource {
+    readonly style = {};
+    constructor(public readonly options: unknown) {}
+    destroy = vi.fn();
+  }
+
+  class Shader {
+    static from = vi.fn(
+      (options: { resources?: Record<string, unknown> } = {}) =>
+        new Shader(options),
+    );
+    readonly resources: Record<string, unknown>;
+    destroy = vi.fn();
+    constructor(options: { resources?: Record<string, unknown> } = {}) {
+      this.resources = options.resources ?? {};
+    }
+  }
+
+  class UniformGroup {
+    readonly uniforms: Record<string, unknown> = {};
+    constructor(uniforms: Record<string, { value: unknown }>) {
+      for (const [name, uniform] of Object.entries(uniforms)) {
+        this.uniforms[name] = uniform.value;
+      }
+    }
+    update = vi.fn();
+  }
+
+  class Mesh {
+    visible = false;
+    shader: unknown;
+    constructor(options: { shader: unknown }) {
+      this.shader = options.shader;
+      pixiMock.meshes.push(this as never);
+    }
+    destroy = vi.fn();
+  }
+
+  class MeshGeometry {
+    constructor(public readonly options: unknown) {}
+    destroy = vi.fn();
+  }
+
+  class ExternalSource {
+    constructor(public readonly options: unknown) {}
+    updateGPUTexture = vi.fn();
+  }
+
+  return {
+    AlphaMask: Stub,
+    Application,
+    Assets: { load: vi.fn(), unload: vi.fn() },
+    BlurFilter: Stub,
+    BufferImageSource: ImageSource,
+    CanvasSource,
+    ColorMatrixFilter: Stub,
+    Container,
+    defaultFilterVert: "default-filter-vertex",
+    ExternalSource,
+    Filter: Stub,
+    Graphics,
+    ImageSource,
+    Mesh,
+    MeshGeometry,
+    PrepareSystem: Stub,
+    Rectangle: Stub,
+    Shader,
+    Sprite,
+    Text: Stub,
+    Texture,
+    UniformGroup,
+    extensions: { add: vi.fn() },
+  };
+});
+
+vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
+
+const documentMock = {
+  addEventListener: vi.fn(),
+  createElement: (tagName: string) =>
+    tagName === "div"
+      ? { appendChild: vi.fn(), remove: vi.fn(), style: {} }
+      : {
+          getContext: () => ({ drawImage: vi.fn(), putImageData: vi.fn() }),
+          height: 0,
+          style: {},
+          width: 0,
+        },
+  hidden: false,
+  removeEventListener: vi.fn(),
+};
+
+const detectionFrames: readonly DetectionFrame[] = [
+  {
+    detections: [{ className: "player", confidence: 0.9, rect: makeRect() }],
+    frameIndex: 0,
+    mediaTime: 1,
+  },
+  {
+    detections: [{ className: "player", confidence: 0.9, rect: makeRect() }],
+    frameIndex: 1,
+    mediaTime: 2,
+  },
+];
+
+const singlePixelMask: DetectionMask = {
+  counts: "01",
+  encoding: DetectionMaskEncoding.CompressedRle,
+  height: 1,
+  width: 1,
+};
+
+const haloDetectionFrames: readonly DetectionFrame[] = [
+  {
+    detections: [
+      {
+        className: "glowing",
+        confidence: 0.9,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+      {
+        className: "dim",
+        confidence: 0.1,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+    ],
+    frameIndex: 0,
+    mediaTime: 1,
+  },
+];
+
+/** A fresh object and a fresh closure per call, the way a live control feeds one. */
+function createGlowingOnlyHaloStyle(spread: number): MaskHaloStyle {
+  return {
+    resolve: (detection) =>
+      detection.className === "glowing"
+        ? { alpha: 1, color: 0xffffff, spread }
+        : undefined,
+  };
+}
+
+const transparentOnDimHaloStyle: MaskHaloStyle = {
+  resolve: (detection) => ({
+    alpha: detection.className === "glowing" ? 1 : 0,
+    color: 0xffffff,
+    spread: 8,
+  }),
+};
+
+/** Answers empty so the preparation queue drains. */
+function createRecordingWorkerFactory(cooks: number[][]) {
+  return {
+    createWorker() {
+      const listeners = new Set<(event: { data: unknown }) => void>();
+
+      return {
+        addEventListener(type: string, listener: (event: unknown) => void) {
+          if (type === "message") {
+            listeners.add(listener as (event: { data: unknown }) => void);
+          }
+        },
+        postMessage(message: {
+          job: {
+            instructions: readonly { detectionIndex: number }[];
+            key: string;
+          };
+          requestId: number;
+        }) {
+          cooks.push(
+            message.job.instructions.map(
+              ({ detectionIndex }) => detectionIndex,
+            ),
+          );
+
+          for (const listener of listeners) {
+            listener({
+              data: {
+                key: message.job.key,
+                requestId: message.requestId,
+                type: "empty",
+              },
+            });
+          }
+        },
+        removeEventListener(_type: string, listener: (event: unknown) => void) {
+          listeners.delete(listener as (event: { data: unknown }) => void);
+        },
+        terminate: vi.fn(),
+      } as unknown as Worker;
+    },
+  };
+}
+
+/** Cooks a raster for the frames named and leaves every other job in flight. */
+function createSelectiveWorkerFactory(cookedKeys: readonly string[]) {
+  return {
+    createWorker() {
+      const listeners = new Set<(event: { data: unknown }) => void>();
+
+      return {
+        addEventListener(type: string, listener: (event: unknown) => void) {
+          if (type === "message") {
+            listeners.add(listener as (event: { data: unknown }) => void);
+          }
+        },
+        postMessage(message: { job: { key: string }; requestId: number }) {
+          if (!cookedKeys.includes(message.job.key)) {
+            return;
+          }
+
+          for (const listener of listeners) {
+            listener({
+              data: {
+                artifactKind: PreparedMaskFrameKind.IdMask,
+                fillPalette: new Float32Array([1, 1, 1, 1]),
+                height: 1,
+                key: message.job.key,
+                raster: new Uint8Array([1]),
+                requestId: message.requestId,
+                sourceWidth: 1,
+                strokePalette: new Float32Array([0, 0, 0, 0]),
+                strokeWidths: new Float32Array([0]),
+                type: "complete",
+                width: 1,
+              },
+            });
+          }
+        },
+        removeEventListener(_type: string, listener: (event: unknown) => void) {
+          listeners.delete(listener as (event: { data: unknown }) => void);
+        },
+        terminate: vi.fn(),
+      } as unknown as Worker;
+    },
+  };
+}
+
+/** Cooks to nothing, so a frame is prepared exactly when its cook has run. */
+const emptyMaskStyle: MaskStyle = { resolve: () => undefined };
+/** Cooks to a raster, so a prepared frame has something to put on screen. */
+const paintedMaskStyle: MaskStyle = {
+  resolve: (detection) =>
+    detection.mask
+      ? { alpha: 1, color: 0xffffff, mask: detection.mask }
+      : undefined,
+};
+/** Three 30 fps steps: the smallest moves a viewer can make. */
+const maskedFrames: readonly DetectionFrame[] = [1, 1.0333, 1.0667].map(
+  (mediaTime, frameIndex) => ({
+    detections: [
+      {
+        className: "player",
+        confidence: 0.9,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+    ],
+    frameIndex,
+    mediaTime,
+  }),
+);
+const emptyPolygonStyle: PolygonStyle = { resolve: () => undefined };
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubGlobal("document", documentMock);
+  vi.stubGlobal("window", { devicePixelRatio: 1 });
+  vi.stubGlobal("ResizeObserver", undefined);
+  vi.stubGlobal("GPUTextureUsage", {
+    COPY_DST: 1,
+    RENDER_ATTACHMENT: 2,
+    TEXTURE_BINDING: 4,
+  });
+  pixiMock.graphics.length = 0;
+  pixiMock.meshes.length = 0;
+  pixiMock.render.mockClear();
+  pixiMock.tickerAdd.mockClear();
+  pixiMock.onTextureDestroy = undefined;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("the prepared annotation window under push presentation", () => {
+  it.each([0, 100])(
+    "keeps a paused mask's screen stroke width through zoom without recooking detection %i",
+    async (detectionIndex) => {
+      vi.stubGlobal(
+        "ImageData",
+        class {
+          constructor(
+            readonly data: Uint8ClampedArray,
+            readonly width: number,
+            readonly height: number,
+          ) {}
+        },
+      );
+      const scene = await createScene({
+        detectionFrames: [
+          {
+            detections: [
+              ...Array.from({ length: detectionIndex }, (_, index) => ({
+                id: `box-${index}`,
+              })),
+              { id: "outlined-mask", mask: singlePixelMask },
+            ],
+            frameIndex: 0,
+            mediaTime: 1,
+          },
+        ],
+        maskStyle: new BaseMaskStyle({
+          stroke: { width: 2, widthUnit: "screen" },
+        }),
+        renderPreparation: { maskFrame: { prefetchFrameCount: 0 } },
+      });
+      try {
+        scene.present(1000);
+        await scene.settleCooks();
+        const graphics = pixiMock.graphics.find(
+          (item) => item.moveTo.mock.calls.length > 0,
+        )!;
+        expect(graphics).toBeDefined();
+        const presentation = scene.lastPresentation();
+        const preparations = scene.scene.getRenderPreparationProgress!();
+        const renders = scene.renderCount();
+        for (const scale of [2, 0.5, 4, 1]) {
+          scene.scene.setViewportTransform!({ scale });
+          await scene.settleCooks();
+          const width = graphics.stroke.mock.lastCall![0]!.width;
+          expect(width * scene.scene.getViewportTransform!().scale).toBeCloseTo(
+            2,
+          );
+          expect(scene.scene.getRenderPreparationProgress!()).toBe(
+            preparations,
+          );
+          expect(scene.lastPresentation()).toBe(presentation);
+        }
+        expect(scene.renderCount()).toBe(renders + 4);
+      } finally {
+        scene.scene.destroy();
+        scene.detectionTimeline.destroy();
+      }
+    },
+  );
+
+  it("updates mask rasters above the video grid when display quality increases", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 4 });
+    const scene = await createScene({
+      detectionFrames: [
+        {
+          detections: [
+            {
+              id: "player",
+              mask: {
+                counts: encodeCompressedRleCounts([0, 1000 * 750]),
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 750,
+                width: 1000,
+              },
+            },
+          ],
+          frameIndex: 0,
+          mediaTime: 1,
+        },
+      ],
+      focusStyle: new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+      maskHaloStyle: {
+        resolve: () => ({ alpha: 1, color: 0xffffff, spread: 4 }),
+      },
+      maskStyle: paintedMaskStyle,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxHeight: 360,
+            boxWidth: 640,
+            devicePixelRatio: 4,
+            maxDevicePixelRatio: 1,
+          },
+          prefetchFrameCount: 0,
+        },
+      },
+    });
+    const rasterWidth = () =>
+      (
+        pixiMock.meshes.find((mesh) => "maskUniforms" in mesh.shader.resources)!
+          .shader.resources.uTexture as { options: { width: number } }
+      ).options.width;
+
+    try {
+      scene.present(1000);
+      await scene.settleCooks();
+      expect(rasterWidth()).toBe(480);
+
+      scene.scene.setRenderQuality(3);
+      await scene.settleCooks();
+
+      expect(rasterWidth()).toBe(1000);
+      expect(scene.lastPresentation()).toMatchObject({
+        activeDetectionFrameTime: 1,
+        drawnMaskFrameTime: 1,
+        mediaTime: 1,
+        presentedFrameSerial: 1,
+      });
+    } finally {
+      scene.scene.destroy();
+      scene.detectionTimeline.destroy();
+    }
+  });
+
+  it("redraws a settled mask at full quality without another media presentation", async () => {
+    const frames: DetectionFrame[] = Array.from({ length: 24 }, (_, index) => ({
+      detections: [
+        {
+          id: "player",
+          mask: {
+            counts: encodeCompressedRleCounts([0, 320 * 240]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 240,
+            width: 320,
+          },
+        },
+      ],
+      frameIndex: index,
+      mediaTime: 1 + index / 25,
+    }));
+    const scene = await createScene({
+      detectionFrames: frames,
+      focusStyle: new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+      maskHaloStyle: {
+        resolve: () => ({ alpha: 1, color: 0xffffff, spread: 4 }),
+      },
+      maskStyle: paintedMaskStyle,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxHeight: 360,
+            boxWidth: 640,
+            devicePixelRatio: 1,
+            maxDevicePixelRatio: 1,
+          },
+          prefetchFrameCount: 0,
+          scanIntervalSeconds: 0,
+        },
+      },
+    });
+    const maskMesh = () =>
+      pixiMock.meshes.find((mesh) => "maskUniforms" in mesh.shader.resources)!;
+    const rasterWidth = () =>
+      (maskMesh().shader.resources.uTexture as { options: { width: number } })
+        .options.width;
+
+    try {
+      scene.present(1000);
+      await scene.settleCooks();
+      const fineWidth = rasterWidth();
+      for (const index of [8, 16]) {
+        scene.present(1000 + (index * 1000) / 25);
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      const coarseSource = maskMesh().shader.resources.uTexture;
+      expect(rasterWidth()).toBeLessThan(fineWidth);
+      const coarseRenderCount = scene.renderCount();
+      const disposals: unknown[] = [];
+      pixiMock.onTextureDestroy = (source) => {
+        disposals.push(source);
+        for (const mesh of pixiMock.meshes) {
+          expect(mesh.shader.resources.uTexture).not.toBe(source);
+          expect(mesh.shader.resources.uSampler).not.toBe(
+            (source as { style: unknown }).style,
+          );
+        }
+      };
+
+      await vi.advanceTimersByTimeAsync(200);
+      await scene.settleCooks();
+
+      expect(rasterWidth()).toBe(fineWidth);
+      expect(scene.renderCount()).toBe(coarseRenderCount + 1);
+      expect(disposals).toContain(coarseSource);
+      expect(scene.lastPresentation()).toMatchObject({
+        activeDetectionFrameTime: frames[16]!.mediaTime,
+        drawnMaskFrameTime: frames[16]!.mediaTime,
+        mediaTime: 1.64,
+        presentedFrameSerial: 3,
+      });
+    } finally {
+      pixiMock.onTextureDestroy = undefined;
+      scene.scene.destroy();
+      scene.detectionTimeline.destroy();
+    }
+  });
+
+  it("draws the vector layers of a frame whose cooks are still owed", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
+    });
+    expect(boxGraphics().rect).toHaveBeenCalled();
+    expect(scene.snapshot()?.playheadPrepared).toBe(false);
+  });
+
+  it("draws every layer once the window reaches the presented frame", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
+    });
+    expect(scene.snapshot()).toMatchObject({
+      playheadPrepared: true,
+      preparedFrameCount: 2,
+      spanFrameCount: 12,
+    });
+  });
+
+  it("never leaves the previous frame's annotations on the next one", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+    await scene.settleCooks();
+    const drawnBefore = boxGraphics().rect.mock.calls.length;
+
+    scene.evictCooks();
+    scene.present(2000);
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 2,
+    });
+    expect(scene.snapshot()?.playheadPrepared).toBe(false);
+    expect(boxGraphics().rect.mock.calls.length).toBeGreaterThan(drawnBefore);
+    expect(boxGraphics().clear.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("takes the previous raster off a frame whose own cook is owed", async () => {
+    const scene = await createScene({
+      detectionFrames: maskedFrames,
+      maskStyle: paintedMaskStyle,
+      renderPreparation: {
+        workerFactory: createSelectiveWorkerFactory(["0:1"]),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionFrameTime: 1,
+      drawnMaskFrameTime: 1,
+      maskHeldStale: false,
+    });
+
+    scene.present(1033);
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionFrameTime: 1.0333,
+      drawnMaskFrameTime: null,
+      maskHeldStale: false,
+    });
+  });
+
+  it("renders exactly once when the window reaches the frame on screen", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+    const presented = scene.renderCount();
+
+    await scene.settleCooks();
+
+    expect(scene.renderCount()).toBe(presented + 1);
+
+    await scene.settleCooks();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(scene.renderCount()).toBe(presented + 1);
+  });
+
+  it("renders the first completed heatmap while another map is still cooking", async () => {
+    class FakeImageBitmap {
+      close = vi.fn();
+    }
+    vi.stubGlobal("ImageBitmap", FakeImageBitmap);
+    const listeners = new Set<(event: MessageEvent) => void>();
+    let requests = 0;
+    let completeFirst: (() => void) | undefined;
+    const respond = (data: unknown) => {
+      for (const listener of listeners) listener({ data } as MessageEvent);
+    };
+    const worker = {
+      addEventListener(type: string, listener: (event: MessageEvent) => void) {
+        if (type === "message") listeners.add(listener);
+      },
+      removeEventListener(
+        type: string,
+        listener: (event: MessageEvent) => void,
+      ) {
+        if (type === "message") listeners.delete(listener);
+      },
+      postMessage(message: {
+        job?: { key: string };
+        requestId: number;
+        type: string;
+      }) {
+        if (message.type === "prepare") {
+          respond({
+            key: message.job?.key,
+            requestId: message.requestId,
+            type: "empty",
+          });
+          return;
+        }
+        requests += 1;
+        if (requests !== 1) return;
+        completeFirst = () =>
+          respond({
+            imageBitmap: new FakeImageBitmap(),
+            requestId: message.requestId,
+            type: "heatmap-complete",
+          });
+      },
+      terminate: vi.fn(),
+    } as unknown as Worker;
+    const scene = await createScene({
+      detectionFrames: [
+        {
+          mediaTime: 1,
+          detections: [0, 1].map((id) => ({
+            id,
+            heatmap: {
+              bounds: { x: 10, y: 10, width: 256, height: 256 },
+              width: 256,
+              height: 256,
+              values: new Float32Array(256 * 256),
+            },
+          })),
+        },
+      ],
+      heatmapRenderers: [annotationRenderers.heatmap()],
+      renderPreparation: { workerFactory: { createWorker: () => worker } },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+    const beforeHeatmap = scene.renderCount();
+    completeFirst?.();
+    await scene.settleCooks();
+
+    expect(requests).toBe(2);
+    expect(scene.snapshot()?.playheadPrepared).toBe(false);
+    expect(scene.renderCount()).toBe(beforeHeatmap + 1);
+    scene.scene.destroy();
+  });
+
+  it("redraws for each cook that lands, whichever layer owns it", async () => {
+    // A cook reaches the screen only through the redraw its own landing makes.
+    const scene = await createScene({ polygonStyle: emptyPolygonStyle });
+
+    scene.present(1000);
+    const presented = scene.renderCount();
+
+    await scene.settleCooks();
+
+    expect(scene.snapshot()?.playheadPrepared).toBe(true);
+    expect(scene.renderCount()).toBe(presented + 2);
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
+    });
+  });
+
+  it("renders detections that arrive while paused", async () => {
+    const scene = await createScene({
+      maskStyle: null,
+      prepareDetections: false,
+    });
+    const presentation: MediaRendererPresentation = {};
+
+    scene.present(1000);
+    scene.scene.setPresentation(presentation, 1);
+    const invisible = scene.renderCount();
+
+    await scene.detectionTimeline.prepare(1);
+    const arrived = scene.scene.setPresentation(presentation, 1);
+
+    expect(scene.renderCount()).toBe(invisible + 1);
+    expect(arrived).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
+    });
+  });
+
+  it("holds at zero renders once the window has settled", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+    await scene.settleCooks();
+    const settled = scene.renderCount();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(scene.renderCount()).toBe(settled);
+    expect(pixiMock.render).toHaveBeenCalledTimes(settled);
+  });
+
+  it("renders a revised box on the paused frame without a presentation change", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "paused-box-revision",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const frame: DetectionFrame = {
+      detections: [{ id: "box", rect: makeRect() }],
+      endTime: 2,
+      frameIndex: 30,
+      mediaTime: 1,
+    };
+    await source.appendFrames([frame]);
+    const detectionTimeline = createBufferedDetectionTimeline({ source });
+    const scene = await createScene({ detectionTimeline, maskStyle: null });
+    const presentation: MediaRendererPresentation = {};
+    scene.present(1000);
+    scene.scene.setPresentation(presentation, 1);
+    const beforeEdit = scene.renderCount();
+
+    await source.appendFrames([
+      {
+        ...frame,
+        detections: [{ id: "box", rect: { ...makeRect(), x: 40 } }],
+      },
+    ]);
+    await detectionTimeline.prepare(1);
+    scene.scene.setPresentation(presentation, 1);
+
+    expect(boxGraphics().rect).toHaveBeenLastCalledWith(30, 0, 20, 30);
+    expect(scene.renderCount()).toBe(beforeEdit + 1);
+    expect(pixiMock.render).toHaveBeenCalledTimes(beforeEdit + 1);
+
+    await detectionTimeline.prepare(1);
+    scene.scene.setPresentation(presentation, 1);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(scene.renderCount()).toBe(beforeEdit + 1);
+    scene.scene.destroy();
+    detectionTimeline.destroy();
+    source.destroy?.();
+  });
+
+  it.each(["replacement", "deletion"] as const)(
+    "updates paused selection handles after same-frame %s without another selection event",
+    async (revision) => {
+      const source = createWritableDetectionFrameSource({
+        datasetId: `paused-handles-${revision}`,
+        store: createMemoryColdDetectionFrameStore(),
+      });
+      const frame: DetectionFrame = {
+        detections: [
+          { id: "selected", rect: { x: 100, y: 100, width: 40, height: 20 } },
+        ],
+        endTime: 2,
+        frameIndex: 30,
+        mediaTime: 1,
+      };
+      await source.appendFrames([frame]);
+      const detectionTimeline = createBufferedDetectionTimeline({ source });
+      const scene = await createScene({
+        detectionTimeline,
+        editingEngine: createGestureEngineStub().engine,
+        maskStyle: null,
+        selectionHandles: true,
+      });
+      const presentation: MediaRendererPresentation = {};
+
+      try {
+        scene.present(1000);
+        scene.scene.setPresentation(presentation, 1);
+        const pick = scene.scene.setSelectedDetection?.(
+          { detectionId: "selected" },
+          1,
+        );
+        expect(pick?.detection.id).toBe("selected");
+        const overlays = pixiMock.graphics.filter(
+          ({ circles }) => circles.length > 0,
+        );
+        expect(overlays).toHaveLength(1);
+        const overlay = overlays[0]!;
+        const centers = () => overlay.circles.map(([x, y]) => [x, y]);
+        const expectedCenters = (x: number) => [
+          [x - 20, 90],
+          [x, 90],
+          [x + 20, 90],
+          [x - 20, 100],
+          [x + 20, 100],
+          [x - 20, 110],
+          [x, 110],
+          [x + 20, 110],
+        ];
+        expect(centers()).toHaveLength(8);
+        expect(centers()).toEqual(expect.arrayContaining(expectedCenters(100)));
+        const beforeRevision = scene.renderCount();
+
+        await source.appendFrames([
+          {
+            ...frame,
+            detections:
+              revision === "deletion"
+                ? []
+                : [
+                    {
+                      id: "selected",
+                      rect: { x: 150, y: 100, width: 40, height: 20 },
+                    },
+                  ],
+          },
+        ]);
+        await detectionTimeline.prepare(1);
+        const refreshed = scene.scene.setPresentation(presentation, 1);
+
+        expect(refreshed).toMatchObject({
+          activeDetectionCount: revision === "deletion" ? 0 : 1,
+          activeDetectionFrameTime: 1,
+        });
+        expect(scene.renderCount()).toBeGreaterThan(beforeRevision);
+        if (revision === "replacement") {
+          expect(centers()).toHaveLength(8);
+          expect(centers()).toEqual(
+            expect.arrayContaining(expectedCenters(150)),
+          );
+        } else {
+          expect(centers()).toEqual([]);
+        }
+
+        await scene.settleCooks();
+        const settled = scene.renderCount();
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(scene.renderCount()).toBe(settled);
+      } finally {
+        scene.scene.destroy();
+        detectionTimeline.destroy();
+        source.destroy?.();
+      }
+    },
+  );
+
+  it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {
+    const diagnostics: RenderPreparationDiagnostics[] = [];
+    const scene = await createScene({
+      focusStyle: new BaseFocusStyle(),
+      maskStyle: null,
+      renderPreparation: {
+        onDiagnostics: (next) => diagnostics.push(next),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(maskArtifactStatuses(diagnostics)).not.toContain(
+      RenderPreparationArtifactFrameStatus.Disabled,
+    );
+    expect(maskArtifactStatuses(diagnostics).length).toBeGreaterThan(0);
+  });
+
+  it("prepares mask coverage for only the detections the halo paints", async () => {
+    const cooks: number[][] = [];
+    const scene = await createScene({
+      detectionFrames: haloDetectionFrames,
+      maskHaloStyle: createGlowingOnlyHaloStyle(8),
+      maskStyle: null,
+      renderPreparation: {
+        workerFactory: createRecordingWorkerFactory(cooks),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    // One id per pixel: a detection the halo skips would bury the one it draws.
+    expect(cooks.length).toBeGreaterThan(0);
+    expect(cooks.at(-1)).toEqual([0]);
+  });
+
+  it("leaves a halo that paints nothing out of the prepared coverage", async () => {
+    const cooks: number[][] = [];
+    const scene = await createScene({
+      detectionFrames: haloDetectionFrames,
+      maskHaloStyle: transparentOnDimHaloStyle,
+      maskStyle: null,
+      renderPreparation: {
+        workerFactory: createRecordingWorkerFactory(cooks),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(cooks.length).toBeGreaterThan(0);
+    expect(cooks.at(-1)).toEqual([0]);
+  });
+
+  it("keeps prepared mask coverage across a halo restyle that admits the same detections", async () => {
+    const cooks: number[][] = [];
+    const scene = await createScene({
+      detectionFrames: haloDetectionFrames,
+      maskHaloStyle: createGlowingOnlyHaloStyle(8),
+      maskStyle: null,
+      renderPreparation: {
+        workerFactory: createRecordingWorkerFactory(cooks),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    const cookCountBeforeRestyle = cooks.length;
+
+    scene.setPresentation({ maskHaloStyle: createGlowingOnlyHaloStyle(24) });
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(cookCountBeforeRestyle).toBeGreaterThan(0);
+    expect(cooks.length).toBe(cookCountBeforeRestyle);
+  });
+
+  it("prepares no id-mask artifacts when neither the fill nor focus is on", async () => {
+    const diagnostics: RenderPreparationDiagnostics[] = [];
+    const scene = await createScene({
+      focusStyle: null,
+      maskStyle: null,
+      renderPreparation: {
+        onDiagnostics: (next) => diagnostics.push(next),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(maskArtifactStatuses(diagnostics)).toHaveLength(0);
+  });
+
+  it("goes quiet on a frame whose focus cutout is owed instead of dimming the picture", async () => {
+    const scene = await createOwedFocusScene();
+
+    scene.present(1000);
+    await scene.settleCooks();
+    const cutout = focusMesh().shader.resources.uTexture;
+
+    scene.present(1033);
+    scene.present(1067);
+
+    expect(focusMesh().visible).toBe(false);
+    expect(focusMesh().shader.resources.uTexture).toBe(cutout);
+  });
+
+  it.each([
+    AnnotationGestureStateKind.Creating,
+    AnnotationGestureStateKind.DragSelecting,
+  ])(
+    "keeps dimming an owed frame a %s gesture is drawing over",
+    async (kind) => {
+      const gesture = createGestureEngineStub();
+      const scene = await createOwedFocusScene(gesture.engine);
+
+      scene.present(1000);
+      await scene.settleCooks();
+      const cutout = focusMesh().shader.resources.uTexture;
+
+      gesture.begin(kind);
+      scene.present(1033);
+      scene.present(1067);
+
+      expect(focusMesh().visible).toBe(true);
+      expect(focusMesh().shader.resources.uTexture).not.toBe(cutout);
+    },
+  );
+
+  it("tells the playback gate to wait for a presented frame whose cooks are owed", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+
+    expect(
+      scene.scene.needsRenderPreparationWait?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      }),
+    ).toBe(true);
+    expect(scene.scene.getRenderPreparationProgress?.()).toBe(0);
+
+    await scene.settleCooks();
+
+    expect(
+      scene.scene.needsRenderPreparationWait?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      }),
+    ).toBe(false);
+    expect(scene.scene.getRenderPreparationProgress?.()).toBeGreaterThan(0);
+  });
+
+  it("holds the gate open until the cooks for the presented frame land", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+    let released = false;
+    const wait = scene.scene
+      .waitForRenderPreparation?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      })
+      .then(() => {
+        released = true;
+      });
+
+    await Promise.resolve();
+
+    expect(released).toBe(false);
+
+    await scene.settleCooks();
+    await wait;
+
+    expect(released).toBe(true);
+  });
+
+  it("reports no window to a scene that free-runs on the ticker", async () => {
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions({ detectionTimeline: createTimeline() }),
+    );
+
+    expect(scene.getPreparedAnnotationWindow?.()).toBeNull();
+  });
+
+  it.each([false, true])(
+    "updates a pulled frame's mask readout after preparation without another present when timings are %s",
+    async (timings) => {
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const detectionTimeline = createTimeline(maskedFrames);
+      await detectionTimeline.prepare(1);
+      const onFrame = vi.fn();
+      const state = createMediaRendererRuntimeState({
+        fit: MediaRendererFit.Contain,
+        getDetectionBufferState: () => detectionTimeline.getState(),
+        getPlaybackGateReach: () => PlaybackGateReach.Off,
+        onFrame,
+        playbackRate: 1,
+      });
+      const onPresentationUpdate = vi.fn((sample: PresentedMediaSample) =>
+        state.recordPresentationUpdate(sample),
+      );
+      const scene = await createPixiMediaScene(
+        createSceneOptions({
+          detectionTimeline,
+          diagnostics: timings ? { frameTimings: true } : undefined,
+          maskStyle: paintedMaskStyle,
+          onPresentationUpdate,
+          renderPreparation: {
+            maskFrame: { prefetchFrameCount: 0 },
+            workerFactory: createSelectiveWorkerFactory(["0:1", "1:1.0333"]),
+          },
+        }),
+      );
+      try {
+        scene.initializeMedia({ height: 240, width: 320 });
+        expect(onPresentationUpdate).not.toHaveBeenCalled();
+
+        for (const [index, timestamp] of [1, 1.0333].entries()) {
+          onPresentationUpdate.mockClear();
+          const close = vi.fn();
+          const presented = scene.presentSample({
+            close,
+            draw: vi.fn(),
+            duration: 1 / 30,
+            timestamp,
+          });
+          expect(onPresentationUpdate).not.toHaveBeenCalled();
+          expect(close).toHaveBeenCalledOnce();
+          expect(presented).toMatchObject({
+            drawnMaskFrameTime: null,
+            mediaTime: timestamp,
+            presentedFrameSerial: index + 1,
+          });
+          state.recordPresentedSample(presented);
+          state.recordPlayheadTime(timestamp + 0.02);
+          state.setScrubbing(true);
+
+          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(1);
+
+          expect(
+            pixiMock.meshes.find(
+              (mesh) => "maskUniforms" in mesh.shader.resources,
+            )?.visible,
+            `prepared mask at ${timestamp}`,
+          ).toBe(true);
+          expect(onPresentationUpdate).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              activeDetectionFrameTime: timestamp,
+              drawnMaskFrameTime: timestamp,
+              mediaTime: timestamp,
+              presentedFrameSerial: index + 1,
+            }),
+          );
+          expect(state.snapshot()).toMatchObject({
+            currentTime: timestamp + 0.02,
+            drawnMaskFrameTime: timestamp,
+            presentedFrames: index + 1,
+            presentedTime: timestamp,
+            scrubbing: true,
+          });
+          expect(onFrame).toHaveBeenCalledTimes(index + 1);
+          expect(pixiMock.render).not.toHaveBeenCalled();
+        }
+        expect(scene.getRenderCount?.()).toBeNull();
+      } finally {
+        scene.destroy();
+        detectionTimeline.destroy();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "leaves pull overlay drawing to the ticker when timings are %s",
+    async (timings) => {
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const detectionTimeline = createTimeline();
+      const previewOverlay = vi.fn(() => null);
+      const scene = await createPixiMediaScene(
+        createSceneOptions({
+          detectionTimeline,
+          diagnostics: timings ? { frameTimings: true } : undefined,
+          previewOverlay,
+        }),
+      );
+      try {
+        scene.initializeMedia({ height: 240, width: 320 });
+        await detectionTimeline.prepare(1);
+        previewOverlay.mockClear();
+
+        scene.presentSample({
+          close: vi.fn(),
+          draw: vi.fn(),
+          duration: 1 / 30,
+          timestamp: 1,
+        });
+        expect(previewOverlay).not.toHaveBeenCalled();
+
+        for (const [tick] of pixiMock.tickerAdd.mock.calls) tick();
+        expect(previewOverlay).toHaveBeenCalledOnce();
+      } finally {
+        scene.destroy();
+        detectionTimeline.destroy();
+      }
+    },
+  );
+});
+
+function maskArtifactStatuses(
+  diagnostics: readonly RenderPreparationDiagnostics[],
+) {
+  return diagnostics
+    .flatMap((entry) => entry.artifacts)
+    .filter(
+      (artifact) =>
+        artifact.kind === RenderPreparationArtifactKind.MaskFrame &&
+        artifact.activeFrame,
+    )
+    .map((artifact) => artifact.activeFrame?.status);
+}
+
+function boxGraphics() {
+  const graphics = pixiMock.graphics[0];
+
+  if (!graphics) {
+    throw new Error("The scene drew no box graphics.");
+  }
+
+  return graphics as unknown as {
+    clear: ReturnType<typeof vi.fn>;
+    rect: ReturnType<typeof vi.fn>;
+  };
+}
+
+async function createScene(
+  options: {
+    readonly editingEngine?: AnnotationEditingEngine;
+    readonly focusStyle?: FocusStyle | null;
+    readonly heatmapRenderers?: MediaRendererSceneOptions["heatmapRenderers"];
+    readonly detectionFrames?: readonly DetectionFrame[];
+    readonly detectionTimeline?: BufferedDetectionTimeline;
+    readonly maskHaloStyle?: MaskHaloStyle | null;
+    readonly maskStyle?: MaskStyle | null;
+    readonly polygonStyle?: PolygonStyle;
+    readonly prepareDetections?: boolean;
+    readonly selectionHandles?: boolean;
+    readonly renderPreparation?: RenderPreparationOptions;
+  } = {},
+) {
+  const detectionTimeline =
+    options.detectionTimeline ?? createTimeline(options.detectionFrames);
+
+  if (options.prepareDetections !== false) {
+    await detectionTimeline.prepare(1);
+  }
+
+  let handler: ((presented: PresentedVideoFrame) => void) | null = null;
+  const presentations: PresentedMediaSample[] = [];
+  const { createPixiMediaScene } = await import("./pixi-media-scene");
+  const scene = await createPixiMediaScene(
+    createSceneOptions({
+      annotationOverlayStyle: options.selectionHandles ? {} : undefined,
+      canInteract: () => options.selectionHandles === true,
+      detectionTimeline,
+      editingEngine: options.editingEngine,
+      focusStyle: options.focusStyle ?? null,
+      heatmapRenderers: options.heatmapRenderers,
+      interaction: options.selectionHandles
+        ? { mode: MediaInteractionMode.Always }
+        : undefined,
+      maskHaloStyle: options.maskHaloStyle ?? undefined,
+      maskStyle:
+        options.maskStyle === undefined ? emptyMaskStyle : options.maskStyle,
+      onPresentationUpdate: (sample) => presentations.push(sample),
+      polygonStyle: options.polygonStyle,
+      renderPreparation: options.renderPreparation,
+      presentedFrames: {
+        onPresentedFrame(next) {
+          handler = next;
+        },
+      },
+    }),
+  );
+
+  scene.initializeMedia({ height: 240, width: 320 });
+
+  return {
+    detectionTimeline,
+
+    /** Runs the cook queues the presented frame put in front of the window. */
+    async settleCooks() {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+    },
+
+    /** Drops what the cooks produced, leaving the next frame uncovered. */
+    evictCooks() {
+      scene.setPresentation({ maskStyle: { ...emptyMaskStyle } }, 1);
+      presentations.length = 0;
+      pixiMock.render.mockClear();
+    },
+
+    lastPresentation() {
+      return presentations[presentations.length - 1];
+    },
+
+    present(mediaTimeMs: number) {
+      handler?.(presentedFrame(mediaTimeMs));
+    },
+
+    renderCount() {
+      return scene.getRenderCount?.() ?? 0;
+    },
+
+    scene,
+
+    setPresentation(presentation: MediaRendererPresentation) {
+      scene.setPresentation(presentation, 1);
+    },
+
+    snapshot() {
+      return scene.getPreparedAnnotationWindow?.();
+    },
+  };
+}
+
+function createTimeline(
+  frames: readonly DetectionFrame[] = detectionFrames,
+): BufferedDetectionTimeline {
+  return createBufferedDetectionTimeline({
+    source: createArrayDetectionFrameSource(frames),
+  });
+}
+
+function presentedFrame(mediaTimeMs: number) {
+  return {
+    frame: { close: vi.fn(), displayHeight: 240, displayWidth: 320 },
+    frameId: { index: mediaTimeMs / 1000, ticks: mediaTimeMs },
+    mediaTimeMs,
+    mediaTimeS: mediaTimeMs / 1000,
+  } as unknown as PresentedVideoFrame;
+}
+
+function makeRect() {
+  return { height: 30, width: 20, x: 10, y: 15 };
+}
+
+function createSceneOptions(
+  overrides: Partial<MediaRendererSceneOptions> & {
+    readonly detectionTimeline: BufferedDetectionTimeline;
+  },
+): MediaRendererSceneOptions {
+  return {
+    annotationOverlayStyle: null,
+    backgroundColor: undefined,
+    boxCornerStyle: undefined,
+    boxStyle: undefined,
+    canInteract: () => false,
+    ellipseStyle: undefined,
+    markerStyle: undefined,
+    maskHaloStyle: undefined,
+    container: {
+      appendChild: vi.fn(),
+      clientHeight: 360,
+      clientWidth: 640,
+    } as unknown as HTMLElement,
+    diagnostics: undefined,
+    editingEngine: undefined,
+    fit: MediaRendererFit.Contain,
+    focusStyle: null,
+    interaction: undefined,
+    interactionStyle: null,
+    keypointStyle: null,
+    labelStyle: null,
+    maskBrush: undefined,
+    maskStyle: null,
+    maxDevicePixelRatio: 1,
+    orientedBoxStyle: undefined,
+    percentageBarStyle: undefined,
+    polygonStyle: undefined,
+    polylineStyle: null,
+    previewOverlay: undefined,
+    regionRenderers: [],
+    renderPreparation: undefined,
+    shapeStyle: null,
+    visibility: undefined,
+    ...overrides,
+  };
+}
+
+/**
+ * A scene whose focus has a cutout on the first frame and none to cut on the
+ * two after it: the second holds the first frame's raster, the third has let
+ * go of it.
+ */
+function createOwedFocusScene(editingEngine?: AnnotationEditingEngine) {
+  return createScene({
+    detectionFrames: maskedFrames,
+    editingEngine,
+    focusStyle: new BaseFocusStyle({
+      fill: { alpha: 0.5, color: 0x000000 },
+      targetMode: FocusTargetMode.Ambient,
+    }),
+    maskStyle: paintedMaskStyle,
+    renderPreparation: {
+      workerFactory: createSelectiveWorkerFactory(["0:1"]),
+    },
+  });
+}
+
+function focusMesh() {
+  const mesh = pixiMock.meshes.find(
+    (candidate) => "focusUniforms" in candidate.shader.resources,
+  );
+
+  if (!mesh) {
+    throw new Error("The scene drew no focus mesh.");
+  }
+
+  return mesh;
+}
+
+function createGestureEngineStub() {
+  let kind = AnnotationGestureStateKind.Idle;
+
+  return {
+    begin(next: AnnotationGestureStateKind) {
+      kind = next;
+    },
+    engine: {
+      beginHandleDrag: vi.fn(),
+      cancel: vi.fn(),
+      deleteVertex: vi.fn(() => null),
+      getState: (): AnnotationEditingState => ({
+        activeDetectionId: null,
+        activeHandleId: null,
+        kind,
+        pointerId: null,
+        preview: null,
+      }),
+      hasCreationTool: vi.fn(() => false),
+      keyDown: vi.fn(),
+      pointerDown: vi.fn(),
+      pointerMove: vi.fn(),
+      pointerUp: vi.fn(),
+      setCreationTool: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+      subscribeFastTranslate: vi.fn(() => () => undefined),
+    } satisfies AnnotationEditingEngine,
+  };
+}

@@ -5,15 +5,512 @@ import {
   AnnotationGeometryKind,
   applyAnnotationHandleDrag,
   createAnnotationEditingEngine,
+  createEditableAnnotationFrameSession,
   deleteAnnotationVertex,
   DetectionMaskEncoding,
   DetectionPickTarget,
   getAnnotationHandles,
   KeypointVisibility,
   pickAnnotationHandle,
+  pickDetectionAtPoint,
+  type Detection,
+  type DetectionFrame,
+  type AnnotationCreationTool,
+  type Rect,
+  type Point,
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it("undoes draft vertices before a polygon can commit", () => {
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const releasePointer = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      onCancel,
+      releasePointer,
+    });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polygon,
+      mode: "multiClick",
+      createDetection: (geometry) => ({
+        polygon: { points: geometry as Point[] },
+      }),
+    });
+    const points = [
+      { x: 10, y: 10 },
+      { x: 50, y: 10 },
+      { x: 50, y: 50 },
+    ];
+    points.forEach((point, index) =>
+      engine.pointerDown({ point, timestamp: index * 300, pointerId: 7 }),
+    );
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+    expect(engine.undoCreation()).toBe(true);
+    expect(engine.getState().preview?.polygon?.points).toEqual([
+      points[0],
+      points[1],
+      points[1],
+    ]);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(engine.undoCreation()).toBe(true);
+    expect(engine.undoCreation()).toBe(true);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(releasePointer).toHaveBeenCalledTimes(1);
+    expect(releasePointer).toHaveBeenCalledWith(7);
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(engine.undoCreation()).toBe(false);
+
+    points.forEach((point, index) =>
+      engine.pointerDown({
+        point,
+        timestamp: 2000 + index * 300,
+        pointerId: 8,
+      }),
+    );
+    engine.undoCreation();
+    const replacement = { x: 10, y: 50 };
+    engine.pointerDown({ point: replacement, timestamp: 4000, pointerId: 8 });
+    engine.keyDown("Enter");
+    expect(onCommit.mock.calls[0]?.[0].polygon.points).toEqual([
+      points[0],
+      points[1],
+      replacement,
+    ]);
+    expect(engine.undoCreation()).toBe(false);
+  });
+
+  it.each([AnnotationGeometryKind.Polygon, AnnotationGeometryKind.Polyline])(
+    "retains the minimum vertex guard after draft Undo (%s)",
+    (geometry) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      engine.setCreationTool({
+        geometry,
+        mode: "multiClick",
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      });
+      const minimum = geometry === AnnotationGeometryKind.Polygon ? 3 : 2;
+      for (let index = 0; index < minimum; index += 1)
+        engine.pointerDown({
+          point: { x: 10 + index * 30, y: 10 },
+          timestamp: index * 300,
+        });
+      engine.undoCreation();
+      engine.keyDown("Enter");
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(engine.undoCreation()).toBe(false);
+    },
+  );
+
+  it.each(["Escape", "tool change", "media cancel"])(
+    "discards Undo ownership on %s",
+    (reason) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const tool: AnnotationCreationTool = {
+        geometry: AnnotationGeometryKind.Polygon,
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      };
+      engine.setCreationTool(tool);
+      engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 0 });
+      if (reason === "Escape") engine.keyDown("Escape");
+      else if (reason === "tool change") engine.setCreationTool(null);
+      else engine.cancel();
+      expect(engine.undoCreation()).toBe(false);
+      expect(onCommit).not.toHaveBeenCalled();
+      engine.setCreationTool(tool);
+      engine.pointerDown({ point: { x: 90, y: 90 }, timestamp: 1000 });
+      expect(engine.getState().preview?.polygon?.points).toEqual([
+        { x: 90, y: 90 },
+        { x: 90, y: 90 },
+      ]);
+    },
+  );
+
+  it.each([undefined, 2])(
+    "breaks the double-click chain after Undo (detail: %s)",
+    (detail) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Polygon,
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      });
+      const points = [
+        { x: 10, y: 10 },
+        { x: 50, y: 10 },
+        { x: 50, y: 50 },
+        { x: 10, y: 50 },
+      ];
+      points.forEach((point, index) =>
+        engine.pointerDown({ point, timestamp: index * 300 }),
+      );
+      engine.undoCreation();
+      const replacement = { x: 30, y: 70 };
+      engine.pointerDown({ point: replacement, timestamp: 1100, detail });
+      expect(onCommit).not.toHaveBeenCalled();
+      engine.keyDown("Enter");
+      expect(onCommit.mock.calls[0]?.[0].polygon.points).toEqual([
+        ...points.slice(0, 3),
+        replacement,
+      ]);
+
+      points.forEach((point, index) =>
+        engine.pointerDown({ point, timestamp: 2000 + index * 300 }),
+      );
+      engine.undoCreation();
+      engine.pointerDown({ point: points[0]!, timestamp: 3100, detail });
+      expect(onCommit.mock.calls[1]?.[0].polygon.points).toEqual(
+        points.slice(0, 3),
+      );
+    },
+  );
+
+  it("keeps a move alive when the unchanged creation tool is synchronized", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const frame: DetectionFrame = {
+      mediaTime: 12.5,
+      detections: [
+        { id: "box", rect: { x: 20, y: 30, width: 10, height: 10 } },
+      ],
+    };
+    const pick = pickDetectionAtPoint(frame, { x: 20, y: 30 });
+    engine.pointerDown(
+      { point: { x: 20, y: 30 }, timestamp: 0, pointerId: 7 },
+      pick,
+    );
+    engine.setCreationTool(null);
+    engine.pointerMove({
+      point: { x: 30, y: 40 },
+      timestamp: 16,
+      pointerId: 7,
+    });
+    engine.pointerUp({ point: { x: 30, y: 40 }, timestamp: 32, pointerId: 7 });
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onCommit.mock.calls[0]?.[0].rect).toEqual({
+      x: 30,
+      y: 40,
+      width: 10,
+      height: 10,
+    });
+  });
+
+  it("reports rejected creation separately from explicit cancellation", () => {
+    const onRejected = vi.fn();
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const tool: AnnotationCreationTool = {
+      geometry: AnnotationGeometryKind.Box,
+      mode: "drag",
+      createDetection: (geometry) => ({ rect: geometry as Rect }),
+      onRejected,
+    };
+    engine.setCreationTool(tool);
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 0 });
+    engine.pointerUp({ point: { x: 10, y: 10 }, timestamp: 1 });
+    expect(onRejected).toHaveBeenCalledOnce();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 2 });
+    engine.keyDown("Escape");
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 3 });
+    engine.setCreationTool(null);
+    expect(onRejected).toHaveBeenCalledOnce();
+
+    engine.setCreationTool(tool);
+    engine.pointerDown({ point: { x: 10, y: 10 }, timestamp: 10 });
+    engine.setCreationTool(tool);
+    engine.pointerMove({ point: { x: 50, y: 50 }, timestamp: 310 });
+    engine.pointerUp({ point: { x: 50, y: 50 }, timestamp: 400 });
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onRejected).toHaveBeenCalledOnce();
+  });
+
+  it("moves a heatmap with its pickable rectangle", () => {
+    const frame: DetectionFrame = {
+      mediaTime: 0,
+      detections: [
+        {
+          id: "anomaly",
+          rect: { x: 20, y: 30, width: 10, height: 10 },
+          heatmap: {
+            bounds: { x: 22, y: 31, width: 6, height: 4 },
+            width: 1,
+            height: 1,
+            values: [0.8],
+          },
+        },
+      ],
+    };
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const pick = pickDetectionAtPoint(frame, { x: 20, y: 30 });
+
+    engine.pointerDown({ point: { x: 20, y: 30 }, timestamp: 0 }, pick);
+    engine.pointerMove({ point: { x: 30, y: 25 }, timestamp: 16 });
+    expect(engine.getState().preview?.heatmap?.bounds).toEqual({
+      x: 32,
+      y: 26,
+      width: 6,
+      height: 4,
+    });
+    engine.pointerUp({ point: { x: 30, y: 25 }, timestamp: 32 });
+
+    expect(onCommit.mock.calls[0]?.[0].heatmap.bounds).toEqual({
+      x: 32,
+      y: 26,
+      width: 6,
+      height: 4,
+    });
+    expect(frame.detections[0]?.heatmap?.bounds.x).toBe(22);
+  });
+
+  it.each([false, true])(
+    "drags oriented boxes through picking, preview, and commit (other geometry: %s)",
+    (withOtherGeometry) => {
+      const frame: DetectionFrame = {
+        mediaTime: 0,
+        detections: [
+          {
+            id: "obb",
+            orientedBox: {
+              points: [
+                { x: 10, y: 30 },
+                { x: 20, y: 20 },
+                { x: 30, y: 30 },
+                { x: 20, y: 40 },
+              ],
+            },
+            ...(withOtherGeometry
+              ? {
+                  rect: { x: 20, y: 30, width: 40, height: 40 },
+                  polygon: {
+                    points: [
+                      { x: 0, y: 0 },
+                      { x: 50, y: 0 },
+                      { x: 25, y: 60 },
+                    ],
+                  },
+                }
+              : {}),
+          },
+        ],
+      };
+      const session = createEditableAnnotationFrameSession(frame);
+      const previous = session.getSnapshot();
+      const onCommit = vi.fn((detection: Detection) =>
+        session.update("obb", detection),
+      );
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const pick = pickDetectionAtPoint(previous, { x: 20, y: 30 });
+      expect(pick?.target).toBe(DetectionPickTarget.OrientedBox);
+
+      engine.pointerDown({ point: { x: 20, y: 30 }, timestamp: 0 }, pick);
+      engine.pointerMove({ point: { x: 30, y: 25 }, timestamp: 16 });
+      const movedPoints = [
+        { x: 20, y: 25 },
+        { x: 30, y: 15 },
+        { x: 40, y: 25 },
+        { x: 30, y: 35 },
+      ];
+      expect(engine.getState().preview?.orientedBox?.points).toEqual(
+        movedPoints,
+      );
+      expect(session.getSnapshot()).toBe(previous);
+      engine.pointerUp({ point: { x: 30, y: 25 }, timestamp: 32 });
+
+      const committed = session.getSnapshot().detections[0]!;
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(committed.orientedBox?.points).toEqual(movedPoints);
+      expect(previous).toEqual(frame);
+      expect(
+        pickDetectionAtPoint(session.getSnapshot(), { x: 30, y: 25 })?.target,
+      ).toBe(DetectionPickTarget.OrientedBox);
+      if (withOtherGeometry) {
+        expect(committed.rect).toEqual({ x: 30, y: 25, width: 40, height: 40 });
+        expect(committed.polygon?.points).toEqual([
+          { x: 10, y: -5 },
+          { x: 60, y: -5 },
+          { x: 35, y: 55 },
+        ]);
+      }
+    },
+  );
+
+  it.each([
+    ["nw", { x: -200, y: -200 }, { x: 35, y: 25, width: 70, height: 50 }],
+    ["n", { x: 50, y: -200 }, { x: 50, y: 25, width: 40, height: 50 }],
+    ["ne", { x: 200, y: -200 }, { x: 65, y: 25, width: 70, height: 50 }],
+    ["e", { x: 200, y: 40 }, { x: 65, y: 40, width: 70, height: 20 }],
+    ["se", { x: 200, y: 200 }, { x: 65, y: 55, width: 70, height: 50 }],
+    ["s", { x: 50, y: 200 }, { x: 50, y: 55, width: 40, height: 50 }],
+    ["sw", { x: -200, y: 200 }, { x: 35, y: 55, width: 70, height: 50 }],
+    ["w", { x: -200, y: 40 }, { x: 35, y: 40, width: 70, height: 20 }],
+    ["nw", { x: 200, y: 200 }, { x: 85, y: 65, width: 30, height: 30 }],
+    ["se", { x: -200, y: -200 }, { x: 15, y: 15, width: 30, height: 30 }],
+  ])(
+    "bounds the %s handle in both preview and commit at %j",
+    (id, point, rect) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const detection = {
+        id: "box",
+        rect: { x: 50, y: 40, width: 40, height: 20 },
+      };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === id,
+      )!;
+      engine.beginHandleDrag(detection, handle, {
+        point: handle.point,
+        timestamp: 0,
+        mediaDimensions: { width: 100, height: 80 },
+      });
+      engine.pointerMove({ point, timestamp: 16 });
+      expect(engine.getState().preview?.rect).toEqual(rect);
+      engine.pointerUp({ point, timestamp: 32 });
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        { ...detection, rect },
+        detection,
+      );
+      expect(detection.rect).toEqual({ x: 50, y: 40, width: 40, height: 20 });
+    },
+  );
+
+  it.each([
+    {
+      rect: { x: 98, y: 78, width: 4, height: 4 },
+      media: { width: 100, height: 80 },
+      expected: { x: 97.5, y: 77.5, width: 5, height: 5 },
+    },
+    {
+      rect: { x: 1.5, y: 1, width: 3, height: 2 },
+      media: { width: 3, height: 2 },
+      expected: { x: 1.5, y: 1, width: 3, height: 2 },
+    },
+  ])(
+    "keeps the minimum-size resize inside media $media",
+    ({ rect, media, expected }) => {
+      const detection = { rect };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === "nw",
+      )!;
+      expect(
+        applyAnnotationHandleDrag(detection, handle, { x: 200, y: 200 }, media)
+          .rect,
+      ).toEqual(expected);
+    },
+  );
+
+  it("bounds a move without resizing the box and keeps fast translation consistent", () => {
+    const onCommit = vi.fn();
+    const onFastTranslate = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      onFastTranslate,
+      viewportScale: () => 0.25,
+    });
+    const detection = {
+      id: "box",
+      rect: { x: 50, y: 40, width: 40, height: 20 },
+    };
+    const start = { x: 45, y: 38 };
+    const pick = pickDetectionAtPoint(
+      { mediaTime: 0, detections: [detection] },
+      start,
+    );
+    engine.pointerDown(
+      {
+        point: start,
+        timestamp: 0,
+        mediaDimensions: { width: 100, height: 80 },
+      },
+      pick,
+    );
+    engine.pointerMove({ point: { x: 200, y: 200 }, timestamp: 16 });
+    expect(engine.getState().preview?.rect).toEqual({
+      x: 80,
+      y: 70,
+      width: 40,
+      height: 20,
+    });
+    expect(onFastTranslate).toHaveBeenLastCalledWith("box", 30, 30);
+    engine.pointerMove({ point: start, timestamp: 32 });
+    expect(engine.getState().preview?.rect).toEqual(detection.rect);
+    engine.pointerMove({ point: { x: -200, y: -200 }, timestamp: 48 });
+    const rect = { x: 20, y: 10, width: 40, height: 20 };
+    expect(engine.getState().preview?.rect).toEqual(rect);
+    expect(onFastTranslate).toHaveBeenLastCalledWith("box", -30, -30);
+    engine.pointerUp({ point: { x: -400, y: -400 }, timestamp: 64 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { ...detection, rect },
+      detection,
+    );
+  });
+
+  it("fits a previously oversized box inside the media when moving it", () => {
+    const engine = createAnnotationEditingEngine();
+    const detection = {
+      id: "box",
+      rect: { x: 50, y: 40, width: 140, height: 100 },
+    };
+    const point = { x: 50, y: 40 };
+    engine.pointerDown(
+      { point, timestamp: 0, mediaDimensions: { width: 100, height: 80 } },
+      pickDetectionAtPoint({ mediaTime: 0, detections: [detection] }, point),
+    );
+    engine.pointerMove({ point: { x: 200, y: 200 }, timestamp: 16 });
+    expect(engine.getState().preview?.rect).toEqual({
+      x: 50,
+      y: 40,
+      width: 100,
+      height: 80,
+    });
+  });
+
+  it.each([
+    [
+      { x: -200, y: -200 },
+      { x: 25, y: 20, width: 50, height: 40 },
+    ],
+    [
+      { x: 200, y: -200 },
+      { x: 75, y: 20, width: 50, height: 40 },
+    ],
+    [
+      { x: -200, y: 200 },
+      { x: 25, y: 60, width: 50, height: 40 },
+    ],
+    [
+      { x: 200, y: 200 },
+      { x: 75, y: 60, width: 50, height: 40 },
+    ],
+  ])("bounds a created box at %j", (point, rect) => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (geometry) => ({ rect: geometry as Rect }),
+    });
+    engine.pointerDown({
+      point: { x: 50, y: 40 },
+      timestamp: 0,
+      mediaDimensions: { width: 100, height: 80 },
+    });
+    engine.pointerMove({ point, timestamp: 300 });
+    expect(engine.getState().preview?.rect).toEqual(rect);
+    engine.pointerUp({ point, timestamp: 400 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith({ rect }, null);
+  });
+
   it("creates center-based boxes and applies the click-cancel threshold", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });
@@ -150,6 +647,113 @@ describe("annotation editing engine", () => {
       rect: { x: 25, y: 35, width: 20, height: 30 },
     });
   });
+
+  it.each([
+    ["nw", { x: 35, y: 50 }, { x: 30, y: 45, width: 10, height: 10 }],
+    ["n", { x: 20, y: 50 }, { x: 20, y: 45, width: 10, height: 10 }],
+    ["ne", { x: 5, y: 50 }, { x: 10, y: 45, width: 10, height: 10 }],
+    ["e", { x: 5, y: 30 }, { x: 10, y: 30, width: 10, height: 20 }],
+    ["se", { x: 5, y: 10 }, { x: 10, y: 15, width: 10, height: 10 }],
+    ["s", { x: 20, y: 10 }, { x: 20, y: 15, width: 10, height: 10 }],
+    ["sw", { x: 35, y: 10 }, { x: 30, y: 15, width: 10, height: 10 }],
+    ["w", { x: 35, y: 30 }, { x: 30, y: 30, width: 10, height: 20 }],
+    ["nw", { x: 35, y: 10 }, { x: 30, y: 25, width: 10, height: 30 }],
+    ["nw", { x: 5, y: 50 }, { x: 15, y: 45, width: 20, height: 10 }],
+    ["nw", { x: 24, y: 39 }, { x: 22.5, y: 37.5, width: 5, height: 5 }],
+    ["nw", { x: 25, y: 40 }, { x: 22.5, y: 37.5, width: 5, height: 5 }],
+    ["nw", { x: 26, y: 41 }, { x: 27.5, y: 42.5, width: 5, height: 5 }],
+  ])("resizes %s through the opposite edges at %j", (id, point, rect) => {
+    const detection = {
+      id: "box",
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const handle = getAnnotationHandles(detection).find(
+      (entry) => entry.id === id,
+    )!;
+
+    expect(applyAnnotationHandleDrag(detection, handle, point)).toEqual({
+      ...detection,
+      rect,
+    });
+    expect(detection.rect).toEqual({ x: 20, y: 30, width: 10, height: 20 });
+  });
+
+  it.each([false, true])(
+    "keeps the opposite corner anchored through crossing and return (cancel: %s)",
+    (cancel) => {
+      const onCommit = vi.fn();
+      const releasePointer = vi.fn();
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        releasePointer,
+      });
+      const detection = {
+        id: "box",
+        rect: { x: 20, y: 30, width: 10, height: 20 },
+      };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === "nw",
+      )!;
+      engine.beginHandleDrag(detection, handle, {
+        point: handle.point,
+        timestamp: 0,
+        pointerId: 7,
+      });
+      engine.pointerMove({
+        point: { x: 25, y: 40 },
+        timestamp: 16,
+        pointerId: 7,
+      });
+      expect(engine.getState().preview?.rect).toEqual({
+        x: 22.5,
+        y: 37.5,
+        width: 5,
+        height: 5,
+      });
+      engine.pointerMove({
+        point: { x: 35, y: 50 },
+        timestamp: 32,
+        pointerId: 7,
+      });
+      expect(engine.getState().preview?.rect).toEqual({
+        x: 30,
+        y: 45,
+        width: 10,
+        height: 10,
+      });
+      engine.pointerMove({
+        point: { x: 5, y: 10 },
+        timestamp: 48,
+        pointerId: 7,
+      });
+      const returned = { x: 15, y: 25, width: 20, height: 30 };
+      expect(engine.getState().preview?.rect).toEqual(returned);
+      expect(onCommit).not.toHaveBeenCalled();
+
+      if (cancel) {
+        engine.keyDown("Escape");
+        engine.pointerUp({
+          point: { x: 5, y: 10 },
+          timestamp: 64,
+          pointerId: 7,
+        });
+        expect(onCommit).not.toHaveBeenCalled();
+      } else {
+        engine.pointerUp({
+          point: { x: 35, y: 50 },
+          timestamp: 64,
+          pointerId: 7,
+        });
+        expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+          { ...detection, rect: { x: 30, y: 45, width: 10, height: 10 } },
+          detection,
+        );
+      }
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(releasePointer).toHaveBeenCalledExactlyOnceWith(7);
+      expect(detection.rect).toEqual({ x: 20, y: 30, width: 10, height: 20 });
+    },
+  );
 
   it("scales only box-relative keypoints with the box and unflags dragged points", () => {
     const detection = {

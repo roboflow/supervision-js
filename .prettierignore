@@ -5,5 +5,8 @@ tools/sam3-fixture/frames*.jsonl
 tools/sam3-fixture/raw*.jsonl
 tools/sam3-fixture/extracted*.jsonl
 benchmark/masks/results/
+benchmark/depth/results/
 *.csv
 demo/fixtures/
+tools/demo-eval/report.json
+tools/demo-eval/baseline.json

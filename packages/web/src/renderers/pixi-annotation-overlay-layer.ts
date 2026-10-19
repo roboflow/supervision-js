@@ -15,9 +15,11 @@ import {
   type BoxFillStyle,
   type BoxStrokeStyle,
   type DetectionFrame,
+  type Detection,
   type KeypointStyle,
   type Point,
   type PreviewOverlayData,
+  type Rect,
 } from "supervision-js-core";
 import type { Graphics as PixiGraphics } from "pixi.js";
 import {
@@ -31,6 +33,7 @@ export interface PixiAnnotationOverlayLayer {
   attachGraphics(graphics: PixiGraphics): void;
   setStyle(style: AnnotationOverlayStyle | null | undefined): void;
   setKeypointStyle(style: KeypointStyle | null | undefined): void;
+  getRenderedEditingBox(): PixiRenderedEditingBox | undefined;
   draw(context: {
     frame: DetectionFrame | undefined;
     selectedDetectionIds: readonly (string | number)[];
@@ -45,12 +48,18 @@ export interface PixiAnnotationOverlayLayer {
   }): void;
 }
 
+export interface PixiRenderedEditingBox {
+  readonly detection: Detection;
+  readonly rect: Rect;
+}
+
 export function createPixiAnnotationOverlayLayer(
   editingEngine?: AnnotationEditingEngine,
   initialStyle?: AnnotationOverlayStyle | null,
   initialKeypointStyle?: KeypointStyle | null,
 ): PixiAnnotationOverlayLayer {
   let graphics: PixiGraphics | undefined;
+  let renderedEditingBox: PixiRenderedEditingBox | undefined;
   let style = resolveAnnotationOverlayStyle(initialStyle);
   let keypointStyle =
     initialKeypointStyle === undefined
@@ -67,7 +76,11 @@ export function createPixiAnnotationOverlayLayer(
     setKeypointStyle(next) {
       if (next !== undefined) keypointStyle = next;
     },
+    getRenderedEditingBox() {
+      return renderedEditingBox;
+    },
     draw(context) {
+      renderedEditingBox = undefined;
       if (!graphics) return;
       graphics.clear();
       drawExternalPreview(
@@ -76,7 +89,7 @@ export function createPixiAnnotationOverlayLayer(
         context.viewportScale,
         style,
       );
-      drawEditingPreview(
+      renderedEditingBox = drawEditingPreview(
         graphics,
         editingEngine,
         context.frame,
@@ -99,10 +112,11 @@ function drawEditingPreview(
   viewportScale: number,
   style: ResolvedAnnotationOverlayStyle,
   keypointStyle: KeypointStyle | null,
-) {
+): PixiRenderedEditingBox | undefined {
   const state = engine?.getState();
   const detection = state?.preview;
   if (!detection) return;
+  let renderedBox: PixiRenderedEditingBox | undefined;
   const styleContext: AnnotationEditingPreviewStyleContext = {
     gestureKind: state.kind,
     viewportScale,
@@ -127,8 +141,8 @@ function drawEditingPreview(
     detection,
     styleContext,
   )!;
-  // A skeleton's rect is part of its geometry, so it previews alongside the
-  // keypoints; polygon, polyline and mask rects are derived bounds and are not.
+  // Rects coexist with keypoints and OBBs as independent editable geometry.
+  // Polygon, polyline and mask rects are derived bounds instead.
   if (
     detection.rect &&
     !detection.mask &&
@@ -159,6 +173,13 @@ function drawEditingPreview(
       stroke,
       viewportScale,
     );
+    if (
+      width > 0 &&
+      height > 0 &&
+      (boxFill.alpha > 0 || (stroke.alpha > 0 && stroke.width > 0))
+    ) {
+      renderedBox = { detection, rect: detection.rect };
+    }
   }
   if (detection.polygon) {
     if (state.kind === AnnotationGestureStateKind.Creating) {
@@ -169,7 +190,7 @@ function drawEditingPreview(
         stroke,
         closeZoneStroke,
       );
-      return;
+      return renderedBox;
     }
     graphics
       .poly(
@@ -180,6 +201,22 @@ function drawEditingPreview(
     drawPixiPath(
       graphics,
       detection.polygon.points,
+      true,
+      stroke,
+      viewportScale,
+    );
+  }
+  // Keep the OBB's own vertices visible alongside any independent rect.
+  if (detection.orientedBox) {
+    graphics
+      .poly(
+        detection.orientedBox.points.flatMap(({ x, y }) => [x, y]),
+        true,
+      )
+      .fill(polygonFill);
+    drawPixiPath(
+      graphics,
+      detection.orientedBox.points,
       true,
       stroke,
       viewportScale,
@@ -209,6 +246,7 @@ function drawEditingPreview(
     if (instruction)
       drawPixiKeypointInstruction(graphics, instruction, viewportScale);
   }
+  return renderedBox;
 }
 
 const CREATION_VERTEX_RADIUS = 6;
@@ -524,6 +562,7 @@ function drawLoading(
     }
     const rect = getDetectionRect(detection);
     if (!rect) continue;
+    graphics.beginPath();
     graphics.arc(
       rect.x,
       rect.y,

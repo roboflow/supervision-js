@@ -89,7 +89,8 @@ configures annotation visualization through one public surface while the
 browser backend keeps the established specialized box, mask, label, polygon,
 polyline, and keypoint paths. The current vocabulary includes boxes, box
 corners, ellipses, markers, masks, mask halos, labels, polygons, polylines,
-keypoints and skeletons, plus the multi-instance `region` renderer.
+keypoints and skeletons, heatmaps, and depth maps, plus the multi-instance
+`region` renderer.
 
 `region` composes external assets and exact current-frame media crops without
 another decoder or canvas readback. Asset regions support explicit media- or
@@ -121,7 +122,7 @@ This inventory is based on the 32 public annotators in Python Supervision
 | `RichLabelAnnotator`            | Covered in essence        | Normal browser text and label recipe                       |
 | `VertexAnnotator`               | Covered                   | Existing keypoint markers                                  |
 | `EdgeAnnotator`                 | Covered                   | Existing skeleton edges                                    |
-| `OrientedBoxAnnotator`          | Partial                   | Oriented quadrilateral lowered to polygon/path geometry    |
+| `OrientedBoxAnnotator`          | Covered                   | Explicit `orientedBox` geometry and oriented-box renderer  |
 | `BoxCornerAnnotator`            | Covered                   | Existing box-corners renderer                              |
 | `CircleAnnotator`               | Covered in essence        | Circle marker or closed ellipse style                      |
 | `EllipseAnnotator`              | Covered                   | Existing ellipse renderer                                  |
@@ -369,16 +370,18 @@ field. Do not inject docs-only detections to simulate coverage.
 
 | Visualization capability | Browser renderer and style  | Frozen fixture evidence                                                                                                                                                           | Public docs state | Next required work                                                                     |
 | ------------------------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| Boxes                    | Implemented (`box`)         | `basketball_geometry.rect`                                                                                                                                                        | Live playground   | Maintain regression coverage with the basketball fixture                               |
-| Box corners              | Implemented (`box-corners`) | `basketball_geometry.rect`                                                                                                                                                        | Live playground   | Maintain screen-space length and interaction-order coverage                            |
-| Ellipses                 | Implemented (`ellipse`)     | `basketball_geometry.rect`                                                                                                                                                        | Live playground   | Maintain closed ellipse, arc, rotation, fill, and stroke coverage                      |
-| Markers                  | Implemented (`marker`)      | `basketball_geometry.rect` and keypoint anchors                                                                                                                                   | Live playground   | Maintain shape, anchor, rotation, and media/screen-space size coverage                 |
-| Masks                    | Implemented (`mask`)        | `basketball_geometry.mask` (compressed RLE)                                                                                                                                       | Live playground   | Maintain mask-preparation and visual coverage                                          |
-| Mask halos               | Implemented (`maskHalo`)    | `basketball_geometry.mask` (compressed RLE)                                                                                                                                       | Live playground   | Maintain artifact reuse, per-detection spread, and GPU-bound blur coverage             |
-| Labels                   | Implemented (`label`)       | `basketball_geometry.className` and `confidence`                                                                                                                                  | Live playground   | Maintain label layout and contrast coverage                                            |
-| Polygons                 | Implemented (`polygon`)     | `basketball_geometry.polygon`                                                                                                                                                     | Live playground   | Maintain contour and fill/stroke coverage                                              |
-| Keypoints and skeletons  | Implemented (`keypoints`)   | `basketball_geometry.keypoints` including edges and visibility                                                                                                                    | Live playground   | Maintain pose association and visibility coverage                                      |
-| Polylines                | Implemented (`polyline`)    | `basketball_geometry` motion-gated basketball track plus mask (versioned bounded center trace)                                                                                    | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
+| Boxes                    | Implemented (`box`)         | `basketball_sam3.rect`                                                                                                                                                            | Live playground   | Maintain regression coverage with the basketball fixture                               |
+| Box corners              | Implemented (`box-corners`) | `basketball_sam3.rect`                                                                                                                                                            | Live playground   | Maintain screen-space length and interaction-order coverage                            |
+| Ellipses                 | Implemented (`ellipse`)     | `basketball_sam3.rect`                                                                                                                                                            | Live playground   | Maintain closed ellipse, arc, rotation, fill, and stroke coverage                      |
+| Markers                  | Implemented (`marker`)      | `basketball_sam3.rect` and keypoint anchors                                                                                                                                       | Live playground   | Maintain shape, anchor, rotation, and media/screen-space size coverage                 |
+| Masks                    | Implemented (`mask`)        | `basketball_sam3.mask` (compressed RLE)                                                                                                                                           | Live playground   | Maintain mask-preparation and visual coverage                                          |
+| Heatmaps                 | Implemented (`heatmap`)     | `pebbles_anomaly` confirmed FoundAD tracker detections with scalar score crops                                                                                                    | Live playground   | Maintain score projection, palette, and temporal fixture coverage                      |
+| Depth maps               | Implemented (`depth`)       | `spring_stereo_depth`: Spring 0021 left view with two exact disparity clips, the dataset's ground truth and OpenCV StereoSGBM output (CC BY 4.0), one 16-bit PNG per frame        | Live playground   | Maintain preview and exact-frame pairing during playback and provenance coverage       |
+| Mask halos               | Implemented (`maskHalo`)    | `basketball_sam3.mask` (compressed RLE)                                                                                                                                           | Live playground   | Maintain artifact reuse, per-detection spread, and GPU-bound blur coverage             |
+| Labels                   | Implemented (`label`)       | `basketball_sam3.className` and `confidence`                                                                                                                                      | Live playground   | Maintain label layout and contrast coverage                                            |
+| Polygons                 | Implemented (`polygon`)     | `basketball_sam3.polygon`                                                                                                                                                         | Live playground   | Maintain contour and fill/stroke coverage                                              |
+| Keypoints and skeletons  | Implemented (`keypoints`)   | `basketball_sam3.keypoints` including edges and visibility                                                                                                                        | Live playground   | Maintain pose association and visibility coverage                                      |
+| Polylines                | Implemented (`polyline`)    | `basketball_sam3` motion-gated basketball track plus mask (versioned bounded center trace)                                                                                        | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
 | Regions                  | Implemented (`region`)      | `basketball_regions` stabilized direct SAM3 head masks, original media, badges, and `player-fire.gif`; pre-normalized `basketball_sam3` team-player masks for blur and pixelation | Live playground   | Maintain media-effect resource lifetime and fixture provenance                         |
 
 The basketball fixtures are therefore the current visual baseline for eleven
@@ -397,16 +400,16 @@ coverage and has no runtime keypoint dependency.
 
 ### Gaps Before New Facades
 
-| Gap                                               | Status                                           | Earliest prerequisite                                                                                                                   |
-| ------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Open-path fixture for the existing polyline layer | Completed with `basketball_geometry`             | Maintain frozen trace derivation, source identity, and visual regression evidence                                                       |
-| Marker and ellipse primitives                     | Completed with focused renderers and playgrounds | Add named facades only when they improve discovery without creating a parallel backend path                                             |
-| Asset and media region composition                | Completed with `basketball_regions`              | Maintain asset lifetime, exact coverage, viewport redraw, and stable fixture identity                                                   |
-| Region replacement composition                    | Deferred by product decision                     | A true replacement needs background reconstruction or a caller-provided prepared source; an overlay remains the honest current contract |
-| Oriented quadrilateral renderer                   | No first-class public annotation renderer        | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture                                                     |
-| Prepared mask/media effects                       | Completed with `region.source.effect`            | Maintain exact-coverage, resource-lifetime, and fixture regression evidence                                                             |
-| Temporal overlays                                 | No timeline-derived public annotation renderer   | Temporal-window primitive plus frozen stable identities and canonical media-time behavior                                               |
-| Analytical guides and HUD                         | No public analytics annotation renderer          | Shared guide/HUD primitives plus `vehicles_zone_v1` with frozen zone state and events                                                   |
+| Gap                                               | Status                                             | Earliest prerequisite                                                                                                                   |
+| ------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Open-path fixture for the existing polyline layer | Completed with `basketball_sam3`                   | Maintain frozen trace derivation, source identity, and visual regression evidence                                                       |
+| Marker and ellipse primitives                     | Completed with focused renderers and playgrounds   | Add named facades only when they improve discovery without creating a parallel backend path                                             |
+| Asset and media region composition                | Completed with `basketball_regions`                | Maintain asset lifetime, exact coverage, viewport redraw, and stable fixture identity                                                   |
+| Region replacement composition                    | Deferred by product decision                       | A true replacement needs background reconstruction or a caller-provided prepared source; an overlay remains the honest current contract |
+| Oriented quadrilateral renderer                   | Completed with `annotationRenderers.orientedBox()` | Maintain explicit OBB geometry, shared closed-path drawing, and the documented synthetic basketball fixture rotation                    |
+| Prepared mask/media effects                       | Completed with `region.source.effect`              | Maintain exact-coverage, resource-lifetime, and fixture regression evidence                                                             |
+| Temporal overlays                                 | No timeline-derived public annotation renderer     | Temporal-window primitive plus frozen stable identities and canonical media-time behavior                                               |
+| Analytical guides and HUD                         | No public analytics annotation renderer            | Shared guide/HUD primitives plus `vehicles_zone_v1` with frozen zone state and events                                                   |
 
 No annotator facade may be added ahead of the matching row's primitive and
 fixture evidence. Each facade remains one pull request after those prerequisites
@@ -435,7 +438,7 @@ normalized asset.
 
 | Fixture                          | Media                                                              | Authoring model and deterministic processing                                                                                                                                                                                      | Primary coverage                                                                                                 |
 | -------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Existing `basketball_geometry`   | Keep the committed normalized basketball media                     | Regeneration target: `yolov8m-pose-640`; retain existing SAM3 masks, pose-to-mask association, compressed RLE, and the explicitly derived motion-gated bounded basketball trace. Derive explicitly marked covariance when needed. | Existing shapes, masks, polygons, polylines, keypoints, skeletons, oriented boxes, covariance, and media effects |
+| Existing `basketball_sam3`       | Keep the committed normalized basketball media                     | Regeneration target: `yolov8m-pose-640`; retain existing SAM3 masks, pose-to-mask association, compressed RLE, and the explicitly derived motion-gated bounded basketball trace. Derive explicitly marked covariance when needed. | Existing shapes, masks, polygons, polylines, keypoints, skeletons, oriented boxes, covariance, and media effects |
 | `vehicles_zone_v1`               | Candidate 10.0-22.0 s interval, finalized after a tracking preview | `yolov8s-640`; car, truck, bus, and motorcycle; confidence >= 0.25; pinned ByteTrack at 30000/1001 fps; frozen line/polygon coordinates, open-path guides, and events.                                                            | Polylines, traces, line zones, polygon zones, counts, and multiclass HUD                                         |
 | Optional `skiing_pose_stress_v1` | Full source or deterministic high-motion interval                  | `yolov8m-pose-640`; preserve missing and low-confidence joints                                                                                                                                                                    | Seek, motion, and occlusion stress for pose and trace rendering                                                  |
 
@@ -637,10 +640,12 @@ prepared source proves the semantics and fixture.
 
 ### Phase 3: Remaining Geometry And Compound Facades
 
-6. **Oriented box.** Add one oriented-quadrilateral renderer/facade using an
-   explicit quadrilateral or a named, versioned mask-derived minimum-area
-   rectangle. Reuse polygon/path drawing internally and use a frozen fixture;
-   do not silently reinterpret the center-based `Rect` contract.
+6. **Oriented box, completed.** `annotationRenderers.orientedBox()` draws
+   explicit `Detection.orientedBox` vertices through the shared closed-path
+   primitive. The frozen basketball fixture uses a documented synthetic
+   22-degree rotation of each eligible basketball rectangle. `Rect` remains
+   independent and axis-aligned. Mask-derived minimum-area boxes remain
+   producer-owned; OBB rotation and vertex editing are not implemented.
 7. **Vertex label.** Resolve labels from visible keypoints and lower them to the
    shared text/label machinery without fabricating detections.
 8. **Pose covariance foundation, no facade.** Add the pure, versioned covariance
@@ -749,8 +754,9 @@ Review every roadmap PR against these questions:
    repository, rather than remaining linked references?
 2. Should the first release expose only factory-built recipes or also a
    low-level custom recipe extension?
-3. Does simultaneous segmentation-polygon and oriented-box data justify an
-   `orientedBox` field, or should adapters continue lowering it to polygons?
+3. Resolved: `Detection.orientedBox` is separate from `polygon` and `rect`, so
+   simultaneous geometries can be styled independently without overwriting
+   segmentation data.
 4. Which recipes should the experimental React Native backend support first?
 5. Which source capability should prove a finite, complete range for
    full-timeline heat maps?
@@ -763,6 +769,12 @@ Review every roadmap PR against these questions:
    coverage gap?
 10. Which Inference image digest and aliases become the first frozen authoring
     toolchain?
+11. For `depth_m` and `relative_inverse` clips, should the 8-bit preview carry
+    normalised inverse depth or the native value? Previews are limited to
+    `disparity_px` until the Python producer settles it.
+12. When a second producer (live in-browser models, React Native) needs to
+    supply depth frames, should the internal depth frame provider become a
+    public source contract?
 
 ## Decision
 

@@ -17,6 +17,7 @@ export interface PixiMaskBrushPreview {
 
 export function createPixiMaskBrushPreview(options: {
   readonly preview: MaskBrushPreviewOptions;
+  readonly onInvalidate?: () => void;
   readonly CanvasSource: new (options: {
     dynamic: boolean;
     height: number;
@@ -43,18 +44,24 @@ export function createPixiMaskBrushPreview(options: {
   const cursor = new options.Graphics();
   const display = new options.Container();
   let viewportScale = 1;
+  let isDestroyed = false;
+  let invalidationQueued = false;
 
   sprite.width = editor.canvas.width;
   sprite.height = editor.canvas.height;
   sprite.alpha = options.preview.alpha ?? 0.4;
-  sprite.tint = options.preview.color ?? 0x22c55e;
   display.addChild(sprite, cursor);
 
   const updateTexture = () => {
+    sprite.tint = options.preview.color ?? 0x22c55e;
     source.update();
+    scheduleInvalidation();
   };
   const unsubscribeTexture = editor.subscribeTextureUpdates(updateTexture);
-  const unsubscribeCursor = editor.subscribeCursorUpdates(drawCursor);
+  const unsubscribeCursor = editor.subscribeCursorUpdates(() => {
+    drawCursor();
+    scheduleInvalidation();
+  });
   drawCursor();
 
   return {
@@ -64,6 +71,7 @@ export function createPixiMaskBrushPreview(options: {
       drawCursor();
     },
     destroy() {
+      isDestroyed = true;
       unsubscribeCursor();
       unsubscribeTexture();
       texture.destroy();
@@ -71,7 +79,18 @@ export function createPixiMaskBrushPreview(options: {
     },
   };
 
+  function scheduleInvalidation() {
+    const onInvalidate = options.onInvalidate;
+    if (!onInvalidate || isDestroyed || invalidationQueued) return;
+    invalidationQueued = true;
+    queueMicrotask(() => {
+      invalidationQueued = false;
+      if (!isDestroyed) onInvalidate();
+    });
+  }
+
   function drawCursor() {
+    sprite.tint = options.preview.color ?? 0x22c55e;
     cursor.clear();
     const state = editor.getCursor();
     if (!state.point) return;

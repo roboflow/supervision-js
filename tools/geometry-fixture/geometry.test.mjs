@@ -365,7 +365,7 @@ describe("stabilizeHeadDetectionFrames", () => {
         {
           frameIndex: 1,
           headDetections: [],
-          playerDetections: [],
+          playerDetections: [player(1)],
         },
         {
           frameIndex: 2,
@@ -374,11 +374,13 @@ describe("stabilizeHeadDetectionFrames", () => {
         },
       ],
       {
-        fillGap: ({ sourceHead, sourcePlayer, targetPlayer }) => ({
-          ...sourceHead,
+        fillGap: ({ interpolationAmount, nextHead, previousHead }) => ({
+          ...previousHead,
           rect: {
-            ...sourceHead.rect,
-            x: sourceHead.rect.x + targetPlayer.rect.x - sourcePlayer.rect.x,
+            ...previousHead.rect,
+            x:
+              previousHead.rect.x +
+              (nextHead.rect.x - previousHead.rect.x) * interpolationAmount,
           },
         }),
         sourceId: "sam3-head",
@@ -404,7 +406,49 @@ describe("stabilizeHeadDetectionFrames", () => {
     assert.equal(result.summary.continuedLowConfidenceHeadCount, 1);
   });
 
-  it("uses the other boundary when the nearest mask cannot be translated", () => {
+  it("hands the gap filler both bracketing observations", () => {
+    const calls = [];
+    const result = stabilizeHeadDetectionFrames(
+      [
+        {
+          frameIndex: 0,
+          headDetections: [head(0, 0.8)],
+          playerDetections: [player(0)],
+        },
+        { frameIndex: 1, headDetections: [], playerDetections: [player(1)] },
+        { frameIndex: 2, headDetections: [], playerDetections: [player(2)] },
+        {
+          frameIndex: 3,
+          headDetections: [head(3, 0.8)],
+          playerDetections: [player(3)],
+        },
+      ],
+      {
+        fillGap: (call) => {
+          calls.push(call);
+
+          return { ...call.previousHead };
+        },
+        sourceId: "sam3-head",
+        targetClassNames: ["yellow team player"],
+      },
+    );
+
+    assert.deepEqual(
+      calls.map(({ interpolationAmount, nextHead, previousHead }) => [
+        previousHead.id,
+        nextHead.id,
+        interpolationAmount,
+      ]),
+      [
+        ["raw:0", "raw:3", 1 / 3],
+        ["raw:0", "raw:3", 2 / 3],
+      ],
+    );
+    assert.equal(result.summary.gapFilledHeadCount, 2);
+  });
+
+  it("leaves a gap frame empty when its player track has no detection", () => {
     const result = stabilizeHeadDetectionFrames(
       [
         {
@@ -420,23 +464,14 @@ describe("stabilizeHeadDetectionFrames", () => {
         },
       ],
       {
-        fillGap: ({ sourceHead }) =>
-          sourceHead.id === "raw:0"
-            ? undefined
-            : {
-                ...sourceHead,
-                metadata: { gapFillBoundary: "next" },
-              },
+        fillGap: ({ previousHead }) => ({ ...previousHead }),
         sourceId: "sam3-head",
         targetClassNames: ["yellow team player"],
       },
     );
 
-    assert.equal(
-      result.detectionsByFrame.get(1)[0].metadata.gapFillBoundary,
-      "next",
-    );
-    assert.equal(result.summary.gapFilledHeadCount, 1);
+    assert.deepEqual(result.detectionsByFrame.get(1), []);
+    assert.equal(result.summary.gapFilledHeadCount, 0);
   });
 
   it("pads and smooths crops without excluding current mask bounds", () => {

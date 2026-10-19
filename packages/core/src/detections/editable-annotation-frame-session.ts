@@ -225,7 +225,20 @@ function assertStableIds(frame: DetectionFrame) {
 
 function createSnapshot(frame: DetectionFrame): DetectionFrame {
   const snapshot = copySortedDetectionFrames([frame])[0]!;
-  return deepFreeze(snapshot);
+  // Non-empty typed arrays cannot be frozen. Convert only editor snapshots to
+  // plain arrays so their scores remain immutable to snapshot consumers.
+  return deepFreeze({
+    ...snapshot,
+    detections: snapshot.detections.map((detection) => {
+      const heatmap = detection.heatmap;
+      return heatmap && ArrayBuffer.isView(heatmap.values)
+        ? {
+            ...detection,
+            heatmap: { ...heatmap, values: Array.from(heatmap.values) },
+          }
+        : detection;
+    }),
+  });
 }
 
 function deepFreeze<T>(value: T): T {

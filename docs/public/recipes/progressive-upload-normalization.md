@@ -33,7 +33,7 @@ const session = await createMediaSession({
 
 ## Track Progress
 
-Use `session.subscribe()` to track normalization, playback gates, and render
+Use `session.subscribe()` to track normalization, playback buffering, and render
 preparation:
 
 ```ts

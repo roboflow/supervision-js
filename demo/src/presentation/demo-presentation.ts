@@ -2,11 +2,13 @@ import {
   BoxStrokeAlignment,
   BoxShape,
   BaseMarkerStyle,
+  BasePercentageBarStyle,
   BaseFocusStyle,
   BaseBoxCornerStyle,
   BaseInteractionStyle,
   BaseKeypointStyle,
   BaseLabelStyle,
+  BaseOrientedBoxStyle,
   BasePolygonStyle,
   BasePolylineStyle,
   DEFAULT_DETECTION_CLASS_STYLES,
@@ -16,8 +18,11 @@ import {
   LabelPlacement,
   MarkerShape,
   MaskRenderMode,
+  StrokeAlignment,
+  PercentageBarPlacement,
   annotationRenderers,
   type BoxDrawInstruction,
+  type AnnotationAntialiasing,
   type BoxCornerStyle,
   type BoxStyle,
   type BoxStyleContext,
@@ -32,10 +37,22 @@ import {
   type MaskStyle,
   type MarkerStyle,
   type MediaRendererPresentation,
+  type OrientedBoxStyle,
+  type PercentageBarStyle,
   type PolygonStyle,
   type PolylineStyle,
   resolveDetectionClassColorStyle,
 } from "supervision";
+import {
+  createDepthRenderer,
+  initialDepthSettings,
+  type DepthSettings,
+} from "../depth";
+import {
+  createDemoHeatmapRenderer,
+  initialDemoHeatmapSettings,
+  type DemoHeatmapSettings,
+} from "../heatmap";
 
 export type DemoClassStyle = DetectionClassColorStyle;
 
@@ -53,17 +70,26 @@ export const demoMarkerPositionOffsets = {
 
 export type DemoMarkerPosition = keyof typeof demoMarkerPositionOffsets;
 
-export interface DemoPresentationSettings {
+export interface DemoPresentationSettings extends DemoHeatmapSettings {
   readonly boxesEnabled: boolean;
   readonly boxCornersEnabled: boolean;
+  /** The fixture's depth clip, under every detection layer. */
+  readonly depthEnabled: boolean;
+  readonly depthStyle: DepthSettings;
   readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
+  readonly heatmapsEnabled: boolean;
   readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
   readonly markersEnabled: boolean;
+  readonly orientedBoxEnabled: boolean;
+  readonly percentageBarsEnabled: boolean;
   readonly polygonsEnabled: boolean;
   readonly polylinesEnabled: boolean;
+  readonly percentageBarHeight: number;
+  readonly percentageBarFillAlpha: number;
+  readonly percentageBarPlacement: PercentageBarPlacement;
   readonly boxCornerRadius: number;
   readonly boxCornerLength: number;
   readonly boxCornerStrokeWidth: number;
@@ -88,12 +114,16 @@ export interface DemoPresentationSettings {
   readonly maskMode: MaskRenderMode;
   readonly maskFillAlpha: number;
   readonly maskOpacity: number;
+  readonly annotationAntialiasing: AnnotationAntialiasing;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
+  readonly maskStrokeAlignment: StrokeAlignment;
   readonly markerPosition: DemoMarkerPosition;
   readonly markerShape: MarkerShape;
   readonly markerSize: number;
   readonly markerStrokeWidth: number;
+  readonly orientedBoxFillAlpha: number;
+  readonly orientedBoxStrokeWidth: number;
   readonly polygonFillAlpha: number;
   readonly polygonStrokeWidth: number;
   readonly polylineStrokeWidth: number;
@@ -112,18 +142,23 @@ export interface DemoPresentationSettings {
   readonly focusCornerRadius: number;
   readonly focusDimColor: number;
   readonly focusDimAlpha: number;
+  readonly focusRectFallbackEnabled: boolean;
   readonly focusTargetMode: FocusTargetMode;
 }
 
 export type DemoPresentationLayerSetting =
   | "boxesEnabled"
   | "boxCornersEnabled"
+  | "depthEnabled"
   | "ellipsesEnabled"
   | "focusEnabled"
+  | "heatmapsEnabled"
   | "keypointsEnabled"
   | "labelsEnabled"
   | "masksEnabled"
   | "markersEnabled"
+  | "orientedBoxEnabled"
+  | "percentageBarsEnabled"
   | "polygonsEnabled"
   | "polylinesEnabled";
 
@@ -131,18 +166,39 @@ export type DemoPresentationAvailability = Partial<
   Record<DemoPresentationLayerSetting, boolean>
 >;
 
-const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
-  "boxesEnabled",
-  "boxCornersEnabled",
-  "ellipsesEnabled",
-  "focusEnabled",
-  "keypointsEnabled",
-  "labelsEnabled",
-  "masksEnabled",
-  "markersEnabled",
-  "polygonsEnabled",
-  "polylinesEnabled",
-];
+export const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] =
+  [
+    "boxesEnabled",
+    "boxCornersEnabled",
+    "depthEnabled",
+    "ellipsesEnabled",
+    "focusEnabled",
+    "heatmapsEnabled",
+    "keypointsEnabled",
+    "labelsEnabled",
+    "masksEnabled",
+    "markersEnabled",
+    "orientedBoxEnabled",
+    "percentageBarsEnabled",
+    "polygonsEnabled",
+    "polylinesEnabled",
+  ];
+
+/**
+ * Whether anything in a presentation would draw a detection, which is what the
+ * workbench asks before it lets the detection buffer keep loading.
+ *
+ * Focus dims around detections without owning a renderer, so it counts on its
+ * own.
+ */
+export function demoPresentationDrawsAnnotations(
+  presentation: MediaRendererPresentation,
+): boolean {
+  return (
+    (presentation.renderers?.length ?? 0) > 0 ||
+    Boolean(presentation.focusStyle)
+  );
+}
 
 export function constrainDemoPresentationSettings(
   settings: DemoPresentationSettings,
@@ -187,6 +243,8 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxStrokeWidth: 2,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0,
+  depthEnabled: false,
+  depthStyle: initialDepthSettings,
   ellipseAxisRatio: 0.35,
   ellipseColor: null,
   ellipseStrokeWidth: 2,
@@ -195,6 +253,9 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   focusDimAlpha: 0.4,
   focusDimColor: 0x000000,
   focusEnabled: true,
+  focusRectFallbackEnabled: true,
+  heatmapsEnabled: false,
+  ...initialDemoHeatmapSettings,
   focusTargetMode: FocusTargetMode.Ambient,
   hiddenClasses: [],
   interactionHoverFillAlpha: 0.08,
@@ -221,14 +282,23 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   maskMode: MaskRenderMode.FillAndStroke,
   maskFillAlpha: 0.45,
   maskOpacity: 1,
+  annotationAntialiasing: false,
   maskStrokeAlpha: 1,
   maskStrokeWidth: 2,
+  maskStrokeAlignment: StrokeAlignment.Outside,
   masksEnabled: true,
   markerPosition: "center",
   markerShape: MarkerShape.Circle,
   markerSize: 14,
   markerStrokeWidth: 2,
   markersEnabled: false,
+  orientedBoxEnabled: false,
+  orientedBoxFillAlpha: 0.16,
+  orientedBoxStrokeWidth: 2,
+  percentageBarsEnabled: false,
+  percentageBarFillAlpha: 1,
+  percentageBarHeight: 8,
+  percentageBarPlacement: PercentageBarPlacement.Top,
   polygonFillAlpha: 0.08,
   polygonStrokeWidth: 2,
   polygonsEnabled: true,
@@ -261,6 +331,12 @@ export function createDemoPresentation(
   const markerStyle = settings.markersEnabled
     ? createDemoMarkerStyle(settings)
     : null;
+  const orientedBoxStyle = settings.orientedBoxEnabled
+    ? createDemoOrientedBoxStyle(settings)
+    : null;
+  const percentageBarStyle = settings.percentageBarsEnabled
+    ? createDemoPercentageBarStyle(settings)
+    : null;
   const polygonStyle = settings.polygonsEnabled
     ? createDemoPolygonStyle(settings)
     : null;
@@ -283,7 +359,10 @@ export function createDemoPresentation(
     keypointStyle,
     labelStyle,
     maskStyle,
+    annotationAntialiasing: settings.annotationAntialiasing,
     markerStyle,
+    orientedBoxStyle,
+    percentageBarStyle,
     polygonStyle,
     polylineStyle,
     maskHaloStyle,
@@ -295,12 +374,24 @@ export function createDemoPresentation(
       ...(ellipseStyle
         ? [annotationRenderers.ellipse({ style: ellipseStyle })]
         : []),
+      ...(settings.depthEnabled
+        ? [createDepthRenderer(settings.depthStyle)]
+        : []),
+      ...(settings.heatmapsEnabled
+        ? [createDemoHeatmapRenderer(settings)]
+        : []),
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
       ...(maskHaloStyle
         ? [annotationRenderers.maskHalo({ style: maskHaloStyle })]
         : []),
       ...(markerStyle
         ? [annotationRenderers.marker({ style: markerStyle })]
+        : []),
+      ...(orientedBoxStyle
+        ? [annotationRenderers.orientedBox({ style: orientedBoxStyle })]
+        : []),
+      ...(percentageBarStyle
+        ? [annotationRenderers.percentageBar({ style: percentageBarStyle })]
         : []),
       ...(polygonStyle
         ? [annotationRenderers.polygon({ style: polygonStyle })]
@@ -351,6 +442,29 @@ function createDemoBoxCornerStyle(
     stroke: (detection) => ({
       color: resolveClassStyle(detection, settings).stroke,
       width: settings.boxCornerStrokeWidth,
+    }),
+  });
+}
+
+/**
+ * Draws the fixture's hand-authored `orientedBox` quadrilaterals. This never
+ * derives a quadrilateral from `rect`: it only draws detections that already
+ * carry explicit oriented-box geometry, so it renders nothing on fixtures
+ * that do not declare any.
+ */
+function createDemoOrientedBoxStyle(
+  settings: DemoPresentationSettings,
+): OrientedBoxStyle {
+  return new BaseOrientedBoxStyle({
+    fill: (detection) => ({
+      alpha: settings.orientedBoxFillAlpha,
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.orientedBoxStrokeWidth,
     }),
   });
 }
@@ -419,13 +533,30 @@ function createDemoPolylineStyle(
   settings: DemoPresentationSettings,
 ): PolylineStyle {
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shadowStroke: createDemoPolylineShadowStroke(settings.polylineStrokeWidth),
+    shouldRender: (detection) =>
+      passesTrajectoryConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
       width: settings.polylineStrokeWidth,
     }),
   });
+}
+
+/**
+ * Contrast under a path that crosses whatever the media happens to show.
+ *
+ * A trajectory is drawn in its class color so it stays tied to the object it
+ * describes, and the basketball's orange over a wooden court is the case where
+ * that color alone leaves the path unreadable.
+ */
+export function createDemoPolylineShadowStroke(strokeWidth: number) {
+  return {
+    alpha: 0.55,
+    color: 0x000000,
+    width: strokeWidth + 1,
+  };
 }
 
 function createDemoKeypointStyle(
@@ -502,7 +633,9 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
       alpha: settings.focusDimAlpha,
       color: settings.focusDimColor,
     },
-    shape: resolveBoxShape(settings.focusCornerRadius),
+    shape: settings.focusRectFallbackEnabled
+      ? resolveBoxShape(settings.focusCornerRadius)
+      : null,
     shouldRender: (context) =>
       settings.focusTargetMode === FocusTargetMode.Ambient ||
       hasRenderableFocusTarget(context, settings),
@@ -588,6 +721,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
       settings.maskFillAlpha,
       settings.maskStrokeAlpha,
       settings.maskStrokeWidth,
+      settings.maskStrokeAlignment,
       serializeMaskClassStyles(settings.classStyles),
     ].join(":"),
     opacity: settings.maskOpacity,
@@ -614,11 +748,26 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
                 alpha: settings.maskStrokeAlpha,
                 color: style.stroke,
                 width: settings.maskStrokeWidth,
+                alignment: settings.maskStrokeAlignment,
               }
             : undefined,
       };
     },
   };
+}
+
+function createDemoPercentageBarStyle(
+  settings: DemoPresentationSettings,
+): PercentageBarStyle {
+  return new BasePercentageBarStyle({
+    fill: (detection) => ({
+      alpha: settings.percentageBarFillAlpha,
+      color: resolveClassStyle(detection, settings).stroke,
+    }),
+    height: settings.percentageBarHeight,
+    placement: settings.percentageBarPlacement,
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+  });
 }
 
 function createDemoMaskHaloStyle(
@@ -652,7 +801,6 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
       cornerRadius: settings.labelCornerRadius,
       paddingX: settings.labelPaddingX,
       paddingY: settings.labelPaddingY,
-      topCornersOnly: true,
     }),
     includeConfidence: settings.labelIncludeConfidence,
     offset: {
@@ -660,7 +808,9 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
       y: settings.labelOffsetY,
     },
     placement: settings.labelPlacement,
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) =>
+      passesConfidenceThreshold(detection, settings) &&
+      hasAnchorableGeometry(detection),
     textStyle: (detection) => ({
       color: resolveClassStyle(detection, settings).labelText,
       fontFamily:
@@ -685,11 +835,7 @@ function createDemoInteractionStyle(
     ),
     shouldRender: (detection) =>
       passesConfidenceThreshold(detection, settings) &&
-      (settings.boxesEnabled ||
-        settings.masksEnabled ||
-        settings.polygonsEnabled ||
-        settings.polylinesEnabled ||
-        settings.keypointsEnabled),
+      hasAnchorableGeometry(detection),
   });
 }
 
@@ -746,14 +892,18 @@ function createDemoInteractionPolylineStyle(
 ): PolylineStyle {
   const isSelected = state === DetectionInteractionState.Selected;
 
+  const strokeWidth = isSelected
+    ? settings.interactionSelectedStrokeWidth
+    : settings.interactionHoverStrokeWidth;
+
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shadowStroke: createDemoPolylineShadowStroke(strokeWidth),
+    shouldRender: (detection) =>
+      passesTrajectoryConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
-      width: isSelected
-        ? settings.interactionSelectedStrokeWidth
-        : settings.interactionHoverStrokeWidth,
+      width: strokeWidth,
     }),
   });
 }
@@ -871,6 +1021,46 @@ function passesConfidenceThreshold(
   settings: DemoPresentationSettings,
 ) {
   return (detection.confidence ?? 1) >= settings.confidenceThreshold;
+}
+
+/**
+ * The confidence threshold applied to a path rather than to a frame.
+ *
+ * Every other layer draws what the detection is claimed to be at this moment,
+ * so its own confidence is the number to filter on. A trajectory draws up to a
+ * second of accepted observations, and filtering that on the newest frame's
+ * score lets one weak frame erase a path built from twenty-five strong ones,
+ * which a viewer reads as the trail blinking. A fixture that measures its own
+ * tracks publishes that measurement, and the threshold keeps biting: a path
+ * whose observations are weak throughout still disappears.
+ */
+function passesTrajectoryConfidenceThreshold(
+  detection: Detection,
+  settings: DemoPresentationSettings,
+) {
+  const trajectoryConfidence = detection.metadata?.trajectoryConfidence;
+
+  return typeof trajectoryConfidence === "number"
+    ? trajectoryConfidence >= settings.confidenceThreshold
+    : passesConfidenceThreshold(detection, settings);
+}
+
+/**
+ * Whether the detection carries geometry a label or highlight can sit on.
+ *
+ * A mask counts because the mask highlight anchors to the mask itself, while
+ * a label anchors to the rect or, failing that, to the bounds of the polygon,
+ * polyline, or keypoint points.
+ */
+function hasAnchorableGeometry(detection: Detection) {
+  return (
+    detection.rect !== undefined ||
+    detection.mask !== undefined ||
+    detection.polygon !== undefined ||
+    detection.orientedBox !== undefined ||
+    detection.polyline !== undefined ||
+    detection.keypoints !== undefined
+  );
 }
 
 export function resolveDemoClassStyle(

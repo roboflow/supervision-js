@@ -99,10 +99,18 @@ export async function prepareSessionDetections(options: {
     };
   }
 
+  const writableSource = isWritableSource(detections.source)
+    ? detections.source
+    : undefined;
   return {
-    appendableSources: new Map(),
+    appendableSource: writableSource,
+    appendableSources: new Map(
+      writableSource ? [[writableSource.datasetId, writableSource]] : [],
+    ),
     detectionFrames: detections.frames,
-    detectionSource: detections.source,
+    detectionSource: detections.source
+      ? borrowDetectionSource(detections.source)
+      : undefined,
     sourcePresentations: [],
   };
 }
@@ -130,6 +138,7 @@ async function prepareMultiSourceSessionDetections(options: {
   }
 
   const appendableSources = new Map<string, WritableDetectionFrameSource>();
+  const ownedSources: WritableDetectionFrameSource[] = [];
   const compositeEntries: CompositeDetectionFrameSourceEntry[] = [];
 
   validateMediaSessionDetectionSources(detections.sources);
@@ -141,7 +150,13 @@ async function prepareMultiSourceSessionDetections(options: {
             appendable: sourceOptions.appendable,
             mode: options.mode,
           })
-        : undefined;
+        : isWritableSource(sourceOptions.source)
+          ? sourceOptions.source
+          : undefined;
+
+      if (sourceOptions.appendable && appendableSource) {
+        ownedSources.push(appendableSource);
+      }
 
       if (appendableSource) {
         appendableSources.set(sourceOptions.id, appendableSource);
@@ -151,13 +166,15 @@ async function prepareMultiSourceSessionDetections(options: {
         frames: sourceOptions.frames,
         id: sourceOptions.id,
         order: sourceOptions.order,
-        requiredForPlayback: sourceOptions.requiredForPlayback,
-        source: sourceOptions.source ?? appendableSource,
+        requiredForCoverage: sourceOptions.requiredForCoverage,
+        source: sourceOptions.source
+          ? borrowDetectionSource(sourceOptions.source)
+          : appendableSource,
         sync: sourceOptions.sync,
       });
     }
   } catch (error) {
-    for (const source of appendableSources.values()) {
+    for (const source of ownedSources) {
       source.destroy?.();
     }
 
@@ -174,6 +191,46 @@ async function prepareMultiSourceSessionDetections(options: {
       id: source.id,
       presentation: source.presentation,
     })),
+  };
+}
+
+function isWritableSource(
+  source: DetectionFrameSource | undefined,
+): source is WritableDetectionFrameSource {
+  const candidate = source as Partial<WritableDetectionFrameSource> | undefined;
+  return (
+    typeof candidate?.datasetId === "string" &&
+    (
+      [
+        "appendFrames",
+        "replaceFrames",
+        "clear",
+        "getVersion",
+        "getSummary",
+        "waitForRange",
+        "getAvailableRanges",
+      ] as const
+    ).every((method) => typeof candidate[method] === "function")
+  );
+}
+
+function borrowDetectionSource(
+  source: DetectionFrameSource,
+): DetectionFrameSource {
+  return {
+    loadFrames: source.loadFrames.bind(source),
+    ...(source.getVersion
+      ? { getVersion: source.getVersion.bind(source) }
+      : {}),
+    ...(source.getChangesSince
+      ? { getChangesSince: source.getChangesSince.bind(source) }
+      : {}),
+    ...(source.getAvailableRanges
+      ? { getAvailableRanges: source.getAvailableRanges.bind(source) }
+      : {}),
+    ...(source.waitForRange
+      ? { waitForRange: source.waitForRange.bind(source) }
+      : {}),
   };
 }
 

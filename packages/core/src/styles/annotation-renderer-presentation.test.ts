@@ -121,6 +121,8 @@ describe("annotation renderer presentation", () => {
       mask: annotationRenderers.mask,
       maskHalo: annotationRenderers.maskHalo,
       marker: annotationRenderers.marker,
+      orientedBox: annotationRenderers.orientedBox,
+      percentageBar: annotationRenderers.percentageBar,
       polygon: annotationRenderers.polygon,
       polyline: annotationRenderers.polyline,
     } as const;
@@ -162,6 +164,87 @@ describe("annotation renderer presentation", () => {
 
     expect(presentation.renderers).toEqual([first, second]);
     expect(presentation.boxStyle).toBeNull();
+  });
+
+  it("keeps multiple uniquely identified heatmap renderers", () => {
+    const first = annotationRenderers.heatmap({
+      id: "heat-low",
+      thresholdScale: 0.5,
+    });
+    const second = annotationRenderers.heatmap({
+      id: "heat-high",
+      thresholdScale: 1,
+    });
+
+    const presentation = resolveAnnotationRendererPresentation({
+      renderers: [first, second],
+    });
+
+    expect(presentation.renderers).toEqual([first, second]);
+  });
+
+  it("rejects invalid heatmap settings when the presentation is applied", () => {
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [annotationRenderers.heatmap({ maximumScore: 0 })],
+      }),
+    ).toThrow('Invalid heatmap renderer settings for "heatmap"');
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [
+          annotationRenderers.heatmap({
+            colorStops: [
+              { position: 0.8, color: 0xff0000 },
+              { position: 0.2, color: 0x00ff00 },
+            ],
+          }),
+        ],
+      }),
+    ).toThrow('Invalid heatmap renderer settings for "heatmap"');
+  });
+
+  it("accepts the depth renderer's defaults and every documented option", () => {
+    const left = annotationRenderers.depth({ id: "depth-left", wipe: 0.5 });
+    const right = annotationRenderers.depth({
+      colormap: "cividis",
+      id: "depth-right",
+      noDepthColor: 0x202020,
+      opacity: 0.6,
+      quantity: "depth",
+      range: { max: 12, min: 0.5 },
+      sampling: "edge-aware",
+    });
+
+    expect(
+      resolveAnnotationRendererPresentation({
+        renderers: [annotationRenderers.depth()],
+      }).renderers,
+    ).toEqual([{ id: "depth", kind: "depth" }]);
+    expect(
+      resolveAnnotationRendererPresentation({ renderers: [left, right] })
+        .renderers,
+    ).toEqual([left, right]);
+  });
+
+  it.each([
+    { colormap: "jet" },
+    { quantity: "height" },
+    { sampling: "bilinear" },
+    { range: "fixed" },
+    { range: { max: 1, min: 1 } },
+    { opacity: Number.NaN },
+    { wipe: 1.5 },
+    { noDepthColor: 0x1000000 },
+  ])("rejects invalid depth setting %j", (settings) => {
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [
+          annotationRenderers.depth(
+            settings as Parameters<typeof annotationRenderers.depth>[0],
+          ),
+        ],
+      }),
+    ).toThrow('Invalid depth renderer settings for "depth"');
   });
 
   it("keeps source-specific style overrides after renderer normalization", () => {

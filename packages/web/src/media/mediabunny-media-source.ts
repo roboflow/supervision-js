@@ -1,7 +1,9 @@
 import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
+import { readMediabunnyFrameClock } from "#media/mediabunny-frame-clock";
 import { normalizeMediaSourcePresentationTimeline } from "#media/presentation-timeline-media-source";
 import type { DecodedMediaSource } from "./media-source";
 import { createMediabunnySampleSink } from "./mediabunny-sample-sink";
+import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaRendererSource } from "#types/media-renderer";
 import { MediaErrorKind } from "supervision-js-core";
 import type { InputFormat, Source } from "mediabunny";
@@ -12,6 +14,9 @@ export interface MediabunnyMediaSourceInput {
     readonly duration?: number | null;
   };
   readonly source: Source;
+  /** Set when the source cannot be indexed yet, such as a file still being
+   *  written. */
+  readonly frameClockUnavailableReason?: string;
 }
 
 const FRAME_RATE_SAMPLE_PACKET_COUNT = 120;
@@ -52,10 +57,19 @@ export async function openMediabunnyMediaSource(
     const primaryVideoTrack = await input.getPrimaryVideoTrack();
 
     if (!primaryVideoTrack) {
-      throw new MediaSourceError(
-        MediaErrorKind.NoVideoTrack,
-        "No video track found in media source.",
-      );
+      // A file whose streams are all in formats mediabunny does not carry
+      // reaches here with an empty track list: its video is unreachable, not
+      // absent. Only a listed set of tracks with no video in it says anything
+      // about the file.
+      throw tracks.length === 0
+        ? new MediaSourceError(
+            MediaErrorKind.UnsupportedFormat,
+            "The container opened and mediabunny parsed no track out of it.",
+          )
+        : new MediaSourceError(
+            MediaErrorKind.NoVideoTrack,
+            "The media source's tracks read and none of them carries video.",
+          );
     }
 
     const packetStatsPromise =
@@ -66,13 +80,19 @@ export async function openMediabunnyMediaSource(
             })
             .catch(() => null)
         : Promise.resolve(null);
-    const [displayWidth, displayHeight, firstTimestamp, packetStats] =
-      await Promise.all([
-        primaryVideoTrack.getDisplayWidth(),
-        primaryVideoTrack.getDisplayHeight(),
-        primaryVideoTrack.getFirstTimestamp(),
-        packetStatsPromise,
-      ]);
+    const [
+      displayWidth,
+      displayHeight,
+      firstTimestamp,
+      timeResolution,
+      packetStats,
+    ] = await Promise.all([
+      primaryVideoTrack.getDisplayWidth(),
+      primaryVideoTrack.getDisplayHeight(),
+      primaryVideoTrack.getFirstTimestamp(),
+      primaryVideoTrack.getTimeResolution(),
+      packetStatsPromise,
+    ]);
 
     const duration = isUrlSourceInput(sourceInput)
       ? metadataDuration
@@ -88,7 +108,25 @@ export async function openMediabunnyMediaSource(
         ? Math.max(1, Math.round(duration * estimatedFrameRate))
         : null;
 
+    const frameClockUnavailableReason = isUrlSourceInput(sourceInput)
+      ? undefined
+      : sourceInput.frameClockUnavailableReason;
+    let frameClock: Promise<MediaFrameClock> | undefined;
+
     return normalizeMediaSourcePresentationTimeline({
+      ...(frameClockUnavailableReason === undefined
+        ? {
+            readFrameClock() {
+              frameClock ??= readMediabunnyFrameClock(primaryVideoTrack);
+              // A walk that failed, say on a dropped connection, is retried
+              // by the next caller.
+              frameClock.catch(() => {
+                frameClock = undefined;
+              });
+              return frameClock;
+            },
+          }
+        : { frameClockUnavailableReason }),
       input,
       metadata: {
         audioTrackCount: audioTracks.length,
@@ -102,6 +140,7 @@ export async function openMediabunnyMediaSource(
         mimeType,
         primaryVideoHeight: displayHeight,
         primaryVideoWidth: displayWidth,
+        timeResolution,
         trackCount: tracks.length,
         videoTrackCount: videoTracks.length,
       },

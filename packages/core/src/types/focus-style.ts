@@ -33,7 +33,8 @@ export interface FocusDrawInstruction {
   readonly fill: FocusFillStyle;
   readonly targets: readonly DetectionPickResult[];
   readonly targetMode?: FocusTargetMode;
-  readonly fallback?: FocusFallbackStyle;
+  /** Set to null to leave rectangle-only targets dimmed. */
+  readonly fallback?: FocusFallbackStyle | null;
   readonly ambient?: boolean;
 }
 

@@ -7,6 +7,8 @@ export type PolylineStyleContext = AnnotationStyleContext;
 export interface PolylineDrawInstruction {
   readonly points: readonly Point[];
   readonly stroke: BoxStrokeStyle;
+  /** Drawn under `stroke` so the path reads over any media beneath it. */
+  readonly shadowStroke?: BoxStrokeStyle;
 }
 
 export interface PolylineStyle {

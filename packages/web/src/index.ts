@@ -76,6 +76,17 @@ export type {
   DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
+export type { MediaFrameClock } from "#types/media-frame-clock";
+export type {
+  PresentedFrameChannel,
+  PresentedFrameChannelSignal,
+  PresentedFrameChannelStatus,
+  PresentedFrameId,
+  PresentedFramePlayhead,
+  PresentedFrameSeekIntent,
+  PresentedFrameSource,
+  PresentedVideoFrame,
+} from "#renderers/presented-frame-channel";
 export {
   createImageUrlMediaSource,
   createStaticImageMediaSource,
@@ -93,10 +104,31 @@ export {
   isMediaSourceError,
   toMediaSourceError,
 } from "#media/media-errors";
+export {
+  createWebVideoEngineMediaRendererSource,
+  openWebVideoEngineMediaSource,
+  type WebVideoEngineMediaSource,
+  type WebVideoEngineMediaSourceOptions,
+} from "#media/video-engine-media-source";
 
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
+export type {
+  PreparedAnnotationWindowFrame,
+  PreparedAnnotationWindowSnapshot,
+} from "#renderers/prepared-annotation-window";
 export { createMediaSession } from "#sessions/media-session";
+export type { MediaRendererDisplay } from "#types/media-renderer-display";
+export type {
+  MediaFrameLanding,
+  MediaFrameNavigation,
+  MediaFrameScrub,
+  MediaFrameScrubSettlement,
+} from "#types/media-frame-navigation";
+export {
+  resolveMediaSessionDefaults,
+  type ResolvedMediaSessionDefaults,
+} from "#sessions/media-session-defaults";
 export type {
   MediaFrameCapture,
   MediaFrameCaptureOptions,
@@ -117,6 +149,8 @@ export { BaseMaskStyle } from "supervision-js-core";
 export type { BaseMaskStyleOptions } from "supervision-js-core";
 export { BaseMarkerStyle } from "supervision-js-core";
 export type { BaseMarkerStyleOptions } from "supervision-js-core";
+export { BaseOrientedBoxStyle } from "supervision-js-core";
+export type { BaseOrientedBoxStyleOptions } from "supervision-js-core";
 export { BasePolygonStyle } from "supervision-js-core";
 export type { BasePolygonStyleOptions } from "supervision-js-core";
 export { BasePolylineStyle } from "supervision-js-core";
@@ -131,12 +165,17 @@ export {
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
   type BoxCornerAnnotationRenderer,
+  type DepthAnnotationRenderer,
   type EllipseAnnotationRenderer,
+  type HeatmapAnnotationRenderer,
+  type HeatmapColorStop,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
   type MaskHaloAnnotationRenderer,
   type MarkerAnnotationRenderer,
+  type OrientedBoxAnnotationRenderer,
+  type PercentageBarAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
@@ -180,6 +219,7 @@ export {
   type DetectionClassColorStyle,
 } from "supervision-js-core";
 export { BoxShape, BoxStrokeAlignment } from "supervision-js-core";
+export { StrokeAlignment } from "supervision-js-core";
 export type {
   BoxCornerDrawInstruction,
   BoxCornerStyle,
@@ -237,6 +277,19 @@ export type {
   MarkerDrawInstruction,
   MarkerStyle,
   MarkerStyleContext,
+} from "supervision-js-core";
+export {
+  BasePercentageBarStyle,
+  PercentageBarPlacement,
+  type BasePercentageBarStyleOptions,
+  type PercentageBarDrawInstruction,
+  type PercentageBarStyle,
+  type PercentageBarStyleContext,
+} from "supervision-js-core";
+export type {
+  OrientedBoxDrawInstruction,
+  OrientedBoxStyle,
+  OrientedBoxStyleContext,
 } from "supervision-js-core";
 export type {
   PolygonDrawInstruction,
@@ -303,11 +356,13 @@ export {
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionHeatmap,
   type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
   type KeypointGeometry,
+  type OrientedBoxGeometry,
   type Point,
   type PolygonGeometry,
   type PolylineGeometry,
@@ -318,6 +373,32 @@ export {
   type SkeletonVertexDefinition,
   type TopLeftRect,
 } from "supervision-js-core";
+export {
+  DepthColormap,
+  DepthMapKind,
+  DepthPreviewLevels,
+  DepthQuantity,
+  DepthSampling,
+  computeDepthPercentileRange,
+  depthColormapColors,
+  parseDepthManifest,
+  readDepthAt,
+  type DepthCamera,
+  type DepthClipFrames,
+  type DepthImageEntry,
+  type DepthManifest,
+  type DepthMap,
+  type DepthPercentileRangeOptions,
+  type DepthPreviewTrack,
+  type DepthRange,
+  type DepthReadout,
+  type PreviewDepthSamples,
+  type ScaledDepthSamples,
+} from "supervision-js-core";
+export type {
+  ActiveDepthMap,
+  MediaRendererDepthInput,
+} from "#types/media-depth";
 export type {
   MediaFrameMetadata,
   MediaTimelineMetadata,
@@ -352,6 +433,7 @@ export {
   type MediaNormalizationOutputProgress,
   type MediaNormalizationProgress,
   type MediaNormalizationVideoOptions,
+  DEFAULT_NORMALIZATION_FRAME_RATE,
   type MediaProbeIssue,
   type MediaProbeOptions,
   type MediaProbeResult,
@@ -365,6 +447,7 @@ export {
   type MediaSession,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMediaBranch,
   MediaSessionMode,
   MediaSessionStatus,
   type MediaSessionActivity,
@@ -375,6 +458,7 @@ export {
   type MediaSessionDetectionSyncOptions,
   type MediaSessionDetectionWriteOptions,
   type MediaSessionMedia,
+  type MediaSessionMediaPreparation,
   type MediaSessionMediaState,
   type MediaSessionNormalizationState,
   type MediaSessionNormalizationOptions,
@@ -385,12 +469,13 @@ export {
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
-export { MediaErrorKind } from "supervision-js-core";
+export { MediaErrorKind, PlaybackGateReach } from "supervision-js-core";
 export {
   DetectionTimelineOrigin,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,
+  type AnnotationAntialiasing,
   type MediaRendererDiagnosticsOptions,
   type MediaRendererAssetError,
   type DetectionLabelBounds,
@@ -413,6 +498,8 @@ export {
   type RenderPreparationActiveFrameDiagnostics,
   type RenderPreparationArtifactDiagnostics,
   type RenderPreparationArtifactWindowDiagnostics,
+  type DepthPlaybackSource,
+  type RenderPreparationDepthOptions,
   type RenderPreparationDiagnostics,
   type RenderPreparationMaskFrameOptions,
   type RenderPreparationOptions,

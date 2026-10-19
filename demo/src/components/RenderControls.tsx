@@ -1,16 +1,41 @@
-import { memo, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useState, type CSSProperties } from "react";
+import {
+  ControlNote,
+  ColorControl,
+  ControlSection,
+  ControlSubheading,
+  NumberControl,
+  SegmentedControl,
+  SliderControl,
+  toHexColor,
+  ToggleControl,
+} from "./InspectorControls";
 import {
   BoxStrokeAlignment,
   FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
+  StrokeAlignment,
 } from "supervision";
+import { DemoEvalHook } from "../eval-hooks";
+import { DepthStyleSection, type WorkbenchDepth } from "./DepthStyleSection";
+import { HeatmapStyleSection } from "./HeatmapStyleSection";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
   type DemoPresentationAvailability,
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
+
+import {
+  readDemoLibraryDefaults,
+  readDemoOptionOrigin,
+} from "../session/library-defaults";
+import { formatOptionFlag } from "../session/option-format";
+import type {
+  DemoSessionConfiguration,
+  DemoSessionOptions,
+} from "../session/session-options";
 
 enum RenderControlsTab {
   Global = "global",
@@ -20,12 +45,20 @@ enum RenderControlsTab {
 export const RenderControls = memo(function RenderControls({
   availability,
   classNames,
+  configuration,
+  depth,
   onChange,
+  onSessionOptionsChange,
+  sessionOptions,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
   readonly classNames: readonly string[];
+  readonly configuration: DemoSessionConfiguration | null;
+  readonly depth: WorkbenchDepth;
   readonly onChange: (settings: DemoPresentationSettings) => void;
+  readonly onSessionOptionsChange: (options: DemoSessionOptions) => void;
+  readonly sessionOptions: DemoSessionOptions;
   readonly settings: DemoPresentationSettings;
 }) {
   const [activeTab, setActiveTab] = useState(RenderControlsTab.Global);
@@ -96,8 +129,12 @@ export const RenderControls = memo(function RenderControls({
       {activeTab === RenderControlsTab.Global ? (
         <GlobalRenderControls
           availability={availability}
+          configuration={configuration}
+          depth={depth}
           onChange={updateSettings}
           onPatch={patchSettings}
+          onSessionOptionsChange={onSessionOptionsChange}
+          sessionOptions={sessionOptions}
           settings={settings}
         />
       ) : (
@@ -115,66 +152,113 @@ export const RenderControls = memo(function RenderControls({
 
 function GlobalRenderControls({
   availability,
+  configuration,
+  depth,
   onChange,
   onPatch,
+  onSessionOptionsChange,
+  sessionOptions,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
+  readonly depth: WorkbenchDepth;
   readonly onChange: <Key extends keyof DemoPresentationSettings>(
     key: Key,
     value: DemoPresentationSettings[Key],
   ) => void;
   readonly onPatch: (patch: Partial<DemoPresentationSettings>) => void;
+  readonly configuration: DemoSessionConfiguration | null;
+  readonly onSessionOptionsChange: (options: DemoSessionOptions) => void;
+  readonly sessionOptions: DemoSessionOptions;
   readonly settings: DemoPresentationSettings;
 }) {
+  const maskFrame = configuration?.resolved.renderPreparation.maskFrame;
+  const preparationGate =
+    configuration?.resolved.renderPreparation.playbackGate;
+  const libraryPreparationGate =
+    configuration === null
+      ? undefined
+      : readDemoLibraryDefaults(configuration).renderPreparation.playbackGate;
+  const waitingForMasks =
+    sessionOptions.preparationGateEnabled ?? preparationGate?.enabled ?? false;
+  const updateSessionOption = <Key extends keyof DemoSessionOptions>(
+    key: Key,
+    value: DemoSessionOptions[Key],
+  ) => {
+    onSessionOptionsChange({ ...sessionOptions, [key]: value });
+  };
   const segmentationEnabled = settings.masksEnabled || settings.polygonsEnabled;
   const segmentationUnavailable =
     availability?.masksEnabled === false &&
     availability?.polygonsEnabled === false;
+  // The sample's depth stays switched on across a path that cannot play it,
+  // and a ticked switch would say it is drawn there.
+  const depthDrawn =
+    settings.depthEnabled && availability?.depthEnabled !== false;
 
   return (
     <div className="render-controls__panel render-controls__panel--global">
-      <ControlSection title="Layers">
+      <ControlSection evalHook={DemoEvalHook.LayersSection} title="Layers">
         <div className="render-controls__toggles">
           <ToggleControl
             checked={settings.boxesEnabled}
             disabled={availability?.boxesEnabled === false}
+            evalHook={DemoEvalHook.BoxesToggle}
             label="Boxes"
             onChange={(checked) => onChange("boxesEnabled", checked)}
           />
           <ToggleControl
             checked={settings.masksEnabled}
             disabled={availability?.masksEnabled === false}
+            evalHook={DemoEvalHook.MasksToggle}
             label="Masks"
             onChange={(checked) => onChange("masksEnabled", checked)}
           />
           <ToggleControl
+            checked={settings.heatmapsEnabled}
+            disabled={availability?.heatmapsEnabled === false}
+            label="Heatmap"
+            onChange={(checked) => onChange("heatmapsEnabled", checked)}
+          />
+          <ToggleControl
+            checked={depthDrawn}
+            disabled={availability?.depthEnabled === false}
+            label="Depth"
+            tooltip="A sample's depth clip: exact depth while playing when it keeps up, 8-bit preview depth otherwise, and exact depth once playback rests."
+            onChange={(checked) => onChange("depthEnabled", checked)}
+          />
+          <ToggleControl
             checked={settings.polygonsEnabled}
             disabled={availability?.polygonsEnabled === false}
+            evalHook={DemoEvalHook.PolygonsToggle}
             label="Polygons"
             onChange={(checked) => onChange("polygonsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.polylinesEnabled}
             disabled={availability?.polylinesEnabled === false}
+            evalHook={DemoEvalHook.PolylinesToggle}
             label="Polylines"
             onChange={(checked) => onChange("polylinesEnabled", checked)}
           />
           <ToggleControl
             checked={settings.keypointsEnabled}
             disabled={availability?.keypointsEnabled === false}
+            evalHook={DemoEvalHook.KeypointsToggle}
             label="Keypoints"
             onChange={(checked) => onChange("keypointsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.labelsEnabled}
             disabled={availability?.labelsEnabled === false}
+            evalHook={DemoEvalHook.LabelsToggle}
             label="Labels"
             onChange={(checked) => onChange("labelsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.focusEnabled}
             disabled={availability?.focusEnabled === false}
+            evalHook={DemoEvalHook.FocusToggle}
             label="Focus"
             onChange={(checked) => onChange("focusEnabled", checked)}
           />
@@ -232,6 +316,7 @@ function GlobalRenderControls({
 
       <ControlSection
         enabled={segmentationEnabled}
+        evalHook={DemoEvalHook.SegmentationSection}
         onToggleEnabled={(checked) =>
           onPatch({
             masksEnabled: checked && availability?.masksEnabled !== false,
@@ -241,7 +326,7 @@ function GlobalRenderControls({
         title="Segmentation"
         toggleDisabled={segmentationUnavailable}
       >
-        <SubLayerHeading
+        <SubLayerToggle
           checked={settings.masksEnabled}
           disabled={availability?.masksEnabled === false}
           label="Masks"
@@ -280,6 +365,7 @@ function GlobalRenderControls({
         />
         <SliderControl
           disabled={!settings.masksEnabled}
+          evalHook={DemoEvalHook.MaskBorderSlider}
           label="Border"
           max={8}
           min={0}
@@ -287,6 +373,17 @@ function GlobalRenderControls({
           step={1}
           value={settings.maskStrokeWidth}
           valueLabel={`${settings.maskStrokeWidth}px`}
+        />
+        <SegmentedControl
+          disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
+          label="Border Align"
+          onChange={(value) => onChange("maskStrokeAlignment", value)}
+          options={[
+            { label: "Outside", value: StrokeAlignment.Outside },
+            { label: "Center", value: StrokeAlignment.Center },
+            { label: "Inside", value: StrokeAlignment.Inside },
+          ]}
+          value={settings.maskStrokeAlignment}
         />
         <SliderControl
           disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
@@ -298,7 +395,84 @@ function GlobalRenderControls({
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
         />
-        <SubLayerHeading
+        {configuration === null ? null : (
+          <>
+            <ControlSubheading>Mask quality</ControlSubheading>
+            <ControlNote>
+              Changing mask settings reopens the clip at the current playhead.
+            </ControlNote>
+            <NumberControl
+              label="Mask preview scale"
+              libraryDefault="0.5"
+              max={1}
+              min={0.01}
+              onChange={(value) =>
+                updateSessionOption("maskPreviewScale", value)
+              }
+              optionPath="maskFrame.previewScale"
+              origin={readDemoOptionOrigin(
+                sessionOptions.maskPreviewScale,
+                sessionOptions.maskPreviewScale ??
+                  maskFrame?.previewScale ??
+                  0.5,
+                0.5,
+              )}
+              placeholder="0.5"
+              step={0.05}
+              tooltip="Masks shown during fast movement use this fraction of the display-fitted width cap, bounded by native mask dimensions. Raise it for sharper previews at greater CPU and memory cost; 1 keeps the full fitted resolution. The visible frame refines when motion stops. `renderer.renderPreparation.maskFrame.previewScale`, default 0.5."
+              value={sessionOptions.maskPreviewScale ?? maskFrame?.previewScale}
+            />
+            <ToggleControl
+              checked={waitingForMasks}
+              label="Mask playback gate enabled"
+              libraryDefault={formatOptionFlag(
+                libraryPreparationGate?.enabled ?? false,
+              )}
+              onChange={(checked) =>
+                updateSessionOption("preparationGateEnabled", checked)
+              }
+              optionPath="renderPreparation.playbackGate.enabled"
+              origin={readDemoOptionOrigin(
+                sessionOptions.preparationGateEnabled,
+                waitingForMasks,
+                libraryPreparationGate?.enabled ?? false,
+              )}
+              tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
+            />
+            <SegmentedControl
+              label="Mask presentation quality"
+              libraryDefault="Adaptive"
+              onChange={(value) =>
+                updateSessionOption("preparationGateQuality", value)
+              }
+              optionPath="renderPreparation.playbackGate.quality"
+              origin={readDemoOptionOrigin(
+                sessionOptions.preparationGateQuality,
+                sessionOptions.preparationGateQuality ??
+                  preparationGate?.quality ??
+                  "adaptive",
+                "adaptive",
+              )}
+              options={[
+                { label: "Adaptive", value: "adaptive" },
+                { label: "Fine", value: "fine" },
+              ]}
+              tooltip="Adaptive accepts smaller mask previews during fast movement. With the mask playback gate enabled, Fine waits for the full display-fitted resolution during playback, scrubbing and seeking. It can increase CPU usage and buffering; the max-wait bound still applies. `renderer.renderPreparation.playbackGate.quality`, default Adaptive."
+              value={
+                sessionOptions.preparationGateQuality ??
+                preparationGate?.quality ??
+                "adaptive"
+              }
+            />
+            {waitingForMasks ? null : (
+              <ControlNote>
+                The mask gate is off. Enable it to apply the selected
+                presentation quality.
+              </ControlNote>
+            )}
+          </>
+        )}
+        <SubLayerToggle
           checked={settings.polygonsEnabled}
           disabled={availability?.polygonsEnabled === false}
           label="Polygons"
@@ -325,6 +499,25 @@ function GlobalRenderControls({
           valueLabel={formatPercent(settings.polygonFillAlpha)}
         />
       </ControlSection>
+
+      <HeatmapStyleSection
+        available={availability?.heatmapsEnabled !== false}
+        enabled={settings.heatmapsEnabled}
+        onChange={onPatch}
+        onToggleEnabled={(checked) => onChange("heatmapsEnabled", checked)}
+        settings={settings}
+      />
+
+      <DepthStyleSection
+        available={availability?.depthEnabled !== false}
+        depth={depth}
+        enabled={depthDrawn}
+        onChange={(patch) =>
+          onChange("depthStyle", { ...settings.depthStyle, ...patch })
+        }
+        onToggleEnabled={(checked) => onChange("depthEnabled", checked)}
+        settings={settings.depthStyle}
+      />
 
       <ControlSection
         enabled={settings.polylinesEnabled}
@@ -498,6 +691,13 @@ function GlobalRenderControls({
             { label: "Both", value: FocusTargetMode.HoveredAndSelected },
           ]}
           value={settings.focusTargetMode}
+        />
+        <ToggleControl
+          checked={settings.focusRectFallbackEnabled}
+          disabled={!settings.focusEnabled}
+          label="Use box fallback"
+          onChange={(checked) => onChange("focusRectFallbackEnabled", checked)}
+          tooltip="Allows detection boxes to cut out focus. Masks, polygons and heatmaps keep their own shapes."
         />
         <ColorControl
           disabled={!settings.focusEnabled}
@@ -677,56 +877,7 @@ function ClassRenderControls({
   );
 }
 
-function ControlSection({
-  children,
-  enabled,
-  onToggleEnabled,
-  title,
-  toggleDisabled = false,
-}: {
-  readonly children: ReactNode;
-  readonly enabled?: boolean;
-  readonly onToggleEnabled?: (enabled: boolean) => void;
-  readonly title: string;
-  readonly toggleDisabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <section className="render-control-section">
-      <div className="render-control-section__header">
-        <button
-          aria-expanded={open}
-          className="render-control-section__toggle"
-          onClick={() => setOpen((current) => !current)}
-          type="button"
-        >
-          <h3>{title}</h3>
-          <span
-            aria-hidden="true"
-            className="render-control-section__chevron"
-          />
-        </button>
-        {onToggleEnabled ? (
-          <label className="render-control-section__enable">
-            <input
-              aria-label={`Enable ${title.toLowerCase()} layer`}
-              checked={enabled}
-              disabled={toggleDisabled}
-              onChange={(event) => onToggleEnabled(event.currentTarget.checked)}
-              type="checkbox"
-            />
-          </label>
-        ) : null}
-      </div>
-      {open ? (
-        <div className="render-control-section__body">{children}</div>
-      ) : null}
-    </section>
-  );
-}
-
-function SubLayerHeading({
+function SubLayerToggle({
   checked,
   disabled = false,
   label,
@@ -738,34 +889,7 @@ function SubLayerHeading({
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="render-control-section__subheading-row">
-      <h4 className="render-control-section__subheading">{label}</h4>
-      <label className="render-control-section__enable">
-        <input
-          aria-label={`Enable ${label.toLowerCase()} layer`}
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.currentTarget.checked)}
-          type="checkbox"
-        />
-      </label>
-    </div>
-  );
-}
-
-function ToggleControl({
-  checked,
-  disabled = false,
-  label,
-  onChange,
-}: {
-  readonly checked: boolean;
-  readonly disabled?: boolean;
-  readonly label: string;
-  readonly onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="render-control render-control--toggle">
+    <label className="render-control-section__group">
       <input
         checked={checked}
         disabled={disabled}
@@ -777,125 +901,10 @@ function ToggleControl({
   );
 }
 
-function SegmentedControl<Value extends string>({
-  disabled = false,
-  label,
-  onChange,
-  options,
-  value,
-}: {
-  readonly disabled?: boolean;
-  readonly label: string;
-  readonly onChange: (value: Value) => void;
-  readonly options: readonly {
-    readonly label: string;
-    readonly value: Value;
-  }[];
-  readonly value: Value;
-}) {
-  return (
-    <div className="render-control render-control--segmented">
-      <span className="render-control__label">
-        <span>{label}</span>
-      </span>
-      <div className="render-control__segments">
-        {options.map((option) => (
-          <button
-            aria-pressed={option.value === value}
-            disabled={disabled}
-            key={option.value}
-            onClick={() => onChange(option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ColorControl({
-  disabled = false,
-  label,
-  onChange,
-  value,
-}: {
-  readonly disabled?: boolean;
-  readonly label: string;
-  readonly onChange: (value: number) => void;
-  readonly value: number;
-}) {
-  return (
-    <label className="class-color-control">
-      <span>{label}</span>
-      <input
-        disabled={disabled}
-        onChange={(event) =>
-          onChange(Number.parseInt(event.currentTarget.value.slice(1), 16))
-        }
-        type="color"
-        value={toHexColor(value)}
-      />
-    </label>
-  );
-}
-
-function SliderControl({
-  disabled = false,
-  label,
-  max,
-  min,
-  onChange,
-  step,
-  value,
-  valueLabel,
-}: {
-  readonly disabled?: boolean;
-  readonly label: string;
-  readonly max: number;
-  readonly min: number;
-  readonly onChange: (value: number) => void;
-  readonly step: number;
-  readonly value: number;
-  readonly valueLabel: string;
-}) {
-  const progress = max === min ? 0 : ((value - min) / (max - min)) * 100;
-
-  return (
-    <label
-      className="render-control render-control--slider"
-      style={{ "--control-progress": `${progress}%` } as SliderControlStyle}
-    >
-      <span className="render-control__label">
-        <span>{label}</span>
-        <strong>{valueLabel}</strong>
-      </span>
-      <input
-        disabled={disabled}
-        max={max}
-        min={min}
-        onChange={(event) => onChange(Number(event.currentTarget.value))}
-        step={step}
-        type="range"
-        value={value}
-      />
-    </label>
-  );
-}
-
 type ClassColorStyle = CSSProperties & {
   readonly "--class-color": string;
 };
 
-type SliderControlStyle = CSSProperties & {
-  readonly "--control-progress": string;
-};
-
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
-}
-
-function toHexColor(color: number) {
-  return `#${color.toString(16).padStart(6, "0").slice(-6)}`;
 }

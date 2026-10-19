@@ -1,4 +1,9 @@
 import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
+import type {
   AnnotationStyleContext,
   BufferedDetectionTimeline,
   Detection,
@@ -40,6 +45,11 @@ import {
   type PixiRegionEffect,
 } from "./pixi-region-effect";
 import type { PixiActiveRegionMaskCoverage } from "./pixi-mask-layer";
+import { createPixiAnnotationAntialiasFilter } from "./pixi-annotation-antialias";
+import {
+  syncPixiMaskViewportBounds,
+  type PixiViewportBounds,
+} from "./pixi-mask-viewport";
 
 type RegionAsset = PixiTexture | PixiGifSource;
 type RegionDisplay = PixiSprite | PixiGifSprite;
@@ -62,6 +72,10 @@ interface RegionSpriteEntry {
   readonly rendererId: string;
   readonly sourceKey: string;
   coverageMask?: PixiGraphics;
+  coverageMaskContainer?: PixiContainer;
+  coverageMaskEffect?: PixiAlphaMask;
+  antialiasFilter?: PixiFilter;
+  alphaCoverage?: boolean;
   exactCoverageMask?: PixiRegionCoverageMask;
   effect?: PixiRegionEffect;
   active: boolean;
@@ -89,16 +103,21 @@ export interface PixiRegionLayerState {
 export interface PixiRegionLayer {
   createContainer(): PixiContainer;
   drawFrame(mediaTime: number, viewportScale?: number): PixiRegionLayerState;
+  /** Whether the last drawn frame shows an asset that animates on its own. */
+  hasAnimatedDisplay(): boolean;
+  releaseMaskTexture(texture: PixiTexture): void;
+  setAntialiasResolution(resolution: number): void;
   setRenderers(renderers: readonly RegionAnnotationRenderer[]): void;
+  syncViewportBounds(): void;
   translateDetection(id: string | number, x: number, y: number): boolean;
   destroy(): void;
 }
 
+type RegionMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
+
 /** Browser implementation for asset- and media-backed region descriptors. */
 export function createPixiRegionLayer(options: {
-  readonly AlphaMask: new (options: {
-    mask: PixiMesh<PixiMeshGeometry, PixiShader>;
-  }) => PixiAlphaMask;
+  readonly AlphaMask: new (options: { mask: PixiContainer }) => PixiAlphaMask;
   readonly BlurFilter?: new (options: {
     kernelSize?: number;
     quality?: number;
@@ -123,17 +142,8 @@ export function createPixiRegionLayer(options: {
     scaleMode?: "linear" | "nearest";
     width: number;
   }) => PixiImageSource;
-  readonly Mesh: new (options: {
-    geometry: PixiMeshGeometry;
-    shader: PixiShader;
-  }) => PixiMesh<PixiMeshGeometry, PixiShader>;
-  readonly MeshGeometry: new (options: {
-    indices: Uint32Array;
-    positions: Float32Array;
-    shrinkBuffersToFit: boolean;
-    topology: "triangle-list";
-    uvs: Float32Array;
-  }) => PixiMeshGeometry;
+  readonly Mesh: InjectedMeshConstructor<RegionMesh>;
+  readonly MeshGeometry: InjectedMeshGeometryConstructor;
   readonly Rectangle: new (
     x?: number,
     y?: number,
@@ -141,12 +151,7 @@ export function createPixiRegionLayer(options: {
     height?: number,
   ) => PixiRectangle;
   readonly Sprite: new (options: { texture: PixiTexture }) => PixiSprite;
-  readonly Shader: {
-    from(options: {
-      gl: { fragment: string; vertex: string };
-      resources: Record<string, unknown>;
-    }): PixiShader;
-  };
+  readonly Shader: InjectedShaderFactory;
   readonly Texture: new (options: {
     readonly dynamic?: boolean;
     readonly frame?: PixiRectangle;
@@ -160,7 +165,12 @@ export function createPixiRegionLayer(options: {
     >,
   ) => PixiUniformGroup;
   readonly detectionTimeline: BufferedDetectionTimeline;
-  readonly getActiveRegionMaskCoverage: () => PixiActiveRegionMaskCoverage | null;
+  readonly getAnnotationAntialiasing?: () => boolean;
+  readonly getAntialiasResolution?: () => number;
+  readonly getViewportBounds?: () => PixiViewportBounds | undefined;
+  readonly getActiveRegionMaskCoverage: (
+    detectionFrameTime: number | null,
+  ) => PixiActiveRegionMaskCoverage | null;
   readonly getMediaTexture: () => PixiTexture | undefined;
   readonly onInvalidate?: () => void;
   readonly onAssetError?: (options: {
@@ -178,6 +188,7 @@ export function createPixiRegionLayer(options: {
   let currentMediaTime = 0;
   let currentViewportScale = 1;
   let destroyed = false;
+  let viewportBounds: PixiViewportBounds | undefined;
   let renderers = [...options.regionRenderers];
   const assets = new Map<
     string,
@@ -309,6 +320,7 @@ export function createPixiRegionLayer(options: {
               viewportScale,
             );
             updateEffect(entry, renderer, viewportScale);
+            updateAssetAntialiasing(entry, renderer);
             if (
               renderer.source.kind === RegionRendererSourceKind.Media &&
               mediaCrop &&
@@ -351,6 +363,34 @@ export function createPixiRegionLayer(options: {
       return { activeDetectionIndexes: [...activeDetectionIndexes] };
     },
 
+    hasAnimatedDisplay() {
+      for (const entry of entries.values()) {
+        if (isAnimatedDisplay(entry.display)) return true;
+      }
+      return false;
+    },
+
+    releaseMaskTexture(texture) {
+      if (destroyed) return;
+      for (const entry of entries.values()) {
+        entry.exactCoverageMask?.releaseTexture(texture.source);
+      }
+      for (const pool of pools.values()) {
+        for (const entry of pool) {
+          entry.exactCoverageMask?.releaseTexture(texture.source);
+        }
+      }
+    },
+
+    setAntialiasResolution(resolution) {
+      for (const entry of entries.values()) {
+        updateEntryResolution(entry, resolution);
+      }
+      for (const pool of pools.values()) {
+        for (const entry of pool) updateEntryResolution(entry, resolution);
+      }
+    },
+
     setRenderers(nextRenderers) {
       renderers = [...nextRenderers];
       syncSources();
@@ -367,9 +407,25 @@ export function createPixiRegionLayer(options: {
           entry.baseX + x,
           entry.baseY + y,
         );
+        syncEntryViewportBounds(entry);
         translated = true;
       }
       return translated;
+    },
+
+    syncViewportBounds() {
+      const next = options.getViewportBounds?.();
+      if (
+        next?.x === viewportBounds?.x &&
+        next?.y === viewportBounds?.y &&
+        next?.width === viewportBounds?.width &&
+        next?.height === viewportBounds?.height
+      )
+        return;
+      viewportBounds = next ? { ...next } : undefined;
+      for (const entry of entries.values()) {
+        if (entry.active) syncEntryViewportBounds(entry);
+      }
     },
 
     destroy() {
@@ -527,17 +583,25 @@ export function createPixiRegionLayer(options: {
     detectionIndex: number,
     crop: TopLeftCrop,
   ) {
-    if (
-      renderer.source.kind !== RegionRendererSourceKind.Media ||
-      renderer.source.coverage === undefined
-    ) {
+    if (renderer.source.kind !== RegionRendererSourceKind.Media) {
       removeCoverageMask(entry);
       return true;
     }
 
+    if (renderer.source.coverage === undefined) {
+      removeExactCoverageMask(entry);
+      if (!annotationAntialiasingEnabled()) {
+        removePolygonCoverageMask(entry);
+        return true;
+      }
+      return updateGraphicsCoverage(entry, renderer, crop);
+    }
+
     if (renderer.source.coverage.kind === RegionRendererCoverageKind.Mask) {
       removePolygonCoverageMask(entry);
-      const artifact = options.getActiveRegionMaskCoverage();
+      const artifact = options.getActiveRegionMaskCoverage(
+        currentFrame?.mediaTime ?? null,
+      );
 
       if (!detection.mask || !artifact) {
         removeExactCoverageMask(entry);
@@ -559,7 +623,14 @@ export function createPixiRegionLayer(options: {
       const mask =
         entry.exactCoverageMask ??
         createPixiRegionCoverageMask({
+          getAnnotationAntialiasing: options.getAnnotationAntialiasing,
+          getAntialiasResolution: options.getAntialiasResolution,
+          getViewportBounds: options.getViewportBounds,
+          defaultFilterVert: options.defaultFilterVert,
+          Filter: options.Filter,
           AlphaMask: options.AlphaMask,
+          Container: options.Container,
+          Rectangle: options.Rectangle,
           ImageSource: options.ImageSource,
           Mesh: options.Mesh,
           MeshGeometry: options.MeshGeometry,
@@ -569,7 +640,7 @@ export function createPixiRegionLayer(options: {
 
       if (!entry.exactCoverageMask) {
         entry.exactCoverageMask = mask;
-        container?.addChild(mask.display);
+        container?.addChild(mask.container);
         // A Mesh assigned through `display.mask` becomes a stencil mask in
         // Pixi v8, which clips by the quad geometry and ignores shader alpha.
         // AlphaMask renders the id-sampling mesh to a GPU texture first, so
@@ -584,7 +655,7 @@ export function createPixiRegionLayer(options: {
         return false;
       }
 
-      mask.render({
+      const alphaCoverage = mask.render({
         artifact: { texture: coverageTexture },
         coverage: coverageEntry,
         crop,
@@ -596,6 +667,7 @@ export function createPixiRegionLayer(options: {
         x: entry.display.position.x,
         y: entry.display.position.y,
       });
+      setCoverageChannel(entry, alphaCoverage);
       return true;
     }
 
@@ -610,23 +682,41 @@ export function createPixiRegionLayer(options: {
 
     removeExactCoverageMask(entry);
 
+    return updateGraphicsCoverage(
+      entry,
+      renderer,
+      crop,
+      detection.polygon.points,
+    );
+  }
+
+  function updateGraphicsCoverage(
+    entry: RegionSpriteEntry,
+    renderer: RegionAnnotationRenderer,
+    crop: TopLeftCrop,
+    points?: readonly { readonly x: number; readonly y: number }[],
+  ) {
     const mask = entry.coverageMask ?? new options.Graphics();
     if (!entry.coverageMask) {
       entry.coverageMask = mask;
-      container?.addChild(mask);
-      entry.display.mask = mask;
+      entry.coverageMaskContainer = new options.Container();
+      entry.coverageMaskContainer.addChild(mask);
+      container?.addChild(entry.coverageMaskContainer);
     }
 
-    mask
-      .clear()
-      .poly(
-        detection.polygon.points.flatMap(({ x, y }) => [
+    mask.clear();
+    if (points) {
+      mask.poly(
+        points.flatMap(({ x, y }) => [
           x - crop.x - crop.width / 2,
           y - crop.y - crop.height / 2,
         ]),
         true,
-      )
-      .fill({ alpha: 1, color: 0xffffff });
+      );
+    } else {
+      mask.rect(-crop.width / 2, -crop.height / 2, crop.width, crop.height);
+    }
+    mask.fill({ alpha: 1, color: 0xffffff });
     mask.position.set(entry.display.position.x, entry.display.position.y);
     mask.scale.set(
       (entry.display.width / crop.width) *
@@ -635,7 +725,79 @@ export function createPixiRegionLayer(options: {
         (renderer.transform?.flip?.vertical ? -1 : 1),
     );
     mask.rotation = entry.display.rotation;
+
+    if (annotationAntialiasingEnabled()) {
+      entry.display.mask = null;
+      const effect =
+        entry.coverageMaskEffect ??
+        new options.AlphaMask({ mask: entry.coverageMaskContainer! });
+      if (!entry.coverageMaskEffect) entry.coverageMaskEffect = effect;
+      if (!entry.display.effects?.includes(effect)) {
+        effect.init(entry.coverageMaskContainer!);
+        entry.display.addEffect(effect);
+      }
+      const filter = ensureAntialiasFilter(entry, true);
+      if (filter && mask.filters?.[0] !== filter) mask.filters = [filter];
+      syncEntryViewportBounds(entry);
+      setCoverageChannel(entry, true);
+    } else {
+      if (entry.coverageMaskEffect) {
+        entry.display.removeEffect(entry.coverageMaskEffect);
+        entry.coverageMaskEffect.reset();
+      }
+      if (mask.filters?.length) mask.filters = null;
+      setCoverageChannel(entry, false);
+      entry.display.mask = mask;
+    }
     return true;
+  }
+
+  function syncEntryViewportBounds(entry: RegionSpriteEntry) {
+    entry.exactCoverageMask?.syncViewportBounds();
+    if (entry.coverageMaskContainer) {
+      syncPixiMaskViewportBounds(
+        entry.coverageMaskContainer,
+        options.getViewportBounds?.(),
+        options.Rectangle,
+      );
+    }
+  }
+
+  function annotationAntialiasingEnabled() {
+    return Boolean(
+      options.getAnnotationAntialiasing?.() &&
+      options.Filter &&
+      options.defaultFilterVert,
+    );
+  }
+
+  function ensureAntialiasFilter(
+    entry: RegionSpriteEntry,
+    maskCoverage = false,
+  ) {
+    if (!options.Filter || !options.defaultFilterVert) return undefined;
+    entry.antialiasFilter ??= createPixiAnnotationAntialiasFilter({
+      maskCoverage,
+      Filter: options.Filter,
+      defaultFilterVert: options.defaultFilterVert,
+      resolution: options.getAntialiasResolution?.(),
+    });
+    return entry.antialiasFilter;
+  }
+
+  function updateAssetAntialiasing(
+    entry: RegionSpriteEntry,
+    renderer: RegionAnnotationRenderer,
+  ) {
+    if (renderer.source.kind !== RegionRendererSourceKind.Asset) return;
+    if (annotationAntialiasingEnabled()) {
+      const filter = ensureAntialiasFilter(entry);
+      if (filter && entry.display.filters?.[0] !== filter) {
+        entry.display.filters = [filter];
+      }
+    } else if (entry.antialiasFilter && entry.display.filters?.length) {
+      entry.display.filters = null;
+    }
   }
 
   function updateEffect(
@@ -665,27 +827,6 @@ export function createPixiRegionLayer(options: {
     entry.effect?.apply(entry.display, viewportScale);
   }
 
-  function removeCoverageMask(entry: RegionSpriteEntry) {
-    removePolygonCoverageMask(entry);
-    removeExactCoverageMask(entry);
-  }
-
-  function removePolygonCoverageMask(entry: RegionSpriteEntry) {
-    if (!entry.coverageMask) return;
-    entry.display.mask = null;
-    entry.coverageMask.removeFromParent();
-    entry.coverageMask.destroy();
-    entry.coverageMask = undefined;
-  }
-
-  function removeExactCoverageMask(entry: RegionSpriteEntry) {
-    if (!entry.exactCoverageMask) return;
-    entry.display.removeEffect(entry.exactCoverageMask.effect);
-    entry.exactCoverageMask.display.removeFromParent();
-    entry.exactCoverageMask.destroy();
-    entry.exactCoverageMask = undefined;
-  }
-
   function destroyRendererDisplays(rendererId: string) {
     for (const [key, entry] of entries) {
       if (entry.rendererId !== rendererId) continue;
@@ -713,17 +854,54 @@ export function createPixiRegionLayer(options: {
   }
 }
 
+function setCoverageChannel(entry: RegionSpriteEntry, alpha: boolean) {
+  if ((entry.alphaCoverage ?? false) === alpha) return;
+  entry.display.setMask({ channel: alpha ? "alpha" : "red" });
+  entry.alphaCoverage = alpha;
+}
+
+function removeCoverageMask(entry: RegionSpriteEntry) {
+  removePolygonCoverageMask(entry);
+  removeExactCoverageMask(entry);
+}
+
+function removePolygonCoverageMask(entry: RegionSpriteEntry) {
+  if (!entry.coverageMask) return;
+  entry.display.mask = null;
+  if (entry.coverageMaskEffect) {
+    entry.display.removeEffect(entry.coverageMaskEffect);
+    entry.coverageMaskEffect.destroy();
+    entry.coverageMaskEffect = undefined;
+  }
+  destroyEntryAntialiasFilter(entry);
+  entry.coverageMask.removeFromParent();
+  entry.coverageMask.destroy();
+  entry.coverageMask = undefined;
+  entry.coverageMaskContainer?.removeFromParent();
+  entry.coverageMaskContainer?.destroy();
+  entry.coverageMaskContainer = undefined;
+  setCoverageChannel(entry, false);
+}
+
+function removeExactCoverageMask(entry: RegionSpriteEntry) {
+  if (!entry.exactCoverageMask) return;
+  entry.display.removeEffect(entry.exactCoverageMask.effect);
+  entry.exactCoverageMask.container.removeFromParent();
+  entry.exactCoverageMask.destroy();
+  entry.exactCoverageMask = undefined;
+  setCoverageChannel(entry, false);
+}
+
+function updateEntryResolution(entry: RegionSpriteEntry, resolution: number) {
+  if (entry.antialiasFilter) entry.antialiasFilter.resolution = resolution;
+  entry.exactCoverageMask?.setAntialiasResolution(resolution);
+}
+
 function destroyEntry(entry: RegionSpriteEntry) {
   entry.effect?.destroy();
   entry.effect = undefined;
-  entry.display.mask = null;
-  entry.coverageMask?.removeFromParent();
-  entry.coverageMask?.destroy();
-  if (entry.exactCoverageMask) {
-    entry.display.removeEffect(entry.exactCoverageMask.effect);
-    entry.exactCoverageMask.display.removeFromParent();
-    entry.exactCoverageMask.destroy();
-  }
+  removeCoverageMask(entry);
+  destroyEntryAntialiasFilter(entry);
   entry.display.removeFromParent?.();
   // GifSprite sources are shared and released through Assets.unload().
   entry.display.destroy();
@@ -732,12 +910,28 @@ function destroyEntry(entry: RegionSpriteEntry) {
   entry.ownedTexture?.destroy(false);
 }
 
+function destroyEntryAntialiasFilter(entry: RegionSpriteEntry) {
+  if (!entry.antialiasFilter) return;
+  if (entry.display.filters?.includes(entry.antialiasFilter)) {
+    entry.display.filters = null;
+  }
+  if (entry.coverageMask?.filters?.includes(entry.antialiasFilter)) {
+    entry.coverageMask.filters = null;
+  }
+  entry.antialiasFilter.destroy();
+  entry.antialiasFilter = undefined;
+}
+
+function isAnimatedDisplay(display: RegionDisplay): display is PixiGifSprite {
+  return "play" in display && typeof display.play === "function";
+}
+
 function pauseAnimatedDisplay(display: RegionDisplay) {
   if ("stop" in display && typeof display.stop === "function") display.stop();
 }
 
 function resumeAnimatedDisplay(display: RegionDisplay) {
-  if ("play" in display && typeof display.play === "function") display.play();
+  if (isAnimatedDisplay(display)) display.play();
 }
 
 function matchesTarget(

@@ -63,6 +63,9 @@
       <div>
         <p>
           Give a session a container and media. It prepares the renderer, exposes state for your UI, and provides playback and detection controls without asking React or your app to run another frame loop.
+          Indexed media sources also expose exact frame times and durations through <code>session.frameClock</code>.
+          Use <code>session.frameNavigation</code>, when available, for exact moves and observable scrub completion.
+          Display-box video engine sources can resize their output through <code>session.setDisplay()</code> while keeping the same session.
         </p>
         <a href="documents/Core_Concepts.Media_Sessions.html">Learn how media sessions work <span aria-hidden="true">→</span></a>
       </div>
@@ -101,13 +104,13 @@ console.log(state.status, state.activities);
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">02</span>
         <h3>Detection rendering</h3>
-        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, and multi-instance regions, selected from canonical media timing.</p>
+        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, heatmaps, depth maps, and multi-instance regions, selected from canonical media timing.</p>
         <a href="documents/Core_Concepts.Detections_And_Rendering.html">Detections and rendering</a>
       </article>
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">03</span>
         <h3>Interaction and editing</h3>
-        <p>Renderer-synchronized picking plus host-owned editing engines, persistence, undo/redo policy, and annotation commits.</p>
+        <p>Renderer-synchronized picking, Shift-click and marquee selection, plus host-owned editing engines, persistence, undo/redo policy, and annotation commits. Restore the full selection through <code>setSelectedDetection({ detectionIds })</code>.</p>
         <a href="documents/Recipes.Interactive_Picking.html">Interactive picking</a>
       </article>
     </div>

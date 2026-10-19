@@ -2,6 +2,8 @@ import type { Container as PixiContainer } from "pixi.js";
 
 export enum PixiSceneLayerKind {
   Media = "media",
+  Depth = "depth",
+  Heatmap = "heatmap",
   Mask = "mask",
   Box = "box",
   Vector = "vector",
@@ -68,6 +70,12 @@ function defaultLayerOrder(kind: string) {
   switch (kind) {
     case PixiSceneLayerKind.Media:
       return 0;
+    case PixiSceneLayerKind.Focus:
+      return 10;
+    case PixiSceneLayerKind.Depth:
+      return 25;
+    case PixiSceneLayerKind.Heatmap:
+      return 50;
     case PixiSceneLayerKind.Mask:
       return 100;
     case PixiSceneLayerKind.Box:
@@ -76,8 +84,6 @@ function defaultLayerOrder(kind: string) {
       return 250;
     case PixiSceneLayerKind.Region:
       return 275;
-    case PixiSceneLayerKind.Focus:
-      return 300;
     case PixiSceneLayerKind.Preview:
       return 400;
     case PixiSceneLayerKind.Guide:

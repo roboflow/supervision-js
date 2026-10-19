@@ -7,11 +7,31 @@ import type {
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import {
-  copySortedDetectionFrames,
   detectionFrameOverlapsRange,
+  sortedDetectionFrames,
 } from "supervision-js-core";
 
-const DEFAULT_MAX_CACHED_CHUNKS = 12;
+/**
+ * Chunks kept when the caller sets no cap, at least. Twelve evicted under any
+ * drag wider than twelve seconds and the scrub re-downloaded the dataset over
+ * and over (6.6x its size in 12 s on a 70 s clip); eighty covers a long clip
+ * end to end and measured nothing visible in memory.
+ */
+const UNPINNED_CACHE_FLOOR_CHUNKS = 80;
+/**
+ * Windows of cached chunks when the caller sets no cap: the one being served
+ * and the one before it. A cache that holds only the live window has nothing
+ * left to hand back, because every chunk outside it was evicted to make room.
+ */
+const CACHED_WINDOW_COUNT = 2;
+/**
+ * Chunk requests in flight at once when the caller sets no cap. A buffer window
+ * spans dozens of chunk files, and they queue behind the same connection the
+ * media's own range reads use, so an unbounded fan-out buys detection frames by
+ * starving decode. Four is the ceiling automatic mask preparation holds itself
+ * to against the same contention.
+ */
+const DEFAULT_MAX_CONCURRENT_CHUNK_FETCHES = 4;
 
 export function createChunkedDetectionFrameSource(
   options: ChunkedDetectionFrameSourceOptions,
@@ -20,11 +40,18 @@ export function createChunkedDetectionFrameSource(
   const fetchChunk =
     options.fetchChunk ??
     ((chunk) => fetchJsonDetectionFrameChunk(chunk, options.baseUrl));
-  const maxCachedChunks = options.maxCachedChunks ?? DEFAULT_MAX_CACHED_CHUNKS;
+  const pinnedMaxCachedChunks = options.maxCachedChunks;
+  const maxConcurrentChunkFetches =
+    options.maxConcurrentChunkFetches ?? DEFAULT_MAX_CONCURRENT_CHUNK_FETCHES;
+  let cacheCapacity = pinnedMaxCachedChunks ?? UNPINNED_CACHE_FLOOR_CHUNKS;
   let destroyed = false;
 
-  if (maxCachedChunks <= 0) {
+  if (cacheCapacity <= 0) {
     throw new Error("maxCachedChunks must be greater than 0.");
+  }
+
+  if (maxConcurrentChunkFetches <= 0) {
+    throw new Error("maxConcurrentChunkFetches must be greater than 0.");
   }
 
   return {
@@ -45,17 +72,27 @@ export function createChunkedDetectionFrameSource(
         return [];
       }
 
-      const loadedChunks = await Promise.all(
-        chunks.map((chunk) => loadChunk(chunk, fetchChunk, chunkCache)),
+      const loadedChunks = await mapWithConcurrency(
+        chunks,
+        maxConcurrentChunkFetches,
+        (chunk) => loadChunk(chunk, fetchChunk, chunkCache),
       );
+
+      if (pinnedMaxCachedChunks === undefined) {
+        cacheCapacity = Math.max(
+          cacheCapacity,
+          chunks.length * CACHED_WINDOW_COUNT,
+        );
+      }
 
       trimChunkCache(
         chunkCache,
-        maxCachedChunks,
+        cacheCapacity,
         new Set(chunks.map((chunk) => chunk.chunkIndex)),
       );
 
-      return copySortedDetectionFrames(
+      // Chunks are validated on load; warm windows only merge and sort them.
+      return sortDetectionFramesByTime(
         dedupeDetectionFrames(
           loadedChunks.flatMap((chunk) => chunk.frames),
         ).filter((frame) =>
@@ -85,6 +122,12 @@ function getOverlappingChunks(
   );
 }
 
+function sortDetectionFramesByTime(
+  frames: readonly DetectionFrame[],
+): DetectionFrame[] {
+  return [...frames].sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
 function loadChunk(
   chunk: DetectionFrameChunkDescriptor,
   fetchChunk: DetectionFrameChunkFetch,
@@ -98,16 +141,49 @@ function loadChunk(
     return cachedChunk;
   }
 
-  const chunkPromise = fetchChunk(chunk).catch((error: unknown) => {
-    if (chunkCache.get(chunk.chunkIndex) === chunkPromise) {
-      chunkCache.delete(chunk.chunkIndex);
-    }
+  const chunkPromise = fetchChunk(chunk)
+    .then((loaded) => ({
+      ...loaded,
+      // validated once, here, for the life of the cached chunk
+      frames: sortedDetectionFrames(loaded.frames),
+    }))
+    .catch((error: unknown) => {
+      if (chunkCache.get(chunk.chunkIndex) === chunkPromise) {
+        chunkCache.delete(chunk.chunkIndex);
+      }
 
-    throw error;
-  });
+      throw error;
+    });
 
   chunkCache.set(chunk.chunkIndex, chunkPromise);
   return chunkPromise;
+}
+
+/** Result order follows item order. Workers pull from a shared cursor, so a
+ *  slow item holds up only its own slot. */
+async function mapWithConcurrency<Item, Result>(
+  items: readonly Item[],
+  concurrency: number,
+  loadItem: (item: Item) => Promise<Result>,
+): Promise<Result[]> {
+  const results: Result[] = new Array<Result>(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const itemIndex = nextIndex;
+
+        nextIndex += 1;
+        results[itemIndex] = await loadItem(items[itemIndex]);
+      }
+    },
+  );
+
+  await Promise.all(workers);
+
+  return results;
 }
 
 function trimChunkCache(

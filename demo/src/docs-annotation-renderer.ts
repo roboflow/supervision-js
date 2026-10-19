@@ -1,5 +1,11 @@
-import { MarkerShape, type DetectionFrame } from "supervision";
 import {
+  MarkerShape,
+  PercentageBarPlacement,
+  StrokeAlignment,
+  type DetectionFrame,
+} from "supervision";
+import {
+  createDemoPolylineShadowStroke,
   demoMarkerPositionOffsets,
   type DemoMarkerPosition,
   type DemoPresentationSettings,
@@ -18,7 +24,9 @@ export const docsAnnotationRendererIds = [
   "masks",
   "mask-halo",
   "markers",
+  "percentage-bar",
   "labels",
+  "oriented-box",
   "polygons",
   "polylines",
   "keypoints",
@@ -28,6 +36,12 @@ export const docsAnnotationRendererIds = [
 
 export type DocsAnnotationRendererId =
   (typeof docsAnnotationRendererIds)[number];
+
+/** The ids the shared style playground draws, each with its own live snippet. */
+export type DocsStyleAnnotationRendererId = Exclude<
+  DocsAnnotationRendererId,
+  "regions" | "region-effects"
+>;
 
 export interface DocsAnnotationRendererControl {
   readonly key: NumericPresentationSetting;
@@ -39,7 +53,10 @@ export interface DocsAnnotationRendererControl {
 }
 
 export type DocsAnnotationRendererSelectSetting =
-  "markerPosition" | "markerShape";
+  | "markerPosition"
+  | "markerShape"
+  | "percentageBarPlacement"
+  | "maskStrokeAlignment";
 
 export interface DocsAnnotationRendererSelectControl {
   readonly key: DocsAnnotationRendererSelectSetting;
@@ -168,6 +185,17 @@ export const docsAnnotationRenderers: Readonly<
       },
     ],
     description: "Compressed RLE segmentation",
+    selects: [
+      {
+        key: "maskStrokeAlignment",
+        label: "Border alignment",
+        options: [
+          { label: "Outside", value: StrokeAlignment.Outside },
+          { label: "Center", value: StrokeAlignment.Center },
+          { label: "Inside", value: StrokeAlignment.Inside },
+        ],
+      },
+    ],
     title: "Masks",
   },
   "mask-halo": {
@@ -241,6 +269,43 @@ export const docsAnnotationRenderers: Readonly<
     ],
     title: "Markers",
   },
+  "percentage-bar": {
+    controls: [
+      {
+        key: "percentageBarHeight",
+        label: "Height",
+        max: 24,
+        min: 2,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "percentageBarFillAlpha",
+        label: "Fill opacity",
+        max: 1,
+        min: 0.1,
+        step: 0.05,
+        unit: "percent",
+      },
+    ],
+    description: "Proportional metric bars anchored to bounding boxes",
+    selects: [
+      {
+        key: "percentageBarPlacement",
+        label: "Placement",
+        options: [
+          { label: "Top", value: PercentageBarPlacement.Top },
+          { label: "Bottom", value: PercentageBarPlacement.Bottom },
+          { label: "Inside Top", value: PercentageBarPlacement.InsideTop },
+          {
+            label: "Inside Bottom",
+            value: PercentageBarPlacement.InsideBottom,
+          },
+        ],
+      },
+    ],
+    title: "Percentage Bar",
+  },
   labels: {
     controls: [
       {
@@ -270,6 +335,29 @@ export const docsAnnotationRenderers: Readonly<
     ],
     description: "Class names and confidence",
     title: "Labels",
+  },
+  "oriented-box": {
+    controls: [
+      {
+        key: "orientedBoxFillAlpha",
+        label: "Fill opacity",
+        max: 0.6,
+        min: 0,
+        step: 0.01,
+        unit: "percent",
+      },
+      {
+        key: "orientedBoxStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description:
+      "Explicit rotated quadrilateral, drawn through the same closed-path fill and stroke as polygons",
+    title: "Oriented Box",
   },
   polygons: {
     controls: [
@@ -342,6 +430,21 @@ export const docsAnnotationRenderers: Readonly<
   },
 };
 
+/**
+ * The region playgrounds compose their own renderers over the media, so every
+ * style layer the general demo offers is switched off for them.
+ */
+export const docsRegionPlaygroundPresentationSettings: Partial<DemoPresentationSettings> =
+  {
+    boxesEnabled: false,
+    focusEnabled: false,
+    keypointsEnabled: false,
+    labelsEnabled: false,
+    masksEnabled: false,
+    polygonsEnabled: false,
+    polylinesEnabled: false,
+  };
+
 export function parseDocsAnnotationRenderer(
   value: string | null,
 ): DocsAnnotationRendererId {
@@ -369,14 +472,19 @@ export function createDocsAnnotationRendererPresentation(
     maskHaloEnabled: renderer === "mask-halo",
     masksEnabled: renderer === "masks" || renderer === "polylines",
     markersEnabled: renderer === "markers",
+    percentageBarsEnabled: renderer === "percentage-bar",
     ...(renderer === "markers"
       ? {
           markerPosition: "bottom-center" as const,
           markerShape: MarkerShape.Triangle,
         }
       : {}),
+    orientedBoxEnabled: renderer === "oriented-box",
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
+    // The frame filter already scopes this page to the one derived trace, so
+    // the fixture's confidence gate can only subtract from it.
+    ...(renderer === "polylines" ? { confidenceThreshold: 0 } : {}),
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };
@@ -404,9 +512,9 @@ export function filterDocsAnnotationRendererFrames(
 }
 
 export function createDocsAnnotationRendererSnippet(
-  renderer: DocsAnnotationRendererId,
+  renderer: DocsStyleAnnotationRendererId,
   settings: DemoPresentationSettings,
-) {
+): string {
   switch (renderer) {
     case "boxes":
       return `session.setPresentation({
@@ -467,7 +575,7 @@ export function createDocsAnnotationRendererSnippet(
       style: new BaseMaskStyle({
         fillAlpha: ${formatNumber(settings.maskFillAlpha)},
         opacity: ${formatNumber(settings.maskOpacity)},
-        stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)} },
+        stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)}, alignment: StrokeAlignment.${settings.maskStrokeAlignment === StrokeAlignment.Inside ? "Inside" : settings.maskStrokeAlignment === StrokeAlignment.Center ? "Center" : "Outside"} },
       }),
     }),
   ],
@@ -509,6 +617,23 @@ export function createDocsAnnotationRendererSnippet(
     }),
   ],
 });`;
+    case "percentage-bar":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.percentageBar({
+      style: new BasePercentageBarStyle({
+        fill: (detection) => ({
+          alpha: ${formatNumber(settings.percentageBarFillAlpha)},
+          color: resolveDetectionClassColorStyle(detection.className).fill,
+        }),
+        height: ${formatNumber(settings.percentageBarHeight)},
+        placement: PercentageBarPlacement.${percentageBarPlacementMemberNames[settings.percentageBarPlacement]},
+        shouldRender: (detection) =>
+          (detection.confidence ?? 1) >= ${formatNumber(settings.confidenceThreshold)},
+      }),
+    }),
+  ],
+});`;
     case "labels":
       return `session.setPresentation({
   renderers: [
@@ -524,6 +649,17 @@ export function createDocsAnnotationRendererSnippet(
     }),
   ],
 });`;
+    case "oriented-box":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.orientedBox({
+      style: new BaseOrientedBoxStyle({
+        fill: { alpha: ${formatNumber(settings.orientedBoxFillAlpha)} },
+        stroke: { width: ${formatNumber(settings.orientedBoxStrokeWidth)} },
+      }),
+    }),
+  ],
+});`;
     case "polygons":
       return `session.setPresentation({
   renderers: [
@@ -535,16 +671,22 @@ export function createDocsAnnotationRendererSnippet(
     }),
   ],
 });`;
-    case "polylines":
+    case "polylines": {
+      const shadow = createDemoPolylineShadowStroke(
+        settings.polylineStrokeWidth,
+      );
+
       return `session.setPresentation({
   renderers: [
     annotationRenderers.polyline({
       style: new BasePolylineStyle({
+        shadowStroke: { alpha: ${formatNumber(shadow.alpha)}, color: ${formatColor(shadow.color)}, width: ${formatNumber(shadow.width)} },
         stroke: { width: ${formatNumber(settings.polylineStrokeWidth)} },
       }),
     }),
   ],
 });`;
+    }
     case "keypoints":
       return `session.setPresentation({
   renderers: [
@@ -554,18 +696,6 @@ export function createDocsAnnotationRendererSnippet(
         markerFill: { alpha: 1 },
         radius: ${formatNumber(settings.keypointRadius)},
       }),
-    }),
-  ],
-});`;
-    case "regions":
-      return `session.setPresentation({
-  renderers: [
-    annotationRenderers.region({
-      id: "player-fire",
-      target: { className: ["white team player", "yellow team player"] },
-      source: { kind: "asset", asset: { src: fireGifUrl } },
-      region: { kind: "keypoint-anchor", anchor: "head" },
-      compose: { mode: "over" },
     }),
   ],
 });`;
@@ -585,6 +715,15 @@ const markerShapeMemberNames: Readonly<Record<MarkerShape, string>> = {
   [MarkerShape.Cross]: "Cross",
   [MarkerShape.Square]: "Square",
   [MarkerShape.Triangle]: "Triangle",
+};
+
+const percentageBarPlacementMemberNames: Readonly<
+  Record<PercentageBarPlacement, string>
+> = {
+  [PercentageBarPlacement.Top]: "Top",
+  [PercentageBarPlacement.Bottom]: "Bottom",
+  [PercentageBarPlacement.InsideTop]: "InsideTop",
+  [PercentageBarPlacement.InsideBottom]: "InsideBottom",
 };
 
 function formatMarkerCoordinate(axis: "x" | "y", position: DemoMarkerPosition) {

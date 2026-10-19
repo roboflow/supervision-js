@@ -1,0 +1,64 @@
+/*
+ * The depth readout never changes height: a fixed number of single-line rows,
+ * values that cannot wrap, and figures of one width.
+ */
+.depth-readout {
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  display: grid;
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  gap: 0.35rem;
+  line-height: 1.25rem;
+  padding: 0.7rem 0.85rem;
+}
+
+.depth-readout header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.6rem;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.depth-readout header strong {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.depth-readout header span {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.depth-readout dl {
+  display: grid;
+  gap: 0.1rem;
+  grid-auto-rows: 1.25rem;
+  margin: 0;
+}
+
+.depth-readout dl > div {
+  align-items: baseline;
+  display: flex;
+  gap: 0.6rem;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.depth-readout dt {
+  color: var(--muted-strong);
+  white-space: nowrap;
+}
+
+.depth-readout dd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

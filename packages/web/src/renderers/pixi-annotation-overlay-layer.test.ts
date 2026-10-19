@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { Graphics, Polygon } from "pixi.js";
 
 import {
   AnnotationGestureStateKind,
+  applyAnnotationHandleDrag,
+  getAnnotationHandles,
   KeypointMarkerShape,
 } from "supervision-js-core";
 
@@ -34,6 +37,55 @@ function createGraphicsMock() {
 }
 
 describe("Pixi annotation overlay presentation", () => {
+  it.each([
+    { now: 0, viewportScale: 1 },
+    { now: 500, viewportScale: 2 },
+  ])(
+    "keeps loading arcs separate from other overlays at $viewportScale zoom",
+    ({ now, viewportScale }) => {
+      const graphics = new Graphics();
+      const detections = [
+        { id: "box-1", rect: { height: 20, width: 30, x: 40, y: 50 } },
+        { id: "box-2", rect: { height: 20, width: 30, x: 80, y: 70 } },
+      ];
+      const layer = createPixiAnnotationOverlayLayer();
+      layer.attachGraphics(graphics);
+      layer.draw({
+        frame: { detections, mediaTime: 0 },
+        marquee: null,
+        mediaHeight: 100,
+        mediaWidth: 100,
+        now,
+        pointer: null,
+        selectedDetectionIds: ["box-1"],
+        viewportScale,
+        visibility: { loadingDetectionIds: detections.map(({ id }) => id) },
+      });
+
+      const strokes = graphics.context.instructions
+        .filter((instruction) => instruction.action === "stroke")
+        .slice(-detections.length);
+      expect(strokes).toHaveLength(detections.length);
+      strokes.forEach((instruction, index) => {
+        const primitives = instruction.data.path.shapePath.shapePrimitives;
+        expect(primitives).toHaveLength(1);
+        const shape = primitives[0]!.shape;
+        expect(shape).toBeInstanceOf(Polygon);
+        if (!(shape instanceof Polygon))
+          throw new Error("Expected a loading arc");
+        expect(shape.closePath).toBe(false);
+        expect(shape.points.length).toBeGreaterThan(4);
+        const { x, y } = detections[index]!.rect;
+        for (let point = 0; point < shape.points.length; point += 2) {
+          expect(
+            Math.hypot(shape.points[point]! - x, shape.points[point + 1]! - y),
+          ).toBeCloseTo(10 / viewportScale, 8);
+        }
+      });
+      graphics.destroy();
+    },
+  );
+
   it("does not draw loading overlays for hidden detections", () => {
     const graphics = createGraphicsMock();
     const layer = createPixiAnnotationOverlayLayer();
@@ -90,7 +142,7 @@ describe("Pixi annotation overlay presentation", () => {
     });
 
     layer.attachGraphics(graphics as never);
-    layer.draw({
+    const context = {
       frame: undefined,
       marquee: null,
       mediaHeight: 100,
@@ -99,7 +151,8 @@ describe("Pixi annotation overlay presentation", () => {
       pointer: null,
       selectedDetectionIds: [],
       viewportScale: 2,
-    });
+    };
+    layer.draw(context);
 
     expect(graphics.roundRect).toHaveBeenCalledWith(25, 40, 30, 20, 0.5);
     expect(graphics.fill).toHaveBeenCalledWith({
@@ -111,6 +164,18 @@ describe("Pixi annotation overlay presentation", () => {
       color: 0xff0056,
       width: 1,
     });
+    expect(layer.getRenderedEditingBox()).toEqual({
+      detection: preview,
+      rect: preview.rect,
+    });
+    layer.setStyle({
+      editingPreview: {
+        boxFill: { alpha: 0, color: 0xff0056 },
+        stroke: { alpha: 0, color: 0xff0056, width: 2 },
+      },
+    });
+    layer.draw(context);
+    expect(layer.getRenderedEditingBox()).toBeUndefined();
   });
 
   it("resolves resize previews from the annotation being edited", () => {
@@ -387,6 +452,189 @@ describe("Pixi annotation overlay presentation", () => {
       10,
       expect.any(Number),
     );
+  });
+
+  it("keeps an oriented box visible as a rotated quadrilateral while dragging (OBB-only detection)", () => {
+    const graphics = createGraphicsMock();
+    const detection = {
+      id: "obb-1",
+      orientedBox: {
+        points: [
+          { x: 20, y: 10 },
+          { x: 30, y: 20 },
+          { x: 20, y: 30 },
+          { x: 10, y: 20 },
+        ] as const,
+      },
+    };
+    const frame = { detections: [detection], mediaTime: 0 };
+    const translatedPoints = [
+      { x: 50, y: 50 },
+      { x: 60, y: 60 },
+      { x: 50, y: 70 },
+      { x: 40, y: 60 },
+    ] as const;
+    const engine = {
+      getState: () => ({
+        activeDetectionId: "obb-1",
+        activeHandleId: null,
+        kind: AnnotationGestureStateKind.Moving,
+        pointerId: 1,
+        preview: { ...detection, orientedBox: { points: translatedPoints } },
+      }),
+      hasCreationTool: () => false,
+    };
+    const layer = createPixiAnnotationOverlayLayer(engine as never);
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: ["obb-1"],
+      viewportScale: 1,
+    });
+
+    // Testing coordinate translation alone (e.g. just the first point, or a
+    // derived center) would pass even if the preview silently degenerated
+    // into a 2-point line or an axis-aligned box -- assert the actual
+    // drawing commands use all four translated vertices, in order, and
+    // close the path.
+    expect(graphics.poly).toHaveBeenCalledWith(
+      translatedPoints.flatMap(({ x, y }) => [x, y]),
+      true,
+    );
+    expect(graphics.moveTo).toHaveBeenCalledWith(50, 50);
+    expect(graphics.lineTo).toHaveBeenNthCalledWith(1, 60, 60);
+    expect(graphics.lineTo).toHaveBeenNthCalledWith(2, 50, 70);
+    expect(graphics.lineTo).toHaveBeenNthCalledWith(3, 40, 60);
+    expect(graphics.closePath).toHaveBeenCalledTimes(1);
+    expect(graphics.roundRect).not.toHaveBeenCalled();
+  });
+
+  it("previews both independent geometries while moving an OBB plus rect", () => {
+    const graphics = createGraphicsMock();
+    const detection = {
+      id: "basketball-1",
+      orientedBox: {
+        points: [
+          { x: 20, y: 10 },
+          { x: 30, y: 20 },
+          { x: 20, y: 30 },
+          { x: 10, y: 20 },
+        ] as const,
+      },
+      rect: { height: 20, width: 20, x: 20, y: 20 },
+    };
+    const frame = { detections: [detection], mediaTime: 0 };
+    const translatedPoints = [
+      { x: 50, y: 50 },
+      { x: 60, y: 60 },
+      { x: 50, y: 70 },
+      { x: 40, y: 60 },
+    ] as const;
+    const engine = {
+      getState: () => ({
+        activeDetectionId: "basketball-1",
+        activeHandleId: null,
+        kind: AnnotationGestureStateKind.Moving,
+        pointerId: 1,
+        preview: {
+          ...detection,
+          orientedBox: { points: translatedPoints },
+          rect: { ...detection.rect, x: 50, y: 60 },
+        },
+      }),
+      hasCreationTool: () => false,
+    };
+    const layer = createPixiAnnotationOverlayLayer(engine as never);
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: ["basketball-1"],
+      viewportScale: 1,
+    });
+
+    expect(graphics.roundRect).toHaveBeenCalledWith(40, 50, 20, 20, 1);
+    expect(graphics.poly).toHaveBeenCalledWith(
+      translatedPoints.flatMap(({ x, y }) => [x, y]),
+      true,
+    );
+    expect(graphics.moveTo).toHaveBeenCalledWith(50, 50);
+    expect(graphics.lineTo.mock.calls.slice(-3)).toEqual([
+      [60, 60],
+      [50, 70],
+      [40, 60],
+    ]);
+    expect(graphics.closePath).toHaveBeenCalledTimes(2);
+  });
+
+  it("previews a resized rect without reshaping its independent OBB", () => {
+    const graphics = createGraphicsMock();
+    const detection = {
+      id: "ball",
+      orientedBox: {
+        points: [
+          { x: 20, y: 10 },
+          { x: 30, y: 20 },
+          { x: 20, y: 30 },
+          { x: 10, y: 20 },
+        ] as const,
+      },
+      rect: { x: 20, y: 20, width: 20, height: 20 },
+    };
+    const handle = getAnnotationHandles(detection).find(
+      ({ point }) => point.x === 30 && point.y === 30,
+    )!;
+    const preview = applyAnnotationHandleDrag(detection, handle, {
+      x: 50,
+      y: 40,
+    });
+    expect(preview.rect).toEqual({ x: 30, y: 25, width: 40, height: 30 });
+    expect(preview.orientedBox).toEqual(detection.orientedBox);
+    const engine = {
+      getState: () => ({
+        activeDetectionId: detection.id,
+        activeHandleId: handle.id,
+        kind: AnnotationGestureStateKind.Resizing,
+        pointerId: 1,
+        preview,
+      }),
+      hasCreationTool: () => false,
+    };
+    const layer = createPixiAnnotationOverlayLayer(engine as never);
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame: { detections: [detection], mediaTime: 0 },
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [detection.id],
+      viewportScale: 1,
+    });
+
+    expect(graphics.roundRect).toHaveBeenCalledWith(10, 10, 40, 30, 1);
+    expect(graphics.lineTo.mock.calls.slice(0, 3)).toEqual([
+      [50, 10],
+      [50, 40],
+      [10, 40],
+    ]);
+    expect(graphics.poly).toHaveBeenCalledWith(
+      detection.orientedBox.points.flatMap(({ x, y }) => [x, y]),
+      true,
+    );
+    expect(graphics.closePath).toHaveBeenCalledTimes(2);
   });
 
   it("lets keypoint handles hide behind their markers with keypointAlpha 0", () => {

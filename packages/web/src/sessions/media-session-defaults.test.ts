@@ -27,14 +27,14 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer).toEqual({
       bufferAheadSeconds: 10,
-      bufferBehindSeconds: 0.5,
+      bufferBehindSeconds: 5,
       frameRate: 30,
-      refreshIntervalSeconds: 0.5,
+      refreshIntervalSeconds: 2.5,
       selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
     });
     expect(defaults.renderPreparation).toMatchObject({
       maskFrame: {
-        maxCacheFrameCount: 240,
+        maxCacheFrameCount: 2700,
         maxPendingFrameCount: 24,
         prefetchFrameCount: 210,
         scanIntervalSeconds: 0.1,
@@ -42,8 +42,10 @@ describe("media session defaults", () => {
       },
       playbackGate: {
         enabled: true,
-        minimumAheadSeconds: 0.25,
+        maxWaitSeconds: 2,
         requiredAheadSeconds: 1,
+        resumeMarginWallSeconds: 0.2,
+        stopBelowWallSeconds: 0.1,
       },
     });
   });
@@ -87,7 +89,7 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.renderPreparation.maskFrame).toMatchObject({
-      maxCacheFrameCount: 80,
+      maxCacheFrameCount: 900,
       prefetchFrameCount: 70,
     });
   });
@@ -110,6 +112,7 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
@@ -136,10 +139,88 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
       mode: DetectionFrameRetentionMode.PersistAll,
+    });
+  });
+
+  it("carries an opted-in playback gate through to both resolved configs", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        appendable: { datasetId: "stream" },
+        playbackGate: { enabled: true },
+      },
+      mode: MediaSessionMode.Stream,
+      renderer: {
+        renderPreparation: {
+          playbackGate: { enabled: true },
+        },
+      },
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 10,
+      requiredAheadSeconds: 2,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 2,
+      requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
+    });
+  });
+
+  it("turns both gates on from the session-level switch", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        source: { loadFrames: async () => [] },
+      },
+      mode: MediaSessionMode.File,
+      playbackGate: true,
+      renderer: {},
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 10,
+      requiredAheadSeconds: 2,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 2,
+      requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
+    });
+  });
+
+  it("lets a single gate opt back out of the session-level switch", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        playbackGate: { enabled: false },
+        source: { loadFrames: async () => [] },
+      },
+      mode: MediaSessionMode.File,
+      playbackGate: true,
+      renderer: {},
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: false,
+      maxWaitSeconds: 10,
+      requiredAheadSeconds: 2,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      maxWaitSeconds: 2,
+      requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
     });
   });
 
@@ -175,22 +256,25 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer).toMatchObject({
       bufferAheadSeconds: 3,
-      bufferBehindSeconds: 0.5,
+      bufferBehindSeconds: 5,
       playbackGate: {
         enabled: false,
+        maxWaitSeconds: 10,
         requiredAheadSeconds: 4,
       },
     });
     expect(defaults.renderPreparation).toMatchObject({
       maskFrame: {
-        maxCacheFrameCount: 240,
+        maxCacheFrameCount: 2700,
         prefetchFrameCount: 12,
         workerCount: 2,
       },
       playbackGate: {
         enabled: false,
-        minimumAheadSeconds: 0.25,
+        maxWaitSeconds: 2,
         requiredAheadSeconds: 1,
+        resumeMarginWallSeconds: 0.2,
+        stopBelowWallSeconds: 0.1,
       },
     });
     expect(retention).toEqual({

@@ -158,8 +158,8 @@ finishes. That IS the strict-sync guarantee, same as live.
 
 ### Shared tick (`processFrame`)
 
-Extract the live worklet body into a shared, source-agnostic worklet
-(`examples/react-native/src/live-tick.ts` or inline in App):
+Extract the live worklet body into a shared, source-agnostic worklet (a
+`live-tick.ts` module under `examples/react-native/src/`, or inline in App):
 serialize detections → class-effects filter → `createLiveSkiaMaskFrame` →
 packet swap → present. The only source-specific seams:
 

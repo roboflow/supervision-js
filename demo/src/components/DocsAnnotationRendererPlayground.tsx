@@ -8,12 +8,14 @@ import {
   type DocsAnnotationRendererControl,
   type DocsAnnotationRendererId,
   type DocsAnnotationRendererSelectControl,
+  type DocsStyleAnnotationRendererId,
   type DocsAnnotationRendererSelectSetting,
   type NumericPresentationSetting,
 } from "../docs-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import { RendererViewport } from "./RendererViewport";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 import { DocsRegionAnnotationRendererPlayground } from "./DocsRegionAnnotationRendererPlayground";
 import { DocsRegionEffectsPlayground } from "./DocsRegionEffectsPlayground";
 
@@ -35,17 +37,14 @@ export function DocsAnnotationRendererPlayground({
 function DocsStyleAnnotationRendererPlayground({
   renderer,
 }: {
-  readonly renderer: Exclude<
-    DocsAnnotationRendererId,
-    "regions" | "region-effects"
-  >;
+  readonly renderer: DocsStyleAnnotationRendererId;
 }) {
   const definition = docsAnnotationRenderers[renderer];
   const fixtureName = "basketball fixture";
   const demo = useDemoRenderer({
     fixtureFrameTransform: (frames) =>
       filterDocsAnnotationRendererFrames(renderer, frames),
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_sam3",
     initialPresentationSettings:
       createDocsAnnotationRendererPresentation(renderer),
   });
@@ -99,6 +98,12 @@ function DocsStyleAnnotationRendererPlayground({
     [demo.presentationSettings, demo.setPresentationSettings],
   );
 
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
+  );
+
   return (
     <main
       className="docs-layer-playground"
@@ -107,9 +112,8 @@ function DocsStyleAnnotationRendererPlayground({
       <section className="docs-layer-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
       </section>
 

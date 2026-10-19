@@ -6,22 +6,37 @@ import {
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
-import type { AnnotationStyleContext, Detection } from "supervision-js-core";
+import type {
+  AnnotationStyleContext,
+  Detection,
+  Rect,
+} from "supervision-js-core";
 import type { Graphics as PixiGraphics } from "pixi.js";
 import type { Container as PixiContainer } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
+import { detectionRenderOrder } from "./detection-render-order";
 
 export interface PixiBoxLayerState {
+  /** The frame this layer resolved and drew. The timeline's answer for one
+   *  media time moves when a load lands, so this is the only record of which
+   *  frame the screen actually got. */
+  readonly activeDetectionFrame: DetectionFrame | undefined;
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly activeDetectionIndexes: readonly number[];
 }
 
+export interface PixiRenderedBoxFrame {
+  readonly frame: DetectionFrame;
+  readonly rects: ReadonlyMap<number, Rect>;
+}
+
 export interface PixiBoxLayer {
   createContainer(): PixiContainer | undefined;
   attachGraphics(graphics: PixiGraphics): void;
   drawFrame(mediaTime: number, viewportScale?: number): PixiBoxLayerState;
+  getRenderedBoxes(): PixiRenderedBoxFrame | undefined;
   setBoxStyle(boxStyle: BoxStyle | null | undefined): void;
   invalidate(): void;
   invalidateDetection(id: string | number): void;
@@ -32,6 +47,9 @@ export function createPixiBoxLayer(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
   readonly Container?: new () => PixiContainer;
+  readonly container?: PixiContainer;
+  /** Ordered rendering retains each frame detection independently of its public ID. */
+  readonly retainByIndex?: boolean;
   readonly Graphics?: new () => PixiGraphics;
   readonly resolveContextState?: (
     detection: Detection,
@@ -48,9 +66,11 @@ export function createPixiBoxLayer(options: {
   let hasDrawnDetectionFrame = false;
   let isDirty = true;
   let lastViewportScale = 0;
-  let retainedContainer: PixiContainer | undefined;
+  let retainedContainer = options.container;
   const retainedEntries = new Map<string, PixiGraphics>();
   const invalidatedDetections = new Set<string>();
+  const renderedRects = new Map<number, Rect>();
+  let renderedBoxFrame: PixiRenderedBoxFrame | undefined;
 
   const usingRetainedEntries = Boolean(options.Container && options.Graphics);
 
@@ -86,6 +106,10 @@ export function createPixiBoxLayer(options: {
 
       const activeDetectionIndexes: number[] = [];
       const activeKeys = new Set<string>();
+      renderedRects.clear();
+      renderedBoxFrame = detectionFrame
+        ? { frame: detectionFrame, rects: renderedRects }
+        : undefined;
 
       if (boxStyle && detectionFrame) {
         const orderedDetections = detectionFrame.detections
@@ -97,7 +121,9 @@ export function createPixiBoxLayer(options: {
           );
 
         for (const { detectionIndex, detection } of orderedDetections) {
-          const key = detectionKey(detection, detectionIndex);
+          const key = options.retainByIndex
+            ? `index:${detectionIndex}`
+            : detectionKey(detection, detectionIndex);
           const instruction = boxStyle.resolve(detection, {
             detectionIndex,
             frame: detectionFrame,
@@ -117,13 +143,17 @@ export function createPixiBoxLayer(options: {
             activeKeys.add(key);
             const display = ensureRetainedEntry(key);
             display.visible = true;
-            display.zIndex = detection.zIndex ?? detectionIndex;
+            display.zIndex = options.container
+              ? detectionRenderOrder(detectionFrame)[detectionIndex]! * 2
+              : (detection.zIndex ?? detectionIndex);
             display.position?.set?.(0, 0);
             display.clear();
             drawBoxInstruction(display, instruction, viewportScale);
+            retainRenderedBox(detectionIndex, instruction);
             invalidatedDetections.delete(key);
           } else {
             drawBoxInstruction(boxGraphics, instruction, viewportScale);
+            if (boxGraphics) retainRenderedBox(detectionIndex, instruction);
           }
         }
       }
@@ -136,6 +166,10 @@ export function createPixiBoxLayer(options: {
       lastDrawnState = getBoxLayerState(detectionFrame, activeDetectionIndexes);
 
       return lastDrawnState;
+    },
+
+    getRenderedBoxes() {
+      return renderedBoxFrame;
     },
 
     setBoxStyle(nextBoxStyle) {
@@ -152,17 +186,39 @@ export function createPixiBoxLayer(options: {
     },
 
     invalidateDetection(id) {
-      invalidatedDetections.add(`id:${String(id)}`);
+      invalidatedDetections.add(keyForId(id));
       isDirty = true;
     },
 
     translateDetection(id, x, y) {
-      const display = retainedEntries.get(`id:${String(id)}`);
+      const display = retainedEntries.get(keyForId(id));
       if (!display) return false;
       display.position?.set?.(x, y);
       return true;
     },
   };
+
+  function keyForId(id: string | number) {
+    return options.retainByIndex
+      ? `index:${lastDrawnDetectionFrame?.detections.findIndex((detection) => detection.id === id) ?? -1}`
+      : `id:${String(id)}`;
+  }
+
+  function retainRenderedBox(
+    detectionIndex: number,
+    instruction: BoxDrawInstruction,
+  ) {
+    if (
+      instruction.rect.width > 0 &&
+      instruction.rect.height > 0 &&
+      ((instruction.fill && (instruction.fill.alpha ?? 1) > 0) ||
+        (instruction.stroke &&
+          instruction.stroke.width > 0 &&
+          (instruction.stroke.alpha ?? 1) > 0))
+    ) {
+      renderedRects.set(detectionIndex, instruction.rect);
+    }
+  }
 
   function ensureRetainedEntry(key: string) {
     let display = retainedEntries.get(key);
@@ -241,6 +297,7 @@ function getBoxLayerState(
 ): PixiBoxLayerState {
   return {
     activeDetectionCount: activeDetectionIndexes.length,
+    activeDetectionFrame: detectionFrame,
     activeDetectionIndexes,
     activeDetectionFrameIndex: detectionFrame?.frameIndex ?? null,
     activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,

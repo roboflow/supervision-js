@@ -1,41 +1,49 @@
 import {
   DetectionFrameSelectionMode,
-  MediaNormalizationContainer,
-  MediaNormalizationVideoCodec,
-  MediaInteractionMode,
-  MediaRendererFit,
-  MediaRendererPlaybackState,
-  RenderPreparationMode,
+  MediaSessionMode,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
+  createWebVideoEngineMediaRendererSource,
   type ColdDetectionFrameStoreWriteSummary,
-  type DetectionFrame,
+  type DecodedVideoSampleSink,
   type MediaSession,
-  type MediaNormalizationProgress,
-  type MediaRenderer,
+  type MediaSessionDetectionOptions,
+  type MediaRendererSource,
   type WritableDetectionFrameSource,
 } from "supervision";
+import { SourceKind } from "supervision/web-video-engine";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
 import { inferSam3FrameBatchStream } from "../inference/roboflow-sam3";
 import {
-  NORMALIZED_UPLOAD_VIDEO_BITRATE,
   TARGET_UPLOAD_FRAME_RATE,
   createPreparedUploadedVideoMedia,
   extractInferenceFrameBatches,
   prepareUploadedImageMedia,
-  UploadedMediaKind,
   type PreparedUploadMedia,
 } from "../media/upload-media";
-import { createDemoPresentation } from "../presentation/demo-presentation";
+import { PipelineNodeId } from "../pipeline/pipeline-descriptor";
+import type { PipelineRecorder } from "../pipeline/pipeline-recorder";
+import { readDemoDisplayBox } from "./decode-resolution";
+import { createDemoRendererOptions } from "./demo-session-renderer";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
-import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type {
   DemoSessionCallbacks,
   UploadInferenceStateSetter,
 } from "./demo-session-types";
+import {
+  applyDemoDetectionOptions,
+  applyDemoEngineOptions,
+  applyDemoRendererOptions,
+  applyDemoSessionMode,
+  applyDemoSessionPlaybackGate,
+  DemoEngineSource,
+  DemoMediaPath,
+  describeMissingSupport,
+  resolveDemoSessionConfiguration,
+} from "./session-options";
 import {
   addTimelineRange,
   appendTimelineRange,
@@ -43,6 +51,18 @@ import {
   createDetectionFrameTimelineRange,
   removeTimelineRange,
 } from "./timeline-ranges";
+
+/**
+ * SAM3 reads its frames back out of the opened engine source, so this
+ * session cannot hand the clip to `createMediaSession` as a `Blob`, which is
+ * the only shape `normalize` acts on.
+ */
+const UPLOAD_MEDIA_PATH_BLOCKED = describeMissingSupport(
+  "SAM3 inference reads frames back from the web video engine as it runs, so an upload always opens on the engine.",
+);
+const UPLOAD_NORMALIZATION_BLOCKED = describeMissingSupport(
+  "SAM3 inference reads frames back from the web video engine source, which normalizing would replace.",
+);
 
 export interface UploadRunRequest {
   readonly apiKey: string;
@@ -70,9 +90,59 @@ export async function createUploadSession(
     status: "ready | waiting for SAM3 frames",
   });
 
-  const presentation = createDemoPresentation(options.presentationSettings);
+  const presentation = options.presentation;
+  const baseDetections: MediaSessionDetectionOptions = {
+    appendable: {
+      chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
+      clearOnCreate: true,
+      datasetId,
+      store,
+    },
+    sync: {
+      frameIndexOriginTime: 0,
+      frameRate: TARGET_UPLOAD_FRAME_RATE,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    },
+  };
+  const detections = applyDemoDetectionOptions(
+    baseDetections,
+    options.sessionOptions,
+  );
+  const renderer = applyDemoRendererOptions(
+    createDemoRendererOptions(options),
+    options.sessionOptions,
+  );
+  const mode = applyDemoSessionMode(
+    MediaSessionMode.File,
+    options.sessionOptions,
+  );
+  const playbackGate = applyDemoSessionPlaybackGate(
+    undefined,
+    options.sessionOptions,
+  );
+
+  const engine = applyDemoEngineOptions({}, options.sessionOptions);
+
+  options.onSessionConfiguration(
+    resolveDemoSessionConfiguration({
+      detections,
+      engine,
+      engineSource: DemoEngineSource.Blob,
+      mediaPath: DemoMediaPath.Engine,
+      mediaPathSupport: UPLOAD_MEDIA_PATH_BLOCKED,
+      mode,
+      normalizationSupport: UPLOAD_NORMALIZATION_BLOCKED,
+      playbackGate,
+      renderer,
+    }),
+  );
+
   const isImageUpload = options.uploadRun.file.type.startsWith("image/");
+
+  recordUploadPath(options.pipeline, options.uploadRun.file, isImageUpload);
+
   let preparedMedia: PreparedUploadMedia | undefined;
+  let sampleSink: DecodedVideoSampleSink | undefined;
   let session: MediaSession | undefined;
 
   try {
@@ -89,65 +159,30 @@ export async function createUploadSession(
 
     session = await createMediaSession({
       container: options.container,
-      detections: {
-        appendable: {
-          chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
-          clearOnCreate: true,
-          datasetId,
-          store,
-        },
-        sync: {
-          frameIndexOriginTime: 0,
-          frameRate: TARGET_UPLOAD_FRAME_RATE,
-          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-        },
-      },
-      media: preparedMedia?.blob ?? options.uploadRun.file,
-      normalize: isImageUpload
-        ? false
-        : {
-            audio: { discard: true },
-            container: MediaNormalizationContainer.WebM,
-            onProgress(progress) {
-              options.onUploadState((current) => ({
-                ...current,
-                normalizedRanges: createNormalizationTimelineRanges(progress),
-                status: "preparing",
-                statusLabel: `stream-normalizing media ${Math.round(
-                  progress.progress * 100,
-                )}%`,
-              }));
+      detections,
+      media: options.tapMediaSource(
+        tapSampleSink(
+          createWebVideoEngineMediaRendererSource({
+            ...engine,
+            display: readDemoDisplayBox(
+              options.container,
+              options.renderQuality,
+            ),
+            source: {
+              blob: preparedMedia?.blob ?? options.uploadRun.file,
+              kind: SourceKind.Blob,
             },
-            signal: options.abortSignal,
-            stream: true,
-            video: {
-              bitrate: NORMALIZED_UPLOAD_VIDEO_BITRATE,
-              codec: MediaNormalizationVideoCodec.Vp9,
-              forceTranscode: true,
-              frameRate: TARGET_UPLOAD_FRAME_RATE,
-              keyFrameInterval: 1,
-            },
+          }),
+          (opened) => {
+            sampleSink = opened;
           },
+        ),
+      ),
+      mode,
       presentation,
       onState: options.onSessionState,
-      renderer: {
-        autoPlay: false,
-        fit: MediaRendererFit.Contain,
-        interaction: {
-          mode: MediaInteractionMode.PausedOnly,
-          onHover: options.onDetectionHover,
-          onSelect: options.onDetectionSelect,
-        },
-        loop: true,
-        maxDevicePixelRatio: getDemoMaxDevicePixelRatio(options.renderQuality),
-        onFrame: options.onFrame,
-        onState: options.onRendererState,
-        renderPreparation: {
-          mode: RenderPreparationMode.Worker,
-          onDiagnostics: options.onRenderPreparationDiagnostics,
-        },
-        onSource: options.onSourceState,
-      },
+      playbackGate,
+      renderer,
     });
   } catch (error) {
     session?.destroy();
@@ -158,13 +193,18 @@ export async function createUploadSession(
   if (!isImageUpload) {
     preparedMedia = createPreparedUploadedVideoMedia({
       file: options.uploadRun.file,
-      media: session.media,
+      renderer: session.renderer,
     });
   }
 
   if (!preparedMedia) {
     session.destroy();
     throw new Error("Upload media could not be prepared.");
+  }
+
+  if (!sampleSink) {
+    session.destroy();
+    throw new Error("Upload media session opened no readable frame source.");
   }
 
   if (!options.isActive()) {
@@ -188,22 +228,12 @@ export async function createUploadSession(
     completedFrames: 0,
     errorMessage: null,
     inferredDetections: 0,
-    normalizedRanges:
-      preparedMedia.kind === UploadedMediaKind.Image
-        ? [{ endTime: preparedMedia.duration, startTime: 0 }]
-        : [],
     preparedMedia,
     processedRanges: [],
     processingRanges: [],
     status: "running",
-    statusLabel: "running SAM3",
+    statusLabel: "Running the model",
     totalFrames: preparedMedia.frameCount,
-  });
-  watchNormalizationCompletion({
-    isActive: options.isActive,
-    onMediaState: options.onMediaState,
-    onUploadState: options.onUploadState,
-    preparedMedia,
   });
 
   void runUploadInference({
@@ -214,11 +244,83 @@ export async function createUploadSession(
     onFixtureSummary: options.onFixtureSummary,
     onUploadState: options.onUploadState,
     preparedMedia,
+    sampleSink,
     session,
     uploadRun: options.uploadRun,
   });
 
   return session;
+}
+
+const UPLOAD_SITE = "demo/session/upload-session.ts › createUploadSession";
+
+function recordUploadPath(
+  pipeline: PipelineRecorder,
+  file: File,
+  isImageUpload: boolean,
+) {
+  pipeline.record(PipelineNodeId.IntakeUploadFile, UPLOAD_SITE, [
+    { label: "file", value: file.name },
+    { label: "type", value: file.type === "" ? "not stated" : file.type },
+    { label: "size", value: `${file.size} bytes` },
+  ]);
+  pipeline.bypass(
+    PipelineNodeId.IntakeFixtureUrl,
+    "This session is playing your file, not one of the sample clips.",
+  );
+  pipeline.bypass(
+    PipelineNodeId.IntakeFixtureProxy,
+    "Stand-ins belong to the sample clips, and this is your own file.",
+  );
+  pipeline.bypass(
+    PipelineNodeId.IntakeConversionRefetch,
+    "The file is already on this machine, so there was nothing to download.",
+  );
+
+  if (isImageUpload) {
+    pipeline.record(PipelineNodeId.IntakeUploadImageRecode, UPLOAD_SITE);
+  } else {
+    pipeline.bypass(
+      PipelineNodeId.IntakeUploadImageRecode,
+      "A moving clip is opened as it is; only a still picture is re-encoded first.",
+    );
+  }
+
+  const sam3 =
+    "SAM3 reads frames back out of the opened clip as it labels them, so converting the file would replace the very thing it is reading from.";
+
+  pipeline.record(PipelineNodeId.ConditioningNone, UPLOAD_SITE);
+  pipeline.bypass(PipelineNodeId.ConditioningWholeFile, sam3);
+  pipeline.bypass(PipelineNodeId.ConditioningProgressive, sam3);
+  pipeline.record(PipelineNodeId.DetectionsNearestFrameIndex, UPLOAD_SITE, [
+    { label: "detections a second", value: String(TARGET_UPLOAD_FRAME_RATE) },
+    {
+      label: "why",
+      value:
+        "SAM3 is asked for frames on an even grid, so a detection's position is the count it was taken at",
+    },
+  ]);
+  pipeline.bypass(
+    PipelineNodeId.DetectionsInterval,
+    "SAM3 returns a label per frame it was given and no stretch of time to pair against.",
+  );
+}
+
+/** Hands the opened source's pull path to the inference pass, so the upload is
+ *  read back through the media the player already demuxed. */
+function tapSampleSink(
+  source: MediaRendererSource,
+  onSampleSink: (sampleSink: DecodedVideoSampleSink) => void,
+): MediaRendererSource {
+  return {
+    async open() {
+      const opened = await source.open();
+
+      onSampleSink(opened.sampleSink);
+
+      return opened;
+    },
+  };
 }
 
 function getAppendableSessionDetectionSource(
@@ -240,50 +342,6 @@ function getAppendableSessionDetectionSource(
   return detectionSource as WritableDetectionFrameSource;
 }
 
-function watchNormalizationCompletion(options: {
-  readonly isActive: () => boolean;
-  readonly onMediaState: DemoSessionCallbacks["onMediaState"];
-  readonly onUploadState: UploadInferenceStateSetter;
-  readonly preparedMedia: PreparedUploadMedia;
-}) {
-  if (!options.preparedMedia.normalizationCompletion) {
-    return;
-  }
-
-  void options.preparedMedia.normalizationCompletion
-    .then(() => {
-      if (!options.isActive()) {
-        return;
-      }
-
-      options.onMediaState({
-        errorMessage: null,
-        status: `upload normalized WebM ${options.preparedMedia.frameRate}fps complete`,
-      });
-      options.onUploadState((current) => ({
-        ...current,
-        normalizedRanges: [
-          { endTime: options.preparedMedia.duration, startTime: 0 },
-        ],
-      }));
-    })
-    .catch((error: unknown) => {
-      if (!options.isActive()) {
-        return;
-      }
-
-      const message = getErrorMessage(error, "Media normalization failed.");
-
-      options.onMediaState({ errorMessage: message, status: "error" });
-      options.onUploadState((current) => ({
-        ...current,
-        errorMessage: message,
-        status: "error",
-        statusLabel: message,
-      }));
-    });
-}
-
 async function runUploadInference(options: {
   readonly abortSignal: AbortSignal;
   readonly detectionSource: WritableDetectionFrameSource;
@@ -292,12 +350,14 @@ async function runUploadInference(options: {
   readonly onFixtureSummary: DemoSessionCallbacks["onFixtureSummary"];
   readonly onUploadState: UploadInferenceStateSetter;
   readonly preparedMedia: PreparedUploadMedia;
+  readonly sampleSink: DecodedVideoSampleSink;
   readonly session: MediaSession;
   readonly uploadRun: Pick<UploadRunRequest, "apiKey" | "classNames">;
 }) {
   try {
     for await (const batch of extractInferenceFrameBatches({
       media: options.preparedMedia,
+      sampleSink: options.sampleSink,
       signal: options.abortSignal,
     })) {
       if (!options.isActive()) {
@@ -316,7 +376,6 @@ async function runUploadInference(options: {
           batchRange,
         ),
         status: "running",
-        statusLabel: "SAM3 requests in flight",
       }));
 
       for await (const detectionFrame of inferSam3FrameBatchStream({
@@ -358,10 +417,8 @@ async function runUploadInference(options: {
             createDetectionFrameTimelineRange(detectionFrame),
           ),
           status: "running",
-          statusLabel: "SAM3 frames streaming into cold storage",
           totalFrames: options.preparedMedia.frameCount,
         }));
-        refreshPausedRendererForFrame(options.session.renderer, detectionFrame);
       }
 
       options.onUploadState((current) => ({
@@ -371,7 +428,6 @@ async function runUploadInference(options: {
           batchRange,
         ),
         status: "running",
-        statusLabel: "SAM3 batch complete",
       }));
     }
 
@@ -385,7 +441,7 @@ async function runUploadInference(options: {
           summary?.detectionCount ?? current.inferredDetections,
         processingRanges: [],
         status: "ready",
-        statusLabel: "SAM3 inference complete",
+        statusLabel: "The model has finished",
         totalFrames: options.preparedMedia.frameCount,
       }));
     }
@@ -413,7 +469,7 @@ function handleUploadInferenceError(
       ...current,
       processingRanges: [],
       status: "idle",
-      statusLabel: "upload inference canceled",
+      statusLabel: "Model run canceled",
     }));
     options.onDetectionSourceState({
       datasetId: options.detectionSource.datasetId,
@@ -441,32 +497,6 @@ function handleUploadInferenceError(
   });
 }
 
-function refreshPausedRendererForFrame(
-  renderer: MediaRenderer,
-  frame: DetectionFrame,
-) {
-  const state = renderer.getState();
-
-  if (
-    state.playbackState === MediaRendererPlaybackState.Playing ||
-    state.playbackState === MediaRendererPlaybackState.Buffering
-  ) {
-    return;
-  }
-
-  if (!frameOverlapsTime(frame, state.currentTime)) {
-    return;
-  }
-
-  void renderer.seek(state.currentTime).catch(() => undefined);
-}
-
-function frameOverlapsTime(frame: DetectionFrame, time: number) {
-  const frameEndTime = frame.endTime ?? frame.mediaTime;
-
-  return frame.mediaTime <= time && time <= frameEndTime;
-}
-
 function createUploadSummary(
   media: PreparedUploadMedia,
   options: {
@@ -487,16 +517,6 @@ function createUploadSummary(
     maskWidth: media.width,
     missingFrameIndexes: [],
   };
-}
-
-function createNormalizationTimelineRanges(
-  progress: MediaNormalizationProgress,
-) {
-  if (progress.processedTime <= 0) {
-    return [];
-  }
-
-  return [{ endTime: progress.processedTime, startTime: 0 }];
 }
 
 function getDetectionSourceSummary(

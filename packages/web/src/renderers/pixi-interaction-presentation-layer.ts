@@ -1,11 +1,36 @@
+import { createPixiMaskScreenStrokeRenderer } from "#renderers/pixi-mask-screen-stroke";
+import {
+  idMaskStrokeCoverageGlsl,
+  idMaskStrokeCoverageWgsl,
+} from "#renderers/id-mask-stroke-coverage";
+import {
+  ID_MASK_STROKE_WIDTH_LANES,
+  idMaskFillPaletteWgslField,
+  idMaskPaletteGlsl,
+  idMaskPaletteWgsl,
+  idMaskStrokePaletteWgslField,
+  idMaskStrokeWidthsWgslField,
+  idMaskStrokeAlignmentsWgslField,
+} from "#renderers/mask-palette";
+import {
+  tintedMaskVertexGlsl,
+  tintedMaskVertexWgsl,
+} from "#renderers/mask-vertex";
+import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
 import {
   createDetectionPickKey,
   DetectionPickTarget,
   rebaseDetectionPickToFrame,
+  resolveIdMaskPaletteId,
+  StrokeAlignment,
+  writeIdMaskPaletteEntry,
 } from "supervision-js-core";
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { createPixiBoxLayer } from "#renderers/pixi-box-layer";
 import { createPixiLabelLayer } from "#renderers/pixi-label-layer";
 import { createPixiVectorLayer } from "#renderers/pixi-vector-layer";
@@ -32,6 +57,7 @@ import type {
 } from "supervision-js-core";
 import type {
   Container as PixiContainer,
+  Filter as PixiFilter,
   Graphics as PixiGraphics,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
@@ -41,8 +67,6 @@ import type {
   Texture as PixiTexture,
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
-
-const MAX_INTERACTION_STROKE_RADIUS = 12;
 
 type PixiInteractionMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
@@ -74,6 +98,10 @@ type MeshGeometryConstructor = new (options: {
 type ShaderFactory = {
   from(options: {
     gl: { fragment: string; vertex: string };
+    gpu: {
+      fragment: { entryPoint: string; source: string };
+      vertex: { entryPoint: string; source: string };
+    };
     resources: Record<string, unknown>;
   }): PixiShader;
 };
@@ -86,7 +114,7 @@ type UniformGroupConstructor = new (
 ) => PixiUniformGroup;
 
 export interface PixiInteractionMaskArtifact {
-  readonly frame: PreparedPngIdMaskFrame;
+  readonly frame: PreparedIdMaskFrame;
   readonly texture: PixiTexture;
 }
 
@@ -98,6 +126,8 @@ export interface PixiInteractionPresentationLayerFrameContext {
   readonly selectedPick: DetectionPickResult | null;
   readonly selectedPicks?: readonly DetectionPickResult[];
   readonly viewportScale?: number;
+  /** Annotation capture pixels per CSS pixel. */
+  readonly strokePixelRatio?: number;
 }
 
 export interface PixiInteractionPresentationLayer {
@@ -105,10 +135,13 @@ export interface PixiInteractionPresentationLayer {
     readonly width: number;
     readonly height: number;
   }): PixiContainer;
+  getLabelDisplay(): PixiContainer | null;
   drawFrame(context: PixiInteractionPresentationLayerFrameContext): void;
+  releaseMaskTexture(texture: PixiTexture): void;
   setInteractionStyle(
     interactionStyle: InteractionStyle | null | undefined,
   ): void;
+  setBackgroundAntialiasFilter(filter: PixiFilter | null): void;
   destroy(): void;
 }
 
@@ -135,13 +168,18 @@ export function createPixiInteractionPresentationLayer(options: {
     options.interactionStyle === undefined
       ? new BaseInteractionStyle()
       : options.interactionStyle;
+  let displayContainer: PixiContainer | undefined;
   let mediaHeight = 0;
   let mediaWidth = 0;
   let syntheticFrame: DetectionFrame | undefined;
   let activePicks: readonly ActiveInteractionPick[] = [];
   let currentMediaTime = 0;
   let viewportScale = 1;
+  let strokePixelRatio = 1;
   let maskRenderer: InteractionMaskRenderer | undefined;
+  let labelDisplay: PixiContainer | null = null;
+  let screenStrokeRenderer:
+    ReturnType<typeof createPixiMaskScreenStrokeRenderer> | undefined;
   let isDestroyed = false;
 
   const syntheticTimeline = createSyntheticTimeline(() => syntheticFrame);
@@ -177,7 +215,7 @@ export function createPixiInteractionPresentationLayer(options: {
       const container = new options.Container();
 
       const boxGraphics = new options.Graphics();
-      const labels = labelLayer.createContainer();
+      labelDisplay = labelLayer.createContainer();
       const vectors = vectorLayer.createContainer();
 
       boxLayer.attachGraphics(boxGraphics);
@@ -187,9 +225,14 @@ export function createPixiInteractionPresentationLayer(options: {
         container.addChild(maskRenderer.mesh);
       }
 
-      container.addChild(boxGraphics, vectors, labels);
+      container.addChild(boxGraphics, vectors);
+      displayContainer = container;
 
       return container;
+    },
+
+    getLabelDisplay() {
+      return labelDisplay;
     },
 
     destroy() {
@@ -201,13 +244,20 @@ export function createPixiInteractionPresentationLayer(options: {
       syntheticFrame = undefined;
       activePicks = [];
       maskRenderer?.destroy();
+      screenStrokeRenderer?.destroy();
       labelLayer.destroy();
+      labelDisplay = null;
       vectorLayer.destroy();
+    },
+
+    releaseMaskTexture(texture) {
+      if (!isDestroyed) maskRenderer?.releaseTexture(texture.source);
     },
 
     drawFrame(context) {
       currentMediaTime = context.mediaTime;
       viewportScale = context.viewportScale ?? 1;
+      strokePixelRatio = context.strokePixelRatio ?? 1;
 
       if (isDestroyed || !interactionStyle || !context.frame) {
         clear();
@@ -249,6 +299,10 @@ export function createPixiInteractionPresentationLayer(options: {
       boxLayer.setBoxStyle(boxStyle);
       labelLayer.setLabelStyle(labelStyle);
       vectorLayer.setStyles({ polygonStyle, polylineStyle, keypointStyle });
+    },
+
+    setBackgroundAntialiasFilter(filter) {
+      labelLayer.setBackgroundAntialiasFilter(filter);
     },
   };
 
@@ -364,6 +418,7 @@ export function createPixiInteractionPresentationLayer(options: {
     syntheticFrame = undefined;
     activePicks = [];
     maskRenderer?.hide();
+    screenStrokeRenderer?.hide();
     boxLayer.setBoxStyle(null);
     boxLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer.setLabelStyle(null);
@@ -379,6 +434,7 @@ export function createPixiInteractionPresentationLayer(options: {
   function drawMasks(artifact: PixiInteractionMaskArtifact | null | undefined) {
     if (!maskRenderer || !artifact) {
       maskRenderer?.hide();
+      screenStrokeRenderer?.hide();
       return;
     }
 
@@ -414,10 +470,40 @@ export function createPixiInteractionPresentationLayer(options: {
 
     if (instructions.length === 0) {
       maskRenderer.hide();
+      screenStrokeRenderer?.hide();
       return;
     }
 
-    maskRenderer.render(artifact.frame, artifact.texture, instructions);
+    maskRenderer.render(
+      artifact.frame,
+      artifact.texture,
+      instructions,
+      strokePixelRatio,
+    );
+    if (
+      !screenStrokeRenderer &&
+      instructions.some(
+        ({ instruction }) => instruction.stroke?.widthUnit !== undefined,
+      )
+    ) {
+      screenStrokeRenderer = createPixiMaskScreenStrokeRenderer({
+        Graphics: options.Graphics,
+        mediaWidth,
+        mediaHeight,
+      });
+      displayContainer?.addChildAt(
+        screenStrokeRenderer.display,
+        maskRenderer ? 1 : 0,
+      );
+    }
+    screenStrokeRenderer?.render(
+      artifact.frame,
+      viewportScale,
+      instructions.map(({ detectionIndex, instruction }) => ({
+        detectionIndex,
+        stroke: instruction.stroke,
+      })),
+    );
   }
 
   function createMaskRenderer() {
@@ -617,10 +703,12 @@ interface InteractionMaskInstruction {
 interface InteractionMaskRenderer {
   readonly mesh: PixiInteractionMesh;
   hide(): void;
+  releaseTexture(source: PixiImageSource): void;
   render(
-    frame: PreparedPngIdMaskFrame,
+    frame: PreparedIdMaskFrame,
     texture: PixiTexture,
     instructions: readonly InteractionMaskInstruction[],
+    strokePixelRatio: number,
   ): void;
   destroy(): void;
 }
@@ -637,6 +725,7 @@ function createInteractionMaskRenderer(options: {
   const fillPalette = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
   const strokePalette = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
   const strokeWidths = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
+  const strokeAlignments = new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
   const uniforms = new options.UniformGroup({
     uFillPalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
@@ -644,15 +733,22 @@ function createInteractionMaskRenderer(options: {
       value: fillPalette,
     },
     uMaxStrokeWidth: { type: "f32", value: 0 },
+    uBorderEnabled: { type: "f32", value: 0 },
+    uStrokePixelRatio: { type: "f32", value: 1 },
     uStrokePalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
       type: "vec4<f32>",
       value: strokePalette,
     },
     uStrokeWidths: {
-      size: MAX_ID_MASK_PALETTE_ENTRIES,
-      type: "f32",
+      size: ID_MASK_STROKE_WIDTH_LANES,
+      type: "vec4<f32>",
       value: strokeWidths,
+    },
+    uStrokeAlignments: {
+      size: ID_MASK_STROKE_WIDTH_LANES,
+      type: "vec4<f32>",
+      value: strokeAlignments,
     },
     uTextureSize: {
       type: "vec2<f32>",
@@ -663,7 +759,7 @@ function createInteractionMaskRenderer(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -691,7 +787,7 @@ function createInteractionMaskRenderer(options: {
   return {
     destroy() {
       mesh.destroy();
-      shader.destroy(true);
+      destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -700,10 +796,16 @@ function createInteractionMaskRenderer(options: {
       mesh.visible = false;
     },
 
+    releaseTexture(source) {
+      if (shader.resources.uTexture !== source) return;
+      bindTexture(placeholderSource);
+      mesh.visible = false;
+    },
+
     mesh,
 
-    render(frame, texture, instructions) {
-      if (frame.kind !== PreparedMaskFrameKind.PngIdMask) {
+    render(frame, texture, instructions, strokePixelRatio) {
+      if (frame.kind !== PreparedMaskFrameKind.IdMask) {
         mesh.visible = false;
         return;
       }
@@ -712,49 +814,65 @@ function createInteractionMaskRenderer(options: {
       fillPalette.fill(0);
       strokePalette.fill(0);
       strokeWidths.fill(0);
+      strokeAlignments.fill(0);
 
       let maxStrokeWidth = 0;
+      let hasStroke = false;
 
       for (const { detectionIndex, instruction } of instructions) {
-        const maskId = detectionIndex + 1;
+        const maskId = resolveIdMaskPaletteId(detectionIndex);
 
-        if (maskId <= 0 || maskId >= MAX_ID_MASK_PALETTE_ENTRIES) {
+        // A raster naming this detection is one the palette accepted, so an id
+        // it cannot hold is an id no texel of this raster carries either.
+        if (maskId === undefined) {
           continue;
         }
 
-        writePaletteEntry(
+        writeIdMaskPaletteEntry(
           fillPalette,
           maskId,
           instruction.color,
           instruction.alpha,
         );
 
-        if (instruction.stroke && instruction.stroke.width > 0) {
-          writePaletteEntry(
+        if (
+          instruction.stroke &&
+          instruction.stroke.widthUnit === undefined &&
+          instruction.stroke.width > 0
+        ) {
+          writeIdMaskPaletteEntry(
             strokePalette,
             maskId,
             instruction.stroke.color,
             instruction.stroke.alpha,
           );
-          strokeWidths[maskId] = Math.min(
-            Math.max(0, instruction.stroke.width),
-            MAX_INTERACTION_STROKE_RADIUS,
+          const alignment =
+            instruction.stroke.alignment === StrokeAlignment.Inside
+              ? 1
+              : instruction.stroke.alignment === StrokeAlignment.Center
+                ? 0.5
+                : 0;
+          strokeWidths[maskId] = instruction.stroke.width;
+          strokeAlignments[maskId] = alignment;
+          hasStroke = true;
+          maxStrokeWidth = Math.max(
+            maxStrokeWidth,
+            instruction.stroke.width * (1 - alignment),
           );
-          maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidths[maskId] ?? 0);
         }
       }
 
       uniforms.uniforms.uFillPalette = fillPalette;
       uniforms.uniforms.uStrokePalette = strokePalette;
       uniforms.uniforms.uStrokeWidths = strokeWidths;
+      uniforms.uniforms.uStrokeAlignments = strokeAlignments;
+      uniforms.uniforms.uBorderEnabled = hasStroke ? 1 : 0;
+      uniforms.uniforms.uStrokePixelRatio = strokePixelRatio;
       uniforms.uniforms.uTextureSize = new Float32Array([
         frame.width,
         frame.height,
       ]);
-      uniforms.uniforms.uMaxStrokeWidth = Math.min(
-        maxStrokeWidth,
-        MAX_INTERACTION_STROKE_RADIUS,
-      );
+      uniforms.uniforms.uMaxStrokeWidth = maxStrokeWidth;
       uniforms.update();
       mesh.visible = true;
     },
@@ -775,10 +893,20 @@ function createInteractionMaskRenderer(options: {
     return options.Shader.from({
       gl: {
         fragment: interactionMaskFragmentShader,
-        vertex: interactionMaskVertexShader,
+        vertex: tintedMaskVertexGlsl,
+      },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: interactionMaskFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: tintedMaskVertexWgsl,
+        },
       },
       resources: {
-        interactionMaskUniforms: uniforms,
+        maskUniforms: uniforms,
         uSampler: placeholderSource.style,
         uTexture: placeholderSource,
       },
@@ -786,66 +914,11 @@ function createInteractionMaskRenderer(options: {
   }
 
   function rebuildShader() {
-    try {
-      shader.destroy(true);
-    } catch {
-      // Pixi has already invalidated this shader's resource group.
-    }
-
+    destroyShaderKeepingProgram(shader);
     shader = createShader();
     mesh.shader = shader;
   }
 }
-
-function writePaletteEntry(
-  palette: Float32Array,
-  maskId: number,
-  color: number,
-  alpha: number,
-) {
-  const offset = maskId * 4;
-  const clampedAlpha = Math.max(0, Math.min(alpha, 1));
-
-  palette[offset] = ((color >> 16) & 0xff) / 255;
-  palette[offset + 1] = ((color >> 8) & 0xff) / 255;
-  palette[offset + 2] = (color & 0xff) / 255;
-  palette[offset + 3] = clampedAlpha;
-}
-
-function createPlaceholderCanvas() {
-  const canvas = document.createElement("canvas");
-
-  canvas.height = 1;
-  canvas.width = 1;
-
-  return canvas;
-}
-
-const interactionMaskVertexShader = `#version 300 es
-precision highp float;
-
-in vec2 aPosition;
-in vec2 aUV;
-
-uniform mat3 uProjectionMatrix;
-uniform mat3 uWorldTransformMatrix;
-uniform vec4 uWorldColorAlpha;
-uniform mat3 uTransformMatrix;
-uniform vec4 uColor;
-
-out vec2 vUV;
-out vec4 vColor;
-
-void main(void) {
-  mat3 modelViewProjectionMatrix =
-    uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-
-  gl_Position =
-    vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-  vUV = aUV;
-  vColor = uWorldColorAlpha * uColor;
-}
-`;
 
 const interactionMaskFragmentShader = `#version 300 es
 precision highp float;
@@ -855,33 +928,12 @@ in vec2 vUV;
 in vec4 vColor;
 
 uniform sampler2D uTexture;
-uniform vec4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
-uniform vec4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
-uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform vec2 uTextureSize;
 uniform float uMaxStrokeWidth;
-
+uniform float uBorderEnabled;
+uniform float uStrokePixelRatio;
+${idMaskPaletteGlsl}
 out vec4 finalColor;
-
-float sampleMaskId(vec2 uv) {
-  return floor(texture(uTexture, uv).r * 255.0 + 0.5);
-}
-
-int paletteIndex(float maskId) {
-  return int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
-}
-
-vec4 readFill(float maskId) {
-  return uFillPalette[paletteIndex(maskId)];
-}
-
-vec4 readStroke(float maskId) {
-  return uStrokePalette[paletteIndex(maskId)];
-}
-
-float readStrokeWidth(float maskId) {
-  return uStrokeWidths[paletteIndex(maskId)];
-}
 
 vec4 premultiplyAlpha(vec4 color) {
   return vec4(color.rgb * color.a, color.a);
@@ -891,75 +943,115 @@ bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
 
-float findNeighborStrokeId(float centerId, vec2 texel) {
-  float bestId = 0.0;
-
-  for (int offsetY = -${MAX_INTERACTION_STROKE_RADIUS}; offsetY <= ${MAX_INTERACTION_STROKE_RADIUS}; offsetY += 1) {
-    for (int offsetX = -${MAX_INTERACTION_STROKE_RADIUS}; offsetX <= ${MAX_INTERACTION_STROKE_RADIUS}; offsetX += 1) {
-      if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      float distance = max(abs(float(offsetX)), abs(float(offsetY)));
-
-      if (distance > uMaxStrokeWidth) {
-        continue;
-      }
-
-      float maskId = sampleMaskId(vUV + vec2(float(offsetX), float(offsetY)) * texel);
-
-      if (maskId < 0.5 || !differs(maskId, centerId)) {
-        continue;
-      }
-
-      if (readStrokeWidth(maskId) >= distance && readStroke(maskId).a > 0.0) {
-        bestId = maskId;
-      }
-    }
-  }
-
-  return bestId;
-}
-
-bool isBoundary(float centerId, vec2 texel) {
-  return
-    differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
-    differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
-}
+${idMaskStrokeCoverageGlsl}
 
 void main(void) {
-  float centerId = sampleMaskId(vUV);
-  vec2 texel = 1.0 / uTextureSize;
+  vec2 position = vUV * uTextureSize;
+  ivec2 sourceCell = ivec2(floor(position));
+  float centerId = sampleMaskIdCell(sourceCell);
+  vec2 cell = fract(position);
+  vec2 footprint = fwidth(position);
+  float pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
 
   if (centerId > 0.5) {
     vec4 fill = readFill(centerId);
     vec4 stroke = readStroke(centerId);
 
-    if (
-      uMaxStrokeWidth > 0.0 &&
-      readStrokeWidth(centerId) > 0.0 &&
-      stroke.a > 0.0 &&
-      isBoundary(centerId, texel)
-    ) {
-      finalColor = premultiplyAlpha(stroke * vColor);
-      return;
+    float width = strokeWidthInTexels(centerId, pixelWidth);
+    if (uBorderEnabled > 0.5 && width > 0.0 && stroke.a > 0.0) {
+      float coverage = innerStrokeCoverage(centerId, sourceCell, cell, width, pixelWidth);
+      if (coverage >= 1.0) {
+        finalColor = premultiplyAlpha(stroke * vColor);
+        return;
+      }
+      if (coverage > 0.0) {
+        finalColor = mix(premultiplyAlpha(fill * vColor), premultiplyAlpha(stroke * vColor), coverage);
+        return;
+      }
     }
 
     finalColor = premultiplyAlpha(fill * vColor);
     return;
   }
 
-  if (uMaxStrokeWidth > 0.0) {
-    float strokeId = findNeighborStrokeId(centerId, texel);
+  if (uBorderEnabled > 0.5) {
+    vec2 border = findNeighborStroke(centerId, sourceCell, cell, pixelWidth);
 
-    if (strokeId > 0.5) {
-      finalColor = premultiplyAlpha(readStroke(strokeId) * vColor);
+    if (border.x > 0.5) {
+      finalColor = premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
       return;
     }
   }
 
   finalColor = vec4(0.0);
+}
+`;
+
+const interactionMaskFragmentWgsl = `
+struct InteractionMaskUniforms {
+  ${idMaskFillPaletteWgslField}
+  uMaxStrokeWidth: f32,
+  uBorderEnabled: f32,
+  uStrokePixelRatio: f32,
+  ${idMaskStrokePaletteWgslField}
+  ${idMaskStrokeWidthsWgslField}
+  ${idMaskStrokeAlignmentsWgslField}
+  uTextureSize: vec2<f32>,
+}
+
+@group(2) @binding(0) var<uniform> maskUniforms: InteractionMaskUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+${idMaskPaletteWgsl}
+fn premultiplyAlpha(color: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(color.rgb * color.a, color.a);
+}
+
+fn differs(left: f32, right: f32) -> bool {
+  return abs(left - right) > 0.5;
+}
+
+${idMaskStrokeCoverageWgsl}
+
+@fragment
+fn mainFragment(
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+) -> @location(0) vec4<f32> {
+  let position = vUV * maskUniforms.uTextureSize;
+  let sourceCell = vec2<i32>(floor(position));
+  let centerId = sampleMaskIdCell(sourceCell);
+  let cell = fract(position);
+  let footprint = fwidth(position);
+  let pixelWidth = max(max(footprint.x, footprint.y), 0.00001);
+
+  if (centerId > 0.5) {
+    let fill = readFill(centerId);
+    let stroke = readStroke(centerId);
+
+    let width = strokeWidthInTexels(centerId, pixelWidth);
+    if (maskUniforms.uBorderEnabled > 0.5 && width > 0.0 && stroke.a > 0.0) {
+      let coverage = innerStrokeCoverage(centerId, sourceCell, cell, width, pixelWidth);
+      if (coverage >= 1.0) {
+        return premultiplyAlpha(stroke * vColor);
+      }
+      if (coverage > 0.0) {
+        return mix(premultiplyAlpha(fill * vColor), premultiplyAlpha(stroke * vColor), coverage);
+      }
+    }
+
+    return premultiplyAlpha(fill * vColor);
+  }
+
+  if (maskUniforms.uBorderEnabled > 0.5) {
+    let border = findNeighborStroke(centerId, sourceCell, cell, pixelWidth);
+
+    if (border.x > 0.5) {
+      return premultiplyAlpha(readStroke(border.x) * vColor) * border.y;
+    }
+  }
+
+  return vec4<f32>(0.0);
 }
 `;

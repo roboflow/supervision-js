@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPixiVectorLayer } from "#renderers/pixi-vector-layer";
+import { resolveAnnotationShapeStyle } from "#renderers/annotation-shape-styles";
 import {
+  BaseOrientedBoxStyle,
   KeypointMarkerShape,
   MarkerShape,
   MarkerSizeSpace,
@@ -16,23 +18,64 @@ import type {
 } from "supervision-js-core";
 
 describe("pixi vector layer", () => {
-  it("recycles graphics when frame-scoped detection ids change", () => {
-    const frames = [
-      createFrame(0, ["pose-0", "pose-1"]),
-      createFrame(1, ["pose-2"]),
-    ];
-    const layer = createLayer(frames);
+  it("draws a fill-only OBB without issuing stroke commands", () => {
+    const points = [
+      { x: 20, y: 10 },
+      { x: 30, y: 20 },
+      { x: 20, y: 30 },
+      { x: 10, y: 20 },
+    ] as const;
+    const frame: DetectionFrame = {
+      detections: [{ id: "ball", orientedBox: { points } }],
+      mediaTime: 0,
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([frame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle: resolveAnnotationShapeStyle({
+        orientedBoxStyle: new BaseOrientedBoxStyle({ stroke: null }),
+      }),
+    });
     const container = layer.createContainer() as unknown as FakeContainer;
-
     layer.drawFrame(0);
-    expect(container.children).toHaveLength(2);
 
-    layer.drawFrame(1);
-    expect(container.children).toHaveLength(2);
-    expect(container.children.filter((child) => child.visible)).toHaveLength(1);
-    expect(layer.translateDetection("pose-0", 1, 2)).toBe(false);
-    expect(layer.translateDetection("pose-2", 3, 4)).toBe(true);
+    expect(container.children).toHaveLength(1);
+    const display = container.children[0]!;
+    expect(display.poly).toHaveBeenCalledWith(
+      points.flatMap(({ x, y }) => [x, y]),
+      true,
+    );
+    expect(display.fill).toHaveBeenCalledOnce();
+    expect(display.moveTo).not.toHaveBeenCalled();
+    expect(display.stroke).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    "recycles graphics when frame-scoped detection ids change (retainByIndex: %s)",
+    (retainByIndex) => {
+      const frames = [
+        createFrame(0, ["pose-0", "pose-1"]),
+        createFrame(1, ["pose-2"]),
+      ];
+      const layer = createLayer(frames, keypointStyle, retainByIndex);
+      const container = layer.createContainer() as unknown as FakeContainer;
+
+      layer.drawFrame(0);
+      expect(container.children).toHaveLength(2);
+
+      layer.drawFrame(1);
+      expect(container.children).toHaveLength(2);
+      expect(container.children.filter((child) => child.visible)).toHaveLength(
+        1,
+      );
+      expect(layer.translateDetection("pose-0", 1, 2)).toBe(false);
+      expect(layer.translateDetection("pose-2", 3, 4)).toBe(true);
+    },
+  );
 
   it("does not allocate graphics when the matching style is disabled", () => {
     const frame = createFrame(0, ["pose-0"]);
@@ -378,9 +421,11 @@ const keypointStyle: KeypointStyle = {
 function createLayer(
   frames: readonly DetectionFrame[],
   style: KeypointStyle | null = keypointStyle,
+  retainByIndex = false,
 ) {
   return createPixiVectorLayer({
     Container: FakeContainer as never,
+    retainByIndex,
     detectionTimeline: createTimeline(frames),
     Graphics: FakeGraphics as never,
     keypointStyle: style,

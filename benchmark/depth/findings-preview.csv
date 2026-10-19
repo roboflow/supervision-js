@@ -1,0 +1,67 @@
+browser,case,clip,decoder,copy,rate,upload,fps,main_ms_median,main_ms_p95,longest_block_ms,presents,presents_without_depth,gate_holds,gate_gave_up,held_ms,present_ms_median,present_ms_p95,uploads_in_present,seek_to_preview_ms,codes_changed,max_code_error,code_0_reads_as,code_255_reads_as,luma_path
+chrome,preview-codes,probe 256x256,prefer-software,,,,,,,,,,,,,,,,,0,0,0,255,plane
+chrome,preview-codes,probe 256x256,prefer-hardware,,,,,,,,,,,,,,,,,249,20,16,235,plane
+chrome,preview-codes,probe 256x256,no-preference,,,,,,,,,,,,,,,,,0,0,0,255,plane
+chrome,preview-decode,720p,prefer-software,worker,,,1054,0.005,0.015,1.6,,,,,,,,,,,,,,plane
+chrome,preview-decode,720p,prefer-software,page,,,1033,0.055,0.130,1.9,,,,,,,,,,,,,,plane
+chrome,preview-decode,720p,prefer-hardware,worker,,,886,0.000,0.020,3.8,,,,,,,,,,,,,,plane
+chrome,preview-decode,720p,no-preference,worker,,,899,0.000,0.020,2.4,,,,,,,,,,,,,,plane
+chrome,preview-decode,1080p,prefer-software,worker,,,868,0.005,0.025,5.6,,,,,,,,,,,,,,plane
+chrome,preview-decode,1080p,prefer-software,page,,,827,0.255,0.350,4.2,,,,,,,,,,,,,,plane
+chrome,preview-decode,1080p,prefer-hardware,worker,,,647,0.000,0.025,3.8,,,,,,,,,,,,,,plane
+chrome,preview-decode,1080p,no-preference,worker,,,651,0.000,0.030,3.6,,,,,,,,,,,,,,plane
+chrome,preview-decode,4K,prefer-software,worker,,,742,0.000,0.030,5.0,,,,,,,,,,,,,,plane
+chrome,preview-decode,4K,prefer-software,page,,,736,1.050,1.515,6.4,,,,,,,,,,,,,,plane
+chrome,preview-decode,4K,prefer-hardware,worker,,,295,0.000,0.025,6.2,,,,,,,,,,,,,,plane
+chrome,preview-decode,4K,no-preference,worker,,,286,0.000,0.035,5.0,,,,,,,,,,,,,,plane
+chrome,playback,720p,prefer-software,worker,1,in-present,,0.014,,6.0,241,0,0,0,0,0.06,0.20,97,0.0,,,,,
+chrome,playback,720p,prefer-software,worker,1,ahead,,0.010,,7.6,241,0,0,0,0,0.04,0.08,1,0.0,,,,,
+chrome,playback,720p,prefer-software,worker,2,in-present,,0.010,,5.5,240,0,0,0,0,0.07,0.12,192,8.2,,,,,
+chrome,playback,720p,prefer-software,worker,2,ahead,,0.011,,5.7,240,0,0,0,0,0.04,0.09,1,12.3,,,,,
+chrome,playback,720p,prefer-software,worker,8,in-present,,0.013,,10.3,61,0,0,0,0,0.14,0.25,61,10.3,,,,,
+chrome,playback,720p,prefer-software,worker,8,ahead,,0.012,,5.5,61,0,0,0,0,0.04,0.11,2,10.2,,,,,
+chrome,playback,1080p,prefer-software,worker,1,in-present,,0.014,,6.1,241,0,0,0,0,0.06,0.34,97,0.0,,,,,
+chrome,playback,1080p,prefer-software,worker,1,ahead,,0.011,,6.0,241,0,0,0,0,0.04,0.08,1,0.0,,,,,
+chrome,playback,1080p,prefer-software,worker,2,in-present,,0.009,,6.7,240,0,0,0,0,0.24,1.97,192,8.1,,,,,
+chrome,playback,1080p,prefer-software,worker,2,ahead,,0.008,,6.0,239,0,0,0,0,0.03,0.08,1,8.1,,,,,
+chrome,playback,1080p,prefer-software,worker,8,in-present,,0.007,,7.1,61,0,0,0,0,0.24,1.92,61,12.9,,,,,
+chrome,playback,1080p,prefer-software,worker,8,ahead,,0.007,,22.6,60,0,0,0,0,0.04,0.12,3,8.1,,,,,
+chrome,playback,4K,prefer-software,worker,1,in-present,,0.008,,20.5,241,0,0,0,0,0.06,2.57,97,0.0,,,,,
+chrome,playback,4K,prefer-software,worker,1,ahead,,0.036,,30.0,241,0,0,0,0,0.05,0.09,1,0.0,,,,,
+chrome,playback,4K,prefer-software,worker,2,in-present,,0.009,,22.7,240,0,0,0,0,1.01,3.48,192,20.2,,,,,
+chrome,playback,4K,prefer-software,worker,2,ahead,,0.009,,31.1,242,0,0,0,0,0.05,0.09,1,20.2,,,,,
+chrome,playback,4K,prefer-software,worker,8,in-present,,0.007,,26.0,61,0,0,0,0,1.08,2.68,61,25.1,,,,,
+chrome,playback,4K,prefer-software,worker,8,ahead,,0.008,,31.5,61,0,0,0,0,0.07,0.63,2,20.2,,,,,
+firefox,preview-codes,probe 256x256,prefer-software,,,,,,,,,,,,,,,,,36,1,0,255,rgb
+firefox,preview-codes,probe 256x256,prefer-hardware,,,,,,,,,,,,,,,,,36,1,0,255,rgb
+firefox,preview-codes,probe 256x256,no-preference,,,,,,,,,,,,,,,,,36,1,0,255,rgb
+firefox,preview-decode,720p,prefer-software,worker,,,389,0.000,0.040,4.1,,,,,,,,,,,,,,rgb
+firefox,preview-decode,720p,prefer-software,page,,,435,2.020,2.380,7.1,,,,,,,,,,,,,,rgb
+firefox,preview-decode,720p,prefer-hardware,worker,,,374,0.000,0.040,9.7,,,,,,,,,,,,,,rgb
+firefox,preview-decode,720p,no-preference,worker,,,378,0.000,0.040,8.8,,,,,,,,,,,,,,rgb
+firefox,preview-decode,1080p,prefer-software,worker,,,182,0.000,0.040,15.5,,,,,,,,,,,,,,rgb
+firefox,preview-decode,1080p,prefer-software,page,,,208,4.400,4.980,16.8,,,,,,,,,,,,,,rgb
+firefox,preview-decode,1080p,prefer-hardware,worker,,,178,0.000,0.060,77.4,,,,,,,,,,,,,,rgb
+firefox,preview-decode,1080p,no-preference,worker,,,180,0.000,0.060,35.9,,,,,,,,,,,,,,rgb
+firefox,preview-decode,4K,prefer-software,worker,,,51,0.000,0.080,21.6,,,,,,,,,,,,,,rgb
+firefox,preview-decode,4K,prefer-software,page,,,54,17.380,20.320,46.5,,,,,,,,,,,,,,rgb
+firefox,preview-decode,4K,prefer-hardware,worker,,,51,0.000,0.100,101.1,,,,,,,,,,,,,,rgb
+firefox,preview-decode,4K,no-preference,worker,,,51,0.000,0.100,18.0,,,,,,,,,,,,,,rgb
+firefox,playback,720p,prefer-software,worker,1,in-present,,0.014,,13.3,111,0,0,0,0,0.34,0.44,97,0.0,,,,,
+firefox,playback,720p,prefer-software,worker,1,ahead,,0.012,,15.9,99,0,0,0,0,0.14,0.20,1,0.0,,,,,
+firefox,playback,720p,prefer-software,worker,2,in-present,,0.012,,17.2,100,0,0,0,0,0.32,0.40,100,15.7,,,,,
+firefox,playback,720p,prefer-software,worker,2,ahead,,0.012,,14.3,100,0,0,0,0,0.14,0.26,6,18.5,,,,,
+firefox,playback,720p,prefer-software,worker,8,in-present,,0.008,,13.9,26,0,0,0,0,0.32,0.40,26,20.0,,,,,
+firefox,playback,720p,prefer-software,worker,8,ahead,,0.010,,13.6,26,0,0,0,0,0.14,0.40,6,17.6,,,,,
+firefox,playback,1080p,prefer-software,worker,1,in-present,,0.016,,14.1,99,0,0,0,0,0.50,0.62,97,0.0,,,,,
+firefox,playback,1080p,prefer-software,worker,1,ahead,,0.017,,14.8,101,0,0,0,0,0.16,0.22,1,0.0,,,,,
+firefox,playback,1080p,prefer-software,worker,2,in-present,,0.021,,14.5,98,0,0,0,0,0.56,0.86,98,33.2,,,,,
+firefox,playback,1080p,prefer-software,worker,2,ahead,,0.018,,16.1,100,0,0,0,0,0.16,0.42,7,28.8,,,,,
+firefox,playback,1080p,prefer-software,worker,8,in-present,,0.014,,13.8,25,0,0,0,0,0.56,0.70,25,34.4,,,,,
+firefox,playback,1080p,prefer-software,worker,8,ahead,,0.013,,16.5,28,0,0,0,0,0.18,0.64,10,44.4,,,,,
+firefox,playback,4K,prefer-software,worker,1,in-present,,0.023,,17.2,98,0,0,0,0,1.62,2.20,96,0.0,,,,,
+firefox,playback,4K,prefer-software,worker,1,ahead,,0.028,,15.3,100,0,0,0,0,0.18,0.40,1,0.1,,,,,
+firefox,playback,4K,prefer-software,worker,2,in-present,,0.024,,18.4,95,0,0,0,0,1.38,2.08,95,78.7,,,,,
+firefox,playback,4K,prefer-software,worker,2,ahead,,0.025,,16.7,100,0,0,0,0,0.20,1.36,12,76.6,,,,,
+firefox,playback,4K,prefer-software,worker,8,in-present,,0.024,,17.2,31,0,9,0,2217,1.56,2.36,31,82.8,,,,,
+firefox,playback,4K,prefer-software,worker,8,ahead,,0.025,,18.4,29,0,9,0,2225,1.32,2.42,20,76.0,,,,,

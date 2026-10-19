@@ -8,6 +8,10 @@ code contributions.
 
 - Search existing issues and pull requests before opening a new one.
 - Keep browser renderer changes aligned with the session-first public API.
+- Video presentation is push-based and its atomic present is law for later
+  edits. Read
+  [video-engine-presentation.md](docs/internal/video-engine-presentation.md)
+  before changing video, the annotation window, or the render policy.
 - Do not expose PixiJS, Mediabunny, worker, or prepared-artifact internals as
   public API without a concrete consumer need.
 - Treat React Native as experimental and keep it independent of the browser
@@ -23,12 +27,22 @@ including its one-annotator-per-PR and frozen-fixture requirements.
 
 ## Local Development
 
-Use Node.js 20.19 or newer.
+Use Node.js 20.19 or newer and [Git LFS](https://git-lfs.com). The demo's
+sample media and fixtures are stored in Git LFS; without it, they are checked
+out as small pointer files, the demo reports them as an unsupported format, and
+the pre-push hook (`git lfs pre-push`) fails.
 
 ```sh
+git lfs install
+git lfs pull   # needed if you cloned before installing Git LFS
 npm install
 npm run dev
 ```
+
+`npm run dev` keeps the package build watchers running beside the demo server.
+A demo-only server does not, and the demo runs the built package, so read
+[the build note in agent-guidance](docs/internal/agent-guidance.md#the-demo-runs-the-built-package)
+before iterating on library source any other way.
 
 Useful checks:
 

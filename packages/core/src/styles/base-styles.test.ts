@@ -12,6 +12,7 @@ import { FocusTargetMode } from "#types/focus-style";
 import { DetectionInteractionState } from "#types/interaction-style";
 import { LabelPlacement } from "#types/label-style";
 import { MaskRenderMode } from "#types/mask-style";
+import { StrokeAlignment } from "#types/paint-style";
 
 const frame: DetectionFrame = {
   detections: [],
@@ -75,6 +76,31 @@ describe("base presentation styles", () => {
     ).toBeUndefined();
   });
 
+  it.each(["screen", "mask"] as const)(
+    "preserves %s stroke units and separates their cached artifacts",
+    (widthUnit) => {
+      const mask = {
+        counts: "04",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      } as const;
+      const screenStyle = new BaseMaskStyle({
+        stroke: { width: 2, widthUnit },
+      });
+      const maskStyle = new BaseMaskStyle({ stroke: { width: 2 } });
+      expect(screenStyle.artifactKey).toBe(
+        `${maskStyle.artifactKey}:${widthUnit}`,
+      );
+      expect(
+        screenStyle.resolve(
+          { mask },
+          { detectionIndex: 0, frame, mediaTime: 0.25 },
+        )?.stroke,
+      ).toMatchObject({ width: 2, widthUnit });
+    },
+  );
+
   it("supports dynamic mask colors while preserving global opacity as a cheap knob", () => {
     const staticStyle = new BaseMaskStyle({
       color: 0x00ff66,
@@ -105,7 +131,7 @@ describe("base presentation styles", () => {
     };
 
     expect(staticStyle.artifactKey).toBe(
-      "base:65382:1:fillAndStroke:16777215:1:1",
+      "base:65382:1:fillAndStroke:16777215:1:1:outside",
     );
     expect(staticStyle.opacity).toBe(0.7);
     expect(dynamicStyle.artifactKey).toBeUndefined();
@@ -120,7 +146,12 @@ describe("base presentation styles", () => {
       alpha: 0,
       color: 0x22c55e,
       mask,
-      stroke: { alpha: 1, color: 0x22c55e, width: 1 },
+      stroke: {
+        alignment: StrokeAlignment.Outside,
+        alpha: 1,
+        color: 0x22c55e,
+        width: 1,
+      },
     });
     expect(
       dynamicStyle.resolve(
@@ -167,7 +198,12 @@ describe("base presentation styles", () => {
       alpha: 0.45,
       color: 0x22c55e,
       mask,
-      stroke: { alpha: 1, color: 0x22c55e, width: 2 },
+      stroke: {
+        alignment: StrokeAlignment.Outside,
+        alpha: 1,
+        color: 0x22c55e,
+        width: 2,
+      },
     });
   });
 
@@ -183,15 +219,38 @@ describe("base presentation styles", () => {
       width: 2,
     } as const;
 
-    expect(style.artifactKey).toBe("base:3718648:1:strokeOnly:3718648:1:1");
+    expect(style.artifactKey).toBe(
+      "base:3718648:1:strokeOnly:3718648:1:1:outside",
+    );
     expect(
       style.resolve({ mask }, { detectionIndex: 0, frame, mediaTime: 0.25 }),
     ).toEqual({
       alpha: 0,
       color: 0x38bdf8,
       mask,
-      stroke: { alpha: 1, color: 0x38bdf8, width: 1 },
+      stroke: {
+        alignment: StrokeAlignment.Outside,
+        alpha: 1,
+        color: 0x38bdf8,
+        width: 1,
+      },
     });
+  });
+
+  it("separates mask artifact identities by stroke alignment", () => {
+    const outside = new BaseMaskStyle({ stroke: { width: 2 } });
+    const explicitOutside = new BaseMaskStyle({
+      stroke: { width: 2, alignment: StrokeAlignment.Outside },
+    });
+    const inside = new BaseMaskStyle({
+      stroke: { width: 2, alignment: StrokeAlignment.Inside },
+    });
+    const center = new BaseMaskStyle({
+      stroke: { width: 2, alignment: StrokeAlignment.Center },
+    });
+    expect(explicitOutside.artifactKey).toBe(outside.artifactKey);
+    expect(inside.artifactKey).not.toBe(outside.artifactKey);
+    expect(center.artifactKey).not.toBe(outside.artifactKey);
   });
 
   it("supports dynamic label text and presentation", () => {
@@ -265,6 +324,12 @@ describe("base presentation styles", () => {
     });
     const detection = {
       className: "person",
+      mask: {
+        counts: "04",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      } as const,
       rect: { height: 40, width: 20, x: 10, y: 12 },
     };
 
@@ -292,20 +357,19 @@ describe("base presentation styles", () => {
     });
   });
 
-  it("resolves hover and selected interaction highlights without touching base layers", () => {
+  it("resolves hover and selected picks into their configured presentations", () => {
     const style = new BaseInteractionStyle({
-      fill: (_detection, context) =>
-        context.state === DetectionInteractionState.Selected
-          ? { alpha: 0.2, color: 0xfde047 }
-          : null,
-      stroke: (detection, context) => ({
-        alpha: context.state === DetectionInteractionState.Selected ? 1 : 0.85,
-        cap: "square",
-        color: detection.className === "person" ? 0x22c55e : 0x38bdf8,
-        join: "round",
-        miterLimit: 5,
-        width: context.state === DetectionInteractionState.Selected ? 5 : 3,
-      }),
+      hovered: {
+        boxStyle: new BaseBoxStyle({
+          stroke: { alpha: 0.85, color: 0x38bdf8, width: 3 },
+        }),
+      },
+      selected: {
+        boxStyle: new BaseBoxStyle({
+          fill: { alpha: 0.2, color: 0xfde047 },
+          stroke: { alpha: 1, color: 0x22c55e, width: 5 },
+        }),
+      },
     });
     const detection = {
       className: "person",
@@ -335,18 +399,10 @@ describe("base presentation styles", () => {
         frame,
         mediaTime: 0.25,
       }),
-    ).toEqual({
-      fill: undefined,
+    ).toMatchObject({
       rect: detection.rect,
       shape: BoxShape.Rect,
-      stroke: {
-        alpha: 0.85,
-        cap: "square",
-        color: 0x22c55e,
-        join: "round",
-        miterLimit: 5,
-        width: 3,
-      },
+      stroke: { alpha: 0.85, color: 0x38bdf8, width: 3 },
     });
     expect(
       selectedPresentation?.boxStyle?.resolve(detection, {
@@ -356,11 +412,34 @@ describe("base presentation styles", () => {
       }),
     ).toMatchObject({
       fill: { alpha: 0.2, color: 0xfde047 },
-      stroke: {
-        alpha: 1,
-        color: 0x22c55e,
-        width: 5,
-      },
+      stroke: { alpha: 1, color: 0x22c55e, width: 5 },
+    });
+  });
+
+  it("falls back to a highlight rectangle when a state has no presentation", () => {
+    const style = new BaseInteractionStyle();
+    const detection = { rect: { height: 40, width: 20, x: 10, y: 12 } };
+
+    const presentation = style.resolve(detection, {
+      detectionIndex: 0,
+      frame,
+      mediaTime: 0.25,
+      point: { x: 12, y: 14 },
+      state: DetectionInteractionState.Selected,
+      target: DetectionPickTarget.Box,
+    });
+
+    expect(
+      presentation?.boxStyle?.resolve(detection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0.25,
+      }),
+    ).toEqual({
+      fill: { alpha: 0.18, color: 0xfde047 },
+      rect: detection.rect,
+      shape: BoxShape.Rect,
+      stroke: { alpha: 1, color: 0xfde047, width: 4 },
     });
   });
 
@@ -413,6 +492,69 @@ describe("base presentation styles", () => {
         hoveredPick: null,
         mediaTime: 0.25,
         selectedPick: null,
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each([null, () => null])(
+    "can disable rectangle fallback without disabling focus",
+    (shape) => {
+      const focusFrame = {
+        detections: [{ rect: { height: 40, width: 20, x: 10, y: 12 } }],
+        mediaTime: 0.25,
+      };
+      const context = {
+        frame: focusFrame,
+        hoveredPick: null,
+        mediaTime: focusFrame.mediaTime,
+        selectedPick: null,
+      };
+
+      expect(
+        new BaseFocusStyle({
+          shape,
+          targetMode: FocusTargetMode.Ambient,
+        }).resolve(context),
+      ).toMatchObject({ fallback: null, targets: [{ frame: focusFrame }] });
+      expect(
+        new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }).resolve(
+          context,
+        ),
+      ).toMatchObject({ fallback: { shape: BoxShape.RoundedRect } });
+    },
+  );
+
+  it("ignores previous-frame picks in ambient focus", () => {
+    const detection = { rect: { height: 40, width: 20, x: 10, y: 12 } };
+    const focusFrame = { detections: [detection], mediaTime: 0.25 };
+    const previousFrame = { detections: [detection], mediaTime: 0.2 };
+    const previousPick = {
+      detection,
+      detectionIndex: 0,
+      frame: previousFrame,
+      mediaTime: previousFrame.mediaTime,
+      point: { x: 12, y: 14 },
+      target: DetectionPickTarget.Box,
+    };
+    const style = new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient });
+
+    expect(
+      style.resolve({
+        frame: focusFrame,
+        mediaTime: focusFrame.mediaTime,
+        selectedPick: previousPick,
+        hoveredPick: previousPick,
+      }),
+    ).toMatchObject({
+      ambient: true,
+      targets: [{ frame: focusFrame, detection }],
+    });
+    expect(
+      style.resolve({
+        frame: { detections: [], mediaTime: 0.3 },
+        mediaTime: 0.3,
+        selectedPick: previousPick,
+        hoveredPick: previousPick,
       }),
     ).toBeUndefined();
   });

@@ -1,11 +1,19 @@
 import type { BoxStyle } from "#types/box-style";
 import type { BoxCornerStyle } from "#types/box-corner-style";
+import type {
+  DepthColormap,
+  DepthQuantity,
+  DepthRange,
+  DepthSampling,
+} from "#types/depth-map";
 import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { MarkerStyle } from "#types/marker-style";
+import type { OrientedBoxStyle } from "#types/oriented-box-style";
+import type { PercentageBarStyle } from "#types/percentage-bar-style";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
 import type { AnnotationStyleContext } from "#types/style";
@@ -20,12 +28,16 @@ import type { Detection } from "#types/detections";
 export const annotationRendererKinds = [
   "box",
   "box-corners",
+  "depth",
   "ellipse",
+  "heatmap",
   "keypoints",
   "label",
   "mask",
   "maskHalo",
   "marker",
+  "orientedBox",
+  "percentageBar",
   "polygon",
   "polyline",
   "region",
@@ -44,12 +56,16 @@ export type AnnotationRendererKind = (typeof annotationRendererKinds)[number];
 export type AnnotationRenderer =
   | BoxAnnotationRenderer
   | BoxCornerAnnotationRenderer
+  | DepthAnnotationRenderer
   | EllipseAnnotationRenderer
+  | HeatmapAnnotationRenderer
   | KeypointAnnotationRenderer
   | LabelAnnotationRenderer
   | MaskAnnotationRenderer
   | MaskHaloAnnotationRenderer
   | MarkerAnnotationRenderer
+  | OrientedBoxAnnotationRenderer
+  | PercentageBarAnnotationRenderer
   | PolygonAnnotationRenderer
   | PolylineAnnotationRenderer
   | RegionAnnotationRenderer;
@@ -79,9 +95,73 @@ export interface BoxCornerAnnotationRenderer extends BaseAnnotationRenderer {
   readonly style?: BoxCornerStyle | null;
 }
 
+/**
+ * Colours the session's depth map over the media.
+ *
+ * The map comes from the session's `depth` option, not from detections, and is
+ * stretched over the whole media rectangle. Changing a setting here recolours
+ * the map without reloading or re-uploading it. Descriptors with distinct ids
+ * may coexist, for example two colormaps split by `wipe`.
+ */
+export interface DepthAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "depth";
+  /** Colour table, with the near end warm or bright. Defaults to `"turbo"`. */
+  readonly colormap?: DepthColormap;
+  /**
+   * Colours disparity (inverse depth) or metric depth. Defaults to
+   * `"disparity"`. Depth needs metric data or a camera; without one the map
+   * is coloured as disparity.
+   */
+  readonly quantity?: DepthQuantity;
+  /**
+   * `"clip"` uses the map's own display range, `"auto"` the frame's 2nd to
+   * 98th percentile, and `{ min, max }` a fixed range in the quantity's unit:
+   * pixels of disparity, or metres of depth. Without a camera, a metric
+   * map's disparity is inverse depth in 1/m; relative inverse depth keeps
+   * its own unit. Values outside clamp to the ends.
+   * Defaults to `"clip"`, which behaves as `"auto"` for a map without a
+   * display range.
+   */
+  readonly range?: "clip" | "auto" | DepthRange;
+  /** Overall alpha from 0 to 1. Defaults to 1. */
+  readonly opacity?: number;
+  /**
+   * `"auto"` samples the nearest map pixel when the map is at least media
+   * size and filters edge-aware when it is smaller. Defaults to `"auto"`.
+   */
+  readonly sampling?: DepthSampling;
+  /** Share of the media width, from the left, the map covers. Defaults to 1. */
+  readonly wipe?: number;
+  /**
+   * `0xRRGGBB` painted where the map has no depth, or `null` to leave those
+   * pixels unpainted. Defaults to `null`.
+   */
+  readonly noDepthColor?: number | null;
+}
+
 export interface EllipseAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "ellipse";
   readonly style?: EllipseStyle | null;
+}
+
+/** Colours scalar heatmap samples without changing the underlying scores. */
+export interface HeatmapAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "heatmap";
+  /** Multiplies each heatmap's model threshold; defaults to 1. */
+  readonly thresholdScale?: number;
+  /** Minimum alpha for visible samples, from 0 to 1; defaults to 0. */
+  readonly minimumAlpha?: number;
+  /** Overall alpha multiplier, from 0 to 1; defaults to 1. */
+  readonly opacity?: number;
+  /** Upper score mapped to the final colour stop; defaults to 1. */
+  readonly maximumScore?: number;
+  /** Positions from 0 to 1 map scores from 0 to `maximumScore`. */
+  readonly colorStops?: readonly HeatmapColorStop[];
+}
+
+export interface HeatmapColorStop {
+  readonly position: number;
+  readonly color: number;
 }
 
 export interface KeypointAnnotationRenderer extends BaseAnnotationRenderer {
@@ -114,6 +194,22 @@ export interface MaskHaloAnnotationRenderer extends BaseAnnotationRenderer {
 export interface MarkerAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "marker";
   readonly style?: MarkerStyle | null;
+}
+
+/**
+ * Draws one explicit oriented quadrilateral per detection.
+ *
+ * Presentation-only, like `box-corners` and `ellipse`: it never reinterprets
+ * `rect` as rotatable and never mutates semantic detection geometry.
+ */
+export interface OrientedBoxAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "orientedBox";
+  readonly style?: OrientedBoxStyle | null;
+}
+
+export interface PercentageBarAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "percentageBar";
+  readonly style?: PercentageBarStyle | null;
 }
 
 export interface PolygonAnnotationRenderer extends BaseAnnotationRenderer {
@@ -346,9 +442,19 @@ export type AnnotationRendererFactory = {
   readonly boxCorners: (
     options?: AnnotationRendererStyleOptions<"box-corners">,
   ) => BoxCornerAnnotationRenderer;
+  readonly depth: (
+    options?: Omit<DepthAnnotationRenderer, "kind" | "id"> & {
+      readonly id?: string;
+    },
+  ) => DepthAnnotationRenderer;
   readonly ellipse: (
     options?: AnnotationRendererStyleOptions<"ellipse">,
   ) => EllipseAnnotationRenderer;
+  readonly heatmap: (
+    options?: Omit<HeatmapAnnotationRenderer, "kind" | "id"> & {
+      readonly id?: string;
+    },
+  ) => HeatmapAnnotationRenderer;
   readonly keypoints: (
     options?: AnnotationRendererStyleOptions<"keypoints">,
   ) => KeypointAnnotationRenderer;
@@ -364,6 +470,12 @@ export type AnnotationRendererFactory = {
   readonly marker: (
     options?: AnnotationRendererStyleOptions<"marker">,
   ) => MarkerAnnotationRenderer;
+  readonly orientedBox: (
+    options?: AnnotationRendererStyleOptions<"orientedBox">,
+  ) => OrientedBoxAnnotationRenderer;
+  readonly percentageBar: (
+    options?: AnnotationRendererStyleOptions<"percentageBar">,
+  ) => PercentageBarAnnotationRenderer;
   readonly polygon: (
     options?: AnnotationRendererStyleOptions<"polygon">,
   ) => PolygonAnnotationRenderer;
@@ -376,7 +488,7 @@ export type AnnotationRendererFactory = {
 };
 
 type AnnotationRendererStyleOptions<
-  TKind extends Exclude<AnnotationRendererKind, "region">,
+  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap" | "depth">,
 > = Pick<AnnotationRendererOfKind<TKind>, "style">;
 
 /**
@@ -390,19 +502,32 @@ type AnnotationRendererStyleOptions<
 export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
   boxCorners: (options) => createAnnotationRenderer("box-corners", options),
+  depth: (options) => ({
+    ...options,
+    id: options?.id ?? "depth",
+    kind: "depth",
+  }),
   ellipse: (options) => createAnnotationRenderer("ellipse", options),
+  heatmap: (options) => ({
+    ...options,
+    id: options?.id ?? "heatmap",
+    kind: "heatmap",
+  }),
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),
   maskHalo: (options) => createAnnotationRenderer("maskHalo", options),
   marker: (options) => createAnnotationRenderer("marker", options),
+  orientedBox: (options) => createAnnotationRenderer("orientedBox", options),
+  percentageBar: (options) =>
+    createAnnotationRenderer("percentageBar", options),
   polygon: (options) => createAnnotationRenderer("polygon", options),
   polyline: (options) => createAnnotationRenderer("polyline", options),
   region: (options) => ({ kind: "region", ...options }),
 };
 
 function createAnnotationRenderer<
-  TKind extends Exclude<AnnotationRendererKind, "region">,
+  TKind extends Exclude<AnnotationRendererKind, "region" | "heatmap" | "depth">,
 >(
   kind: TKind,
   options: AnnotationRendererStyleOptions<TKind> | undefined,

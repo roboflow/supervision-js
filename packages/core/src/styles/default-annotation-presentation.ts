@@ -4,7 +4,9 @@ import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseMarkerStyle } from "#styles/marker-style";
+import { BasePercentageBarStyle } from "#styles/percentage-bar-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
+import { BaseOrientedBoxStyle } from "#styles/oriented-box-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
 import { BoxShape } from "#types/box-style";
@@ -26,6 +28,8 @@ const DEFAULT_KEYPOINT_EDGE_WIDTH = 1.5;
 const DEFAULT_KEYPOINT_SHADOW_WIDTH = 3;
 const DEFAULT_KEYPOINT_SHADOW_ALPHA = 0.25;
 const DEFAULT_KEYPOINT_RADIUS = 3.5;
+const DEFAULT_POLYLINE_SHADOW_WIDTH = DEFAULT_OUTLINE_WIDTH + 1;
+const DEFAULT_POLYLINE_SHADOW_ALPHA = 0.55;
 const DEFAULT_LABEL_CORNER_RADIUS = 4;
 const DEFAULT_LABEL_PADDING_X = 6;
 const DEFAULT_LABEL_PADDING_Y = 3;
@@ -190,7 +194,6 @@ export function createDefaultLabelStyle(
       cornerRadius: DEFAULT_LABEL_CORNER_RADIUS,
       paddingX: DEFAULT_LABEL_PADDING_X,
       paddingY: DEFAULT_LABEL_PADDING_Y,
-      topCornersOnly: true,
     }),
     includeConfidence: options.includeConfidence,
     placement: LabelPlacement.Top,
@@ -252,6 +255,28 @@ export function createDefaultMaskHaloStyle(
   };
 }
 
+/**
+ * Canonical opt-in oriented-box presentation, styled the same as the default
+ * polygon fill/stroke so the two closed shapes read consistently together.
+ */
+export function createDefaultOrientedBoxStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseOrientedBoxStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseOrientedBoxStyle({
+    fill: (detection) => ({
+      alpha: DEFAULT_FILL_ALPHA,
+      color: getClassColor(detection),
+    }),
+    stroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
 export function createDefaultPolygonStyle(
   options: DefaultAnnotationPresentationOptions = {},
 ): BasePolygonStyle {
@@ -276,10 +301,28 @@ export function createDefaultPolylineStyle(
   const getClassColor = createClassColorResolver(options);
 
   return new BasePolylineStyle({
+    shadowStroke: {
+      alpha: DEFAULT_POLYLINE_SHADOW_ALPHA,
+      color: 0x000000,
+      width: DEFAULT_POLYLINE_SHADOW_WIDTH,
+    },
     stroke: (detection) => ({
       alpha: 1,
       color: getClassColor(detection),
       width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
+export function createDefaultPercentageBarStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BasePercentageBarStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BasePercentageBarStyle({
+    fill: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
     }),
   });
 }

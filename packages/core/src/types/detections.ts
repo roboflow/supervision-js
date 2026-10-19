@@ -42,6 +42,20 @@ export interface PolygonGeometry {
   readonly points: readonly Point[];
 }
 
+/**
+ * Explicit oriented quadrilateral in media-pixel coordinates.
+ *
+ * Unlike `Rect`, which stays axis-aligned, these four vertices may describe a
+ * rotated rectangle or another convex quadrilateral. Order is clockwise in
+ * media space, starting from the box's local top-left corner (its top-left
+ * before any rotation was applied). A producer that only has a mask and wants
+ * an oriented box must compute this quadrilateral itself; nothing in
+ * `supervision-js` derives one from mask or polygon geometry.
+ */
+export interface OrientedBoxGeometry {
+  readonly points: readonly [Point, Point, Point, Point];
+}
+
 export interface PolylineGeometry {
   readonly points: readonly Point[];
 }
@@ -120,6 +134,23 @@ export interface CompressedRleDetectionMask {
 export type DetectionMask = CompressedRleDetectionMask;
 
 /**
+ * Scalar samples in row-major order, independent of any colour palette.
+ * `bounds` locates the raster in media pixels; its resolution need not match
+ * the video or the source model's input size. Flatten an inference
+ * `anomaly_map[y][x]` to populate `values` without changing the scores.
+ */
+export interface DetectionHeatmap {
+  readonly bounds: Rect;
+  readonly width: number;
+  readonly height: number;
+  readonly values: readonly number[] | Float32Array | Uint16Array;
+  /** Multiplies stored samples before thresholding; defaults to 1. */
+  readonly valueScale?: number;
+  /** Model-supplied score cutoff, not a binary mask threshold. */
+  readonly threshold?: number;
+}
+
+/**
  * One semantic detection for a media frame.
  *
  * A detection may come directly from a model or from a semantic
@@ -161,7 +192,8 @@ export interface Detection {
   readonly confidence?: number;
   /** Optional host-owned annotation attributes. */
   readonly attributes?: readonly string[];
-  /** Optional per-annotation render and pick order. Higher values are on top. */
+  /** Optional per-annotation geometry order. Higher values are in front within
+   *  a renderer layer; editable boxes and vectors share a layer. */
   readonly zIndex?: number;
   /** Optional host editing lock. Renderers may still present locked records. */
   readonly locked?: boolean;
@@ -171,6 +203,8 @@ export interface Detection {
   readonly rect?: Rect;
   /** Optional closed polygon in media-pixel coordinates. */
   readonly polygon?: PolygonGeometry;
+  /** Optional explicit oriented quadrilateral in media-pixel coordinates. */
+  readonly orientedBox?: OrientedBoxGeometry;
   /** Optional open path in media-pixel coordinates. */
   readonly polyline?: PolylineGeometry;
   /** Optional keypoints and skeleton edges in media-pixel coordinates. */
@@ -179,6 +213,8 @@ export interface Detection {
    * Optional binary mask in semantic cold-storage form.
    */
   readonly mask?: DetectionMask;
+  /** Optional scalar heatmap, which the presentation colours at render time. */
+  readonly heatmap?: DetectionHeatmap;
   /**
    * Caller-owned metadata. The renderer does not interpret this field.
    */

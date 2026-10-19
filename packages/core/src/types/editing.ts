@@ -40,6 +40,8 @@ export interface AnnotationHandleDefinition {
 export interface AnnotationPointerInput {
   readonly point: Point;
   readonly timestamp: number;
+  /** Natural media size. When provided, box gestures stay within the media. */
+  readonly mediaDimensions?: Pick<Rect, "width" | "height">;
   readonly button?: number;
   readonly shiftKey?: boolean;
   readonly altKey?: boolean;
@@ -55,6 +57,8 @@ export interface AnnotationCreationTool {
   readonly minVertices?: number;
   readonly mode?: "drag" | "multiClick" | "freehand";
   readonly shouldCommit?: (geometry: Rect | readonly Point[]) => boolean;
+  /** Called when a completed creation gesture is rejected, never on cancel(). */
+  readonly onRejected?: () => void;
 }
 
 export interface AnnotationEditingState {
@@ -93,6 +97,9 @@ export interface AnnotationEditingEngine {
   pointerMove(input: AnnotationPointerInput): void;
   pointerUp(input: AnnotationPointerInput): void;
   keyDown(key: string): void;
+  /** Remove the last multi-click draft vertex. Returns false when no path is active.
+   * Consumes the final vertex by cancelling the draft, without committing it. */
+  undoCreation?(): boolean;
   beginHandleDrag(
     detection: Detection,
     handle: AnnotationHandleDefinition,
@@ -105,6 +112,11 @@ export interface AnnotationEditingEngine {
   subscribeFastTranslate(
     listener: (id: string | number, dx: number, dy: number) => void,
   ): () => void;
+}
+
+/** The built-in editing engine guarantees multi-click draft Undo. */
+export interface DraftUndoAnnotationEditingEngine extends AnnotationEditingEngine {
+  undoCreation(): boolean;
 }
 
 export interface PreviewOverlayPoint extends Point {

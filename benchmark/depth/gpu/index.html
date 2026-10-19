@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Depth GPU Benchmark</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        background: #080b0f;
+        color: #e5edf5;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+
+      main {
+        display: grid;
+        gap: 16px;
+        max-width: 1100px;
+      }
+
+      pre {
+        overflow: auto;
+        border: 1px solid #263241;
+        border-radius: 8px;
+        padding: 16px;
+        background: #111820;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Depth GPU Benchmark</h1>
+      <p>
+        Synthetic stereo scene, not model output. Query options:
+        <code>?backends=webgl,webgpu</code>,
+        <code>?cases=exactness,decode,upload,memory</code>,
+        <code>?resolutions=720p,1080p,4K</code>.
+      </p>
+      <p id="status">Preparing benchmark...</p>
+      <pre id="output"></pre>
+    </main>
+    <script type="module" src="/benchmark/depth/gpu/src/main.ts"></script>
+  </body>
+</html>

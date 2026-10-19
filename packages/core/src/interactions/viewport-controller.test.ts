@@ -26,4 +26,27 @@ describe("viewport controller", () => {
     viewport.panBy(10, 10);
     expect(viewport.getTransform()).toMatchObject({ locked: true, x: 0, y: 0 });
   });
+  it.each([0.025, 30])(
+    "restores exact scale %s while locked, then zooms gradually toward gesture bounds",
+    (scale) => {
+      const viewport = createViewportController();
+      viewport.setLocked(true);
+      viewport.setTransform({ scale, x: -42, y: 77 });
+      expect(viewport.getTransform()).toEqual({
+        locked: true,
+        scale,
+        x: -42,
+        y: 77,
+      });
+      viewport.zoomAt({ x: 100, y: 100 }, 2);
+      expect(viewport.getTransform().scale).toBe(scale);
+      viewport.setLocked(false);
+      const anchor = viewport.screenToMedia({ x: 100, y: 100 });
+      viewport.zoomAt({ x: 100, y: 100 }, scale < 0.1 ? 2 : 0.5);
+      expect(viewport.getTransform().scale).toBe(
+        scale < 0.1 ? scale * 2 : scale * 0.5,
+      );
+      expect(viewport.screenToMedia({ x: 100, y: 100 })).toEqual(anchor);
+    },
+  );
 });

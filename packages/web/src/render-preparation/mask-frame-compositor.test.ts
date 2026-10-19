@@ -1,22 +1,162 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as core from "supervision-js-core";
 
 import {
   DetectionMaskEncoding,
+  encodeBinaryMask,
   encodeCompressedRleCounts,
+  StrokeAlignment,
 } from "supervision-js-core";
 
 import {
+  PreparedMaskFrameKind,
+  readIdMaskRasterValue,
+  type PreparedIdMaskFrame,
+} from "./mask-frame-artifact";
+import {
+  canIdMaskPaletteNameFrame,
   compositeMaskFrame,
   createIdMaskFrame,
-  createPngIdMaskFrame,
+  createIdMaskPlane,
+  createIdMaskRasterFrame,
+  createMaskScreenStrokes,
   createRegionMaskCoverageFrame,
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  type CompositedMaskFrame,
 } from "./mask-frame-compositor";
 
-const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
 describe("mask frame compositor", () => {
-  it("encodes style-indexed ID masks as PNG artifacts", async () => {
-    const frame = await createPngIdMaskFrame([
+  it.each([
+    { detectionIndex: 0, widthUnit: "screen" },
+    { detectionIndex: 100, widthUnit: "screen" },
+    { detectionIndex: 0, widthUnit: "mask" },
+    { detectionIndex: 100, widthUnit: "mask" },
+  ] as const)(
+    "keeps $widthUnit stroke geometry and fill separate for detection $detectionIndex",
+    ({ detectionIndex, widthUnit }) => {
+      const instruction = {
+        alpha: 0.45,
+        color: 0xff0000,
+        detectionIndex,
+        mask: encodeBinaryMask(
+          new Uint8Array([1, 1, 1, 1, 0, 1, 1, 1, 1]),
+          3,
+          3,
+        ),
+        stroke: {
+          alpha: 1,
+          color: 0x00ff00,
+          width: 2,
+          widthUnit,
+          alignment: StrokeAlignment.Inside,
+        },
+      };
+      const raster = createIdMaskRasterFrame([instruction]);
+      const fill = compositeMaskFrame([instruction])!;
+      const strokes = createMaskScreenStrokes(
+        [instruction],
+        3,
+        3,
+        raster?.data,
+      )!;
+      expect(strokes[0]).toMatchObject({
+        detectionIndex,
+        width: 2,
+        alpha: 1,
+        color: 0x00ff00,
+        widthUnit,
+        alignment: StrokeAlignment.Inside,
+      });
+      expect(strokes[0]!.paths).toHaveLength(2);
+      expect(strokes[0]!.paths.map(signedArea).sort((a, b) => a - b)).toEqual([
+        -1, 9,
+      ]);
+      expect(readPixel(fill.data, fill.width, 1, 1)).toEqual([0, 0, 0, 0]);
+      expect(readPixel(fill.data, fill.width, 0, 0)).toEqual([255, 0, 0, 115]);
+      if (raster) expect(raster.hasStroke).toBe(false);
+    },
+  );
+
+  it("reuses the bounded ID raster for contours without materializing source polygons", () => {
+    const rasterize = vi
+      .spyOn(core, "rasterizePolygonToMask")
+      .mockImplementation(() => {
+        throw new Error("Prepared polygon contours must reuse the ID raster.");
+      });
+    try {
+      const instructions = [
+        {
+          alpha: 0.5,
+          color: 0xff0000,
+          detectionIndex: 0,
+          mask: encodeBinaryMask(new Uint8Array([1, 1, 1, 1]), 2, 2),
+          stroke: {
+            alpha: 1,
+            color: 0xff0000,
+            width: 2,
+            widthUnit: "screen" as const,
+            alignment: StrokeAlignment.Outside,
+          },
+        },
+        {
+          alpha: 0.5,
+          color: 0x00ff00,
+          detectionIndex: 1,
+          polygon: {
+            width: 2,
+            height: 2,
+            points: [
+              { x: 0, y: 1 },
+              { x: 2, y: 1 },
+              { x: 2, y: 2 },
+              { x: 0, y: 2 },
+            ],
+          },
+          stroke: { alpha: 1, color: 0x00ff00, width: 1 },
+        },
+      ];
+      const frame = createIdMaskRasterFrame(instructions)!;
+      const contours = createMaskScreenStrokes(
+        instructions,
+        frame.width,
+        frame.height,
+        frame.data,
+      )!;
+      expect(frame.strokeWidths[1]).toBe(0);
+      expect(frame.strokeWidths[2]).toBe(1);
+      expect(contours[0]).toMatchObject({
+        detectionIndex: 0,
+        width: 2,
+        alignment: StrokeAlignment.Outside,
+      });
+      expect(contours[0]!.paths).toHaveLength(1);
+      expect(rasterize).not.toHaveBeenCalled();
+    } finally {
+      rasterize.mockRestore();
+    }
+  });
+
+  it("retains disconnected islands at a diagonal pixel contact", () => {
+    const instruction = {
+      alpha: 1,
+      color: 0xff0000,
+      detectionIndex: 0,
+      mask: encodeBinaryMask(new Uint8Array([1, 0, 0, 1]), 2, 2),
+      stroke: {
+        alpha: 1,
+        color: 0xff0000,
+        width: 2,
+        widthUnit: "screen" as const,
+      },
+    };
+    const raster = createIdMaskRasterFrame([instruction])!;
+    const strokes = createMaskScreenStrokes([instruction], 2, 2, raster.data)!;
+    expect(strokes[0]!.paths.map(signedArea)).toEqual([1, 1]);
+    expect(strokes[0]!.paths.every((path) => path.length === 8)).toBe(true);
+  });
+
+  it("carries an unaligned ID raster one byte per pixel", () => {
+    const frame = createIdMaskRasterFrame([
       {
         alpha: 0.5,
         color: 0xff0000,
@@ -31,12 +171,75 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect([...frame!.png.slice(0, 8)]).toEqual(pngSignature);
     expect([...frame!.data]).toEqual([1, 0, 0, 0]);
   });
 
-  it("rasterizes polygons into worker-preparable ID-mask artifacts", async () => {
-    const frame = await createPngIdMaskFrame([
+  it("keeps an odd-width ID raster pickable", () => {
+    const frame = createIdMaskRasterFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([1, 2, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 3,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect(frame!.data.length).toBe(3 * 2);
+
+    const prepared: PreparedIdMaskFrame = {
+      close() {},
+      fillPalette: frame!.fillPalette,
+      hasStroke: frame!.hasStroke,
+      height: frame!.height,
+      key: "odd",
+      kind: PreparedMaskFrameKind.IdMask,
+      maxStrokeWidth: frame!.maxStrokeWidth,
+      raster: frame!.data,
+      sourceWidth: frame!.sourceWidth,
+      strokePalette: frame!.strokePalette,
+      strokeWidths: frame!.strokeWidths,
+      width: frame!.width,
+    };
+    const picked: number[] = [];
+
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 3; x += 1) {
+        picked.push(readIdMaskRasterValue(prepared, x, y));
+      }
+    }
+
+    // Compressed RLE runs down columns, so the two mask pixels of run [1, 2]
+    // are (0,1) and (1,0).
+    expect(picked).toEqual([0, 1, 0, 1, 0, 0]);
+  });
+
+  it("hands an aligned ID raster to the GPU one byte per pixel", () => {
+    const frame = createIdMaskRasterFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 1, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 1,
+          width: 4,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect([...frame!.data]).toEqual([1, 0, 0, 0]);
+  });
+
+  it("rasterizes polygons into worker-preparable ID-mask artifacts", () => {
+    const frame = createIdMaskRasterFrame([
       {
         alpha: 0.25,
         color: 0x00ff00,
@@ -66,6 +269,46 @@ describe("mask frame compositor", () => {
       Float32Array.from([0, 1, 0, 0.25]),
     );
     expect(frame!.strokeWidths[3]).toBe(2);
+  });
+
+  it("excludes hidden polygons from prepared coverage and dimensions", () => {
+    const frame = createIdMaskRasterFrame([
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        polygon: {
+          height: 100,
+          width: 100,
+          points: [
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 0, y: 100 },
+          ],
+        },
+        visible: false,
+      },
+      {
+        alpha: 0.5,
+        color: 0x00ff00,
+        detectionIndex: 1,
+        polygon: {
+          height: 4,
+          width: 4,
+          points: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 4 },
+            { x: 0, y: 4 },
+          ],
+        },
+      },
+    ]);
+
+    expect(frame!.width).toBe(4);
+    expect(frame!.height).toBe(4);
+    expect(frame!.data).toEqual(new Uint8Array(16).fill(2));
+    expect(frame!.fillPalette[7]).toBe(0);
   });
 
   it("builds detection-indexed ID mask artifacts for shader rendering and picking", () => {
@@ -128,8 +371,35 @@ describe("mask frame compositor", () => {
     expect(frame!.hasStroke).toBe(true);
   });
 
-  it("keeps thick mask strokes on the PNG ID-mask path", async () => {
-    const frame = await createPngIdMaskFrame([
+  it("caps the ID plane the RGBA composite carries", () => {
+    const instructions = [
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 32]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 4,
+          width: 8,
+        },
+      },
+    ];
+    const plane = createIdMaskPlane(instructions, 4);
+
+    expect(plane).toEqual({
+      data: new Uint8Array(8).fill(1),
+      height: 2,
+      width: 4,
+    });
+    expect(createIdMaskPlane(instructions)).toMatchObject({
+      height: 4,
+      width: 8,
+    });
+  });
+
+  it("keeps thick mask strokes on the ID-mask path", () => {
+    const frame = createIdMaskRasterFrame([
       {
         alpha: 0.5,
         color: 0xff0000,
@@ -149,7 +419,6 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect([...frame!.png.slice(0, 8)]).toEqual(pngSignature);
     expect(frame!.hasStroke).toBe(true);
     expect(frame!.maxStrokeWidth).toBe(5);
     expect(frame!.strokeWidths[1]).toBe(5);
@@ -274,6 +543,33 @@ describe("mask frame compositor", () => {
     ]);
   });
 
+  it("leaves a coverage-only instruction out of the ID raster too", () => {
+    const mask = {
+      counts: encodeCompressedRleCounts([1, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 2,
+    } as const;
+    const instructions = [
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask,
+        regionCoverageMask: mask,
+        visible: false,
+      },
+    ] as const;
+
+    // Both representations read the same instruction list, so the filter has
+    // to sit where they share it or one of them paints the invisible mask.
+    expect(createIdMaskRasterFrame(instructions)).toBeUndefined();
+    expect(compositeMaskFrame(instructions)).toBeUndefined();
+    expect(createRegionMaskCoverageFrame(instructions)?.entries).toHaveLength(
+      1,
+    );
+  });
+
   it("composites mask strokes into the prepared frame artifact", () => {
     const frame = compositeMaskFrame([
       {
@@ -311,4 +607,267 @@ function readPixel(
   const offset = (y * canvasWidth + x) * 4;
 
   return [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
+}
+
+describe("id mask palette reach", () => {
+  it("counts a detection's index in the frame, not the masks the frame carries", () => {
+    const oneDistantMask = [
+      maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES + 40),
+    ];
+
+    expect(canIdMaskPaletteNameFrame(oneDistantMask)).toBe(false);
+    expect(createIdMaskRasterFrame(oneDistantMask)).toBeUndefined();
+  });
+
+  it("cannot carry an ID plane for a frame it could not name", () => {
+    const overflowing = [
+      maskedDetectionAt(0),
+      maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES - 1),
+    ];
+
+    expect(canIdMaskPaletteNameFrame(overflowing)).toBe(false);
+    expect(createIdMaskPlane(overflowing)).toBeUndefined();
+    expect(compositeMaskFrame(overflowing)).toBeDefined();
+  });
+
+  it("reaches the last slot the palette holds", () => {
+    const lastNameable = [maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES - 2)];
+
+    expect(canIdMaskPaletteNameFrame(lastNameable)).toBe(true);
+    expect(createIdMaskPlane(lastNameable)).toBeDefined();
+  });
+
+  it("ignores a coverage-only instruction the raster never draws", () => {
+    const coverageOnly = [
+      maskedDetectionAt(0),
+      {
+        ...maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES + 40),
+        visible: false,
+      },
+    ];
+
+    expect(canIdMaskPaletteNameFrame(coverageOnly)).toBe(true);
+    expect(createIdMaskRasterFrame(coverageOnly)).toBeDefined();
+  });
+});
+
+function maskedDetectionAt(detectionIndex: number) {
+  return {
+    alpha: 0.5,
+    color: 0xff0000,
+    detectionIndex,
+    mask: {
+      counts: encodeCompressedRleCounts([0, 1, 3]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 2,
+    },
+  };
+}
+
+const FALLBACK_WIDTH = 12;
+const FALLBACK_HEIGHT = 8;
+
+const FALLBACK_LEGEND: Record<
+  string,
+  readonly [number, number, number, number]
+> = {
+  ".": [0, 0, 0, 0],
+  0: [255, 0, 0, 255],
+  1: [0, 255, 0, 128],
+  2: [0, 0, 255, 255],
+  3: [0, 255, 255, 255],
+  4: [255, 165, 0, 255],
+  a: [0, 0, 128, 255],
+  b: [128, 128, 0, 255],
+  c: [128, 0, 128, 128],
+  d: [128, 128, 128, 255],
+};
+
+function rectMask(x0: number, x1: number, y0: number, y1: number) {
+  const data = new Uint8Array(FALLBACK_WIDTH * FALLBACK_HEIGHT);
+
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      data[y * FALLBACK_WIDTH + x] = 1;
+    }
+  }
+
+  return encodeBinaryMask(data, FALLBACK_WIDTH, FALLBACK_HEIGHT);
+}
+
+function paintedGrid(frame: CompositedMaskFrame) {
+  const rows: string[] = [];
+
+  for (let y = 0; y < frame.height; y += 1) {
+    let row = "";
+
+    for (let x = 0; x < frame.width; x += 1) {
+      const offset = (y * frame.width + x) * 4;
+      const pixel = [...frame.data.slice(offset, offset + 4)];
+      const symbol = Object.entries(FALLBACK_LEGEND).find(([, color]) =>
+        color.every((channel, index) => channel === pixel[index]),
+      );
+
+      row += symbol ? symbol[0] : `[${pixel.join(",")}]`;
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+const overlappingStrokedMasks = [
+  {
+    alpha: 1,
+    color: 0xff0000,
+    detectionIndex: 0,
+    mask: rectMask(1, 5, 1, 4),
+    stroke: { alpha: 1, color: 0x000080, width: 1 },
+  },
+  {
+    alpha: 0.5,
+    color: 0x00ff00,
+    detectionIndex: 1,
+    mask: rectMask(3, 8, 2, 6),
+    stroke: { alpha: 1, color: 0x808000, width: 1 },
+  },
+  {
+    alpha: 1,
+    color: 0x0000ff,
+    detectionIndex: 2,
+    mask: rectMask(6, 10, 0, 3),
+    stroke: { alpha: 0.5, color: 0x800080, width: 2 },
+  },
+  {
+    alpha: 1,
+    color: 0x00ffff,
+    detectionIndex: 3,
+    mask: rectMask(2, 9, 5, 7),
+    stroke: { alpha: 1, color: 0x808080, width: 1 },
+  },
+  {
+    alpha: 1,
+    color: 0xffa500,
+    detectionIndex: 4,
+    mask: rectMask(0, 3, 0, 1),
+  },
+] as const;
+
+describe("rgba mask fallback", () => {
+  it("preserves total CSS width and placement across fitted display sizes", () => {
+    const sourceWidth = 64;
+    const sourceHeight = 32;
+    const mask = encodeBinaryMask(
+      Uint8Array.from({ length: sourceWidth * sourceHeight }, (_, index) =>
+        index % sourceWidth >= 32 ? 1 : 0,
+      ),
+      sourceWidth,
+      sourceHeight,
+    );
+    for (const width of [1, 2, 3, 4]) {
+      for (const [alignment, insideFraction] of [
+        [StrokeAlignment.Outside, 0],
+        [StrokeAlignment.Center, 0.5],
+        [StrokeAlignment.Inside, 1],
+      ] as const) {
+        for (const displayWidth of [32, 64, 128]) {
+          const density = sourceWidth / displayWidth;
+          const frame = compositeMaskFrame(
+            [
+              {
+                alpha: 0,
+                color: 0,
+                detectionIndex: 0,
+                mask,
+                stroke: { alpha: 1, color: 0xffffff, width, alignment },
+              },
+            ],
+            displayWidth,
+          )!;
+          let total = 0;
+          for (let x = 0; x < sourceWidth; x += 1) {
+            const signedDistance = 32 - (x + 0.5);
+            const expected = Math.max(
+              0,
+              Math.min(
+                width * density * (1 - insideFraction),
+                signedDistance + 0.5,
+              ) -
+                Math.max(
+                  -width * density * insideFraction,
+                  signedDistance - 0.5,
+                ),
+            );
+            const alpha = readPixel(frame.data, sourceWidth, x, 16)[3]!;
+            expect(alpha).toBeCloseTo(Math.round(expected * 255), 8);
+            total += alpha / 255 / density;
+          }
+          expect(total).toBeCloseTo(width, 1);
+        }
+      }
+    }
+  });
+
+  it("draws an outside border into a hole without replacing the mask interior", () => {
+    const width = 9;
+    const data = new Uint8Array(width * width).fill(1);
+    data[4 * width + 4] = 0;
+    const frame = compositeMaskFrame([
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: encodeBinaryMask(data, width, width),
+        stroke: { alpha: 1, color: 0x00ff00, width: 1 },
+      },
+    ])!;
+    expect(readPixel(frame.data, width, 4, 4)).toEqual([0, 255, 0, 255]);
+    expect(readPixel(frame.data, width, 3, 4)).toEqual([255, 0, 0, 255]);
+    expect(readPixel(frame.data, width, 0, 0)).toEqual([255, 0, 0, 255]);
+  });
+
+  it("paints overlapping fills and strokes pixel for pixel", () => {
+    expect(paintedGrid(compositeMaskFrame(overlappingStrokedMasks)!)).toEqual([
+      "4444cc22222c",
+      "4444cc22222c",
+      "a0b1cc22222c",
+      "a0b1cc22222c",
+      "addddddddddc",
+      "ad33333333dc",
+      ".d33333333d.",
+      ".d33333333d.",
+    ]);
+  });
+
+  it("keeps the pixels a run that overruns the plane wraps onto", () => {
+    // Six foreground pixels from offset 10 outlast the 4x3 plane, so the run
+    // carries on into columns the mask does not have and those offsets read
+    // back row-major onto pixels it never walked over.
+    const frame = compositeMaskFrame([
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([10, 6]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 3,
+          width: 4,
+        },
+      },
+    ]);
+
+    expect(paintedGrid(frame!)).toEqual(["....", "00.0", "0..0"]);
+  });
+});
+
+function signedArea(path: Float32Array) {
+  let area = 0;
+  for (let index = 0; index < path.length; index += 2) {
+    const next = (index + 2) % path.length;
+    area += path[index]! * path[next + 1]! - path[next]! * path[index + 1]!;
+  }
+  return area / 2;
 }

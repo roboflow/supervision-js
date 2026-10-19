@@ -19,9 +19,9 @@ This keeps detections as semantic model output while the renderer owns the
 performance-sensitive drawing strategy.
 
 For focused, live examples, open
-[Annotation Renderers](../annotation-renderers.md). Each built-in renderer has a
-basketball fixture playground whose controls update both the scene and a
-minimal `setPresentation()` snippet.
+[Annotation Renderers](../annotation-renderers.md). Each renderer page with a
+playground runs it on a committed fixture, and its controls update both the
+scene and a minimal `setPresentation()` snippet.
 
 ## Start With Base Styles
 
@@ -69,6 +69,41 @@ session.setPresentation({
   ],
 });
 ```
+
+## Smooth Annotation Edges
+
+Enable antialiasing for the annotations, focus, and interaction overlays
+with one presentation option:
+
+```ts
+session.setPresentation({ annotationAntialiasing: true });
+```
+
+`true` enables FXAA at output resolution; `false` disables smoothing. Label
+backgrounds are smoothed while text stays sharp. Consecutive
+labels that do not overlap can share a background capture; overlaps split
+captures to preserve blending and draw order.
+
+```ts
+session.setPresentation({ annotationAntialiasing: 2 });
+```
+
+`2` applies FXAA with a capture at twice the output density in each dimension,
+with four times as many capture pixels. The output canvas DPR stays unchanged.
+
+Video frames retain their original rendering. Region effects smooth their
+coverage boundary without filtering the video inside it.
+
+Antialiasing is off by default. A 2× capture preserves mask detail
+up to the original resolution before smoothing, independently of video. This adds
+mask preparation work and cache bytes within the configured memory budget,
+as well as rendering work and offscreen GPU textures. Motion previews use
+the configured fraction of that finer mask resolution. The renderer can retain
+offscreen textures for reuse after antialiasing is disabled or DPR changes.
+Capture resolution adjusts to the GPU's texture-size limit on large displays.
+A low-resolution mask preview still limits contour detail; use the
+[mask quality controls](detections-and-rendering.md)
+when more source detail is needed.
 
 ## Static And Dynamic Values
 
@@ -174,6 +209,7 @@ const polygonStyle = new BasePolygonStyle({
 });
 
 const polylineStyle = new BasePolylineStyle({
+  shadowStroke: { alpha: 0.55, color: 0x000000, width: 6 },
   stroke: { alpha: 1, color: 0x38bdf8, width: 4 },
 });
 
@@ -197,6 +233,11 @@ session.setPresentation({
 `BaseKeypointStyle` draws `NotLabeled` points as absent, `Occluded` points as
 crosses, and `Visible` points as circles. Pass `definitions` when class-specific
 skeleton vertices and edges need their own colors.
+
+A contrast stroke drawn under the line keeps a thin class-colored path readable
+where the media beneath it happens to share that color. `BasePolylineStyle`
+takes it as `shadowStroke`, `BaseKeypointStyle` as `edgeShadowStroke`, and the
+default presentation supplies one for both. Pass `null` to remove it.
 
 ## Consistent Class Colors
 
@@ -292,10 +333,11 @@ session.setPresentation({
 });
 ```
 
-Focus styles dim the rest of the media around the selected or hovered
-detections. The renderer may use the prepared PNG ID-mask artifact for
-shape-accurate mask cutouts and falls back to detection rectangles when no mask
-artifact is available:
+Focus styles dim the media around the selected or hovered detections. Annotation
+fills, outlines, and labels remain above the dim overlay. Masks and polygons keep
+their actual shapes; heatmap cutouts follow the regions that display visible
+colour, including changes to the cutoff and opacity. Other detections use the
+styled rectangle fallback:
 
 ```ts
 session.setPresentation({
@@ -308,6 +350,11 @@ session.setPresentation({
   }),
 });
 ```
+
+Set `shape: null` to disable rectangular fallback. Masks, polygons, and ready
+heatmap regions still cut out their actual shapes; rectangle-only detections
+remain dimmed. Heatmap cutouts use the current frame's visible heat and disappear
+when that heat is absent or still loading.
 
 ## Custom Styles
 

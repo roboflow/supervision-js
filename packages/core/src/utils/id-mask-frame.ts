@@ -1,11 +1,33 @@
 import type { MaskDrawInstruction } from "#types/mask-style";
-import { decodeCompressedRleMask } from "#utils/detection-frames";
+import type { Point } from "#types/detections";
+import { StrokeAlignment } from "#types/paint-style";
+import { forEachRasterPolygonSpan } from "#utils/detection-conversions";
+import { decodeCompressedRleCounts } from "#utils/detection-frames";
 
-export const MAX_ID_MASK_PALETTE_ENTRIES = 64;
+/**
+ * Palette slots an id raster can name, one of them the background. A GLSL
+ * fragment stage is guaranteed only 224 uniform vectors, and a palette entry
+ * costs 2.5 of them, so this stays a multiple of four and well inside that
+ * budget; past it a frame draws from the RGBA composite instead.
+ */
+export const MAX_ID_MASK_PALETTE_ENTRIES = 80;
 export const MAX_ID_MASK_STROKE_WIDTH = 16;
 
 export interface IdMaskInstruction extends MaskDrawInstruction {
   readonly detectionIndex: number;
+  readonly polygon?: never;
+}
+
+export interface IdPolygonInstruction extends Omit<
+  IdMaskInstruction,
+  "mask" | "polygon"
+> {
+  readonly mask?: never;
+  readonly polygon: {
+    readonly height: number;
+    readonly points: readonly Point[];
+    readonly width: number;
+  };
 }
 
 export interface IdMaskFrame {
@@ -13,21 +35,59 @@ export interface IdMaskFrame {
   readonly fillPalette: Float32Array<ArrayBuffer>;
   readonly hasStroke: boolean;
   readonly height: number;
+  /** Largest outside stroke extent in CSS pixels. */
   readonly maxStrokeWidth: number;
+  /** Original mask-plane width before optional raster reduction. */
+  readonly sourceWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
+  /** Inside fraction per palette ID: outside 0, center 0.5, inside 1. Missing values default to outside. */
+  readonly strokeAlignments?: Float32Array<ArrayBuffer>;
+  /** Total stroke width in CSS pixels per palette ID. */
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
 }
 
+export interface IdMaskFrameOptions {
+  /**
+   * Widest raster to cook. A value at or above the instructions' own width
+   * cooks at their width, and a smaller one keeps their aspect ratio.
+   */
+  readonly maxWidth?: number;
+}
+
 export function createIdMaskFrame(
-  instructions: readonly IdMaskInstruction[],
+  instructions: readonly (IdMaskInstruction | IdPolygonInstruction)[],
+  options: IdMaskFrameOptions = {},
 ): IdMaskFrame | undefined {
   if (instructions.length === 0) {
     return undefined;
   }
 
-  const width = Math.max(...instructions.map(({ mask }) => mask.width));
-  const height = Math.max(...instructions.map(({ mask }) => mask.height));
+  /* Pixel-grid dimensions use integer parts throughout allocation and RLE
+     traversal. */
+  const maskWidth = Math.floor(
+    Math.max(
+      ...instructions.map(
+        (instruction) => (instruction.mask ?? instruction.polygon).width,
+      ),
+    ),
+  );
+  const maskHeight = Math.floor(
+    Math.max(
+      ...instructions.map(
+        (instruction) => (instruction.mask ?? instruction.polygon).height,
+      ),
+    ),
+  );
+  const width = resolveRasterWidth(maskWidth, options.maxWidth);
+  const height =
+    width === maskWidth
+      ? maskHeight
+      : Math.max(1, Math.round((width * maskHeight) / maskWidth));
+  const scaledAxes =
+    width === maskWidth
+      ? undefined
+      : createScaledMaskAxes({ height, maskHeight, maskWidth, width });
   const data = new Uint8Array(new ArrayBuffer(width * height));
   const fillPalette = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
@@ -38,20 +98,20 @@ export function createIdMaskFrame(
   const strokeWidths = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
   );
+  const strokeAlignments = new Float32Array(
+    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+  );
   let hasStroke = false;
   let maxStrokeWidth = 0;
 
   for (const instruction of instructions) {
-    const detectionMaskId = instruction.detectionIndex + 1;
+    const detectionMaskId = resolveIdMaskPaletteId(instruction.detectionIndex);
 
-    if (
-      detectionMaskId <= 0 ||
-      detectionMaskId >= MAX_ID_MASK_PALETTE_ENTRIES
-    ) {
+    if (detectionMaskId === undefined) {
       return undefined;
     }
 
-    writePaletteEntry(
+    writeIdMaskPaletteEntry(
       fillPalette,
       detectionMaskId,
       instruction.color,
@@ -59,15 +119,19 @@ export function createIdMaskFrame(
     );
 
     if (instruction.stroke && instruction.stroke.width > 0) {
-      const strokeWidth = Math.min(
-        Math.max(0, instruction.stroke.width),
-        MAX_ID_MASK_STROKE_WIDTH,
-      );
+      const strokeWidth = instruction.stroke.width;
+      const alignment =
+        instruction.stroke.alignment === StrokeAlignment.Inside
+          ? 1
+          : instruction.stroke.alignment === StrokeAlignment.Center
+            ? 0.5
+            : 0;
 
       hasStroke = true;
       strokeWidths[detectionMaskId] = strokeWidth;
-      maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth);
-      writePaletteEntry(
+      strokeAlignments[detectionMaskId] = alignment;
+      maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth * (1 - alignment));
+      writeIdMaskPaletteEntry(
         strokePalette,
         detectionMaskId,
         instruction.stroke.color,
@@ -75,16 +139,18 @@ export function createIdMaskFrame(
       );
     }
 
-    const decodedMask = decodeCompressedRleMask(instruction.mask);
-
-    for (let y = 0; y < decodedMask.height; y += 1) {
-      for (let x = 0; x < decodedMask.width; x += 1) {
-        const maskOffset = y * decodedMask.width + x;
-
-        if (decodedMask.data[maskOffset]) {
-          data[y * width + x] = detectionMaskId;
-        }
-      }
+    if (instruction.polygon) {
+      writePolygonSpans(
+        data,
+        width,
+        instruction.polygon,
+        detectionMaskId,
+        scaledAxes,
+      );
+    } else if (scaledAxes) {
+      writeScaledMaskRuns(data, scaledAxes, instruction.mask, detectionMaskId);
+    } else {
+      writeMaskRuns(data, width, instruction.mask, detectionMaskId);
     }
   }
 
@@ -94,19 +160,218 @@ export function createIdMaskFrame(
     hasStroke,
     height,
     maxStrokeWidth,
+    sourceWidth: maskWidth,
     strokePalette,
+    strokeAlignments,
     strokeWidths,
     width,
   };
 }
 
-function writePaletteEntry(
+function writePolygonSpans(
+  data: Uint8Array,
+  frameWidth: number,
+  polygon: IdPolygonInstruction["polygon"],
+  detectionMaskId: number,
+  axes: ScaledMaskAxes | undefined,
+) {
+  forEachRasterPolygonSpan(polygon.points, polygon, (y, left, right) => {
+    const row = axes ? axes.rows[y]! : y * frameWidth;
+    const first = axes ? axes.columns[left]! : left;
+    const last = axes ? axes.columns[right - 1]! + 1 : right;
+
+    data.fill(detectionMaskId, row + first, row + last);
+  });
+}
+
+/**
+ * Compressed RLE counts runs down each column in turn, so a foreground run is
+ * a contiguous walk down one column that wraps into the next.
+ */
+function writeMaskRuns(
+  data: Uint8Array,
+  frameWidth: number,
+  mask: IdMaskInstruction["mask"],
+  detectionMaskId: number,
+) {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const maskWidth = Math.floor(mask.width);
+  const maskHeight = Math.floor(mask.height);
+  let maskOffset = 0;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const runLength = counts[index] ?? 0;
+
+    if (index % 2 === 0 || runLength <= 0) {
+      maskOffset += runLength;
+      continue;
+    }
+
+    let x = Math.floor(maskOffset / maskHeight);
+    let y = maskOffset - x * maskHeight;
+    let frameOffset = y * frameWidth + x;
+
+    for (let step = 0; step < runLength; step += 1) {
+      if (x >= maskWidth) {
+        break;
+      }
+
+      data[frameOffset] = detectionMaskId;
+      y += 1;
+      frameOffset += frameWidth;
+
+      if (y === maskHeight) {
+        y = 0;
+        x += 1;
+        frameOffset = x;
+      }
+    }
+
+    maskOffset += runLength;
+  }
+}
+
+/**
+ * The scaled twin of writeMaskRuns. Every source pixel marks the texel it lands
+ * in, so a mask keeps every part of itself the smaller raster can hold and
+ * gains up to a texel at its edges.
+ */
+function writeScaledMaskRuns(
+  data: Uint8Array,
+  axes: ScaledMaskAxes,
+  mask: IdMaskInstruction["mask"],
+  detectionMaskId: number,
+) {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const maskWidth = Math.floor(mask.width);
+  const maskHeight = Math.floor(mask.height);
+  let maskOffset = 0;
+
+  const stride = axes.stride;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const runLength = counts[index] ?? 0;
+
+    if (index % 2 === 0 || runLength <= 0) {
+      maskOffset += runLength;
+      continue;
+    }
+
+    let x = Math.floor(maskOffset / maskHeight);
+    let y = maskOffset - x * maskHeight;
+    let remaining = runLength;
+
+    /* A run walks down one column and wraps into the next, so it splits into
+       column-sized segments. Within a segment the destination offset only ever
+       steps by the row pitch or stays put: createMaskAxisMap builds
+       `rows[i] = min(height - 1, floor(i * scale)) * width` with scale <= 1, so
+       consecutive entries differ by exactly 0 or exactly `width`. Walking the
+       destination directly therefore touches the same bytes the per-pixel loop
+       touched, and drops the bounds test, the wrap test and one typed-array
+       load from every source pixel. Where the scale collapses several source
+       rows onto one destination row, this writes that byte once instead of
+       once per source row. */
+    while (remaining > 0 && x < maskWidth) {
+      const span = Math.min(remaining, maskHeight - y);
+      const column = axes.columns[x];
+      const first = axes.rows[y];
+      const last = axes.rows[y + span - 1];
+
+      for (let offset = first; offset <= last; offset += stride) {
+        data[offset + column] = detectionMaskId;
+      }
+
+      remaining -= span;
+      y += span;
+
+      if (y === maskHeight) {
+        y = 0;
+        x += 1;
+      }
+    }
+
+    maskOffset += runLength;
+  }
+}
+
+function resolveRasterWidth(maskWidth: number, maxWidth: number | undefined) {
+  return maxWidth !== undefined && maxWidth > 0 && maxWidth < maskWidth
+    ? Math.max(1, Math.floor(maxWidth))
+    : maskWidth;
+}
+
+/**
+ * Converts total CSS outline width into raster texels. Each side is bounded
+ * independently so centered outlines can use the full supported radius.
+ */
+export function resolveIdMaskStrokeTexels(
+  strokeWidth: number,
+  displayWidth: number,
+  rasterWidth: number,
+  alignment: StrokeAlignment = StrokeAlignment.Outside,
+) {
+  const scale = displayWidth > 0 ? rasterWidth / displayWidth : 1;
+  const sideFraction = alignment === StrokeAlignment.Center ? 0.5 : 1;
+
+  return Math.min(strokeWidth * scale, MAX_ID_MASK_STROKE_WIDTH / sideFraction);
+}
+
+interface ScaledMaskAxes {
+  readonly columns: Int32Array;
+  readonly rows: Int32Array;
+  /** Destination row pitch, so a run can step rows without re-reading `rows`. */
+  readonly stride: number;
+}
+
+function createScaledMaskAxes(frame: {
+  readonly height: number;
+  readonly maskHeight: number;
+  readonly maskWidth: number;
+  readonly width: number;
+}): ScaledMaskAxes {
+  return {
+    columns: createMaskAxisMap(frame.maskWidth, frame.width, 1),
+    rows: createMaskAxisMap(frame.maskHeight, frame.height, frame.width),
+    stride: frame.width,
+  };
+}
+
+/** Rows hold their destination offset, so writing a run is two lookups. */
+function createMaskAxisMap(
+  sourceLength: number,
+  targetLength: number,
+  stride: number,
+) {
+  const map = new Int32Array(sourceLength);
+  const scale = targetLength / sourceLength;
+
+  for (let index = 0; index < sourceLength; index += 1) {
+    map[index] = Math.min(targetLength - 1, Math.floor(index * scale)) * stride;
+  }
+
+  return map;
+}
+
+/**
+ * The palette slot a detection index names, or undefined when the palette has
+ * no slot for it. Slot zero is the background, so the ids start at one and the
+ * last detection the palette can name sits one index below the last slot.
+ */
+export function resolveIdMaskPaletteId(detectionIndex: number) {
+  const detectionMaskId = detectionIndex + 1;
+
+  return detectionMaskId > 0 && detectionMaskId < MAX_ID_MASK_PALETTE_ENTRIES
+    ? detectionMaskId
+    : undefined;
+}
+
+export function writeIdMaskPaletteEntry(
   palette: Float32Array,
-  id: number,
+  detectionMaskId: number,
   color: number,
   alpha: number,
 ) {
-  const offset = id * 4;
+  const offset = detectionMaskId * 4;
 
   palette[offset] = ((color >> 16) & 0xff) / 255;
   palette[offset + 1] = ((color >> 8) & 0xff) / 255;

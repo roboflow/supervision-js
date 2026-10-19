@@ -1,3 +1,4 @@
+import type { MediaRendererDisplay } from "#types/media-renderer-display";
 import type {
   DetectionBufferOptions,
   DetectionFrameSource,
@@ -9,6 +10,7 @@ import type {
   MediaRendererStateController,
   MediaSourceState,
 } from "supervision-js-core";
+import type { PreparedAnnotationWindowSnapshot } from "#renderers/prepared-annotation-window";
 import type { DetectionFrame } from "supervision-js-core";
 import type {
   DetectionPickResult,
@@ -17,11 +19,17 @@ import type {
 } from "supervision-js-core";
 import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import type { MediaFrameClock } from "#types/media-frame-clock";
+import type { MediaFrameNavigation } from "#types/media-frame-navigation";
 import type {
   AnnotationEditingEngine,
   PreviewOverlayData,
 } from "supervision-js-core";
 import type { MaskBrushPreviewOptions } from "../editing";
+import type {
+  ActiveDepthMap,
+  MediaRendererDepthInput,
+} from "#types/media-depth";
 
 export {
   MediaRendererFit,
@@ -29,6 +37,7 @@ export {
   MediaSourceStatus,
 } from "supervision-js-core";
 export type {
+  AnnotationAntialiasing,
   MediaFrameDiagnostics,
   MediaFrameRenderTimings,
   MediaRendererDiagnosticsOptions,
@@ -62,7 +71,8 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly loop?: boolean;
   readonly playbackRate?: number;
   /**
-   * No-op in the current video-only renderer. Audio playback is deferred.
+   * @deprecated Nothing reads this. The renderer is video-only and audio
+   * playback is deferred, so setting it changes nothing either way.
    */
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
@@ -74,6 +84,20 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    * pixels, which can be useful for long videos or browsers under load.
    */
   readonly maxDevicePixelRatio?: number;
+  /**
+   * Show distinct source pixels when the media-to-screen scale reaches
+   * `minScale` CSS pixels per natural media pixel (including contain/cover
+   * fit). Below that positive, finite threshold, media is smoothly sampled.
+   * Omit to retain smooth sampling at every zoom. Annotation styles and the
+   * source pixels returned by captureFrame are unaffected.
+   */
+  readonly pixelInspection?: { readonly minScale: number };
+  /**
+   * Interleave raster masks with retained boxes and polygons by detection zIndex
+   * (frame order breaks ties). Omit to retain the dense mask-below-geometry path.
+   * Independent mask coverage costs one bit per cropped source pixel per mask.
+   */
+  readonly maskOrder?: "detection";
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
@@ -82,6 +106,13 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
    * is not zero. Defaults to `MediaTimeline` for backward compatibility.
    */
   readonly detectionTimelineOrigin?: DetectionTimelineOrigin;
+  /**
+   * Depth drawn by `depth` annotation renderers, separate from detection
+   * frames. A map whose aspect ratio differs from the media's puts the
+   * renderer in its error state. A manifest loads once the media's first
+   * frame is up; one that fails leaves the media playing without depth.
+   */
+  readonly depth?: MediaRendererDepthInput;
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly diagnostics?: MediaRendererDiagnosticsOptions;
@@ -161,9 +192,33 @@ export interface DetectionLabelBounds {
  * preparation and detection buffering yourself.
  */
 export interface MediaRenderer extends MediaRendererStateController {
+  /** Exact frame timing when the source provides an index; null otherwise. */
+  readonly frameClock?: MediaFrameClock | null;
+  /** Indexed moves and observable scrub landings for push-based indexed sources. */
+  readonly frameNavigation?: MediaFrameNavigation | null;
+  /**
+   * Resize engine-backed display-box output without reopening the source.
+   * Resolves after the resized frame is presented; supersession rejects with AbortError.
+   * Available only on sources that support live output sizing.
+   */
+  setDisplay?(display: MediaRendererDisplay): Promise<void>;
+
   play(): Promise<void>;
   pause(): void;
+  /**
+   * Flips playback without the caller first reading which way it is going, so
+   * a frame presented between the read and the call cannot invert the result.
+   * Rejects when the play it decides on fails.
+   */
+  togglePlayback(): Promise<void>;
+  /** Lands on `mediaTime` and resolves once the frame there is presented. */
   seek(mediaTime: number): Promise<void>;
+  /**
+   * Moves the playhead for a gesture that is still moving, such as a timeline
+   * drag between pointer down and up. The frame that answers it may be an
+   * approximation; `seek` is what lands the released position exactly.
+   */
+  scrub(mediaTime: number): void;
   stepForward(): Promise<void>;
   stepBackward(): Promise<void>;
   setPlaybackRate(playbackRate: number): void;
@@ -177,20 +232,53 @@ export interface MediaRenderer extends MediaRendererStateController {
    * presented while the encoder runs cannot change the result.
    */
   captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
+  /** Replaces selection; an ordered `detectionIds` list returns its last valid pick. */
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
+  /**
+   * Replaces the depth that `depth` renderers draw, or removes it with
+   * `null`, and redraws the frame on screen. Rejects with a `RangeError` for a
+   * malformed map or one whose aspect ratio differs from the media's.
+   */
+  setDepth?(depth: MediaRendererDepthInput | null): Promise<void>;
+  /**
+   * The depth map on screen, with the media size it is stretched over, or
+   * null when no depth is drawn. Pass it to `readDepthAt` for a readout.
+   */
+  getActiveDepth?(): ActiveDepthMap | null;
+  /**
+   * Explicit renders issued under the render-on-change policy, which a media
+   * source that pushes presented frames and a still image run under: the count
+   * moves when something on screen changed, so a paused, untouched renderer
+   * holds it still. It is `null` when the renderer pulls samples from media
+   * that plays, because Pixi's ticker then paints every animation frame and no
+   * count describes that, so a `null` here is an answer rather than a failure.
+   */
+  getRenderCount(): number | null;
+  /**
+   * Span and per-frame readiness of the prepared annotation window, for
+   * instruments; null when the scene free-runs on the ticker or no window
+   * exists, so a `null` here is an answer rather than a failure.
+   */
+  getPreparedAnnotationWindow(): PreparedAnnotationWindowSnapshot | null;
   destroy(): void;
   getViewportTransform(): import("supervision-js-core").ViewportTransform;
+  /** Apply an exact natural-media-to-CSS transform, including while locked.
+   * The scale must be positive and finite. Locking suppresses pointer viewport
+   * gestures; it does not block explicit toolbar or restored viewport state. */
   setViewportTransform(
     transform: Partial<
       Omit<import("supervision-js-core").ViewportTransform, "locked">
     >,
   ): void;
+  /** Prevent pointer viewport gestures without blocking explicit transforms. */
   setViewportLocked(locked: boolean): void;
+  /** Convert container-relative CSS pixels to natural media pixels. */
   screenToMedia(
     point: import("supervision-js-core").Point,
   ): import("supervision-js-core").Point;
+  /** Convert natural media pixels to container-relative CSS pixels. */
   mediaToScreen(
     point: import("supervision-js-core").Point,
   ): import("supervision-js-core").Point;

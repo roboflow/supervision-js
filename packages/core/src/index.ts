@@ -93,6 +93,10 @@ export { BaseMaskStyle } from "#styles/mask-style";
 export type { BaseMaskStyleOptions } from "#styles/mask-style";
 export { BaseMarkerStyle } from "#styles/marker-style";
 export type { BaseMarkerStyleOptions } from "#types/marker-style";
+export { BaseOrientedBoxStyle } from "#styles/oriented-box-style";
+export type { BaseOrientedBoxStyleOptions } from "#styles/oriented-box-style";
+export { BasePercentageBarStyle } from "#styles/percentage-bar-style";
+export type { BasePercentageBarStyleOptions } from "#types/percentage-bar-style";
 export { BasePolygonStyle } from "#styles/polygon-style";
 export type { BasePolygonStyleOptions } from "#styles/polygon-style";
 export { BasePolylineStyle } from "#styles/polyline-style";
@@ -111,12 +115,17 @@ export {
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
   type BoxCornerAnnotationRenderer,
+  type DepthAnnotationRenderer,
   type EllipseAnnotationRenderer,
+  type HeatmapAnnotationRenderer,
+  type HeatmapColorStop,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
   type MaskHaloAnnotationRenderer,
   type MarkerAnnotationRenderer,
+  type OrientedBoxAnnotationRenderer,
+  type PercentageBarAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
@@ -156,6 +165,10 @@ export {
 } from "#types/marker-style";
 export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
 export {
+  resolveAnnotationRendererStyleFields,
+  type AnnotationRendererStyleField,
+} from "#styles/annotation-renderer-registry";
+export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
   type SourceAwarePresentationOptions,
@@ -167,11 +180,13 @@ export { resolveStyleValue } from "#styles/style-value";
 // Pure utilities used by platform packages.
 export {
   copySortedDetectionFrames,
+  sortedDetectionFrames,
   decodeCompressedRleMask,
   decodeCompressedRleCounts,
   detectionFrameOverlapsRange,
   encodeCompressedRleCounts,
   filterDetectionFramesForRange,
+  PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS,
   selectDetectionFrame,
   validateDetectionFrames,
   type DecodedDetectionMask,
@@ -200,6 +215,7 @@ export {
   encodeBinaryMask,
   encodeBinaryMaskWithBounds,
   encodeDetectionMaskPayload,
+  extractDetectionMaskRectRuns,
   extractMaskContour,
   extractMaskRectRuns,
   isDeflatedBase64DetectionMaskPayload,
@@ -238,8 +254,12 @@ export {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
   createIdMaskFrame,
+  resolveIdMaskPaletteId,
+  resolveIdMaskStrokeTexels,
+  writeIdMaskPaletteEntry,
   type IdMaskFrame,
   type IdMaskInstruction,
+  type IdPolygonInstruction,
 } from "#utils/id-mask-frame";
 export {
   resolveEllipseSegmentCount,
@@ -251,6 +271,12 @@ export type {
   BoxCornerStyle,
   BoxCornerStyleContext,
 } from "#types/box-corner-style";
+export { PercentageBarPlacement } from "#types/percentage-bar-style";
+export type {
+  PercentageBarDrawInstruction,
+  PercentageBarStyle,
+  PercentageBarStyleContext,
+} from "#types/percentage-bar-style";
 export type {
   EllipseGeometry,
   MarkerGeometry,
@@ -276,6 +302,7 @@ export {
   type AnnotationHandleDefinition,
   type AnnotationOverlayStyle,
   type AnnotationPointerInput,
+  type DraftUndoAnnotationEditingEngine,
   type PreviewOverlayData,
   type PreviewOverlayPoint,
 } from "#types/editing";
@@ -331,11 +358,13 @@ export {
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionHeatmap,
   type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
   type KeypointGeometry,
+  type OrientedBoxGeometry,
   type Point,
   type PolygonGeometry,
   type PolylineGeometry,
@@ -346,6 +375,43 @@ export {
   type SkeletonVertexDefinition,
   type TopLeftRect,
 } from "#types/detections";
+export {
+  DepthColormap,
+  DepthMapKind,
+  DepthPreviewLevels,
+  DepthQuantity,
+  DepthSampling,
+  type DepthCamera,
+  type DepthClipFrames,
+  type DepthImageEntry,
+  type DepthManifest,
+  type DepthMap,
+  type DepthPreviewTrack,
+  type DepthRange,
+  type DepthReadout,
+  type PreviewDepthSamples,
+  type ScaledDepthSamples,
+} from "#types/depth-map";
+export {
+  depthPreviewTopCode,
+  parseDepthManifest,
+  resolveDepthFrameFile,
+  validateDepthMap,
+} from "#utils/depth-manifest";
+export { readDepthAt } from "#utils/depth-readout";
+export {
+  computeDepthPercentileRange,
+  resolveDepthColorMapping,
+  resolveDepthQuantity,
+  type DepthColorMapping,
+  type DepthColorMappingOptions,
+  type DepthPercentileRangeOptions,
+} from "#utils/depth-color-mapping";
+export {
+  createDepthColormapLut,
+  depthColormapColors,
+  isDepthColormap,
+} from "#utils/depth-colormaps";
 export type {
   MediaFrameMetadata,
   MediaTimelineMetadata,
@@ -356,9 +422,11 @@ export {
   MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  PlaybackGateReach,
   MediaSourceStatus,
 } from "#types/media-rendering";
 export type {
+  AnnotationAntialiasing,
   MediaFrameDiagnostics,
   MediaFrameRenderTimings,
   MediaRendererDiagnosticsOptions,
@@ -429,6 +497,11 @@ export type {
   MaskHaloStyleContext,
 } from "#types/mask-halo-style";
 export { MaskRenderMode } from "#types/mask-style";
+export type {
+  OrientedBoxDrawInstruction,
+  OrientedBoxStyle,
+  OrientedBoxStyleContext,
+} from "#types/oriented-box-style";
 export type {
   PolygonDrawInstruction,
   PolygonStyle,

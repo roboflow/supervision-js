@@ -62,6 +62,7 @@ export {
   type AnnotationPointerInput,
   type DetectionId,
   type DetectionMaskCompressionCodec,
+  type DraftUndoAnnotationEditingEngine,
   type EditableAnnotationFrameSession,
   type EditableDetection,
   type MaskBrushEditor,

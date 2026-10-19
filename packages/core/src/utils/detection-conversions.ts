@@ -65,8 +65,22 @@ export function rasterizePolygonToMask(
 ): Uint8Array {
   const data = createEmptyMask(dimensions);
 
+  forEachRasterPolygonSpan(points, dimensions, (y, left, right) => {
+    data.fill(1, y * dimensions.width + left, y * dimensions.width + right);
+  });
+
+  return data;
+}
+
+export function forEachRasterPolygonSpan(
+  points: readonly Point[],
+  dimensions: MediaDimensions,
+  writeSpan: (y: number, left: number, right: number) => void,
+): void {
+  assertMediaDimensions(dimensions);
+
   if (points.length < 3) {
-    return data;
+    return;
   }
 
   const bounds = centerRectToTopLeftRect(getPointsRect(points)!);
@@ -102,13 +116,11 @@ export function rasterizePolygonToMask(
         Math.round(intersections[index + 1]!),
       );
 
-      for (let x = left; x < right; x += 1) {
-        data[y * dimensions.width + x] = 1;
+      if (left < right) {
+        writeSpan(y, left, right);
       }
     }
   }
-
-  return data;
 }
 
 export function convertDetectionBoxToPolygon(detection: Detection): Detection {
@@ -270,6 +282,12 @@ export function mergeDetectionPolygonsByClass(
 }
 
 function createEmptyMask(dimensions: MediaDimensions) {
+  assertMediaDimensions(dimensions);
+
+  return new Uint8Array(dimensions.width * dimensions.height);
+}
+
+function assertMediaDimensions(dimensions: MediaDimensions) {
   if (
     !Number.isInteger(dimensions.width) ||
     dimensions.width <= 0 ||
@@ -278,8 +296,6 @@ function createEmptyMask(dimensions: MediaDimensions) {
   ) {
     throw new Error("Media dimensions must be positive integers.");
   }
-
-  return new Uint8Array(dimensions.width * dimensions.height);
 }
 
 function replaceGeometry(

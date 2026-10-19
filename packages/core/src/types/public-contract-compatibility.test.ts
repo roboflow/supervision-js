@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+import { DetectionBufferStatus } from "#types/detection-timeline";
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 import type {
   ColdDetectionFrameStore,
@@ -9,13 +10,24 @@ import type {
   LiveWritableDetectionFrameSource,
   WritableDetectionFrameSource,
 } from "#types/detection-timeline";
-import { MediaSourceStatus } from "#types/media-rendering";
-import type { MediaSourceState } from "#types/media-rendering";
+import {
+  MediaRendererFit,
+  MediaRendererPlaybackState,
+  MediaSourceStatus,
+} from "#types/media-rendering";
+import type {
+  MediaRendererState,
+  MediaSourceState,
+} from "#types/media-rendering";
 import type { DetectionFrame } from "#types/detections";
+import { AnnotationGestureStateKind } from "#types/editing";
+import type { AnnotationEditingEngine } from "#types/editing";
+import { createAnnotationEditingEngine } from "#interactions/annotation-editing-engine";
 
 /**
  * These fixtures are written against the public shapes as they existed before
- * live ingestion, coverage finalization, and typed media errors were added.
+ * live ingestion, coverage finalization, typed media errors, and draft Undo
+ * were added.
  * They exist to fail `typecheck` if any of those additions ever becomes a
  * required member again, because that would break structurally typed consumer
  * code that never opted into the new capabilities.
@@ -77,6 +89,34 @@ const legacySourceState: MediaSourceState = {
   videoTrackCount: 1,
 };
 
+/** A renderer state written before the mask layer reported what it drew. */
+const legacyRendererState: MediaRendererState = {
+  activeDetectionCount: 0,
+  activeDetectionFrameIndex: null,
+  activeDetectionFrameTime: null,
+  currentTime: 0,
+  detectionBuffer: {
+    bufferEndTime: null,
+    bufferStartTime: null,
+    detectionCount: 0,
+    errorMessage: null,
+    frameCount: 0,
+    requestedEndTime: null,
+    requestedStartTime: null,
+    status: DetectionBufferStatus.Idle,
+  },
+  duration: 9,
+  fit: MediaRendererFit.Contain,
+  lastFrameRenderTimings: null,
+  mediaHeight: 720,
+  mediaWidth: 1280,
+  playbackRate: 1,
+  playbackState: MediaRendererPlaybackState.Ready,
+  presentedFrames: 0,
+  rendererBackend: null,
+  source: legacySourceState,
+};
+
 /** A cold store implemented before optional in-place pruning existed. */
 const legacyStore: ColdDetectionFrameStore = {
   async putFrames() {
@@ -91,7 +131,40 @@ const legacyStore: ColdDetectionFrameStore = {
   async clearDataset() {},
 };
 
+/** An editing engine implemented before multi-click draft Undo existed. */
+const legacyEditingEngine: AnnotationEditingEngine = {
+  getState: () => ({
+    activeDetectionId: null,
+    activeHandleId: null,
+    kind: AnnotationGestureStateKind.Idle,
+    pointerId: null,
+    preview: null,
+  }),
+  setCreationTool() {},
+  pointerDown() {},
+  pointerMove() {},
+  pointerUp() {},
+  keyDown() {},
+  beginHandleDrag() {},
+  deleteVertex: () => null,
+  cancel() {},
+  hasCreationTool: () => false,
+  subscribe: () => () => {},
+  subscribeFastTranslate: () => () => {},
+};
+
 describe("public contract compatibility", () => {
+  it("keeps editing engines written before draft Undo assignable", () => {
+    expect(legacyEditingEngine.undoCreation).toBeUndefined();
+  });
+
+  it("guarantees draft Undo on the built-in editing engine", () => {
+    const engine: Required<Pick<AnnotationEditingEngine, "undoCreation">> =
+      createAnnotationEditingEngine();
+
+    expect(engine.undoCreation()).toBe(false);
+  });
+
   it("keeps sources written before live ingestion assignable", () => {
     expect(legacyWritableSource.appendLiveFrame).toBeUndefined();
     expect(legacyWritableSource.finalizeCoverage).toBeUndefined();
@@ -99,6 +172,12 @@ describe("public contract compatibility", () => {
 
   it("keeps media source states written before typed errors assignable", () => {
     expect(legacySourceState.errorKind ?? null).toBeNull();
+  });
+
+  it("keeps renderer states written before the mask readouts assignable", () => {
+    expect(legacyRendererState.presentedFrames).toBe(0);
+    expect(legacyRendererState.drawnMaskFrameTime).toBeUndefined();
+    expect(legacyRendererState.maskHeldStale).toBeUndefined();
   });
 
   it("keeps cold stores written before in-place pruning assignable", () => {

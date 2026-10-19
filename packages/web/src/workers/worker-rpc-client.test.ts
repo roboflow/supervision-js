@@ -53,6 +53,29 @@ describe("worker rpc client", () => {
     client.destroy();
   });
 
+  it("passes an owned buffer as a transferable", async () => {
+    const fakeWorker = createFakeWorker();
+    const posted = vi.spyOn(fakeWorker.worker, "postMessage");
+    const client = createWorkerRpcClient<TestWorkerRequest, TestWorkerResponse>(
+      {
+        defaultErrorMessage: "Test worker failed.",
+        isResponse: isTestResponse,
+        worker: fakeWorker.worker,
+      },
+    );
+    const buffer = new ArrayBuffer(4);
+    const response = client.request({ payload: "hello", type: "request" }, [
+      buffer,
+    ]);
+    expect(posted).toHaveBeenCalledWith(
+      { payload: "hello", requestId: 1, type: "request" },
+      [buffer],
+    );
+    fakeWorker.emitMessage({ payload: "ok", requestId: 1, type: "response" });
+    await response;
+    client.destroy();
+  });
+
   it("rejects pending and future requests after worker failure", async () => {
     const fakeWorker = createFakeWorker();
     const client = createWorkerRpcClient<TestWorkerRequest, TestWorkerResponse>(

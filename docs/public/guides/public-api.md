@@ -24,6 +24,8 @@ Install the current browser release with `npm install supervision`. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 
+The web video engine subpaths are included in `supervision` starting with the 0.2 release series.
+
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
 workers, or browser storage part of those core concepts.
@@ -38,6 +40,18 @@ Start here for normal application code:
 - `MediaSessionState`
 - `MediaSessionStatus`
 - `MediaSessionActivity`
+- `MediaFrameClock` and optional `session.frameClock` / `renderer.frameClock`
+  for exact indexed timing. The clock is `null` for unindexed media; its
+  `frameCount`, `firstTimestamp`, `endTimestamp`, `duration`, `timeAt`,
+  `durationAt`, and `indexAtOrBefore` members use presentation time rather
+  than an assumed frame rate;
+- `MediaFrameNavigation` and optional `session.frameNavigation` /
+  `renderer.frameNavigation` for exact indexed moves and latest-wins scrubs on
+  push-presented indexed sources. Use the ordinary time controls when it is
+  `null`;
+- optional `session.setDisplay()` / `renderer.setDisplay()` to resize existing
+  push-presented output without recreating the source or session. Web video
+  engine sources expose it when configured with a display-box decode strategy;
 - media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
   playback rate, and current-presentation `refresh`;
 - `session.captureFrame()` when a host needs an encoded JPEG `Blob` for the
@@ -53,20 +67,31 @@ Start here for normal application code:
   sources, composite sources, and appended frames all behave the same. A
   composite composes children that were each inferred at a different size, and
   every child is projected from its own space before composition
+- depth maps: `MediaSessionOptions.depth` (a `DepthMap`, or a `depth.json`
+  manifest the session fetches and decodes, for a still image or a clip over
+  video media), and the `depth` annotation renderer. Depth is its own channel
+  beside detections, never a `DetectionFrame` field, and a map is stretched
+  over the media rectangle rather than projected by `coordinateSpace`. Which
+  media draws which depth, and what plays, is in
+  [Depth maps](../annotation-renderers/depth.md#where-depth-works)
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
 - `DetectionMask`
 - `PolygonGeometry`
+- `OrientedBoxGeometry`
 - `PolylineGeometry`
 - `KeypointGeometry`
 - `BaseBoxStyle`
 - `BoxShape`
 - `BaseMaskStyle`
+- `BaseOrientedBoxStyle`
 - `BasePolygonStyle`
 - `BasePolylineStyle`
 - `BaseKeypointStyle`
 - `BaseLabelStyle`
+- `BasePercentageBarStyle`
+- `PercentageBarPlacement`
 - `BaseInteractionStyle`
 - `BaseFocusStyle`
 - `annotationRenderers`
@@ -93,6 +118,16 @@ annotation visualization. An annotation renderer consumes semantic detections
 and contributes to the renderer-owned scene. The built-ins retain the
 established draw order and backend paths for masks, boxes, vectors, and labels.
 
+`MediaRendererPresentation.annotationAntialiasing` enables smoothing for all
+annotation edges, including focus and interaction, without filtering video
+frames. Use `true` for FXAA at output density or `2` for FXAA captured at twice
+that density in each dimension. It smooths label
+backgrounds while keeping text sharp. Separated label runs share captures;
+overlaps split captures to preserve blending and draw order. It defaults to
+`false` and can change in an existing
+session. See
+[Presentation Styles](presentation-styles.md#smooth-annotation-edges).
+
 ```ts
 import { annotationRenderers, BaseBoxStyle, BaseLabelStyle } from "supervision";
 
@@ -110,10 +145,10 @@ session.setPresentation({
 });
 ```
 
-The current built-ins are `box`, `box-corners`, `ellipse`, `marker`, `mask`,
-`maskHalo`, `polygon`, `polyline`, `keypoints`, `label`, and the
-multi-instance `region` renderer for asset overlays and current-frame media
-crops;
+The current built-ins are `box`, `box-corners`, `depth`, `ellipse`, `heatmap`, `marker`, `mask`,
+`maskHalo`, `orientedBox`, `polygon`, `polyline`, `keypoints`, `label`, `percentageBar`, and
+the multi-instance `region` renderer for asset overlays and current-frame media
+crops; `heatmap` and `depth` also support multiple instances with distinct ids;
 `annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list
 is authoritative: omitted built-ins are
@@ -131,8 +166,8 @@ renderer-owned media texture. Media crops may request exact mask coverage,
 which reuses the renderer's prepared GPU ID-mask artifact, or polygon coverage
 for canonical closed polygons. Asset transforms may use an
 explicit media- or screen-space size; screen-space assets stay the same visible
-size across differently sized detections and viewport zoom. Multiple region
-descriptors may coexist when each has a unique `id`.
+size across differently sized detections and viewport zoom. Multiple region,
+heatmap, or depth descriptors may coexist when each has a unique `id`.
 Media sources may also request bounded `blur` or `pixelate` effects through
 `source.effect`; those semantic settings stay independent of the browser filter
 implementation and operate on the renderer-owned current frame.
@@ -155,10 +190,38 @@ not the first thing most users should reach for:
   display time — so a host can correlate transport-side results with what is on
   screen without opening a second hidden video. No DOM element or vendor object
   crosses that boundary, and every field beyond `mediaTime` is optional;
+- `createWebVideoEngineMediaRendererSource()` and `openWebVideoEngineMediaSource()`
+  for video presented by the web video engine, which owns the playhead and
+  hands each selected frame to the host. The renderer atomically composites
+  annotations from that frame's identity and acknowledges it once displayed.
+  Its source is a URL or a `Blob`, because it reads the video twice: once for
+  the frames it presents, and once for the thumbnails and single-frame grabs
+  its sample sink answers. A `ReadableStream` can be read only once, so pass
+  one to `WebVideoEngine` directly instead.
+  Both are also exported from `supervision/web-video-engine`, alongside the
+  engine's own types; the subpath and the root give the same two functions. The
+  source types are among those engine types: `UrlVideoSource`,
+  `BlobVideoSource`, and the `SourceKind` values that build one are imported
+  from `supervision/web-video-engine`, not from the package root. Importing the
+  subpath does not evaluate the root entry, so an application that wants only
+  the video engine does not run the renderer graph. The engine is loaded
+  dynamically at the moment one of these opens a source, so an application that
+  never opens one pays nothing in its bundle to import `supervision`. Pass
+  `display` to size the decode to the box the frames are painted into; without
+  it they decode at the source's full resolution however small that box is.
+  Under this source the renderer also answers `getRenderCount()` and
+  `getPreparedAnnotationWindow()`, which report `null` for pulled media that
+  plays. A still image renders on change too, so it answers
+  `getRenderCount()`;
 - `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses
-  `coordinateSpace` to project each child before composing;
+  `coordinateSpace` to project each child before composing. A
+  `WritableDetectionFrameSource` is accepted anywhere a session accepts
+  `detections.source` or a `detections.sources[].source`; the session borrows
+  that source and never disposes it. Write through the session when it should
+  refresh the visible result, or call `session.refresh()` after a direct source
+  mutation. `detections.autoRefresh: false` leaves every redraw to the host;
 - `LiveMediaSession`, the shape `createMediaSession()` returns. It guarantees
   `appendLiveDetectionFrame()` and `finalizeDetectionCoverage()`, which stay
   optional on `MediaSession` so controllers and test doubles written against the
@@ -179,14 +242,24 @@ not the first thing most users should reach for:
   draft annotations, review overlays, or other app-owned detection streams over
   one media item;
 - `session.setRenderQuality()` for runtime DPR/quality changes without
-  rebuilding the media session;
+  rebuilding the media session. The renderer synchronizes the canvas,
+  display-sized masks, and display-box video output when quality or container
+  dimensions change. Native and capped video strategies, and masks configured
+  without a display box, keep their own resolution policy;
+- `session.setDepth()` to swap or remove a depth map or manifest without
+  reopening the media, `renderer.getActiveDepth()` for the map on screen, `readDepthAt()`
+  for the stored value, disparity, metres, and confidence under a media point,
+  `computeDepthPercentileRange()` to lock a frame's automatic colour range,
+  `depthColormapColors()` for a legend in the renderer's own colours, and
+  `parseDepthManifest()` to validate the `depth.json` a producer writes;
 - cold detection stores for custom persistence and testing;
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;
 - interaction and picking options;
-- polygons, polylines, keypoints, shared class-color helpers, and visibility
-  controls;
-- render-preparation diagnostics and worker options.
+- polygons, oriented boxes, polylines, keypoints, shared class-color helpers,
+  and visibility controls;
+- render-preparation diagnostics, worker options, mask preview scale, and
+  optional fine-quality playback gating.
 - ordered detection post-processing, bounded out-of-order buffering, tracking
   diagnostics, in-place derived detection updates, optional raw-copy
   preservation, and worker options.
@@ -212,8 +285,8 @@ A producer that streams results into a session has four supported contracts:
 
 - `session.appendDetectionFrames()` writes a batch. Frames that declare
   `coordinateSpace` are normalized into media space before storage; rectangles,
-  polygons, polylines, and keypoints scale, while masks keep their own intrinsic
-  dimensions and are never scaled twice.
+  polygons, oriented boxes, polylines, and keypoints scale, while masks keep
+  their own intrinsic dimensions and are never scaled twice.
 - `session.appendLiveDetectionFrame()` writes the newest result for a live
   stream. It stays active until the next live frame supersedes it, at which
   point the previous frame is closed at the new frame's `mediaTime`. At most two
@@ -233,9 +306,9 @@ A producer that streams results into a session has four supported contracts:
   end of media, defaulting to the renderer's reported duration. It sets that
   frame's exclusive end to the requested time, extending a finite frame whose
   container declared a duration past the last decoded sample, or shortening a
-  live frame that is still held open. Without it, coverage-gated playback either
-  stalls on a terminal sliver or believes the source covers time past the end of
-  media. It is idempotent.
+  live frame that is still held open. Without it, reported availability either
+  leaves a terminal sliver uncovered or claims time past the end of media. It is
+  idempotent.
 - `session.refresh()` still redraws on demand. By default the session also
   redraws itself when a write actually changed the frame selected for the
   displayed time. Live writes, batch writes, and coverage finalization all use
@@ -284,6 +357,10 @@ edit list carries decodable samples ahead of presentation time zero; those are
 not presented, and the session reports `firstTimestamp` as the presentation
 start rather than the negative decode start.
 
+When a detection source uses `MediaStart` conversion, renderer time is
+`detectionTime + firstTimestamp`; source coverage remains in detection-timeline
+coordinates.
+
 ## Editing API
 
 Annotation editing is a supported advanced API at the dedicated subpath:
@@ -302,11 +379,86 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
 
+With an editing engine, retained boxes, polygons, polylines, keypoints, and
+shape decorations share detection order: higher `Detection.zIndex` is in front;
+missing values use the detection's frame index, and equal values follow frame
+order. By default, masks remain a prepared fill layer below this geometry.
+Set `renderer.maskOrder: "detection"` to include independent masks in the same
+ordered stack, with or without an editing engine. Labels and interaction overlays
+stay above it. Without an editing engine or this opt-in, the dense renderer keeps
+its separate geometry layers; `zIndex` orders detections within each layer.
+
+Set `interaction.preferTopmost: true` to pick that stack rather than prefer
+smaller shapes or subtargets in other detections. For standalone
+`pickDetectionAtPoint`, pass `{ preferTopmost: true, maskOrder: "detection" }`
+to use the same ordering. This policy interprets rectangles accompanying paths
+or masks as bounds, so they do not create a second box hit target. Mask fills
+stay below vector geometry when `maskOrder` is omitted. Keypoints and edges
+retain priority within the chosen detection. Leave `preferTopmost` unset for
+the default smallest-object policy or when accompanying rectangles are
+independent box targets.
+
+Enable `interaction.multiSelect` for Shift-click selection toggles and
+drag-selection from empty space. `onSelectionChange` reports the full ordered
+selection; `onSelect` reports its primary pick. Shift-clicking a detection in
+Select mode changes selection without starting a move. Shift-click and the
+secondary button still delete an editable polygon/polyline vertex when its
+selected vertex handle is hit; active creation tools keep their gesture priority.
+
+Restore host-owned selections with
+`session.renderer.setSelectedDetection({ detectionIds: selectedIds })`.
+Duplicate ids are ignored, missing or hidden detections are excluded, and the
+last valid id is the primary pick returned by the method. An empty list clears
+selection. `detectionIds` takes precedence over `detectionId` or
+`detectionIndex` when supplied together; singular selectors continue to select
+one detection. Use the full list rather than restoring only the primary pick
+after a refresh or application state update.
+
+Synchronizing the same creation tool is idempotent: `setCreationTool(null)`
+keeps a selection drag alive when the engine is already in Select mode. To
+abort a gesture explicitly, call `engine.cancel()`.
+
+Route Undo to `engine.undoCreation()` before committed history. It removes one
+vertex from an active multi-click draft and returns `true`, including when the
+last vertex cancels the draft and releases its pointer. It never commits a
+preview. A `false` result means no multi-click draft owns Undo; it does not
+consume or cancel an active box, freehand, move, or resize gesture. Consult
+committed history only when `engine.getState().kind` is
+`AnnotationGestureStateKind.Idle`, cancelling an active gesture explicitly
+first if needed. Escape, tool changes, and media changes still cancel through
+`engine.cancel()`; draft vertices never enter persisted history.
+
+`createAnnotationEditingEngine()` returns a `DraftUndoAnnotationEditingEngine`
+that guarantees `undoCreation()`. The method is optional on the broader
+`AnnotationEditingEngine` interface so existing custom engines remain
+compatible; hosts using a custom engine check that capability before routing
+draft Undo to it.
+
+Browser-routed box creation, movement, and resizing stay inside the natural
+media dimensions in both previews and commits. Moving a box preserves its size
+when it fits the media; a previously oversized box is fitted to the media on
+edit. Resizing can cross the opposite edge while keeping the fixed anchor inside
+the media. The renderer supplies `AnnotationPointerInput.mediaDimensions`; callers
+routing input directly can supply the same optional dimensions to enable these
+constraints, or omit them for unbounded geometry editing.
+
+Creation tools may provide `onRejected()` to handle a completed drag or
+freehand stroke that produced no committed detection. The engine calls it
+after returning to idle. Escape, tool changes, and explicit cancellation do
+not call it, so hosts can clear selection on an empty drawing click without
+interpreting every cancellation as a click.
+
 The generated API reference has a separate Editing module for this entrypoint.
 
 `Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
 and `height` are its extent. `TopLeftRect` is only for explicit canvas/layout
-boundaries. There is no legacy top-left rectangle mode.
+boundaries. There is no legacy top-left rectangle mode. `Rect` also stays
+axis-aligned: it never gains a rotation field. A rotated or otherwise
+non-axis-aligned box is a separate `OrientedBoxGeometry` on
+`Detection.orientedBox`, four explicit media-pixel vertices ordered clockwise
+from the box's own top-left corner. Nothing in `supervision-js` derives an
+oriented box from a mask or a plain `rect`; a producer that only has one of
+those computes the quadrilateral itself.
 
 Advanced APIs should remain renderer-neutral. They may expose timing,
 diagnostics, and data-flow contracts, but they should not expose Pixi containers,
@@ -319,8 +471,10 @@ These are implementation details, even when they are important to performance:
 - Pixi scene layers;
 - Mediabunny adapter internals;
 - worker message protocols;
-- PNG ID-mask artifact payloads;
+- ID-mask artifact payloads;
 - shader palette formats;
+- packed depth textures, the depth colour-table texture, and how depth frames
+  are selected for a media time;
 - prepared render-window cache internals;
 - demo-only Roboflow or SAM3 request code;
 - React components or hooks in the browser package. The private experimental
@@ -338,8 +492,10 @@ props into `session.setPresentation()` or session options.
 
 It should not own media decoding, media timing, frame stepping, render loops,
 detection buffering, inference ingestion, worker orchestration, or Pixi
-composition. Timeline UI should consume session state and `renderer.onFrame`,
-then call session navigation methods.
+composition. Timeline UI should subscribe to session state and read
+`state.renderer?.presentedTime` for the displayed timestamp, then call session
+navigation methods. `renderer.onFrame` is a per-sample diagnostic callback for
+pulled renderers, not a provider-independent display clock.
 
 The browser package remains vanilla TypeScript/JavaScript. React wrappers should
 wrap `MediaSession`; they should not shape media timing, rendering, buffering,
@@ -380,26 +536,25 @@ reason, and hosts without the native module keep the usual fallback
 diagnostics. Rotated videos (portrait phone recordings with a
 `rotation-degrees` track metadata) are rejected with an explicit error until
 the GPU rotation pass lands. The pipeline is validated end-to-end on an
-emulator; physical-device validation and performance numbers are still
-pending, so do not claim production-ready cross-platform file support yet.
+emulator; physical-device validation and performance numbers are still pending.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
 
-The remaining mobile work is platform implementation and measurement, not a
-second session abstraction: add the Android saved-video source and measure
-whether native-thread prepared windows are needed before introducing them. The experimental
-`./react/live-inference` entrypoint owns the live VisionCamera worklet through
-`useReactNativeLiveInference()`; applications provide model runners and
-serializable configuration, not frame callbacks. This keeps the generic
-`./react` entry usable without the optional Worklets peer.
+The experimental `./react/live-inference` entrypoint owns the live VisionCamera
+worklet through `useReactNativeLiveInference()`; applications provide model
+runners and serializable configuration, not frame callbacks. This keeps the
+generic `./react` entry usable without the optional Worklets peer.
 
 ## Compatibility Posture
 
 The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
+
+See [Migrating to 0.2](migrating-to-0.2.md) for source changes required by the
+release, including interaction presentation options.
 
 1. one media item maps to one session;
 2. detections are semantic input;
@@ -412,3 +567,33 @@ When adding exports, prefer one of these outcomes:
 - add to the primary API because most apps need it;
 - add to advanced API because integrations need it;
 - keep it internal until a real second use case appears.
+
+## Inspecting source pixels
+
+Pass `renderer: { pixelInspection: { minScale: 3 } }` to `createMediaSession()`
+(or `pixelInspection` to `createMediaRenderer()`) to display distinct source
+pixels at high zoom. The threshold is the actual media-to-screen scale in CSS
+pixels per natural media pixel, including fit and user zoom; it is independent
+of display pixel ratio. A positive, finite `minScale` is required.
+
+Media is smoothly sampled below the threshold, and distinct pixels are restored
+when zoom, container resizing, or a new frame crosses it. This policy affects
+only media display: annotations keep their configured styles, and `captureFrame()`
+still returns the presented source pixels. Brightness/contrast adjustments retain
+the configured renderer resolution, including on Retina displays. Omit the option for smooth sampling
+at every zoom.
+
+`renderer.setDisplayAdjustments({ brightness, contrast, gamma, autoContrast })`
+changes only media display. Brightness, contrast and gamma default to `1`; gamma
+above `1` brightens midtones. For still images, `autoContrast: true` applies
+Contrast Limited Adaptive Histogram Equalization (CLAHE) instead of manual
+contrast. Brightness and gamma remain active. Auto contrast is ignored for video;
+passing an empty object restores the unadjusted display. Source pixels and
+annotation styles are unchanged.
+
+`renderer.setViewportTransform({ scale, x, y })` applies an exact transform in
+natural media pixels and container-relative CSS pixels. Explicit updates work
+while the viewport is locked and can restore scales outside the ordinary gesture
+zoom range. `setViewportLocked(true)` blocks pointer pan/zoom; toolbar resets and
+restored host state remain available. After unlocking, zoom gestures can move a
+restored scale gradually toward the ordinary range without jumping to its bounds.

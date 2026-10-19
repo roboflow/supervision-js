@@ -2,6 +2,7 @@ import {
   DetectionPickTarget,
   encodeCompressedRleCounts,
   MaskRenderMode,
+  StrokeAlignment,
   resolveDetectionClassColorStyle,
   type DetectionFrame,
 } from "supervision-js-core";
@@ -97,6 +98,48 @@ describe("resolveReactNativeFramePresentation", () => {
       }),
     ).toThrowError(
       'React Native frame presentation does not support annotation renderer kind "region".',
+    );
+  });
+
+  it("reports heatmaps as unsupported instead of omitting them", () => {
+    expect(() =>
+      resolveReactNativeFramePresentation({
+        detectionFrame: { detections: [], mediaTime: 0 },
+        mediaFrame: {
+          metadata: {
+            duration: 1 / 30,
+            frameIndex: 0,
+            height: 1080,
+            mediaTime: 0,
+            width: 1920,
+          },
+          payload: { nativeTextureId: "texture-heatmap" },
+        },
+        renderers: [annotationRenderers.heatmap()],
+      }),
+    ).toThrowError(
+      'React Native frame presentation does not support annotation renderer kind "heatmap".',
+    );
+  });
+
+  it("reports depth maps as unsupported instead of omitting them", () => {
+    expect(() =>
+      resolveReactNativeFramePresentation({
+        detectionFrame: { detections: [], mediaTime: 0 },
+        mediaFrame: {
+          metadata: {
+            duration: 1 / 30,
+            frameIndex: 0,
+            height: 1080,
+            mediaTime: 0,
+            width: 1920,
+          },
+          payload: { nativeTextureId: "texture-depth" },
+        },
+        renderers: [annotationRenderers.depth()],
+      }),
+    ).toThrowError(
+      'React Native frame presentation does not support annotation renderer kind "depth".',
     );
   });
 
@@ -579,8 +622,9 @@ describe("React Native live ID-mask artifacts", () => {
   });
 
   it("clamps detections to the palette limit", () => {
-    const detections = Array.from({ length: 70 }, () =>
-      createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+    const detections = Array.from(
+      { length: MAX_ID_MASK_PALETTE_ENTRIES + 1 },
+      () => createFullCoverageLiveDetection({ color: 0x38bdf8 }),
     );
 
     const artifact = createReactNativeLiveIdMaskArtifact({
@@ -945,6 +989,42 @@ describe("React Native ID-mask artifacts", () => {
     expect(artifact!.strokeWidths[1]).toBe(3);
   });
 
+  it.each([
+    StrokeAlignment.Outside,
+    StrokeAlignment.Center,
+    StrokeAlignment.Inside,
+  ])("preserves the native radius cap for %s source styles", (alignment) => {
+    const artifact = createReactNativeIdMaskFrame({
+      detectionFrame: {
+        detections: [
+          {
+            mask: {
+              counts: encodeCompressedRleCounts([0, 1]),
+              encoding: DetectionMaskEncoding.CompressedRle,
+              width: 1,
+              height: 1,
+            },
+          },
+        ],
+        mediaTime: 0,
+      },
+      maskStyle: new BaseMaskStyle({ stroke: { width: 30, alignment } }),
+    })!;
+    const uniforms = resolveReactNativeIdMaskUniforms({
+      artifact,
+      layout: resolveReactNativeFrameLayout({
+        canvasWidth: 1,
+        canvasHeight: 1,
+        mediaWidth: 1,
+        mediaHeight: 1,
+      }),
+    });
+    expect(artifact.strokeWidths[1]).toBe(16);
+    expect(artifact.maxStrokeWidth).toBe(16);
+    expect(uniforms.uStrokeWidths[1]).toBe(16);
+    expect(uniforms.uMaxStrokeWidth).toBe(16);
+  });
+
   it("returns undefined when no masks should render", () => {
     const frame: DetectionFrame = {
       detections: [
@@ -1010,7 +1090,7 @@ describe("React Native ID-mask artifacts", () => {
     expect([...uniforms.uMediaRect]).toEqual([37.5, 0, 25, 50]);
     expect(uniforms.uBorderEnabled).toBe(0);
     expect(Array.isArray(uniforms.uFillPalette)).toBe(true);
-    expect(uniforms.uFillPalette).toHaveLength(256);
+    expect(uniforms.uFillPalette).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES * 4);
     expect(uniforms.uFillPalette.slice(4, 8)).toEqual([1, 0, 0, 1]);
   });
 

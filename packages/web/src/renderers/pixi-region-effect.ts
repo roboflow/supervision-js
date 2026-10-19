@@ -135,7 +135,10 @@ function createFilter(
     clampFinite(options.effect.size, 12, 1, 128) * viewportScale;
   const filter = options.Filter.from({
     gl: { fragment: pixelateFragmentShader, vertex: options.defaultFilterVert },
-    gpu: undefined,
+    gpu: {
+      fragment: { entryPoint: "mainFragment", source: pixelateWgsl },
+      vertex: { entryPoint: "mainVertex", source: pixelateWgsl },
+    },
     resources: {
       regionEffectUniforms: {
         uBlockSize: { type: "f32", value: blockSize },
@@ -187,5 +190,66 @@ void main(void) {
   vec2 block = vec2(max(1.0, uBlockSize)) / textureSize;
   vec2 sampleUV = (floor(vTextureCoord / block) + 0.5) * block;
   finalColor = texture(uTexture, clamp(sampleUV, vec2(0.0), vec2(1.0)));
+}
+`;
+
+// Pixi publishes its default filter vertex stage as GLSL alone, so the WebGPU
+// side restates it here. Both stages live in one source because they share the
+// filter's bind groups: the renderer owns group 0, and the filter's own
+// uniforms follow in group 1.
+const pixelateWgsl = `
+struct GlobalFilterUniforms {
+  uInputSize: vec4<f32>,
+  uInputPixel: vec4<f32>,
+  uInputClamp: vec4<f32>,
+  uOutputFrame: vec4<f32>,
+  uGlobalFrame: vec4<f32>,
+  uOutputTexture: vec4<f32>,
+}
+
+struct RegionEffectUniforms {
+  uBlockSize: f32,
+}
+
+@group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
+@group(0) @binding(1) var uTexture: texture_2d<f32>;
+@group(0) @binding(2) var uSampler: sampler;
+@group(1) @binding(0) var<uniform> regionEffectUniforms: RegionEffectUniforms;
+
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) vTextureCoord: vec2<f32>,
+}
+
+@vertex
+fn mainVertex(@location(0) aPosition: vec2<f32>) -> VertexOutput {
+  var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
+
+  position.x = position.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
+  position.y =
+    position.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) -
+    gfu.uOutputTexture.z;
+
+  var output: VertexOutput;
+
+  output.position = vec4<f32>(position, 0.0, 1.0);
+  output.vTextureCoord = aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw);
+  return output;
+}
+
+@fragment
+fn mainFragment(
+  @location(0) vTextureCoord: vec2<f32>,
+) -> @location(0) vec4<f32> {
+  let textureSize = max(gfu.uInputSize.xy, vec2<f32>(1.0));
+  let block =
+    vec2<f32>(max(1.0, regionEffectUniforms.uBlockSize)) / textureSize;
+  let sampleUV = (floor(vTextureCoord / block) + 0.5) * block;
+
+  return textureSample(
+    uTexture,
+    uSampler,
+    clamp(sampleUV, vec2<f32>(0.0), vec2<f32>(1.0)),
+  );
 }
 `;

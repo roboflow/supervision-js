@@ -13,7 +13,10 @@ export interface WorkerRpcClient<
 > {
   destroy(): void;
   getFailureMessage(): string | null;
-  request(message: WorkerRpcRequestInput<Request>): Promise<Response>;
+  request(
+    message: WorkerRpcRequestInput<Request>,
+    transfer?: Transferable[],
+  ): Promise<Response>;
 }
 
 export type WorkerRpcRequestInput<Request extends WorkerRpcMessage> =
@@ -60,7 +63,7 @@ export function createWorkerRpcClient<
       return failureMessage;
     },
 
-    request(message) {
+    request(message, transfer) {
       if (isDestroyed) {
         return Promise.reject(
           new Error("Worker RPC client has been destroyed."),
@@ -82,7 +85,7 @@ export function createWorkerRpcClient<
         pendingRequests.set(request.requestId, { reject, resolve });
 
         try {
-          options.worker.postMessage(request);
+          options.worker.postMessage(request, transfer ?? []);
         } catch (error) {
           pendingRequests.delete(request.requestId);
           failureMessage = getErrorMessage(error, options.defaultErrorMessage);

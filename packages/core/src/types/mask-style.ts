@@ -1,5 +1,6 @@
 import type { Detection, DetectionMask } from "#types/detections";
 import type { AnnotationStyleContext } from "#types/style";
+import type { StrokeAlignment } from "#types/paint-style";
 
 export type MaskStyleContext = AnnotationStyleContext;
 
@@ -15,7 +16,12 @@ export enum MaskRenderMode {
 export interface MaskStrokeStyle {
   readonly color: number;
   readonly alpha: number;
+  /** Total CSS-pixel width; explicit mask units retain the source-pixel radius. */
   readonly width: number;
+  /** Where the outline grows from the mask boundary. Defaults to outside. */
+  readonly alignment?: StrokeAlignment;
+  /** Omit for the CSS-pixel raster outline; mask units scale with the media. */
+  readonly widthUnit?: "mask" | "screen";
 }
 
 /**
@@ -27,7 +33,11 @@ export interface MaskStrokeStyle {
 export interface MaskStrokeStyleOptions {
   readonly color?: number;
   readonly alpha?: number;
+  /** Total CSS-pixel width; explicit mask units retain the source-pixel radius. */
   readonly width?: number;
+  /** Defaults to outside, preserving the mask interior. */
+  readonly alignment?: StrokeAlignment;
+  readonly widthUnit?: "mask" | "screen";
 }
 
 /**

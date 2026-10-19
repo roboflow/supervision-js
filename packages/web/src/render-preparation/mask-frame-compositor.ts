@@ -1,11 +1,22 @@
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
-import type { PreparedRegionMaskCoverageFrame } from "#render-preparation/mask-frame-artifact";
+import type {
+  PreparedIdMaskPlane,
+  PreparedRegionMaskCoverageEntry,
+  PreparedRegionMaskCoverageFrame,
+  PreparedMaskScreenStroke,
+} from "#render-preparation/mask-frame-artifact";
+import { traceMaskOutlinePaths } from "#render-preparation/mask-outline-paths";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
+  MAX_ID_MASK_STROKE_WIDTH,
+  resolveIdMaskStrokeTexels,
+  StrokeAlignment,
+  decodeCompressedRleCounts,
   decodeCompressedRleMask,
   encodeBinaryMask,
   rasterizePolygonToMask,
+  resolveIdMaskPaletteId,
   type IdMaskInstruction,
   type IdMaskFrame,
 } from "supervision-js-core";
@@ -16,14 +27,17 @@ export {
   type IdMaskFrame,
 } from "supervision-js-core";
 
-const PNG_SIGNATURE = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-]);
-
 interface DecodedMaskPixels {
   readonly data: Uint8Array;
   readonly height: number;
   readonly width: number;
+}
+
+interface MaskBounds {
+  readonly maxX: number;
+  readonly maxY: number;
+  readonly minX: number;
+  readonly minY: number;
 }
 
 interface RgbaColor {
@@ -39,73 +53,76 @@ export interface CompositedMaskFrame {
   readonly width: number;
 }
 
-export interface PngIdMaskFrame extends IdMaskFrame {
-  readonly png: Uint8Array<ArrayBuffer>;
-}
-
 /** Builds compact, independent alpha crops so overlapping masks stay exact. */
 export function createRegionMaskCoverageFrame(
   instructions: readonly SerializableMaskInstruction[],
 ): PreparedRegionMaskCoverageFrame | undefined {
-  const coverageInstructions = instructions.filter(
-    (
-      instruction,
-    ): instruction is SerializableMaskInstruction & {
-      readonly regionCoverageMask: NonNullable<
-        SerializableMaskInstruction["regionCoverageMask"]
-      >;
-    } => instruction.regionCoverageMask !== undefined,
-  );
+  const entries: PreparedRegionMaskCoverageEntry[] = [];
 
-  if (coverageInstructions.length === 0) return undefined;
-
-  const entries: PreparedRegionMaskCoverageFrame["entries"][number][] = [];
-
-  for (const instruction of coverageInstructions) {
-    const decodedMask = decodeCompressedRleMask(instruction.regionCoverageMask);
-    let minX = decodedMask.width;
-    let minY = decodedMask.height;
-    let maxX = -1;
-    let maxY = -1;
-
-    for (let y = 0; y < decodedMask.height; y += 1) {
-      for (let x = 0; x < decodedMask.width; x += 1) {
-        if (!decodedMask.data[y * decodedMask.width + x]) continue;
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
+  for (const instruction of instructions) {
+    if (!instruction.regionCoverageMask) {
+      continue;
     }
 
-    if (maxX < minX || maxY < minY) continue;
+    const entry = cropCoverageMask(
+      instruction.detectionIndex,
+      decodeCompressedRleMask(instruction.regionCoverageMask),
+    );
 
-    const width = maxX - minX + 1;
-    const height = maxY - minY + 1;
-    const data = new Uint8Array(new ArrayBuffer(width * height));
-
-    for (let y = minY; y <= maxY; y += 1) {
-      for (let x = minX; x <= maxX; x += 1) {
-        if (!decodedMask.data[y * decodedMask.width + x]) continue;
-        data[(y - minY) * width + (x - minX)] = 255;
-      }
+    if (entry) {
+      entries.push(entry);
     }
-
-    entries.push({
-      data,
-      detectionIndex: instruction.detectionIndex,
-      height,
-      width,
-      x: minX,
-      y: minY,
-    });
   }
 
   return entries.length > 0 ? { entries } : undefined;
 }
 
+function cropCoverageMask(
+  detectionIndex: number,
+  decodedMask: DecodedMaskPixels,
+): PreparedRegionMaskCoverageEntry | undefined {
+  let minX = decodedMask.width;
+  let minY = decodedMask.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < decodedMask.height; y += 1) {
+    for (let x = 0; x < decodedMask.width; x += 1) {
+      if (!decodedMask.data[y * decodedMask.width + x]) {
+        continue;
+      }
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return undefined;
+  }
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const data = new Uint8Array(new ArrayBuffer(width * height));
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      if (!decodedMask.data[y * decodedMask.width + x]) {
+        continue;
+      }
+
+      data[(y - minY) * width + (x - minX)] = 255;
+    }
+  }
+
+  return { data, detectionIndex, height, width, x: minX, y: minY };
+}
+
 export function compositeMaskFrame(
   instructions: readonly SerializableMaskInstruction[],
+  displayWidth?: number,
 ): CompositedMaskFrame | undefined {
   const maskInstructions = materializeMaskInstructions(instructions);
 
@@ -116,52 +133,169 @@ export function compositeMaskFrame(
   const width = Math.max(...maskInstructions.map(({ mask }) => mask.width));
   const height = Math.max(...maskInstructions.map(({ mask }) => mask.height));
   const data = new Uint8ClampedArray(new ArrayBuffer(width * height * 4));
+  const strokeCoverage = maskInstructions.some(
+    ({ stroke }) => stroke && stroke.width > 0 && stroke.alpha > 0,
+  )
+    ? new Uint8Array(width * height)
+    : undefined;
+  const strokeKernels = new Map<string, StrokeKernel>();
 
   for (const instruction of maskInstructions) {
-    compositeInstruction(data, width, instruction);
+    compositeInstruction(
+      data,
+      width,
+      instruction,
+      strokeCoverage,
+      strokeKernels,
+      displayWidth,
+    );
   }
 
   return { data, height, width };
 }
 
-export function createMaskIdFrame(
+export function createIdMaskRasterFrame(
   instructions: readonly SerializableMaskInstruction[],
-) {
-  return createIdMaskFrame(materializeMaskInstructions(instructions));
+  maxRasterWidth?: number,
+): IdMaskFrame | undefined {
+  try {
+    return createIdMaskFrame(
+      instructions
+        .filter((instruction) => instruction.visible !== false)
+        .map((instruction) =>
+          instruction.stroke?.widthUnit
+            ? { ...instruction, stroke: undefined }
+            : instruction,
+        ),
+      { maxWidth: maxRasterWidth },
+    );
+  } catch {
+    // The id raster is the fast path, not the only one: answering with nothing
+    // puts the caller on the RGBA composite, which draws the same picture.
+    return undefined;
+  }
 }
 
-export async function createPngIdMaskFrame(
+/**
+ * Whether the palette has a slot for every detection this frame masks. An id
+ * names a detection by its index in the frame, so one masked detection past the
+ * last slot leaves the whole frame without an id raster however few masks it
+ * carries.
+ */
+export function canIdMaskPaletteNameFrame(
   instructions: readonly SerializableMaskInstruction[],
-): Promise<PngIdMaskFrame | undefined> {
-  const frame = createMaskIdFrame(instructions);
+) {
+  return instructions.every(
+    (instruction) =>
+      instruction.visible === false ||
+      resolveIdMaskPaletteId(instruction.detectionIndex) !== undefined,
+  );
+}
 
-  if (!frame) {
+export function createIdMaskPlane(
+  instructions: readonly SerializableMaskInstruction[],
+  maxRasterWidth?: number,
+): PreparedIdMaskPlane | undefined {
+  // The plane carries the ids a failed cook could not. A frame the palette
+  // cannot name has none to carry, and cooking it again reaches the same
+  // refusal after rasterizing every mask a second time.
+  if (!canIdMaskPaletteNameFrame(instructions)) {
     return undefined;
   }
 
-  return {
-    ...frame,
-    png: await encodeGrayscalePng({
-      height: frame.height,
-      pixels: frame.data,
-      width: frame.width,
-    }),
-  };
+  const frame = createIdMaskRasterFrame(instructions, maxRasterWidth);
+
+  return frame
+    ? { data: frame.data, height: frame.height, width: frame.width }
+    : undefined;
 }
 
 function compositeInstruction(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
   instruction: IdMaskInstruction,
+  strokeCoverage: Uint8Array | undefined,
+  strokeKernels: Map<string, StrokeKernel>,
+  displayWidth: number | undefined,
 ) {
-  const decodedMask = decodeCompressedRleMask(instruction.mask);
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
+  const bounds = compositeMaskFill(rgba, canvasWidth, instruction.mask, fill);
 
-  compositeMaskFill(rgba, canvasWidth, decodedMask, fill);
-
-  if (instruction.stroke) {
-    compositeMaskStroke(rgba, canvasWidth, decodedMask, instruction.stroke);
+  if (
+    instruction.stroke &&
+    instruction.stroke.widthUnit === undefined &&
+    bounds &&
+    strokeCoverage
+  ) {
+    compositeMaskStroke(
+      rgba,
+      canvasWidth,
+      decodeCompressedRleMask(instruction.mask),
+      bounds,
+      {
+        ...instruction.stroke,
+        width: resolveIdMaskStrokeTexels(
+          instruction.stroke.width,
+          displayWidth ?? canvasWidth,
+          canvasWidth,
+          instruction.stroke.alignment,
+        ),
+      },
+      strokeCoverage,
+      strokeKernels,
+    );
   }
+}
+
+export function createMaskScreenStrokes(
+  instructions: readonly SerializableMaskInstruction[],
+  width: number,
+  height: number,
+  preparedRaster?: Uint8Array,
+): readonly PreparedMaskScreenStroke[] | undefined {
+  const outlined = instructions.filter(
+    ({ visible, stroke }) =>
+      visible !== false &&
+      stroke?.widthUnit !== undefined &&
+      stroke.width > 0 &&
+      stroke.alpha > 0,
+  );
+  if (outlined.length === 0) return undefined;
+  const raster: Uint8Array | Uint32Array =
+    preparedRaster ?? new Uint32Array(width * height);
+  if (!preparedRaster) {
+    const masks = materializeMaskInstructions(instructions);
+    for (const { detectionIndex, mask } of masks) {
+      const counts = decodeCompressedRleCounts(mask.counts);
+      let offset = 0;
+      for (let index = 0; index < counts.length; index += 1) {
+        const length = counts[index]!;
+        if (index % 2 === 1) {
+          for (let pixel = offset; pixel < offset + length; pixel += 1) {
+            const x = Math.floor(pixel / mask.height);
+            const y = pixel % mask.height;
+            raster[y * width + x] = detectionIndex + 1;
+          }
+        }
+        offset += length;
+      }
+    }
+  }
+  const paths = traceMaskOutlinePaths(
+    raster,
+    width,
+    height,
+    new Set(outlined.map(({ detectionIndex }) => detectionIndex + 1)),
+  );
+  return outlined.map(({ detectionIndex, stroke }) => ({
+    detectionIndex,
+    alpha: stroke!.alpha,
+    color: stroke!.color,
+    width: stroke!.width,
+    widthUnit: stroke!.widthUnit,
+    alignment: stroke!.alignment,
+    paths: paths.get(detectionIndex + 1) ?? [],
+  }));
 }
 
 function materializeMaskInstructions(
@@ -190,63 +324,210 @@ function materializeMaskInstructions(
     });
 }
 
+/**
+ * Compressed RLE counts runs down each column in turn, so a foreground run is
+ * a contiguous walk down one column that wraps into the next.
+ */
 function compositeMaskFill(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
-  decodedMask: DecodedMaskPixels,
+  mask: IdMaskInstruction["mask"],
   fill: RgbaColor,
-) {
-  for (let y = 0; y < decodedMask.height; y += 1) {
-    for (let x = 0; x < decodedMask.width; x += 1) {
-      const maskOffset = y * decodedMask.width + x;
+): MaskBounds | undefined {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const maskWidth = mask.width;
+  const maskHeight = mask.height;
+  const maskArea = maskWidth * maskHeight;
+  let maskOffset = 0;
+  let minX = maskWidth;
+  let minY = maskHeight;
+  let maxX = -1;
+  let maxY = -1;
 
-      if (!decodedMask.data[maskOffset]) {
-        continue;
+  for (let index = 0; index < counts.length; index += 1) {
+    const runLength = counts[index] ?? 0;
+
+    if (index % 2 === 0 || runLength <= 0) {
+      maskOffset += runLength;
+      continue;
+    }
+
+    let columnX = Math.floor(maskOffset / maskHeight);
+    let columnY = maskOffset - columnX * maskHeight;
+
+    for (let step = 0; step < runLength; step += 1) {
+      // A run can outlast the columns the mask has; the pixel it then names
+      // is wherever that column-major offset lands when read back row-major.
+      const rowMajorOffset = columnY * maskWidth + columnX;
+
+      if (rowMajorOffset < maskArea) {
+        const x = rowMajorOffset % maskWidth;
+        const y = (rowMajorOffset - x) / maskWidth;
+
+        writePixel(rgba, canvasWidth, x, y, fill);
+
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
       }
 
-      writePixel(rgba, canvasWidth, x, y, fill);
+      columnY += 1;
+
+      if (columnY === maskHeight) {
+        columnY = 0;
+        columnX += 1;
+      }
+    }
+
+    maskOffset += runLength;
+  }
+
+  return maxX < minX || maxY < minY ? undefined : { maxX, maxY, minX, minY };
+}
+
+interface StrokeKernel {
+  readonly inside: readonly (readonly [number, number, number])[];
+  readonly outside: readonly (readonly [number, number, number])[];
+  readonly radius: number;
+}
+
+function createStrokeKernel(
+  width: number,
+  alignment: StrokeAlignment | undefined,
+): StrokeKernel {
+  const innerFraction =
+    alignment === StrokeAlignment.Inside
+      ? 1
+      : alignment === StrokeAlignment.Center
+        ? 0.5
+        : 0;
+  const inside: [number, number, number][] = [];
+  const outside: [number, number, number][] = [];
+  const radius = Math.min(
+    MAX_ID_MASK_STROKE_WIDTH + 1,
+    Math.ceil(width * Math.max(innerFraction, 1 - innerFraction) + 0.5),
+  );
+  const clamp = (value: number) => Math.max(0, Math.min(1, value));
+  const coverage = (signed: number) =>
+    Math.round(
+      255 *
+        (clamp(0.5 + width * (1 - innerFraction) - signed) -
+          clamp(0.5 - width * innerFraction - signed)),
+    );
+
+  for (let y = -radius; y <= radius; y += 1) {
+    for (let x = -radius; x <= radius; x += 1) {
+      if (x === 0 && y === 0) continue;
+      const distance = Math.max(Math.abs(x) - 0.5, Math.abs(y) - 0.5, 0);
+      const innerCoverage = coverage(-distance);
+      const outerCoverage = coverage(distance);
+      if (innerCoverage > 0) inside.push([x, y, innerCoverage]);
+      if (outerCoverage > 0) outside.push([x, y, outerCoverage]);
     }
   }
+  return { inside, outside, radius };
 }
 
 function compositeMaskStroke(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
   decodedMask: DecodedMaskPixels,
+  bounds: MaskBounds,
   stroke: MaskStrokeStyle,
+  coverage: Uint8Array,
+  kernels: Map<string, StrokeKernel>,
 ) {
-  const width = Math.round(stroke.width);
-
-  if (width <= 0) {
-    return;
+  if (stroke.width <= 0 || stroke.alpha <= 0) return;
+  const key = `${stroke.width}:${stroke.alignment}`;
+  let kernel = kernels.get(key);
+  if (!kernel) {
+    kernel = createStrokeKernel(stroke.width, stroke.alignment);
+    kernels.set(key, kernel);
   }
+  const visitedAir = kernel.inside.length > 0 ? new Set<number>() : undefined;
+  const mark = (
+    sourceX: number,
+    sourceY: number,
+    offsets: StrokeKernel["outside"],
+    foreground: boolean,
+  ) => {
+    for (const [dx, dy, value] of offsets) {
+      const x = sourceX + dx;
+      const y = sourceY + dy;
+      if (
+        isOutsideMaskBounds(decodedMask, x, y) ||
+        isMaskPixel(decodedMask, x, y) !== foreground
+      )
+        continue;
+      const index = y * canvasWidth + x;
+      coverage[index] = Math.max(coverage[index], value);
+    }
+  };
 
-  const strokeColor = resolveRgbaColor(stroke.color, stroke.alpha);
-
-  for (let y = 0; y < decodedMask.height; y += 1) {
-    for (let x = 0; x < decodedMask.width; x += 1) {
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
       if (
         !isMaskPixel(decodedMask, x, y) ||
         !isBoundaryPixel(decodedMask, x, y)
-      ) {
+      )
         continue;
-      }
-
-      for (let offsetY = -width; offsetY <= width; offsetY += 1) {
-        for (let offsetX = -width; offsetX <= width; offsetX += 1) {
-          const strokeX = x + offsetX;
-          const strokeY = y + offsetY;
-
+      mark(x, y, kernel.outside, false);
+      if (!visitedAir) continue;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const airX = x + dx;
+          const airY = y + dy;
           if (
-            isOutsideMaskBounds(decodedMask, strokeX, strokeY) ||
-            isMaskPixel(decodedMask, strokeX, strokeY)
-          ) {
+            isOutsideMaskBounds(decodedMask, airX, airY) ||
+            isMaskPixel(decodedMask, airX, airY)
+          )
             continue;
-          }
-
-          writePixel(rgba, canvasWidth, strokeX, strokeY, strokeColor);
+          const airIndex = airY * decodedMask.width + airX;
+          if (visitedAir.has(airIndex)) continue;
+          visitedAir.add(airIndex);
+          mark(airX, airY, kernel.inside, true);
         }
       }
+    }
+  }
+
+  const color = resolveRgbaColor(stroke.color, stroke.alpha);
+  for (
+    let y = Math.max(0, bounds.minY - kernel.radius);
+    y <= Math.min(decodedMask.height - 1, bounds.maxY + kernel.radius);
+    y += 1
+  ) {
+    for (
+      let x = Math.max(0, bounds.minX - kernel.radius);
+      x <= Math.min(decodedMask.width - 1, bounds.maxX + kernel.radius);
+      x += 1
+    ) {
+      const index = y * canvasWidth + x;
+      const amount = coverage[index] / 255;
+      if (amount <= 0) continue;
+      coverage[index] = 0;
+      const offset = index * 4;
+      const alpha = rgba[offset + 3] * (1 - amount) + color.alpha * amount;
+      rgba[offset] =
+        alpha > 0
+          ? (rgba[offset] * rgba[offset + 3] * (1 - amount) +
+              color.red * color.alpha * amount) /
+            alpha
+          : 0;
+      rgba[offset + 1] =
+        alpha > 0
+          ? (rgba[offset + 1] * rgba[offset + 3] * (1 - amount) +
+              color.green * color.alpha * amount) /
+            alpha
+          : 0;
+      rgba[offset + 2] =
+        alpha > 0
+          ? (rgba[offset + 2] * rgba[offset + 3] * (1 - amount) +
+              color.blue * color.alpha * amount) /
+            alpha
+          : 0;
+      rgba[offset + 3] = alpha;
     }
   }
 }
@@ -303,119 +584,4 @@ function writePixel(
   rgba[rgbaOffset + 1] = color.green;
   rgba[rgbaOffset + 2] = color.blue;
   rgba[rgbaOffset + 3] = color.alpha;
-}
-
-async function encodeGrayscalePng(options: {
-  readonly height: number;
-  readonly pixels: Uint8Array;
-  readonly width: number;
-}): Promise<Uint8Array<ArrayBuffer>> {
-  if (typeof CompressionStream === "undefined") {
-    throw new Error("CompressionStream is required to encode PNG ID masks.");
-  }
-
-  const rawScanlines = createFilterlessPngScanlines(options);
-  const ihdr = new Uint8Array(13);
-  const ihdrView = new DataView(ihdr.buffer);
-
-  ihdrView.setUint32(0, options.width);
-  ihdrView.setUint32(4, options.height);
-  ihdr[8] = 8;
-  ihdr[9] = 0;
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-
-  const compressed = new Uint8Array(
-    await new Response(
-      new Blob([rawScanlines])
-        .stream()
-        .pipeThrough(new CompressionStream("deflate")),
-    ).arrayBuffer(),
-  );
-
-  return concatUint8Arrays([
-    PNG_SIGNATURE,
-    createPngChunk("IHDR", ihdr),
-    createPngChunk("IDAT", compressed),
-    createPngChunk("IEND", new Uint8Array(0)),
-  ]);
-}
-
-function createFilterlessPngScanlines(options: {
-  readonly height: number;
-  readonly pixels: Uint8Array;
-  readonly width: number;
-}) {
-  const rowStride = options.width + 1;
-  const scanlines = new Uint8Array(rowStride * options.height);
-
-  for (let y = 0; y < options.height; y += 1) {
-    const sourceOffset = y * options.width;
-    const targetOffset = y * rowStride;
-
-    scanlines[targetOffset] = 0;
-    scanlines.set(
-      options.pixels.subarray(sourceOffset, sourceOffset + options.width),
-      targetOffset + 1,
-    );
-  }
-
-  return scanlines;
-}
-
-function createPngChunk(type: string, data: Uint8Array) {
-  const typeBytes = new TextEncoder().encode(type);
-  const chunk = new Uint8Array(12 + data.length);
-  const view = new DataView(chunk.buffer);
-
-  view.setUint32(0, data.length);
-  chunk.set(typeBytes, 4);
-  chunk.set(data, 8);
-  view.setUint32(8 + data.length, crc32(concatUint8Arrays([typeBytes, data])));
-
-  return chunk;
-}
-
-const crc32Table = createCrc32Table();
-
-function createCrc32Table() {
-  const table = new Uint32Array(256);
-
-  for (let index = 0; index < table.length; index += 1) {
-    let value = index;
-
-    for (let bit = 0; bit < 8; bit += 1) {
-      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    }
-
-    table[index] = value >>> 0;
-  }
-
-  return table;
-}
-
-function crc32(bytes: Uint8Array) {
-  let crc = 0xffffffff;
-
-  for (const byte of bytes) {
-    crc = crc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
-
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function concatUint8Arrays(
-  chunks: readonly Uint8Array[],
-): Uint8Array<ArrayBuffer> {
-  const totalLength = chunks.reduce((total, chunk) => total + chunk.length, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return result;
 }

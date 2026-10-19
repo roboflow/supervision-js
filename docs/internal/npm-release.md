@@ -1,41 +1,46 @@
 # npm Release Operations
 
-This repository publishes one public package: `supervision`. The root
-workspace, `supervision-js-trackers`, `supervision-js-core`, and
-`supervision-js-react-native` remain private. The tracker workspace is compiled
-into core rather than shipped as another installable package. The registry
-artifact is the portable tarball assembled by
+This repository publishes one public package: `supervision`. The root workspace,
+`supervision-js-trackers`, `supervision-js-core`,
+`supervision-js-web-video-engine`, and `supervision-js-react-native` remain
+private. The tracker workspace is compiled into core, and the web video engine
+is staged into the browser package's `dist`, rather than shipped as further
+installable packages.
+
+`supervision` is published as the portable tarball assembled by
 `tools/pack-web-tarball.mjs`; it embeds the private core package without
-exposing the workspace-relative `file:../core` dependency.
+exposing the workspace-relative `file:../core` dependency, and carries the video
+engine under the `supervision/web-video-engine` subpaths.
 
 ## Release Boundary
 
 Never publish from `packages/web` directly. A release publishes exactly one
-generated file matching:
+generated file:
 
 ```text
 artifacts/supervision-<version>.tgz
 ```
 
-The manual GitHub Actions workflow at
-`.github/workflows/publish-npm.yml` recreates and independently validates that
-artifact before publishing it. Stable `latest` releases run only from `main`;
-an explicit prerelease may run from a `release/*` branch with the `next` tag.
-Every publish is gated by the `npm-publish` GitHub environment.
+The manual GitHub Actions workflow at `.github/workflows/publish-npm.yml`
+recreates and independently validates that artifact before publishing it. Stable
+`latest` releases run only from `main`; an explicit prerelease may run from a
+`release/*` branch with the `next` tag. Every publish is gated by the
+`npm-publish` GitHub environment.
 
 `latest` is the default tag for a reviewed, general-availability release. A
 stable publish updates the default version that `npm install supervision`
 resolves.
 
-The `packages/web/package.json` version is the source of truth. The stable
-release workflow creates the matching GitHub Release and `v<version>` tag from
-the `main` commit that npm published. That release page is the canonical GitHub
-record; npm is the canonical installation source.
+`packages/web/package.json` carries the release identity: the stable release
+workflow creates the matching GitHub Release and `v<version>` tag from the
+`main` commit that npm published. That release page is the canonical GitHub
+record; npm is the canonical installation source. The private workspaces have no
+version of their own that anyone can install.
 
 ## Publication Access
 
-The package name is `supervision`; the repository remains `supervision-js`.
-Keep this ownership and security posture in place:
+The package name is `supervision`; the repository remains `supervision-js`. Keep
+this ownership and security posture in place:
 
 1. At least two active Roboflow maintainers have npm package access and two-factor
    authentication.
@@ -58,25 +63,25 @@ publisher.
 
 ## Choose The Version And Tag
 
-Use SemVer against the published browser surface only:
+Version `supervision` with SemVer against its published surface:
 
-| Change                                                                                                   | Example version from `0.1.1` | Tag      |
-| -------------------------------------------------------------------------------------------------------- | ---------------------------- | -------- |
-| Backward-compatible fix, docs, dependency maintenance, internal refactor, or public browser API addition | `0.1.2`                      | `latest` |
-| Breaking browser API or behavior change before 1.0                                                       | `0.2.0`                      | `latest` |
+| Change                                                                                           | Example version from `0.1.7` | Tag      |
+| ------------------------------------------------------------------------------------------------ | ---------------------------- | -------- |
+| Backward-compatible fix, docs, dependency maintenance, internal refactor, or public API addition | `0.1.8`                      | `latest` |
+| Breaking public API or behavior change before 1.0                                                | `0.2.0`                      | `latest` |
 
-While the browser package remains in the experimental `0.1.x` line,
-backward-compatible public API additions release as patches alongside fixes.
-A new minor version communicates an intentional compatibility break or reset
-before `1.0`. This is the repository's release policy for the prototype phase;
-SemVer itself treats `0.y.z` as initial development. Changes limited to private
-React Native experiments do not by themselves change the published browser
-package version.
+While the package remains in the experimental `0.x` line, backward-compatible
+public API additions release as patches alongside fixes. A new minor version
+communicates an intentional compatibility break or reset before `1.0`. This is
+the repository's release policy for the prototype phase; SemVer itself treats
+`0.y.z` as initial development. Changes limited to private React Native
+experiments do not by themselves change the published version.
 
 ## Release Procedure
 
 1. Update `packages/web/package.json`, `package-lock.json`, and the checked docs
-   toolbar version together. `npm run docs:check` verifies the toolbar mirror.
+   toolbar version together. `npm run docs:check` verifies the toolbar mirror
+   against the browser manifest.
 2. Keep the public repository README and hosted docs aligned with the currently
    published stable release. Consumer installation guidance is always
    `npm install supervision`; do not document local archive paths for consumers.

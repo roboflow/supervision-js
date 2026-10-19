@@ -1,12 +1,22 @@
 import {
   createChunkedDetectionFrameSource,
+  createWebVideoEngineMediaRendererSource,
+  type DetectionCoordinateSpace,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
   type DetectionFrameSource,
   type DetectionFrame,
-  type MediaSessionMedia,
+  type MediaRendererSource,
 } from "supervision";
-import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
+import { SourceKind } from "supervision/web-video-engine";
+import { delayDetectionFetch } from "../diagnostics/slow-work";
+import type { DisplayBoxResolutionOptions } from "supervision/web-video-engine";
+import {
+  demoPresentationLayerSettings,
+  type DemoPresentationAvailability,
+  type DemoPresentationLayerSetting,
+} from "../presentation/demo-presentation";
+import type { DemoEngineOptions } from "../session/session-options";
 
 const fixtureMetaModules = import.meta.glob(
   "../../fixtures/*/fixture.meta.json",
@@ -15,6 +25,13 @@ const fixtureMetaModules = import.meta.glob(
     import: "default",
   },
 ) as Record<string, DemoFixtureMeta>;
+const fixtureManifests = import.meta.glob(
+  ["../../fixtures/*/detections.manifest.json"],
+  {
+    eager: true,
+    import: "default",
+  },
+) as Record<string, DemoFixtureDetectionManifest>;
 const fixtureManifestUrls = import.meta.glob(
   "../../fixtures/*/detections.manifest.json",
   {
@@ -59,17 +76,49 @@ interface DemoFixtureMeta {
   readonly media: {
     readonly file: string;
     readonly loadingStatusLabel: string;
-    readonly normalizeInBrowser: boolean;
+    /**
+     * Forced-CFR 30fps transcode the fixture's detections were computed
+     * against. A v1 fixture indexes that timeline rather than the source's own
+     * frames, so playing `file` draws every detection against the wrong frame.
+     */
+    readonly proxyFile?: string;
     readonly readyStatusLabel: string;
   };
   readonly presentation?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
+  readonly depth?: unknown;
+}
+
+export const DemoFixtureDepthSource = {
+  GroundTruth: "ground_truth",
+  Prediction: "prediction",
+} as const;
+
+export type DemoFixtureDepthSource =
+  (typeof DemoFixtureDepthSource)[keyof typeof DemoFixtureDepthSource];
+
+/** One depth map sequence a fixture ships, described by its own depth.json. */
+export interface DemoFixtureDepthLayer {
+  readonly id: string;
+  readonly label: string;
+  /** The layer's depth.json, relative to the fixture folder. */
+  readonly manifest: string;
+  readonly source: DemoFixtureDepthSource;
+}
+
+/** The `depth` block of a fixture.meta.json. */
+export interface DemoFixtureDepth {
+  readonly defaultLayer: string;
+  readonly layers: readonly DemoFixtureDepthLayer[];
 }
 
 export interface DemoFixturePresentationDefaults {
   readonly boxesEnabled?: boolean;
   readonly confidenceThreshold?: number;
+  readonly depthEnabled?: boolean;
   readonly focusEnabled?: boolean;
+  readonly focusRectFallbackEnabled?: boolean;
+  readonly heatmapsEnabled?: boolean;
   readonly keypointsEnabled?: boolean;
   readonly labelsEnabled?: boolean;
   readonly masksEnabled?: boolean;
@@ -80,18 +129,182 @@ export interface DemoFixturePresentationDefaults {
 export interface DemoFixtureDefinition {
   readonly basePath: string;
   readonly datasetId: string;
-  readonly detectionsManifestSrc: string;
+  /** Null for a fixture that ships depth and no detections. */
+  readonly detectionsManifestSrc: string | null;
+  readonly depth: DemoFixtureDepthDefinition | null;
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
-  readonly normalizeInBrowser: boolean;
   readonly presentationDefaults?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
   /** Whether the fixture appears in the general demo sample selector. */
   readonly showInDemo: boolean;
   readonly mediaReadyStatusLabel: string;
+  /** Declared detection-timeline transcode, or null when the fixture has none. */
+  readonly proxyVideoSrc: string | null;
   readonly videoSrc: string;
+}
+
+export interface DemoFixtureDepthDefinition {
+  readonly defaultLayer: string;
+  readonly layers: readonly (DemoFixtureDepthLayer & {
+    readonly manifestSrc: string;
+  })[];
+}
+
+/** The layer with that id, or the fixture's default layer. */
+export function findDepthLayer(
+  depth: DemoFixtureDepthDefinition,
+  id: string | null | undefined,
+) {
+  return (
+    depth.layers.find((layer) => layer.id === id) ??
+    depth.layers.find((layer) => layer.id === depth.defaultLayer)!
+  );
+}
+
+const depthLayerSources: readonly string[] = Object.values(
+  DemoFixtureDepthSource,
+);
+
+export function parseDemoFixtureDepth(value: unknown): DemoFixtureDepth {
+  const fail = (message: string): never => {
+    throw new Error(`fixture.meta.json depth: ${message}`);
+  };
+
+  if (typeof value !== "object" || value === null) fail("must be an object");
+
+  const block = value as Record<string, unknown>;
+
+  if (!Array.isArray(block.layers) || block.layers.length === 0) {
+    fail("layers must be a non-empty array");
+  }
+
+  const ids = new Set<string>();
+  const layers = (block.layers as unknown[]).map((entry, index) => {
+    const layer = (
+      typeof entry === "object" && entry !== null ? entry : {}
+    ) as Record<string, unknown>;
+    const at = `layers[${index}]`;
+
+    if (typeof layer.id !== "string" || layer.id === "") {
+      fail(`${at}.id must be a non-empty string`);
+    }
+    if (ids.has(layer.id as string)) fail(`${at}.id "${layer.id}" repeats`);
+    ids.add(layer.id as string);
+    if (typeof layer.label !== "string" || layer.label === "") {
+      fail(`${at}.label must be a non-empty string`);
+    }
+    if (
+      typeof layer.manifest !== "string" ||
+      !layer.manifest.endsWith(".json") ||
+      layer.manifest.startsWith("/") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(layer.manifest) ||
+      layer.manifest.split("/").includes("..")
+    ) {
+      fail(`${at}.manifest must be a .json path inside the fixture folder`);
+    }
+    if (!depthLayerSources.includes(layer.source as string)) {
+      fail(`${at}.source must be one of ${depthLayerSources.join(", ")}`);
+    }
+
+    return {
+      id: layer.id as string,
+      label: layer.label as string,
+      manifest: layer.manifest as string,
+      source: layer.source as DemoFixtureDepthSource,
+    };
+  });
+
+  if (typeof block.defaultLayer !== "string" || !ids.has(block.defaultLayer)) {
+    fail("defaultLayer must name one of the layers");
+  }
+
+  return { defaultLayer: block.defaultLayer as string, layers };
+}
+
+/** A depth.json names its frames relative to itself, so its folder is served unhashed. */
+function resolveFixtureDepth(
+  depth: DemoFixtureDepth,
+  basePath: string,
+): DemoFixtureDepthDefinition {
+  const folder = basePath.split("/").pop();
+
+  return {
+    defaultLayer: depth.defaultLayer,
+    layers: depth.layers.map((layer) => ({
+      ...layer,
+      manifestSrc: `${import.meta.env.BASE_URL}fixtures/${folder}/${layer.manifest}`,
+    })),
+  };
+}
+
+/** Layers that draw nothing unless the detections carry the matching geometry. */
+const geometryBackedLayers: readonly (readonly [
+  DemoPresentationLayerSetting,
+  keyof DemoFixtureGeometrySummary,
+])[] = [
+  ["boxesEnabled", "boxDetectionCount"],
+  ["keypointsEnabled", "keypointDetectionCount"],
+  ["masksEnabled", "maskDetectionCount"],
+  ["heatmapsEnabled", "heatmapDetectionCount"],
+  ["polygonsEnabled", "polygonDetectionCount"],
+  ["polylinesEnabled", "polylineDetectionCount"],
+];
+
+/**
+ * The layers a fixture is allowed to offer.
+ *
+ * A manifest that counts its own geometry settles what the detections hold, and
+ * a declared flag may only take a layer away from that, never hand one back: a
+ * fixture is regenerated far more often than its metadata is reread, so the
+ * count is the side that stays true.
+ */
+export function resolveDemoFixtureAvailability(
+  declared: DemoPresentationAvailability | undefined,
+  geometry: DemoFixtureGeometrySummary | undefined,
+): DemoPresentationAvailability | undefined {
+  if (!geometry) {
+    return declared;
+  }
+
+  const availability: DemoPresentationAvailability = { ...declared };
+
+  for (const [layer, countKey] of geometryBackedLayers) {
+    if (
+      geometry[countKey] === 0 ||
+      (layer === "heatmapsEnabled" && geometry[countKey] === undefined)
+    ) {
+      availability[layer] = false;
+    }
+  }
+
+  return availability;
+}
+
+export function resolveDemoFixtureDataLayers(
+  availability: DemoPresentationAvailability | undefined,
+  data: { readonly depth: boolean; readonly detections: boolean },
+): DemoPresentationAvailability {
+  const narrowed: DemoPresentationAvailability = { ...availability };
+
+  if (!data.depth) narrowed.depthEnabled = false;
+  if (!data.detections) {
+    for (const layer of demoPresentationLayerSettings) {
+      if (layer !== "depthEnabled") narrowed[layer] = false;
+    }
+  }
+
+  return narrowed;
+}
+
+/** Depth video pairs with the clip's own frames, so a converted clip draws none. */
+export function resolveDemoDepthReach(
+  availability: DemoPresentationAvailability | undefined,
+  depthPlays: boolean,
+): DemoPresentationAvailability | undefined {
+  return depthPlays ? availability : { ...availability, depthEnabled: false };
 }
 
 /** Every committed fixture that can be loaded by a focused documentation view. */
@@ -121,6 +334,7 @@ export interface DemoFixtureGeometrySummary {
   readonly boxDetectionCount: number;
   readonly keypointDetectionCount: number;
   readonly maskDetectionCount: number;
+  readonly heatmapDetectionCount?: number;
   readonly polygonDetectionCount: number;
   readonly polylineDetectionCount: number;
 }
@@ -132,6 +346,12 @@ export interface DemoFixtureDetectionManifest extends DetectionFrameChunkManifes
     readonly height: number;
     readonly frameRate: number;
     readonly duration: number;
+    /**
+     * Presentation timestamp of source frame index 0. Absent on fixtures
+     * extracted from a normalized proxy, whose grid always started at zero.
+     */
+    readonly firstTimestamp?: number;
+    readonly frameCount?: number;
   };
   readonly classNames?: readonly string[];
   readonly geometry?: DemoFixtureGeometrySummary;
@@ -191,16 +411,13 @@ export type DemoFixtureDetectionSourceTransform = (
   manifest: DemoFixtureDetectionManifest,
 ) => DetectionFrameSource;
 
-export interface DemoFixtureMediaSource {
-  readonly error: Error | null;
-  readonly media: MediaSessionMedia;
-  readonly normalizeInBrowser: boolean;
-  readonly statusLabel: string;
-}
-
 export async function loadDemoFixtureDetectionManifest(
   definition: DemoFixtureDefinition = defaultDemoFixture,
 ): Promise<DemoFixtureDetectionManifest> {
+  if (definition.detectionsManifestSrc === null) {
+    throw new Error(`Fixture ${definition.sampleName} has no detections.`);
+  }
+
   const response = await fetch(definition.detectionsManifestSrc);
 
   if (!response.ok) {
@@ -212,32 +429,30 @@ export async function loadDemoFixtureDetectionManifest(
   return (await response.json()) as DemoFixtureDetectionManifest;
 }
 
-export async function loadDemoFixtureMedia(
+/**
+ * Media a fixture session plays. A fixture whose detections were computed on a
+ * transcoded timeline has to play that transcode, because its frame indexes
+ * describe the transcode's grid and not the source's own frames.
+ */
+export function resolveDemoFixturePlaybackSrc(
+  definition: DemoFixtureDefinition,
+): string {
+  return definition.proxyVideoSrc ?? definition.videoSrc;
+}
+
+export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
-): Promise<DemoFixtureMediaSource> {
-  if (!definition.normalizeInBrowser) {
-    return {
-      error: null,
-      media: definition.videoSrc,
-      normalizeInBrowser: false,
-      statusLabel: definition.mediaReadyStatusLabel,
-    };
-  }
-
-  const response = await fetch(definition.videoSrc);
-
-  if (!response.ok) {
-    throw new Error(
-      `Unable to load sample source media: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  return {
-    error: null,
-    media: await response.blob(),
-    normalizeInBrowser: true,
-    statusLabel: definition.mediaReadyStatusLabel,
-  };
+  display?: DisplayBoxResolutionOptions,
+  engine?: DemoEngineOptions,
+): MediaRendererSource {
+  return createWebVideoEngineMediaRendererSource({
+    ...engine,
+    display,
+    source: {
+      kind: SourceKind.Url,
+      url: resolveDemoFixturePlaybackSrc(definition),
+    },
+  });
 }
 
 export function createDemoFixtureDetectionSource(
@@ -246,10 +461,15 @@ export function createDemoFixtureDetectionSource(
   frameTransform?: DemoFixtureFrameTransform,
   sourceTransform?: DemoFixtureDetectionSourceTransform,
 ): DemoFixtureDetectionSource {
-  const baseDetectionSource = createChunkedDetectionFrameSource({
-    baseUrl: definition.detectionsManifestSrc,
+  const detectionSpace = resolveDemoFixtureDetectionSpace(manifest);
+  const chunkedDetectionSource = createChunkedDetectionFrameSource({
+    baseUrl: definition.detectionsManifestSrc ?? undefined,
     fetchChunk: async (chunk) => {
-      const loaded = await fetchDemoFixtureDetectionChunk(chunk, definition);
+      const loaded = await fetchDemoFixtureDetectionChunk(
+        chunk,
+        definition,
+        detectionSpace,
+      );
 
       return frameTransform
         ? { frames: frameTransform(loaded.frames) }
@@ -257,6 +477,25 @@ export function createDemoFixtureDetectionSource(
     },
     manifest,
   });
+  const baseDetectionSource: DetectionFrameSource = {
+    ...chunkedDetectionSource,
+    async loadFrames(startTime, endTime, options) {
+      const frames = await chunkedDetectionSource.loadFrames(
+        startTime,
+        endTime,
+        options,
+      );
+
+      assertDemoFixtureDetectionSpace(
+        frames,
+        detectionSpace,
+        definition,
+        options?.coordinateSpace,
+      );
+
+      return frames;
+    },
+  };
   const detectionSource =
     sourceTransform?.(baseDetectionSource, manifest) ?? baseDetectionSource;
   let destroyed = false;
@@ -285,6 +524,7 @@ export function createDemoFixtureDetectionSource(
 const fetchDemoFixtureDetectionChunk = async (
   chunk: Parameters<DetectionFrameChunkFetch>[0],
   definition: DemoFixtureDefinition,
+  detectionSpace: DetectionCoordinateSpace | null,
 ) => {
   const chunkUrl =
     sampleDetectionChunkUrls[`${definition.basePath}/${chunk.src}`];
@@ -292,6 +532,8 @@ const fetchDemoFixtureDetectionChunk = async (
   if (!chunkUrl) {
     throw new Error(`Unknown fixture detection chunk: ${chunk.src}`);
   }
+
+  await delayDetectionFetch();
 
   const response = await fetch(chunkUrl);
 
@@ -301,10 +543,74 @@ const fetchDemoFixtureDetectionChunk = async (
     );
   }
 
-  return (await response.json()) as Awaited<
+  const chunkData = (await response.json()) as Awaited<
     ReturnType<DetectionFrameChunkFetch>
   >;
+
+  return detectionSpace
+    ? {
+        frames: chunkData.frames.map((frame) => ({
+          ...frame,
+          coordinateSpace: detectionSpace,
+        })),
+      }
+    : chunkData;
 };
+
+/**
+ * Pixel space the fixture's detections were computed in, as its manifest
+ * records it.
+ *
+ * A fixture's chunks hold rectangles, polygons, polylines, and keypoints in the
+ * pixels of the media the model saw. The demo may play a smaller delivery
+ * proxy of that media instead, so every frame states the space it came from and
+ * lets the renderer scale it onto the frame actually presented.
+ */
+function resolveDemoFixtureDetectionSpace(
+  manifest: DemoFixtureDetectionManifest,
+): DetectionCoordinateSpace | null {
+  const { height, width } = manifest.video;
+
+  return width > 0 && height > 0 ? { height, width } : null;
+}
+
+/**
+ * Refuses to serve detections the demo cannot place on the media it is playing.
+ *
+ * Nothing downstream can notice geometry drawn in the wrong pixel space: boxes
+ * and labels simply land somewhere plausible, or off the canvas entirely.
+ */
+function assertDemoFixtureDetectionSpace(
+  frames: readonly DetectionFrame[],
+  detectionSpace: DetectionCoordinateSpace | null,
+  definition: DemoFixtureDefinition,
+  presentedSpace: DetectionCoordinateSpace | undefined,
+): void {
+  if (!presentedSpace) {
+    return;
+  }
+
+  if (!detectionSpace) {
+    throw new Error(
+      `Fixture ${definition.sampleName} does not say what size its detections were computed at, so the demo cannot tell whether they fit the ${presentedSpace.width}x${presentedSpace.height} media it is playing. Give video.width and video.height real pixel sizes in demo/fixtures/${definition.sampleName}/detections.manifest.json.`,
+    );
+  }
+
+  if (
+    detectionSpace.width === presentedSpace.width &&
+    detectionSpace.height === presentedSpace.height
+  ) {
+    return;
+  }
+
+  if (frames.every((frame) => frame.coordinateSpace)) {
+    return;
+  }
+
+  throw new Error(
+    `Fixture ${definition.sampleName} plays ${presentedSpace.width}x${presentedSpace.height} media while its detections were computed at ${detectionSpace.width}x${detectionSpace.height}, and the loaded frames do not declare which of the two they use. Every frame needs coordinateSpace set to the size the detections were computed at, or every box, label, polygon, polyline, and keypoint is drawn in the wrong place.`,
+  );
+}
 
 function createDemoFixtures(): readonly DemoFixtureDefinition[] {
   const fixtures = Object.entries(fixtureMetaModules).flatMap(
@@ -322,12 +628,38 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
       const basePath = metaPath.replace(/\/fixture\.meta\.json$/, "");
       const manifestPath = `${basePath}/detections.manifest.json`;
       const mediaPath = normalizeFixturePath(basePath, meta.media.file);
-      const detectionsManifestSrc = fixtureManifestUrls[manifestPath];
+      const proxyPath = meta.media.proxyFile
+        ? normalizeFixturePath(basePath, meta.media.proxyFile)
+        : null;
+      const detectionsManifestSrc = fixtureManifestUrls[manifestPath] ?? null;
       const videoSrc = fixtureMediaUrls[mediaPath];
+      const proxyVideoSrc = proxyPath ? fixtureMediaUrls[proxyPath] : null;
+      let depth: DemoFixtureDepthDefinition | null = null;
 
-      if (!detectionsManifestSrc || !videoSrc) {
+      if (meta.depth !== undefined) {
+        try {
+          depth = resolveFixtureDepth(
+            parseDemoFixtureDepth(meta.depth),
+            basePath,
+          );
+        } catch (error) {
+          console.warn(
+            `Skipping demo fixture ${meta.sampleName}: ${error instanceof Error ? error.message : String(error)}.`,
+          );
+          return [];
+        }
+      }
+
+      if ((!detectionsManifestSrc && !depth) || !videoSrc) {
         console.warn(
-          `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${manifestPath} and ${mediaPath}.`,
+          `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${mediaPath} and ${manifestPath} or a depth block.`,
+        );
+        return [];
+      }
+
+      if (proxyPath && !proxyVideoSrc) {
+        console.warn(
+          `Skipping demo fixture ${meta.sampleName} with a declared but missing proxy. Expected ${proxyPath}.`,
         );
         return [];
       }
@@ -336,14 +668,24 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
         {
           basePath,
           datasetId: meta.datasetId,
+          depth,
           detectionsManifestSrc,
           displayName: meta.displayName,
           inferenceLabel: meta.inferenceLabel,
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
-          normalizeInBrowser: meta.media.normalizeInBrowser,
           presentationDefaults: meta.presentation,
-          presentationAvailability: meta.presentationAvailability,
+          presentationAvailability: resolveDemoFixtureDataLayers(
+            resolveDemoFixtureAvailability(
+              meta.presentationAvailability,
+              fixtureManifests[manifestPath]?.geometry,
+            ),
+            {
+              depth: depth !== null,
+              detections: detectionsManifestSrc !== null,
+            },
+          ),
+          proxyVideoSrc: proxyVideoSrc ?? null,
           sampleName: meta.sampleName,
           showInDemo: meta.showInDemo !== false,
           videoSrc,

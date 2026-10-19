@@ -13,6 +13,41 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^#web-video-engine$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/index.ts",
+        ),
+      },
+      {
+        find: /^#web-video-engine\/analysis$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/analysis.ts",
+        ),
+      },
+      {
+        find: /^#web-video-engine\/frame-index$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/frame-index.ts",
+        ),
+      },
+      {
+        find: /^supervision\/web-video-engine$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/web/src/web-video-engine/index.ts",
+        ),
+      },
+      {
+        find: /^supervision\/web-video-engine\/analysis$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/analysis.ts",
+        ),
+      },
+      {
         find: "supervision/editing",
         replacement: path.resolve(rootDir, "packages/web/src/editing.ts"),
       },
@@ -41,7 +76,7 @@ export default defineConfig({
         replacement: `${coreSource("styles")}/$1.ts`,
       },
       {
-        find: /^#types\/(annotation-renderer|box-style|detection-timeline|detections|editing|ellipse-style|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-style|media|media-rendering|paint-style|polygon-style|polyline-style|post-processing|session-lifecycle|shape-style|style|viewport)$/,
+        find: /^#types\/(annotation-renderer|box-corner-style|box-style|depth-map|detection-timeline|detections|editing|ellipse-style|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-halo-style|mask-style|marker-style|media|media-rendering|paint-style|percentage-bar-style|polygon-style|polyline-style|post-processing|session-lifecycle|shape-style|style|viewport)$/,
         replacement: `${coreSource("types")}/$1.ts`,
       },
       {
@@ -99,7 +134,9 @@ export default defineConfig({
     include: [
       "packages/**/*.test.ts",
       "demo/src/**/*.test.ts",
+      "demo/src/**/*.test.tsx",
       "examples/react-native/src/**/*.test.ts",
+      "tools/**/*.test.ts",
     ],
   },
 });

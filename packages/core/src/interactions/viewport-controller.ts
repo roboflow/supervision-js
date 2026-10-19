@@ -33,10 +33,17 @@ export function createViewportController(
     screenToMedia: (point) => screenToMedia(point, transform),
     mediaToScreen: (point) => mediaToScreen(point, transform),
     setTransform(next) {
-      if (transform.locked) return;
+      if (
+        next.scale !== undefined &&
+        (!Number.isFinite(next.scale) || next.scale <= 0)
+      ) {
+        throw new RangeError(
+          "Viewport scale must be a finite number greater than zero.",
+        );
+      }
       update({
         ...transform,
-        ...(next.scale === undefined ? {} : { scale: clampScale(next.scale) }),
+        ...(next.scale === undefined ? {} : { scale: next.scale }),
         ...(next.x === undefined ? {} : { x: next.x }),
         ...(next.y === undefined ? {} : { y: next.y }),
       });
@@ -51,7 +58,7 @@ export function createViewportController(
     zoomAt(point, factor) {
       if (transform.locked || !Number.isFinite(factor) || factor <= 0) return;
       const mediaPoint = screenToMedia(point, transform);
-      const scale = clampScale(transform.scale * factor);
+      const scale = clampScale(transform.scale * factor, transform.scale);
       update({
         ...transform,
         scale,
@@ -95,10 +102,10 @@ export function mediaToScreen(
   };
 }
 
-function clampScale(scale: number) {
+function clampScale(scale: number, current = 1) {
   return Math.max(
-    MIN_SCALE,
-    Math.min(MAX_SCALE, Number.isFinite(scale) ? scale : 1),
+    Math.min(MIN_SCALE, current),
+    Math.min(Math.max(MAX_SCALE, current), Number.isFinite(scale) ? scale : 1),
   );
 }
 

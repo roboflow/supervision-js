@@ -29,6 +29,7 @@ import type {
   Graphics as PixiGraphics,
 } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
+import { detectionRenderOrder } from "./detection-render-order";
 
 interface RetainedVectorEntry {
   readonly display: PixiGraphics;
@@ -60,6 +61,9 @@ export interface PixiVectorLayer {
 
 export function createPixiVectorLayer(options: {
   readonly Container: new () => PixiContainer;
+  readonly container?: PixiContainer;
+  /** Ordered rendering retains each frame detection independently of its public ID. */
+  readonly retainByIndex?: boolean;
   readonly Graphics: new () => PixiGraphics;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly polygonStyle?: PolygonStyle | null;
@@ -70,7 +74,7 @@ export function createPixiVectorLayer(options: {
     detection: Detection,
   ) => Partial<AnnotationStyleContext>;
 }): PixiVectorLayer {
-  let container: PixiContainer | undefined;
+  let container = options.container;
   let polygonStyle =
     options.polygonStyle === undefined
       ? new BasePolygonStyle()
@@ -100,8 +104,8 @@ export function createPixiVectorLayer(options: {
     createContainer() {
       if (!container) {
         container = new options.Container();
-        container.sortableChildren = true;
       }
+      container.sortableChildren = true;
 
       return container;
     },
@@ -167,11 +171,11 @@ export function createPixiVectorLayer(options: {
     },
 
     invalidateDetection(id) {
-      invalidated.add(`id:${String(id)}`);
+      invalidated.add(keyForId(id));
     },
 
     translateDetection(id, x, y) {
-      const entry = entries.get(`id:${String(id)}`);
+      const entry = entries.get(keyForId(id));
 
       if (!entry) {
         return false;
@@ -198,6 +202,12 @@ export function createPixiVectorLayer(options: {
       container = undefined;
     },
   };
+
+  function keyForId(id: string | number) {
+    return options.retainByIndex
+      ? `index:${lastFrame?.detections.findIndex((detection) => detection.id === id) ?? -1}`
+      : `id:${String(id)}`;
+  }
 
   function ensureEntry(key: string) {
     let entry = entries.get(key);
@@ -253,12 +263,17 @@ export function createPixiVectorLayer(options: {
     }
 
     return {
-      key: detectionKey(detection, detectionIndex),
+      key: options.retainByIndex
+        ? `index:${detectionIndex}`
+        : detectionKey(detection, detectionIndex),
       keypoints,
       polygon,
       polyline,
       shapes,
-      zIndex: detection.zIndex ?? detectionIndex,
+      // Vector details stay above their own box even if the box is retained later.
+      zIndex: options.container
+        ? detectionRenderOrder(frame)[detectionIndex]! * 2 + 1
+        : (detection.zIndex ?? detectionIndex),
     };
   }
 
@@ -292,7 +307,15 @@ export function createPixiVectorLayer(options: {
         );
     }
 
-    if (polyline)
+    if (polyline) {
+      if (polyline.shadowStroke)
+        drawPixiPath(
+          graphics,
+          polyline.points,
+          false,
+          polyline.shadowStroke,
+          viewportScale,
+        );
       drawPixiPath(
         graphics,
         polyline.points,
@@ -300,6 +323,7 @@ export function createPixiVectorLayer(options: {
         polyline.stroke,
         viewportScale,
       );
+    }
 
     if (keypoints)
       drawPixiKeypointInstruction(graphics, keypoints, viewportScale);
@@ -403,13 +427,15 @@ function drawShapeInstruction(
       graphics.fill(instruction.fill);
     }
 
-    drawPixiPath(
-      graphics,
-      segment,
-      instruction.closed,
-      instruction.stroke,
-      viewportScale,
-    );
+    if (instruction.stroke) {
+      drawPixiPath(
+        graphics,
+        segment,
+        instruction.closed,
+        instruction.stroke,
+        viewportScale,
+      );
+    }
   }
 }
 

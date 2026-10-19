@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { URL } from "node:url";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, URL } from "node:url";
 import test from "node:test";
+
+import {
+  readStaticImportGraph,
+  staticImportSpecifiers,
+} from "./lib/static-import-graph.mjs";
+
+const webDistDir = fileURLToPath(
+  new URL("../packages/web/dist/", import.meta.url),
+);
 
 const expectedWebRuntimeExports = [
   "BaseBoxCornerStyle",
@@ -12,12 +22,20 @@ const expectedWebRuntimeExports = [
   "BaseLabelStyle",
   "BaseMarkerStyle",
   "BaseMaskStyle",
+  "BaseOrientedBoxStyle",
+  "BasePercentageBarStyle",
   "BasePolygonStyle",
   "BasePolylineStyle",
   "BoxShape",
   "BoxStrokeAlignment",
   "DEFAULT_DETECTION_CLASS_STYLES",
   "DEFAULT_DETECTION_COLOR_SEQUENCE",
+  "DEFAULT_NORMALIZATION_FRAME_RATE",
+  "DepthColormap",
+  "DepthMapKind",
+  "DepthPreviewLevels",
+  "DepthQuantity",
+  "DepthSampling",
   "DetectionBufferStatus",
   "DetectionFrameRetentionMode",
   "DetectionFrameSelectionMode",
@@ -47,10 +65,13 @@ const expectedWebRuntimeExports = [
   "MediaRendererPlaybackState",
   "MediaSessionActivityKind",
   "MediaSessionActivityStatus",
+  "MediaSessionMediaBranch",
   "MediaSessionMode",
   "MediaSessionStatus",
   "MediaSourceError",
   "MediaSourceStatus",
+  "PercentageBarPlacement",
+  "PlaybackGateReach",
   "RegionRendererComposeMode",
   "RegionRendererCoverageKind",
   "RegionRendererMediaEffectKind",
@@ -63,9 +84,11 @@ const expectedWebRuntimeExports = [
   "RenderPreparationMode",
   "RenderPreparationWorkerStatus",
   "SUPERVISION_ROBOFLOW_COLOR",
+  "StrokeAlignment",
   "TrackingGeometry",
   "annotationRendererKinds",
   "annotationRenderers",
+  "computeDepthPercentileRange",
   "createArrayDetectionFrameSource",
   "createBrowserColdDetectionFrameStore",
   "createBufferedDetectionTimeline",
@@ -86,13 +109,17 @@ const expectedWebRuntimeExports = [
   "createProjectedDetectionFrameSource",
   "createSortTracker",
   "createStaticImageMediaSource",
+  "createWebVideoEngineMediaRendererSource",
   "createWritableDetectionFrameSource",
+  "depthColormapColors",
   "detectionPostProcessors",
   "getMediaErrorKind",
   "isMediaSourceError",
   "normalizeDetectionClassName",
   "normalizeMedia",
   "normalizeMediaProgressively",
+  "openWebVideoEngineMediaSource",
+  "parseDepthManifest",
   "pickDetectionAtPoint",
   "prepareMedia",
   "prepareMediaProgressively",
@@ -100,8 +127,28 @@ const expectedWebRuntimeExports = [
   "projectDetectionFrame",
   "projectDetectionFrameForTracking",
   "projectDetectionFrames",
+  "readDepthAt",
   "resolveDetectionClassColorStyle",
+  "resolveMediaSessionDefaults",
   "toMediaSourceError",
+];
+
+const expectedVideoEngineRuntimeExports = [
+  "DIAGNOSTICS",
+  "FrameTimeline",
+  "PLAYBACK_RATE",
+  "PlaybackStatus",
+  "SourceKind",
+  "TRACE_RING_BOUNDS",
+  "WebVideoEngine",
+  "WebVideoEngineError",
+  "WebVideoEngineErrorCode",
+  "cappedResolution",
+  "createWebVideoEngineMediaRendererSource",
+  "displayBoxResolution",
+  "nativeResolution",
+  "openWebVideoEngineMediaSource",
+  "viewportResolution",
 ];
 
 const expectedCoreRuntimeExports = [
@@ -112,6 +159,7 @@ const expectedCoreRuntimeExports = [
   "BaseLabelStyle",
   "BaseMarkerStyle",
   "BaseMaskStyle",
+  "BasePercentageBarStyle",
   "BoxShape",
   "BoxStrokeAlignment",
   "DEFAULT_DETECTION_CLASS_STYLES",
@@ -135,6 +183,8 @@ const expectedCoreRuntimeExports = [
   "MediaSessionMode",
   "MediaSessionStatus",
   "MediaSourceStatus",
+  "PercentageBarPlacement",
+  "PlaybackGateReach",
   "RegionRendererComposeMode",
   "RegionRendererCoverageKind",
   "RegionRendererRegionKind",
@@ -258,7 +308,7 @@ test("built core package imports without browser APIs", async () => {
   assert.equal(typeof entrypoint.BaseBoxStyle, "function");
   assert.equal(typeof entrypoint.annotationRenderers.box, "function");
   assert.equal(typeof entrypoint.createIdMaskFrame, "function");
-  assert.equal(entrypoint.MAX_ID_MASK_PALETTE_ENTRIES, 64);
+  assert.equal(entrypoint.MAX_ID_MASK_PALETTE_ENTRIES, 80);
   assert.equal(entrypoint.DetectionMaskEncoding.CompressedRle, "compressedRle");
   assert.equal(entrypoint.MediaInteractionMode.PausedOnly, "pausedOnly");
 });
@@ -292,6 +342,92 @@ test("built editing entrypoint exposes advanced host-owned editing APIs", async 
   assert.equal(typeof editing.createMaskBrushEditor, "function");
 });
 
+test("built heatmap path retains Pixi prepare registration", () => {
+  const entrypoint = readFileSync(
+    new URL("../packages/web/dist/index.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(entrypoint, /extensions\.add\(PrepareSystem\)/);
+  assert.match(entrypoint, /renderer\.prepare\.upload\(texture\)/);
+});
+
+test("the render-preparation worker decodes depth PNGs, embedded or deployed", () => {
+  const worker = readFileSync(
+    new URL("../packages/web/dist/mask-preparation.worker.js", import.meta.url),
+    "utf8",
+  );
+  const entrypoint = readFileSync(
+    new URL("../packages/web/dist/index.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(worker, /depth-decode/);
+  assert.match(worker, /DecompressionStream/);
+  // The Blob-worker default runs the copy embedded in the entry.
+  assert.match(entrypoint, /depth-decode-complete/);
+  // Decoded depth preview frames are copied in the same worker.
+  assert.match(worker, /depth-preview-luma/);
+  assert.match(entrypoint, /depth-preview-luma-complete/);
+});
+
+test("the depth preview decoder loads with Mediabunny only when a preview opens", () => {
+  const entrypoint = readFileSync(
+    new URL("../packages/web/dist/index.js", import.meta.url),
+    "utf8",
+  );
+  const chunks = readdirSync(
+    new URL("../packages/web/dist/", import.meta.url),
+  ).filter((name) => /^depth-preview-(track|probe)-.+\.js$/.test(name));
+
+  assert.ok(
+    chunks.some((name) => name.startsWith("depth-preview-track-")),
+    "the preview decoder is a chunk of its own",
+  );
+  assert.doesNotMatch(entrypoint, /^import[^;]*["']mediabunny["']/m);
+  for (const chunk of chunks) {
+    const code = readFileSync(
+      new URL(`../packages/web/dist/${chunk}`, import.meta.url),
+      "utf8",
+    );
+
+    assert.doesNotMatch(code, /^import[^;]*["']mediabunny["']/m, chunk);
+    if (chunk.startsWith("depth-preview-track-")) {
+      assert.match(code, /import\(["']mediabunny["']\)/, chunk);
+    }
+  }
+});
+
+test("the package that ships the depth colour tables carries their notices", () => {
+  const core = readFileSync(
+    new URL("../packages/core/dist/index.js", import.meta.url),
+    "utf8",
+  );
+
+  // Turbo's first entry and Cividis's notice are in the shipped JavaScript.
+  assert.match(core, /30123b/);
+  assert.match(core, /Battelle Memorial Institute/);
+
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("../packages/core/package.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const notices = readFileSync(
+    new URL("../packages/core/THIRD_PARTY_NOTICES.md", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok(
+    manifest.files.includes("THIRD_PARTY_NOTICES.md"),
+    `${manifest.name} must publish THIRD_PARTY_NOTICES.md`,
+  );
+  assert.match(notices, /Copyright 2019 Google LLC/);
+  assert.match(notices, /Apache License\s+Version 2\.0, January 2004/);
+  assert.match(notices, /Copyright \(c\) 2017, Battelle Memorial Institute/);
+});
+
 test("public browser declarations do not leak Pixi implementation types", () => {
   for (const declaration of [
     "../packages/web/dist/index.d.ts",
@@ -305,6 +441,107 @@ test("public browser declarations do not leak Pixi implementation types", () => 
     assert.ok(!contents.includes("pixi.js"), `${declaration} imports Pixi`);
     assert.ok(!contents.includes("Pixi"), `${declaration} exposes Pixi types`);
   }
+});
+
+test("the video engine subpath exports the adapter that opens it", async () => {
+  const barrel = await import("../packages/web/dist/web-video-engine/index.js");
+  const entrypoint = await import("../packages/web/dist/index.js");
+
+  assert.equal(
+    typeof barrel.createWebVideoEngineMediaRendererSource,
+    "function",
+  );
+  assert.equal(typeof barrel.openWebVideoEngineMediaSource, "function");
+  // One adapter, not a copy per entry: a caller may hand `createMediaSession`
+  // a source built from either specifier.
+  assert.equal(
+    barrel.createWebVideoEngineMediaRendererSource,
+    entrypoint.createWebVideoEngineMediaRendererSource,
+  );
+  assert.equal(typeof barrel.WebVideoEngine, "function");
+  assert.equal(typeof barrel.FrameTimeline, "function");
+  assert.equal(barrel.WebVideoEngineErrorCode.NoVideoTrack, "NO_VIDEO_TRACK");
+
+  const analysis =
+    await import("../packages/web/dist/web-video-engine/analysis.js");
+
+  assert.equal(typeof analysis.AnalysisSession, "function");
+  assert.equal(typeof analysis.FrameWalker, "function");
+  assert.ok(
+    existsSync(
+      new URL(
+        "../packages/web/dist/web-video-engine/engine.worker.js",
+        import.meta.url,
+      ),
+    ),
+  );
+});
+
+test("built video engine subpath exposes the public runtime API", async () => {
+  // The engine's own entry is wider: its modules export for one another. This
+  // list is the part of it applications may reach.
+  const barrel = await import("../packages/web/dist/web-video-engine/index.js");
+
+  assert.deepEqual(
+    Object.keys(barrel).sort(),
+    expectedVideoEngineRuntimeExports,
+  );
+});
+
+test("the published entries never load the video engine to reach the rest", async () => {
+  // The engine embeds a 1.5 MB decode worker. A static import of it anywhere in
+  // an entry's graph makes every consumer download that worker, whether or not
+  // anything opens a video source, and the adapter that loads it sits a chunk
+  // away from the entry file.
+  for (const entry of ["index.js", "editing.js"]) {
+    const graph = await readStaticImportGraph(path.join(webDistDir, entry));
+    const failures = [];
+
+    for (const [file, source] of graph) {
+      for (const specifier of staticImportSpecifiers(source)) {
+        if (specifier.includes("web-video-engine")) {
+          failures.push(
+            `dist/${webDistPath(file)} statically imports ${specifier}`,
+          );
+        }
+      }
+    }
+
+    assert.deepEqual(failures, [], `dist/${entry} reaches the video engine`);
+  }
+
+  const rootGraph = await readStaticImportGraph(
+    path.join(webDistDir, "index.js"),
+  );
+
+  assert.ok(
+    [...rootGraph.values()].some((source) =>
+      /import\(["'][^"'\n]*web-video-engine[^"'\n]*["']\)/.test(source),
+    ),
+    "dist/index.js must still reach the engine, through a dynamic import",
+  );
+});
+
+test("the video engine subpath never evaluates the browser package's root entry", async () => {
+  const graph = await readStaticImportGraph(
+    path.join(webDistDir, "web-video-engine/index.js"),
+  );
+  const reached = new Set([...graph.keys()].map(webDistPath));
+
+  // Naming the subpath evaluates everything it statically imports, so a path
+  // back to a published entry runs the renderer graph an application that only
+  // wants the engine never asked for.
+  for (const entry of ["index.js", "editing.js"]) {
+    assert.ok(
+      !reached.has(entry),
+      `dist/web-video-engine/index.js statically reaches dist/${entry} through ${[...reached].join(", ")}`,
+    );
+  }
+
+  // An absence proves nothing unless the walk followed edges, and the barrel's
+  // two exports leave its directory in opposite directions.
+  assert.ok(reached.has("web-video-engine/engine.js"));
+  assert.ok(reached.has("media/video-engine-media-source.js"));
 });
 
 test("built React Native package imports core without importing web", async () => {
@@ -444,3 +681,7 @@ test("built React Native subpath entries ship and resolve", async () => {
     ),
   );
 });
+
+function webDistPath(file) {
+  return path.relative(webDistDir, file).split(path.sep).join("/");
+}

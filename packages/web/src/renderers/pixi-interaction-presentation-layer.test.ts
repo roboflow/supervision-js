@@ -1,16 +1,51 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  Container,
+  Graphics,
+  GpuUboSystem,
+  Rectangle,
+  UniformGroup,
+  createUboElementsWGSL,
+  extractStructAndGroups,
+  type Filter,
+} from "pixi.js";
 
 import { createPixiInteractionPresentationLayer } from "#renderers/pixi-interaction-presentation-layer";
-import { BaseBoxStyle, BaseInteractionStyle } from "supervision-js-core";
+import {
+  BaseBoxStyle,
+  BaseInteractionStyle,
+  MAX_ID_MASK_STROKE_WIDTH,
+  LabelPlacement,
+  StrokeAlignment,
+  createIdMaskFrame,
+  encodeCompressedRleCounts,
+} from "supervision-js-core";
 import type {
   Detection,
   DetectionFrame,
+  IdMaskFrame,
   InteractionStyleContext,
 } from "supervision-js-core";
 import {
   DetectionInteractionState,
+  DetectionMaskEncoding,
   DetectionPickTarget,
 } from "supervision-js-core";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+
+type ShaderDescriptor = {
+  readonly gl: { readonly fragment: string; readonly vertex: string };
+  readonly gpu: {
+    readonly fragment: { readonly entryPoint: string; readonly source: string };
+    readonly vertex: { readonly entryPoint: string; readonly source: string };
+  };
+  readonly resources: Record<string, unknown>;
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  FakeShaderFactory.descriptors.length = 0;
+});
 
 const frame: DetectionFrame = {
   detections: [
@@ -25,6 +60,201 @@ const frame: DetectionFrame = {
 };
 
 describe("pixi interaction presentation layer", () => {
+  it("keeps interaction glyphs sharp while their ordered backgrounds move and clear", () => {
+    const layer = createPixiInteractionPresentationLayer({
+      Container,
+      Graphics,
+      Text: MeasuredText as never,
+      interactionStyle: {
+        resolve: (_detection, context) => ({
+          boxStyle: new BaseBoxStyle(),
+          labelStyle: {
+            resolve: (detection) => ({
+              rect: detection.rect!,
+              text: `${context.state}: ${detection.className}`,
+              placement: LabelPlacement.InsideTop,
+              textStyle: { alpha: 0.7, color: 0xffffff },
+              background: {
+                alpha: 0.4,
+                color: 0x00ff00,
+                cornerRadius: 3,
+                paddingX: 3,
+                paddingY: 2,
+              },
+            }),
+          },
+        }),
+      },
+    });
+    const geometry = layer.createDisplay({ height: 80, width: 120 });
+    const labels = layer.getLabelDisplay()!;
+    expect(labels.parent).toBeNull();
+    expect(geometry.children).not.toContain(labels);
+    const scene = new Container();
+    scene.addChild(geometry, labels);
+    const filter = { padding: 2 } as Filter;
+    geometry.filters = [filter];
+    layer.setBackgroundAntialiasFilter(filter);
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const twoLabels: DetectionFrame = {
+      ...frame,
+      detections: [
+        ...frame.detections,
+        { ...frame.detections[0]!, id: "player-2", className: "other" },
+      ],
+    };
+    const hoveredPick = {
+      ...selectedPick,
+      detection: twoLabels.detections[1]!,
+      detectionIndex: 1,
+      frame: twoLabels,
+    };
+    const draw = (activeFrame: DetectionFrame | undefined) =>
+      layer.drawFrame({
+        frame: activeFrame,
+        hoveredPick,
+        selectedPick,
+        mediaTime: activeFrame?.mediaTime ?? frame.mediaTime,
+      });
+    draw(twoLabels);
+    const [selectedCapture, selectedText, hoveredCapture, hoveredText] =
+      labels.children;
+    const texts = [selectedText, hoveredText] as MeasuredText[];
+    const captures = [selectedCapture, hoveredCapture] as Container[];
+    expect(texts.map((text) => text.text)).toEqual([
+      `${DetectionInteractionState.Selected}: player`,
+      `${DetectionInteractionState.Hovered}: other`,
+    ]);
+    for (const text of texts) {
+      expect(text.parent).toBe(labels);
+      expect(text.parent!.filters ?? []).toEqual([]);
+      expect(text.alpha).toBe(0.7);
+    }
+    for (const capture of captures) {
+      expect(capture.filters).toEqual([filter]);
+      expect(capture.children[0]).toBeInstanceOf(Graphics);
+      expect((capture.children[0] as Graphics).context.fillStyle).toMatchObject(
+        {
+          alpha: 0.4,
+          color: 0x00ff00,
+        },
+      );
+    }
+    expect(texts[0]!.position).toMatchObject({ x: 13, y: 17 });
+    draw({
+      ...twoLabels,
+      detections: twoLabels.detections.map((detection) => ({
+        ...detection,
+        rect: { ...detection.rect!, x: 40, y: 40 },
+      })),
+    });
+    expect(texts[0]!.position).toMatchObject({ x: 33, y: 27 });
+    expect(labels.children).toEqual([
+      selectedCapture,
+      selectedText,
+      hoveredCapture,
+      hoveredText,
+    ]);
+    draw(undefined);
+    for (const text of texts) expect(text.visible).toBe(false);
+    draw(twoLabels);
+    for (const text of texts) expect(text.visible).toBe(true);
+    layer.setInteractionStyle(null);
+    draw(twoLabels);
+    for (const text of texts) expect(text.visible).toBe(false);
+    layer.destroy();
+    expect(layer.getLabelDisplay()).toBeNull();
+    for (const capture of captures) expect(capture.filters ?? []).toEqual([]);
+    expect(labels.destroyed).toBe(false);
+    scene.destroy({ children: true });
+    expect(labels.destroyed).toBe(true);
+    for (const text of texts) expect(text.destroyed).toBe(true);
+  });
+
+  it("releases the texture and sampler of a hidden mask highlight", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+      interactionStyle: {
+        resolve: () => ({
+          maskStyle: {
+            resolve: () => ({
+              alpha: 1,
+              color: 0xffffff,
+              mask: {
+                counts: "",
+                encoding: "compressedRle",
+                height: 80,
+                width: 120,
+              },
+            }),
+          },
+        }),
+      } as never,
+    });
+    layer.createDisplay({ height: 80, width: 120 });
+    const source = { style: {} };
+    const texture = { source };
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      idMaskArtifact: {
+        frame: {
+          height: 80,
+          key: "mask-frame",
+          kind: PreparedMaskFrameKind.IdMask,
+          sourceWidth: 120,
+          width: 120,
+        },
+        texture,
+      } as never,
+      mediaTime: frame.mediaTime,
+      selectedPick: {
+        detection: frame.detections[0]!,
+        detectionIndex: 0,
+        frame,
+        mediaTime: frame.mediaTime,
+        point: { x: 15, y: 20 },
+        target: DetectionPickTarget.Mask,
+      },
+    });
+    const resources = FakeShaderFactory.descriptors.at(-1)!.resources;
+    expect(resources.uTexture).toBe(source);
+    expect(resources.uSampler).toBe(source.style);
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick: null,
+    });
+
+    layer.releaseMaskTexture(texture as never);
+
+    expect(resources.uTexture).not.toBe(source);
+    expect(resources.uSampler).not.toBe(source.style);
+    layer.destroy();
+  });
+
   it("passes the picked sub-geometry index to interaction styles", () => {
     const keypointFrame: DetectionFrame = {
       detections: [
@@ -301,7 +531,391 @@ describe("pixi interaction presentation layer", () => {
     expect(graphics.rect).not.toHaveBeenCalled();
     expect(graphics.stroke).not.toHaveBeenCalled();
   });
+
+  it("declares a WebGL and a WebGPU program for the interaction mask shader", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+
+    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
+    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
+    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
+    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
+    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
+    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
+  });
+
+  it("gives the placeholder texture canvas a rendering context", () => {
+    const getContext = vi.fn();
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ getContext, height: 0, width: 0 })),
+    });
+
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    expect(getContext).toHaveBeenCalledWith("2d");
+  });
+
+  it("bounds the stroke scan by the stroke width in use, not by the compile-time maximum", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+
+    expect(descriptor.gl.fragment).toContain(
+      "int radius = int(strokeScanRadius(maxWidth, pixelWidth));",
+    );
+    expect(descriptor.gpu.fragment.source).toContain(
+      "let radius = i32(strokeScanRadius(maxWidth, pixelWidth));",
+    );
+
+    for (const source of [
+      descriptor.gl.fragment,
+      descriptor.gpu.fragment.source,
+    ]) {
+      expect(source).toContain("offsetY = radius; offsetY >= -radius");
+      expect(source).toContain("offsetX = radius; offsetX >= -radius");
+      expect(source).not.toContain(`offsetY = -${MAX_ID_MASK_STROKE_WIDTH}`);
+      expect(source).not.toContain(`offsetX = -${MAX_ID_MASK_STROKE_WIDTH}`);
+    }
+  });
+
+  it("keeps interaction stroke widths in CSS pixels across raster densities", () => {
+    expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 2 })).toBe(2);
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(4);
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 1.5 })).toBe(
+      1.5,
+    );
+    expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 0.5 })).toBe(
+      0.5,
+    );
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 0.5 })).toBe(
+      0.5,
+    );
+  });
+
+  it("packs inside interaction strokes for the WebGPU shader with no outside extent", () => {
+    uploadedStrokeWidth({
+      rasterWidth: 60,
+      strokeWidth: 3,
+      alignment: StrokeAlignment.Inside,
+      strokePixelRatio: 4,
+    });
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+    const group = descriptor.resources.maskUniforms as UniformGroup;
+    const ubo = new GpuUboSystem();
+    ubo.updateUniformGroup(group);
+    const gpuBuffer = group.buffer!;
+    const buffer = gpuBuffer.data as Float32Array;
+    const shaderStruct = extractStructAndGroups(
+      descriptor.gpu.fragment.source,
+    ).structs.find((struct) => struct.name === "InteractionMaskUniforms")!;
+    const shaderLayout = createUboElementsWGSL(
+      Object.keys(shaderStruct.members).map(
+        (name) => group.uniformStructures[name]!,
+      ),
+    );
+    const readShaderUniform = (name: string, index = 0) =>
+      buffer[
+        shaderLayout.uboElements.find((element) => element.data.name === name)!
+          .offset /
+          4 +
+          index
+      ];
+    expect(readShaderUniform("uStrokePixelRatio")).toBe(4);
+    expect(readShaderUniform("uMaxStrokeWidth")).toBe(0);
+    expect(readShaderUniform("uBorderEnabled")).toBe(1);
+    expect(readShaderUniform("uStrokeWidths", 1)).toBe(3);
+    expect(readShaderUniform("uStrokeAlignments", 1)).toBe(1);
+    gpuBuffer.destroy();
+    ubo.destroy();
+  });
+
+  it("gives a wide stroke the width the mask layer drew it at", () => {
+    for (const strokeWidth of [
+      MAX_ID_MASK_STROKE_WIDTH - 2,
+      MAX_ID_MASK_STROKE_WIDTH + 10,
+    ]) {
+      expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth })).toBe(
+        maskLayerStrokeWidth(strokeWidth),
+      );
+    }
+  });
+
+  it("measures a narrow mask's stroke on the grid the whole frame shares", () => {
+    const maskFrame = createIdMaskFrame([
+      twoMaskFrameInstruction({ detectionIndex: 0, height: 80, width: 120 }),
+      twoMaskFrameInstruction({ detectionIndex: 1, height: 40, width: 60 }),
+    ])!;
+
+    expect(uploadedNarrowMaskStrokeWidth(maskFrame)).toBe(
+      maskFrame.strokeWidths[2],
+    );
+  });
 });
+
+const TWO_MASK_FRAME_STROKE_WIDTH = 4;
+
+function twoMaskFrameInstruction(mask: {
+  readonly detectionIndex: number;
+  readonly height: number;
+  readonly width: number;
+}) {
+  return {
+    alpha: 1,
+    color: 0x00ff00,
+    detectionIndex: mask.detectionIndex,
+    mask: {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: mask.height,
+      width: mask.width,
+    },
+    stroke: { alpha: 1, color: 0xffffff, width: TWO_MASK_FRAME_STROKE_WIDTH },
+  };
+}
+
+function uploadedNarrowMaskStrokeWidth(maskFrame: IdMaskFrame) {
+  vi.stubGlobal("document", {
+    createElement: vi.fn(() => ({
+      getContext: vi.fn(),
+      height: 0,
+      width: 0,
+    })),
+  });
+
+  const twoDetectionFrame: DetectionFrame = {
+    detections: [
+      {
+        className: "player",
+        id: "player-1",
+        rect: { height: 60, width: 100, x: 60, y: 40 },
+      },
+      {
+        className: "player",
+        id: "player-2",
+        rect: { height: 30, width: 20, x: 20, y: 30 },
+      },
+    ],
+    frameIndex: 3,
+    mediaTime: 0.1,
+  };
+  const layer = createPixiInteractionPresentationLayer({
+    Container: FakeContainer as never,
+    Graphics: FakeGraphics as never,
+    ImageSource: FakeImageSource as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
+    Shader: FakeShaderFactory as never,
+    Text: FakeText as never,
+    UniformGroup: FakeUniformGroup as never,
+    interactionStyle: {
+      resolve: () => ({
+        maskStyle: {
+          resolve: () => ({
+            alpha: 1,
+            color: 0x00ff00,
+            mask: {
+              counts: "",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 40,
+              width: 60,
+            },
+            stroke: {
+              alpha: 1,
+              color: 0xffffff,
+              width: TWO_MASK_FRAME_STROKE_WIDTH,
+            },
+          }),
+        },
+      }),
+    } as never,
+  });
+
+  layer.createDisplay({ height: 80, width: 120 });
+  layer.drawFrame({
+    frame: twoDetectionFrame,
+    hoveredPick: null,
+    idMaskArtifact: {
+      frame: {
+        close() {},
+        fillPalette: maskFrame.fillPalette,
+        hasStroke: maskFrame.hasStroke,
+        height: maskFrame.height,
+        key: "mask-frame",
+        kind: PreparedMaskFrameKind.IdMask,
+        maxStrokeWidth: maskFrame.maxStrokeWidth,
+        raster: maskFrame.data,
+        sourceWidth: maskFrame.sourceWidth,
+        strokePalette: maskFrame.strokePalette,
+        strokeWidths: maskFrame.strokeWidths,
+        width: maskFrame.width,
+      },
+      texture: { source: { style: {} } } as never,
+    },
+    mediaTime: twoDetectionFrame.mediaTime,
+    selectedPick: {
+      detection: twoDetectionFrame.detections[1]!,
+      detectionIndex: 1,
+      frame: twoDetectionFrame,
+      mediaTime: twoDetectionFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    },
+  });
+
+  const uniforms = FakeShaderFactory.descriptors.at(-1)!.resources
+    .maskUniforms as FakeUniformGroup;
+
+  return (uniforms.uniforms.uStrokeWidths as Float32Array)[2];
+}
+
+function maskLayerStrokeWidth(strokeWidth: number) {
+  const maskFrame = createIdMaskFrame([
+    {
+      alpha: 1,
+      color: 0x00ff00,
+      detectionIndex: 0,
+      mask: {
+        counts: encodeCompressedRleCounts([0, 1]),
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 80,
+        width: 120,
+      },
+      stroke: { alpha: 1, color: 0xffffff, width: strokeWidth },
+    },
+  ]);
+
+  return maskFrame!.strokeWidths[1];
+}
+
+function uploadedStrokeWidth(options: {
+  readonly rasterWidth: number;
+  readonly strokeWidth: number;
+  readonly alignment?: StrokeAlignment;
+  readonly strokePixelRatio?: number;
+}) {
+  vi.stubGlobal("document", {
+    createElement: vi.fn(() => ({
+      getContext: vi.fn(),
+      height: 0,
+      width: 0,
+    })),
+  });
+
+  const mask = {
+    counts: "",
+    encoding: "compressedRle",
+    height: 80,
+    width: 120,
+  };
+  const layer = createPixiInteractionPresentationLayer({
+    Container: FakeContainer as never,
+    Graphics: FakeGraphics as never,
+    ImageSource: FakeImageSource as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
+    Shader: FakeShaderFactory as never,
+    Text: FakeText as never,
+    UniformGroup,
+    interactionStyle: {
+      resolve: () => ({
+        maskStyle: {
+          resolve: () => ({
+            alpha: 1,
+            color: 0x00ff00,
+            mask,
+            stroke: {
+              alpha: 1,
+              color: 0xffffff,
+              width: options.strokeWidth,
+              alignment: options.alignment,
+            },
+          }),
+        },
+      }),
+    } as never,
+  });
+
+  layer.createDisplay({ height: 80, width: 120 });
+  layer.drawFrame({
+    frame,
+    hoveredPick: null,
+    idMaskArtifact: {
+      frame: {
+        height: 80,
+        key: "mask-frame",
+        kind: PreparedMaskFrameKind.IdMask,
+        sourceWidth: mask.width,
+        width: options.rasterWidth,
+      },
+      texture: { source: { style: {} } },
+    } as never,
+    mediaTime: frame.mediaTime,
+    strokePixelRatio: options.strokePixelRatio,
+    selectedPick: {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    },
+  });
+
+  const uniforms = FakeShaderFactory.descriptors.at(-1)!.resources
+    .maskUniforms as FakeUniformGroup;
+
+  return (uniforms.uniforms.uStrokeWidths as Float32Array)[1];
+}
 
 class FakeContainer {
   readonly children: unknown[] = [];
@@ -319,6 +933,62 @@ class FakeGraphics {
   readonly stroke = vi.fn(() => this);
 }
 
+class FakeImageSource {
+  readonly style = {};
+
+  constructor(readonly _options: unknown) {}
+
+  readonly destroy = vi.fn();
+}
+
+class FakeMeshGeometry {
+  constructor(readonly _options: unknown) {}
+
+  readonly destroy = vi.fn();
+}
+
+class FakeShader {
+  constructor(readonly resources: Record<string, unknown>) {}
+
+  readonly destroy = vi.fn();
+}
+
+class FakeShaderFactory {
+  static readonly descriptors: ShaderDescriptor[] = [];
+
+  static from(options: ShaderDescriptor) {
+    FakeShaderFactory.descriptors.push(options);
+
+    return new FakeShader(options.resources);
+  }
+}
+
+class FakeUniformGroup {
+  constructor(readonly uniforms: Record<string, unknown>) {}
+
+  readonly update = vi.fn();
+}
+
+class FakeMesh {
+  alpha = 1;
+  visible = true;
+
+  constructor(
+    readonly options: {
+      readonly geometry: FakeMeshGeometry;
+      readonly shader: FakeShader;
+    },
+  ) {}
+
+  get shader() {
+    return this.options.shader;
+  }
+
+  set shader(_shader: FakeShader) {}
+
+  readonly destroy = vi.fn();
+}
+
 class FakeText {
   alpha = 1;
   height = 10;
@@ -330,6 +1000,17 @@ class FakeText {
   y = 0;
 
   constructor(options: { readonly style?: unknown; readonly text?: string }) {
+    this.style = options.style;
+    this.text = options.text ?? "";
+  }
+}
+
+class MeasuredText extends Container {
+  style: unknown;
+  text: string;
+
+  constructor(options: { readonly style?: unknown; readonly text?: string }) {
+    super({ boundsArea: new Rectangle(0, 0, 20, 10) });
     this.style = options.style;
     this.text = options.text ?? "";
   }

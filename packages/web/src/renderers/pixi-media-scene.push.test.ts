@@ -1,0 +1,2072 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  annotationRenderers,
+  BaseMaskStyle,
+  createArrayDetectionFrameSource,
+  createBufferedDetectionTimeline,
+  createIdleDetectionBufferState,
+  DetectionMaskEncoding,
+  DetectionPickTarget,
+  encodeCompressedRleCounts,
+  MediaInteractionMode,
+  RegionRendererRegionKind,
+  RegionRendererSourceKind,
+  type DepthMap,
+  type DetectionFrame,
+  type MediaDisplayAdjustments,
+} from "supervision-js-core";
+
+import type {
+  MediaRendererScene,
+  MediaRendererSceneOptions,
+  PresentedMediaSample,
+} from "./media-renderer-scene";
+import type { MediaRendererPresentation } from "#types/media-renderer";
+import type { PresentedVideoFrame } from "./presented-frame-channel";
+import { createMaskBrushEditor } from "#editing/mask-brush-editor";
+import { MediaRendererFit } from "#types/media-renderer";
+import type { PixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
+
+const pixiMock = vi.hoisted(() => ({
+  copyExternalImageToTexture: vi.fn(),
+  externalSources: [] as MockExternalSource[],
+  displayFilters: [] as unknown[],
+  extractCanvas: vi.fn(() => ({ height: 240, width: 320 })),
+  init: vi.fn(async (): Promise<void> => {}),
+  render: vi.fn(),
+  resize: vi.fn(),
+  cursorCircles: new Map<object, { x: number; y: number; radius: number }>(),
+  sprites: [] as PaintedSprite[],
+  textures: [] as MockTextureInstance[],
+  tickerAdd: vi.fn(),
+  tickerRemove: vi.fn(),
+  updateGPUTexture: vi.fn(),
+}));
+
+/** The dimensions a source advertises, and the ones its texture really has. */
+interface MockExternalSource {
+  scaleMode: string;
+  style: { update: ReturnType<typeof vi.fn> };
+  height: number;
+  pixelHeight: number;
+  pixelWidth: number;
+  width: number;
+}
+
+interface MockTextureInstance {
+  readonly frame?: { height: number; width: number; x: number; y: number };
+  readonly source: unknown;
+}
+
+/**
+ * What the batcher would put on screen: the quad Pixi last built from the
+ * texture's dimensions, scaled by the sprite's transform.
+ */
+interface PaintedSprite {
+  readonly destroy: ReturnType<typeof vi.fn>;
+  readonly filters?: unknown[];
+  readonly quad: { height: number; width: number };
+  readonly scale: { x: number; y: number };
+}
+
+// Push mode asks Pixi for WebGPU, so the mock renderer carries a device: the
+// scene then composites through the GPU path production runs, not the staging
+// canvas fallback.
+vi.mock("pixi.js", async (importOriginal) => {
+  const { BufferImageSource } =
+    await importOriginal<typeof import("pixi.js")>();
+  class Stub {
+    destroy = vi.fn();
+  }
+
+  class Application {
+    canvas = {
+      addEventListener: vi.fn(),
+      height: 360,
+      removeEventListener: vi.fn(),
+      style: {},
+      width: 640,
+    };
+    screen = { height: 360, width: 640 };
+    renderer = {
+      background: { color: 0 },
+      extract: { canvas: pixiMock.extractCanvas },
+      filter: { applyFilter: vi.fn() },
+      gpu: {
+        device: {
+          createTexture: (descriptor: {
+            size: { height: number; width: number };
+          }) => ({
+            destroy: vi.fn(),
+            height: descriptor.size.height,
+            width: descriptor.size.width,
+          }),
+          queue: {
+            copyExternalImageToTexture: pixiMock.copyExternalImageToTexture,
+          },
+        },
+      },
+      name: "webgpu",
+      resize: (width: number, height: number, resolution: number) => {
+        Object.assign(this.screen, { width, height });
+        this.renderer.resolution = resolution;
+        this.canvas.width = Math.round(width * resolution);
+        this.canvas.height = Math.round(height * resolution);
+        pixiMock.resize.call(this.renderer, width, height, resolution);
+      },
+      resolution: 1,
+      screen: this.screen,
+    };
+    stage = { addChild: vi.fn() };
+    ticker = { add: pixiMock.tickerAdd, remove: pixiMock.tickerRemove };
+    cancelResize = vi.fn();
+    destroy = vi.fn();
+    init = pixiMock.init;
+    render = pixiMock.render;
+    resize = vi.fn();
+  }
+
+  class Container {
+    children: unknown[] = [];
+    destroy = vi.fn();
+    on = vi.fn();
+    position = { set: vi.fn() };
+    scale = { set: vi.fn() };
+    addChild(...children: unknown[]) {
+      this.children.push(...children);
+      return children[0];
+    }
+    removeChild() {
+      return undefined;
+    }
+    removeChildren() {
+      return this.children.splice(0);
+    }
+  }
+
+  class Graphics extends Container {
+    circle = vi.fn((x: number, y: number, radius: number) => {
+      pixiMock.cursorCircles.set(this, { x, y, radius });
+      return this;
+    });
+    clear = vi.fn(() => {
+      pixiMock.cursorCircles.delete(this);
+      return this;
+    });
+    fill = vi.fn(() => this);
+    rect = vi.fn(() => this);
+    roundRect = vi.fn(() => this);
+    stroke = vi.fn(() => this);
+    visible = true;
+  }
+
+  interface MockSource {
+    readonly height: number;
+    readonly width: number;
+    onResize?: (listener: () => void) => void;
+  }
+
+  interface MockTexture {
+    readonly dynamic: boolean;
+    readonly orig: { height: number; width: number };
+    onUpdate: (listener: () => void) => void;
+  }
+
+  /**
+   * Models the sprite behaviour the media scene leans on: `width` only writes
+   * the scale Pixi derives from the texture's current dimensions, and the quad
+   * the batcher paints is rebuilt only when the sprite is told its view
+   * changed, which a texture reports only while it is dynamic.
+   */
+  class Sprite {
+    alpha = 1;
+    anchor = { set: vi.fn() };
+    position = { set: vi.fn() };
+    quad = { height: 0, width: 0 };
+    rotation = 0;
+    scale = { x: 1, y: 1 };
+    visible = false;
+    zIndex = 0;
+    destroy = vi.fn();
+    private _height: number | undefined;
+    private _texture: MockTexture | undefined;
+    private _width: number | undefined;
+
+    constructor(options: { texture?: MockTexture } = {}) {
+      pixiMock.sprites.push(this);
+      if (options.texture) this.texture = options.texture;
+    }
+
+    get texture(): MockTexture | undefined {
+      return this._texture;
+    }
+
+    set texture(value: MockTexture | undefined) {
+      this._texture = value;
+      if (value?.dynamic) value.onUpdate(() => this.onViewUpdate());
+      if (this._width !== undefined) this.width = this._width;
+      if (this._height !== undefined) this.height = this._height;
+      this.onViewUpdate();
+    }
+
+    get width() {
+      return Math.abs(this.scale.x) * (this._texture?.orig.width ?? 0);
+    }
+
+    set width(value: number) {
+      const local = this._texture?.orig.width ?? 0;
+      this.scale.x = local === 0 ? 1 : value / local;
+      this._width = value;
+    }
+
+    get height() {
+      return Math.abs(this.scale.y) * (this._texture?.orig.height ?? 0);
+    }
+
+    set height(value: number) {
+      const local = this._texture?.orig.height ?? 0;
+      this.scale.y = local === 0 ? 1 : value / local;
+      this._height = value;
+    }
+
+    onViewUpdate() {
+      this.quad.height = this._texture?.orig.height ?? 0;
+      this.quad.width = this._texture?.orig.width ?? 0;
+    }
+  }
+
+  class Texture {
+    destroy = vi.fn();
+    readonly dynamic: boolean;
+    readonly frame?: { height: number; width: number; x: number; y: number };
+    readonly orig: { height: number; width: number };
+    source: MockSource | undefined;
+    update = vi.fn();
+    private readonly _listeners: (() => void)[] = [];
+
+    constructor(
+      public readonly options: {
+        dynamic?: boolean;
+        frame?: { height: number; width: number; x: number; y: number };
+        source?: MockSource;
+      } = {},
+    ) {
+      const source = options.source;
+
+      pixiMock.textures.push(this);
+      this.dynamic = options.dynamic ?? false;
+      this.frame = options.frame;
+      this.source = source;
+      this.orig = { height: source?.height ?? 0, width: source?.width ?? 0 };
+      source?.onResize?.(() => {
+        this.orig.height = source.height;
+        this.orig.width = source.width;
+        for (const listener of this._listeners) listener();
+      });
+    }
+
+    onUpdate(listener: () => void) {
+      this._listeners.push(listener);
+    }
+  }
+
+  class CanvasSource {
+    scaleMode = "linear";
+    style = { update: vi.fn() };
+    destroy = vi.fn();
+    readonly height: number;
+    readonly width: number;
+    update = vi.fn();
+
+    constructor(
+      public readonly options: { height?: number; width?: number } = {},
+    ) {
+      this.height = options.height ?? 0;
+      this.width = options.width ?? 0;
+    }
+  }
+
+  class ColorMatrixFilter {
+    brightness = vi.fn();
+    contrast = vi.fn();
+    constructor() {
+      pixiMock.displayFilters.push(this);
+    }
+  }
+
+  class Rectangle {
+    constructor(
+      public x: number,
+      public y: number,
+      public width: number,
+      public height: number,
+    ) {}
+  }
+
+  class ExternalSource {
+    scaleMode = "linear";
+    style = { update: vi.fn() };
+    height: number;
+    pixelHeight: number;
+    pixelWidth: number;
+    width: number;
+    private readonly _listeners: (() => void)[] = [];
+
+    constructor(
+      public readonly options: {
+        resource?: { height: number; width: number };
+      } = {},
+    ) {
+      this.height = options.resource?.height ?? 0;
+      this.width = options.resource?.width ?? 0;
+      this.pixelHeight = this.height;
+      this.pixelWidth = this.width;
+      pixiMock.externalSources.push(this);
+    }
+
+    onResize(listener: () => void) {
+      this._listeners.push(listener);
+    }
+
+    resize(width: number, height: number, resolution: number) {
+      this.height = height;
+      this.width = width;
+      this.pixelHeight = Math.round(height * resolution);
+      this.pixelWidth = Math.round(width * resolution);
+      for (const listener of this._listeners) listener();
+    }
+
+    updateGPUTexture(texture: { height: number; width: number }) {
+      pixiMock.updateGPUTexture(texture);
+      this.height = texture.height;
+      this.width = texture.width;
+      this.pixelHeight = texture.height;
+      this.pixelWidth = texture.width;
+      for (const listener of this._listeners) listener();
+    }
+  }
+
+  class Mesh {
+    alpha = 1;
+    destroy = vi.fn();
+    removeFromParent = vi.fn();
+    shader: unknown;
+    visible = true;
+
+    constructor(options: { shader: unknown }) {
+      this.shader = options.shader;
+    }
+  }
+
+  class Destroyable {
+    destroy = vi.fn();
+    style = {};
+  }
+
+  class Filter extends Stub {
+    static from(options: { resources: Record<string, unknown> }) {
+      return {
+        destroy: vi.fn(),
+        resources: Object.fromEntries(
+          Object.entries(options.resources).map(([key, resource]) => [
+            key,
+            key.endsWith("Uniforms")
+              ? {
+                  uniforms: Object.fromEntries(
+                    Object.entries(
+                      resource as Record<string, { value: unknown }>,
+                    ).map(([name, definition]) => [name, definition.value]),
+                  ),
+                }
+              : resource,
+          ]),
+        ),
+      };
+    }
+  }
+
+  class UniformGroup {
+    uniforms: Record<string, unknown> = {};
+    update = vi.fn();
+  }
+
+  const Shader = {
+    from: (options: { resources: Record<string, unknown> }) => ({
+      destroy: vi.fn(),
+      resources: { ...options.resources },
+    }),
+  };
+
+  return {
+    AlphaMask: Stub,
+    Application,
+    Assets: { load: vi.fn(), unload: vi.fn() },
+    BlurFilter: Stub,
+    BufferImageSource,
+    CanvasSource,
+    ColorMatrixFilter,
+    Container,
+    defaultFilterVert: "default-filter-vertex",
+    ExternalSource,
+    Filter,
+    Matrix: class {},
+    Graphics,
+    ImageSource: Destroyable,
+    Mesh,
+    MeshGeometry: Destroyable,
+    PrepareSystem: Stub,
+    Rectangle,
+    Shader,
+    Sprite,
+    Text: Stub,
+    Texture,
+    UniformGroup,
+    extensions: { add: vi.fn() },
+  };
+});
+
+vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
+
+/** Shared so a test can see what the staging fallback drew into it. */
+const stagingContext = {
+  drawImage: vi.fn(),
+  getImageData: (_x: number, _y: number, width: number, height: number) => ({
+    data: new Uint8ClampedArray(width * height * 4).fill(100),
+  }),
+};
+
+function createBrushCanvas(): HTMLCanvasElement {
+  const circles: Array<{ x: number; y: number; radius: number }> = [];
+  const context = {
+    save() {},
+    restore() {},
+    beginPath() {},
+    clearRect() {
+      circles.length = 0;
+    },
+    arc(x: number, y: number, radius: number) {
+      circles.push({ x, y, radius });
+    },
+    fill() {},
+    getImageData(x: number, y: number, width: number, height: number) {
+      const data = new Uint8ClampedArray(width * height * 4);
+      for (let row = 0; row < height; row += 1) {
+        for (let column = 0; column < width; column += 1) {
+          if (
+            circles.some(
+              (circle) =>
+                Math.hypot(
+                  x + column + 0.5 - circle.x,
+                  y + row + 0.5 - circle.y,
+                ) <= circle.radius,
+            )
+          ) {
+            data[(row * width + column) * 4 + 3] = 255;
+          }
+        }
+      }
+      return { data, width, height };
+    },
+  };
+  return {
+    width: 320,
+    height: 240,
+    getContext: () => context,
+  } as unknown as HTMLCanvasElement;
+}
+
+const documentMock = {
+  addEventListener: vi.fn(),
+  createElement: (tagName: string) =>
+    tagName === "div"
+      ? { appendChild: vi.fn(), remove: vi.fn(), style: {} }
+      : {
+          getContext: () => stagingContext,
+          height: 0,
+          style: {},
+          toBlob: (receive: (blob: Blob) => void, type: string) =>
+            receive(new Blob([], { type })),
+          width: 0,
+        },
+  hidden: false,
+  removeEventListener: vi.fn(),
+};
+
+beforeEach(() => {
+  vi.stubGlobal("document", documentMock);
+  vi.stubGlobal("window", { devicePixelRatio: 1 });
+  vi.stubGlobal("ResizeObserver", undefined);
+  vi.stubGlobal("GPUTextureUsage", {
+    COPY_DST: 1,
+    RENDER_ATTACHMENT: 2,
+    TEXTURE_BINDING: 4,
+  });
+  // Before the scene takes the GPU path it asks the device whether it converts
+  // a decoded frame at all, and it asks by building one, so a browser that has
+  // WebCodecs is part of what this mock stands for.
+  vi.stubGlobal(
+    "OffscreenCanvas",
+    class {
+      getContext() {
+        return { fillRect: vi.fn() };
+      }
+    },
+  );
+  vi.stubGlobal(
+    "VideoFrame",
+    class {
+      close() {}
+    },
+  );
+  pixiMock.copyExternalImageToTexture.mockReset();
+  pixiMock.displayFilters.length = 0;
+  pixiMock.extractCanvas.mockClear();
+  pixiMock.init.mockReset();
+  pixiMock.init.mockResolvedValue(undefined);
+  stagingContext.drawImage.mockClear();
+  pixiMock.render.mockReset();
+  pixiMock.resize.mockClear();
+  pixiMock.cursorCircles.clear();
+  pixiMock.externalSources.length = 0;
+  pixiMock.sprites.length = 0;
+  pixiMock.textures.length = 0;
+  pixiMock.tickerAdd.mockClear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("push-presented Pixi scene", () => {
+  it("clears selection without rendering after destruction begins", async () => {
+    const channel = createChannel();
+    const onSelect = vi.fn();
+    const frame: DetectionFrame = {
+      detections: [{ rect: { x: 0, y: 0, width: 10, height: 10 } }],
+      mediaTime: 1,
+    };
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      canInteract: () => true,
+      detectionTimeline: stubDetectionTimeline(() => frame),
+      interaction: { mode: MediaInteractionMode.Always, onSelect },
+    });
+
+    try {
+      scene.initializeMedia({ height: 240, width: 320 });
+      channel.present(presentedFrame(1000));
+      const rendersBeforeSelection = pixiMock.render.mock.calls.length;
+
+      expect(
+        scene.setSelectedDetection?.({ detectionIndex: 0 }, 1),
+      ).not.toBeNull();
+      expect(pixiMock.render.mock.calls.length).toBeGreaterThan(
+        rendersBeforeSelection,
+      );
+      expect(onSelect).toHaveBeenLastCalledWith(expect.any(Object));
+
+      pixiMock.render.mockClear();
+      scene.destroy();
+
+      expect(onSelect).toHaveBeenLastCalledWith(null);
+      expect(pixiMock.render).not.toHaveBeenCalled();
+    } finally {
+      scene.destroy();
+    }
+  });
+
+  it("keeps capped annotation density stable as the camera moves", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    const preparation =
+      await import("#render-preparation/prepared-render-window");
+    const createWindow = vi.spyOn(preparation, "createPreparedRenderWindow");
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(createChannel().channel),
+      annotationAntialiasing: 2,
+      container: {
+        appendChild: vi.fn(),
+        clientWidth: 5000,
+        clientHeight: 2000,
+      } as unknown as HTMLElement,
+      maskStyle: new BaseMaskStyle(),
+      maxDevicePixelRatio: 2,
+      renderPreparation: {
+        maskFrame: {
+          display: { boxWidth: 5000, boxHeight: 2000, devicePixelRatio: 2 },
+        },
+      },
+    });
+    try {
+      scene.initializeMedia({ width: 1000, height: 400 });
+      const width = createWindow.mock.calls[0]?.[0].resolveMaxRasterWidth;
+      const capped = width?.();
+      expect(capped).toBeGreaterThan(0);
+      expect(capped).toBeLessThan(8192);
+      scene.panViewportBy?.(-2500, 0);
+      expect(width?.()).toBe(capped);
+      scene.zoomViewportAt?.({ x: 2500, y: 1000 }, 2);
+      expect(width?.()).toBe(capped);
+    } finally {
+      scene.destroy();
+      createWindow.mockRestore();
+    }
+  });
+
+  it("keeps canvas, mask and decode sizing together across quality changes and container resizes", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    let resized = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        disconnect = vi.fn();
+        observe = vi.fn();
+      },
+    );
+    const preparation =
+      await import("#render-preparation/prepared-render-window");
+    const originalCreateWindow = preparation.createPreparedRenderWindow;
+    let resolveRasterWidth: (() => number | undefined) | undefined;
+    let invalidateRaster: ReturnType<typeof vi.fn> | undefined;
+    const createWindow = vi
+      .spyOn(preparation, "createPreparedRenderWindow")
+      .mockImplementation((options) => {
+        const window = originalCreateWindow(options);
+        resolveRasterWidth = options.resolveMaxRasterWidth;
+        invalidateRaster = vi.spyOn(window, "invalidateRasterSize");
+        return window;
+      });
+    const channel = createChannel();
+    const options = createSceneOptions(channel.channel);
+    const container = {
+      appendChild: vi.fn(),
+      clientWidth: 640,
+      clientHeight: 360,
+    };
+    const onDisplayChange = vi.fn();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...options,
+      container: container as unknown as HTMLElement,
+      maskStyle: new BaseMaskStyle(),
+      onDisplayChange,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxWidth: 640,
+            boxHeight: 360,
+            devicePixelRatio: 2,
+            maxDevicePixelRatio: 1,
+          },
+        },
+      },
+    });
+
+    try {
+      scene.initializeMedia({ width: 1920, height: 1080 });
+      const frame = presentedFrame(1000, { width: 640, height: 360 });
+      channel.present(frame);
+      expect(resolveRasterWidth?.()).toBe(640);
+      scene.setRenderQuality(2);
+      expect(resolveRasterWidth?.()).toBe(1280);
+      scene.setRenderQuality(3);
+      expect(resolveRasterWidth?.()).toBe(1280);
+      expect(onDisplayChange).toHaveBeenCalledTimes(2);
+      scene.setRenderQuality(1);
+      expect(resolveRasterWidth?.()).toBe(640);
+      scene.setRenderQuality(1.25);
+      expect(resolveRasterWidth?.()).toBe(800);
+      container.clientWidth = 320;
+      container.clientHeight = 180;
+      resized();
+
+      expect(resolveRasterWidth?.()).toBe(400);
+      expect(onDisplayChange.mock.calls.map(([display]) => display)).toEqual([
+        {
+          boxWidth: 640,
+          boxHeight: 360,
+          devicePixelRatio: 2,
+          maxDevicePixelRatio: 1,
+        },
+        {
+          boxWidth: 640,
+          boxHeight: 360,
+          devicePixelRatio: 2,
+          maxDevicePixelRatio: 2,
+        },
+        {
+          boxWidth: 640,
+          boxHeight: 360,
+          devicePixelRatio: 2,
+          maxDevicePixelRatio: 1,
+        },
+        {
+          boxWidth: 640,
+          boxHeight: 360,
+          devicePixelRatio: 2,
+          maxDevicePixelRatio: 1.25,
+        },
+        {
+          boxWidth: 320,
+          boxHeight: 180,
+          devicePixelRatio: 2,
+          maxDevicePixelRatio: 1.25,
+        },
+      ]);
+      expect(pixiMock.resize).toHaveBeenCalledWith(640, 360, 2);
+      expect(pixiMock.resize).toHaveBeenLastCalledWith(320, 180, 1.25);
+      expect(invalidateRaster).toHaveBeenCalledTimes(4);
+      expect(frame.frame.close).toHaveBeenCalledOnce();
+    } finally {
+      scene.destroy();
+      createWindow.mockRestore();
+    }
+  });
+
+  it("refreshes selected mask capture density when a resize keeps the fitted picture unchanged", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    let resized = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        disconnect = vi.fn();
+        observe = vi.fn();
+      },
+    );
+    const interaction = await import("./pixi-interaction-presentation-layer");
+    const createInteractionLayer = vi.spyOn(
+      interaction,
+      "createPixiInteractionPresentationLayer",
+    );
+    const channel = createChannel();
+    const container = {
+      appendChild: vi.fn(),
+      clientWidth: 2040,
+      clientHeight: 720,
+    };
+    const frame: DetectionFrame = {
+      detections: [
+        {
+          mask: {
+            counts: encodeCompressedRleCounts([0, 1280 * 720]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 720,
+            width: 1280,
+          },
+        },
+      ],
+      mediaTime: 1,
+    };
+    const detectionTimeline = createBufferedDetectionTimeline({
+      source: createArrayDetectionFrameSource([frame]),
+    });
+    const maskStyle = new BaseMaskStyle();
+    const onDisplayChange = vi.fn();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      annotationAntialiasing: 2,
+      canInteract: () => true,
+      container: container as unknown as HTMLElement,
+      detectionTimeline,
+      interaction: { mode: MediaInteractionMode.Always },
+      interactionStyle: { resolve: () => ({ maskStyle }) },
+      maskStyle,
+      maxDevicePixelRatio: 2,
+      onDisplayChange,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxWidth: 1280,
+            boxHeight: 720,
+            devicePixelRatio: 2,
+            maxDevicePixelRatio: 2,
+          },
+        },
+      },
+    });
+    const drawInteraction = vi.spyOn(
+      createInteractionLayer.mock.results[0]!
+        .value as PixiInteractionPresentationLayer,
+      "drawFrame",
+    );
+
+    try {
+      scene.initializeMedia({ width: 1280, height: 720 });
+      scene.setPlaybackActive?.(false);
+      await detectionTimeline.prepare(1);
+      await scene.waitForRenderPreparation?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      });
+      channel.present(presentedFrame(1000, { width: 1280, height: 720 }));
+      expect(
+        scene.setSelectedDetection?.({ detectionIndex: 0 }, 1),
+      ).toMatchObject({ target: DetectionPickTarget.Mask });
+      const before = drawInteraction.mock.lastCall?.[0];
+      expect(before).toMatchObject({
+        idMaskArtifact: { frame: { width: 1280, height: 720 } },
+        strokePixelRatio: 4,
+        viewportScale: 1,
+      });
+      expect(onDisplayChange).toHaveBeenLastCalledWith({
+        boxWidth: 1280,
+        boxHeight: 720,
+        devicePixelRatio: 2,
+        maxDevicePixelRatio: 2,
+      });
+      drawInteraction.mockClear();
+      onDisplayChange.mockClear();
+      pixiMock.resize.mockClear();
+
+      container.clientWidth = 2200;
+      resized();
+
+      expect(drawInteraction).toHaveBeenCalledOnce();
+      const after = drawInteraction.mock.lastCall?.[0];
+      expect(after).toMatchObject({
+        selectedPick: { detectionIndex: 0, target: DetectionPickTarget.Mask },
+        viewportScale: 1,
+      });
+      expect(after?.strokePixelRatio).toBeGreaterThan(0);
+      expect(after?.strokePixelRatio).toBeLessThan(
+        before?.strokePixelRatio ?? 0,
+      );
+      expect(after?.idMaskArtifact?.frame).toBe(before?.idMaskArtifact?.frame);
+      expect(after?.idMaskArtifact?.texture).toBe(
+        before?.idMaskArtifact?.texture,
+      );
+      expect(onDisplayChange).not.toHaveBeenCalled();
+      expect(pixiMock.resize).toHaveBeenLastCalledWith(1280, 720, 2);
+    } finally {
+      scene.destroy();
+      drawInteraction.mockRestore();
+      createInteractionLayer.mockRestore();
+    }
+  });
+
+  it("changes mask detail for AA without resizing video or canvas", async () => {
+    vi.stubGlobal("window", { devicePixelRatio: 1 });
+    const preparation =
+      await import("#render-preparation/prepared-render-window");
+    const originalCreateWindow = preparation.createPreparedRenderWindow;
+    let resolveRasterWidth: (() => number | undefined) | undefined;
+    const createWindow = vi
+      .spyOn(preparation, "createPreparedRenderWindow")
+      .mockImplementation((options) => {
+        resolveRasterWidth = options.resolveMaxRasterWidth;
+        return originalCreateWindow(options);
+      });
+    const channel = createChannel();
+    const onDisplayChange = vi.fn();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maskStyle: new BaseMaskStyle(),
+      onDisplayChange,
+      renderPreparation: {
+        maskFrame: {
+          display: {
+            boxWidth: 640,
+            boxHeight: 360,
+            devicePixelRatio: 1,
+          },
+        },
+      },
+    });
+
+    try {
+      scene.initializeMedia({ width: 1920, height: 1080 });
+      expect(resolveRasterWidth?.()).toBe(640);
+      onDisplayChange.mockClear();
+      pixiMock.resize.mockClear();
+
+      scene.setPresentation({ annotationAntialiasing: true }, 0);
+      expect(resolveRasterWidth?.()).toBe(640);
+      scene.setPresentation({ annotationAntialiasing: 2 }, 0);
+      expect(resolveRasterWidth?.()).toBe(1280);
+      scene.setPresentation({ annotationAntialiasing: false }, 0);
+      expect(resolveRasterWidth?.()).toBe(640);
+      expect(onDisplayChange).not.toHaveBeenCalled();
+      expect(pixiMock.resize).not.toHaveBeenCalled();
+    } finally {
+      scene.destroy();
+      createWindow.mockRestore();
+    }
+  });
+
+  it.each([0, -1, NaN, Infinity, undefined])(
+    "uses the same default DPR for canvas and decode with cap %s on opening and live updates",
+    async (cap) => {
+      vi.stubGlobal("window", { devicePixelRatio: 3 });
+      const channel = createChannel();
+      const onDisplayChange = vi.fn();
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const scene = await createPixiMediaScene({
+        ...createSceneOptions(channel.channel),
+        maxDevicePixelRatio: cap,
+        onDisplayChange,
+      });
+
+      try {
+        scene.initializeMedia({ width: 1920, height: 1080 });
+        expect(onDisplayChange).toHaveBeenLastCalledWith({
+          boxWidth: 640,
+          boxHeight: 360,
+          devicePixelRatio: 3,
+          maxDevicePixelRatio: 2,
+        });
+        scene.setRenderQuality(1);
+        scene.setRenderQuality(cap);
+        scene.setRenderQuality(2);
+
+        expect(
+          onDisplayChange.mock.calls.map(
+            ([display]) => display.maxDevicePixelRatio,
+          ),
+        ).toEqual([2, 1, 2]);
+        expect(pixiMock.resize).toHaveBeenLastCalledWith(640, 360, 2);
+      } finally {
+        scene.destroy();
+      }
+    },
+  );
+
+  it("retains brush updates made while Pixi initialization is pending", async () => {
+    const editor = createMaskBrushEditor({
+      canvas: createBrushCanvas(),
+      width: 320,
+      height: 240,
+    });
+    let finishInit!: () => void;
+    const initPending = new Promise<void>((resolve) => {
+      finishInit = resolve;
+    });
+    let markInitStarted!: () => void;
+    const initStarted = new Promise<void>((resolve) => {
+      markInitStarted = resolve;
+    });
+    pixiMock.init.mockImplementationOnce(() => {
+      markInitStarted();
+      return initPending;
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scenePending = createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maskBrush: { editor },
+    });
+    await initStarted;
+    const queued: Array<() => void> = [];
+    vi.stubGlobal("queueMicrotask", (callback: () => void) => {
+      queued.push(callback);
+    });
+    const flushQueued = () => {
+      for (const callback of queued.splice(0)) callback();
+    };
+
+    try {
+      editor.beginStroke({ x: 50, y: 60 }, { radius: 10 });
+      editor.extendStroke({ x: 70, y: 80 });
+      editor.setCursor({ x: 90, y: 100 });
+      expect(flushQueued).not.toThrow();
+      expect(pixiMock.render).not.toHaveBeenCalled();
+
+      finishInit();
+      const scene = await scenePending;
+      scene.initializeMedia({ height: 240, width: 320 });
+      channel.present(presentedFrame(1000));
+      expect(scene.getRenderCount?.()).toBe(1);
+      expect([...pixiMock.cursorCircles.values()].at(-1)).toEqual({
+        x: 90,
+        y: 100,
+        radius: 10,
+      });
+      expect(editor.getMaskBounds()).toEqual({
+        x: 60,
+        y: 70,
+        width: 40,
+        height: 40,
+      });
+    } finally {
+      finishInit();
+      (await scenePending).destroy();
+    }
+  });
+
+  it("repaints one coherent brush update per stroke move on a paused frame", async () => {
+    const editor = createMaskBrushEditor({
+      canvas: createBrushCanvas(),
+      width: 320,
+      height: 240,
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maskBrush: { editor },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    const frame = presentedFrame(1000);
+    channel.present(frame);
+    expect(scene.getRenderCount?.()).toBe(1);
+    const renderedCursors: unknown[] = [];
+    pixiMock.render.mockImplementation(() => {
+      renderedCursors.push([...pixiMock.cursorCircles.values()].at(-1));
+    });
+    editor.beginStroke({ x: 50, y: 60 }, { radius: 10 });
+    expect(scene.getRenderCount?.()).toBe(1);
+    await Promise.resolve();
+    expect(scene.getRenderCount?.()).toBe(2);
+    expect(renderedCursors).toEqual([{ x: 50, y: 60, radius: 10 }]);
+    editor.extendStroke({ x: 70, y: 80 });
+    await Promise.resolve();
+    expect(scene.getRenderCount?.()).toBe(3);
+    expect(renderedCursors).toEqual([
+      { x: 50, y: 60, radius: 10 },
+      { x: 70, y: 80, radius: 10 },
+    ]);
+    editor.setCursor({ x: 90, y: 100 });
+    editor.setCursor({ x: 110, y: 120 });
+    await Promise.resolve();
+    expect(scene.getRenderCount?.()).toBe(4);
+    expect(renderedCursors.at(-1)).toEqual({ x: 110, y: 120, radius: 10 });
+    editor.clear();
+    await Promise.resolve();
+    expect(scene.getRenderCount?.()).toBe(5);
+    expect(renderedCursors.at(-1)).toEqual({ x: 110, y: 120, radius: 10 });
+    editor.setCursor(null);
+    await Promise.resolve();
+    expect(scene.getRenderCount?.()).toBe(6);
+    expect(renderedCursors.at(-1)).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(scene.getRenderCount?.()).toBe(6);
+    expect(frame.frame.close).toHaveBeenCalledTimes(1);
+    expect(pixiMock.tickerAdd).not.toHaveBeenCalled();
+    scene.destroy();
+  });
+
+  it("does not render a queued brush update after destruction", async () => {
+    const editor = createMaskBrushEditor({
+      canvas: createBrushCanvas(),
+      width: 320,
+      height: 240,
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      maskBrush: { editor },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(1000));
+    pixiMock.render.mockClear();
+    editor.beginStroke({ x: 50, y: 60 }, { radius: 10 });
+    scene.destroy();
+    await Promise.resolve();
+    editor.setCursor({ x: 70, y: 80 });
+    await Promise.resolve();
+    expect(pixiMock.render).not.toHaveBeenCalled();
+  });
+
+  it("keeps pixel inspection sampling across a compositor texture replacement", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      pixelInspection: { minScale: 3 },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setViewportTransform?.({ scale: 4 });
+    channel.present(presentedFrame(1000));
+    const source = pixiMock.externalSources[0]!;
+    expect(source.scaleMode).toBe("nearest");
+    expect(source.style.update).toHaveBeenCalledTimes(1);
+    scene.setViewportTransform?.({ scale: 2 });
+    expect(source.scaleMode).toBe("linear");
+    expect(source.style.update).toHaveBeenCalledTimes(2);
+    scene.destroy();
+  });
+
+  it("renders once per presented frame and nothing else", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const first = presentedFrame(1000);
+    const second = presentedFrame(2000);
+    channel.present(first);
+    channel.present(second);
+
+    expect(scene.getRenderCount?.()).toBe(2);
+    expect(first.frame.close).toHaveBeenCalledTimes(1);
+    expect(second.frame.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives every frame it presents a serial of its own", async () => {
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(2000));
+
+    expect(presented.map((sample) => sample.mediaTime)).toEqual([1, 1, 2]);
+    expect(
+      new Set(presented.map((sample) => sample.presentedFrameSerial)).size,
+    ).toBe(3);
+  });
+
+  it("reports the detection frame the layers drew, not the one selected at completion", async () => {
+    const drawnFrame: DetectionFrame = {
+      detections: [],
+      frameIndex: 7,
+      mediaTime: 1,
+    };
+    const revisedFrame: DetectionFrame = {
+      detections: [],
+      frameIndex: 8,
+      mediaTime: 1,
+    };
+    let answer = drawnFrame;
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      detectionTimeline: stubDetectionTimeline(() => answer),
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    // A detection load landing between the draw and the completion: the same
+    // media time now answers a different frame from the one on screen.
+    pixiMock.render.mockImplementationOnce(() => {
+      answer = revisedFrame;
+    });
+
+    channel.present(presentedFrame(1000));
+
+    expect(pixiMock.render).toHaveBeenCalled();
+    expect(presented).toHaveLength(1);
+    expect(presented[0].activeDetectionFrameIndex).toBe(drawnFrame.frameIndex);
+    expect(presented[0].activeDetectionFrameTime).toBe(drawnFrame.mediaTime);
+  });
+
+  it("measures the present it makes when frame timings are asked for", async () => {
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      diagnostics: { frameTimings: true },
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+
+    // A push-presented scene never pulls a sample, so timings only the pull
+    // path fills leave every per-layer cost unmeasured for the whole session.
+    expect(presented[0].renderTimings).toEqual({
+      boxMs: expect.any(Number),
+      depthMs: expect.any(Number),
+      fitMs: expect.any(Number),
+      focusMs: expect.any(Number),
+      interactionMs: expect.any(Number),
+      labelMs: expect.any(Number),
+      maskMs: expect.any(Number),
+      mediaUploadMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    });
+  });
+
+  it("renders a burst of presents once per display refresh", async () => {
+    const frames = stubAnimationFrames();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(2000));
+    channel.present(presentedFrame(3000));
+
+    expect(scene.getRenderCount?.()).toBe(1);
+
+    frames.run();
+
+    expect(scene.getRenderCount?.()).toBe(2);
+
+    frames.run();
+
+    // Nothing was deferred by the second render, so the scene stops asking for
+    // frames instead of holding one open forever.
+    expect(scene.getRenderCount?.()).toBe(2);
+    expect(frames.pending()).toBe(0);
+  });
+
+  it("renders the next present straight away once the burst has drained", async () => {
+    const frames = stubAnimationFrames();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+    frames.run();
+    channel.present(presentedFrame(2000));
+
+    expect(scene.getRenderCount?.()).toBe(2);
+  });
+
+  it("closes every frame of a burst even though most of them never render", async () => {
+    const frames = stubAnimationFrames();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const burst = [1000, 2000, 3000, 4000].map((time) => presentedFrame(time));
+
+    for (const presented of burst) {
+      channel.present(presented);
+    }
+
+    expect(scene.getRenderCount?.()).toBe(1);
+    for (const presented of burst.slice(0, -1)) {
+      expect(presented.frame.close).toHaveBeenCalledTimes(1);
+    }
+    expect(burst.at(-1)?.frame.close).not.toHaveBeenCalled();
+
+    frames.run();
+
+    expect(scene.getRenderCount?.()).toBe(2);
+    expect(burst.at(-1)?.frame.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Pixi's ticker unused so nothing free-runs", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    expect(pixiMock.tickerAdd).not.toHaveBeenCalled();
+  });
+
+  it("holds at zero renders while paused, untouched, for ten seconds", async () => {
+    vi.useFakeTimers();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(scene.getRenderCount?.()).toBe(0);
+    expect(pixiMock.render).not.toHaveBeenCalled();
+    // Fake timers stand in for animation frames too, so an empty queue means
+    // the scene left nothing behind that could wake it up.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores notifications that describe what is already drawn", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+
+    const presentation: MediaRendererPresentation = {};
+    scene.setPresentation(presentation, 2);
+    const settled = scene.getRenderCount?.();
+
+    scene.setPresentation(presentation, 2);
+    scene.setPresentation(presentation, 2);
+    scene.setPresentation(presentation, 2);
+
+    expect(scene.getRenderCount?.()).toBe(settled);
+  });
+
+  it("renders a style swap on a memoized renderer list", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+
+    const renderers = [annotationRenderers.marker()];
+    scene.setPresentation(
+      { markerStyle: { resolve: () => undefined }, renderers },
+      2,
+    );
+    const settled = scene.getRenderCount?.();
+
+    scene.setPresentation(
+      { markerStyle: { resolve: () => undefined }, renderers },
+      2,
+    );
+
+    expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
+  });
+
+  it.each(
+    Object.keys(
+      createPopulatedPresentation(),
+    ) as (keyof MediaRendererPresentation)[],
+  )("repaints when %s alone changes", async (field) => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+
+    const applied = createPopulatedPresentation();
+    scene.setPresentation(applied, 2);
+    const settled = scene.getRenderCount?.();
+
+    scene.setPresentation(changePresentationField(applied, field), 2);
+
+    expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
+  });
+
+  it("draws depth from the presented timestamp alone, and none where it has none", async () => {
+    const map = createDepthMap();
+    const asked: number[] = [];
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setDepthSource?.({
+      destroy: vi.fn(),
+      getEntry(mediaTime) {
+        asked.push(mediaTime);
+        return mediaTime < 2 ? { frameIndex: 0, map } : null;
+      },
+    });
+
+    channel.present(presentedFrame(1000));
+    expect(scene.getActiveDepth?.()).toMatchObject({ map, mediaTime: 1 });
+
+    channel.present(presentedFrame(4250));
+    expect(asked).toEqual([1, 4.25]);
+    expect(scene.getActiveDepth?.()).toBeNull();
+  });
+
+  it("renders a clip's exact frame once when it lands, then holds at zero renders while paused", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const channel = createChannel();
+    const { openDepthSource } =
+      await import("#render-preparation/depth/source");
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      depthRenderers: [annotationRenderers.depth()],
+    });
+    const decodeDepth = vi.fn(async () => ({
+      height: 24,
+      values: new Uint16Array(32 * 24).fill(2560),
+      width: 32,
+    }));
+    const source = await openDepthSource(
+      {
+        manifest: {
+          frames: { count: 10, exact: "exact/{index:06}.png" },
+          height: 24,
+          kind: "disparity_px",
+          schema: "supervision.depth-manifest",
+          storage: { format: "png16", noDepth: 0, scale: 256 },
+          version: 1,
+          width: 32,
+        },
+        baseUrl: "https://example.test/clip/",
+      },
+      {
+        fetch: (async () =>
+          new Response(new Uint8Array(4))) as unknown as typeof fetch,
+        frameClock: {
+          duration: 10,
+          durationAt: () => 1,
+          endTimestamp: 10,
+          firstTimestamp: 0,
+          frameCount: 10,
+          indexAtOrBefore: (time: number) =>
+            Math.min(9, Math.max(0, Math.floor(time))),
+          timeAt: (index: number) => index,
+        },
+        media: { height: 240, width: 320 },
+        preparer: () => ({
+          concurrency: 1,
+          decodeConfidence: vi.fn(),
+          decodeDepth,
+          destroy: vi.fn(),
+        }),
+      },
+    );
+
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setPlaybackActive?.(false);
+    scene.setDepthSource?.(source);
+    channel.present(presentedFrame(3000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+    const presented = scene.getRenderCount?.() ?? 0;
+
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.waitFor(() =>
+      expect(scene.getActiveDepth?.()).toMatchObject({
+        frameIndex: 3,
+        precision: "exact",
+      }),
+    );
+    expect(scene.getRenderCount?.()).toBe(presented + 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(scene.getRenderCount?.()).toBe(presented + 1);
+
+    // Playing hides it at once; it is never drawn over the next frames.
+    scene.setPlaybackActive?.(true);
+    expect(scene.getActiveDepth?.()).toBeNull();
+    expect(scene.getRenderCount?.()).toBe(presented + 2);
+    channel.present(presentedFrame(4000));
+    expect(scene.getActiveDepth?.()).toBeNull();
+
+    source.destroy();
+    vi.useRealTimers();
+  });
+
+  it("renders a display adjustment once, and a repeat of it never", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+    const presented = scene.getRenderCount?.();
+
+    await applyDisplayAdjustment(scene);
+    expect(pixiMock.displayFilters[0]).toMatchObject({ resolution: "inherit" });
+    const adjusted = scene.getRenderCount?.();
+
+    await applyDisplayAdjustment(scene);
+    await applyDisplayAdjustment(scene);
+    await applyDisplayAdjustment(scene);
+
+    expect([adjusted, scene.getRenderCount?.()]).toStrictEqual([
+      (presented ?? 0) + 1,
+      adjusted,
+    ]);
+  });
+
+  it("repaints Gamma and still-image Auto without filtering annotations, and Reset restores manual contrast", async () => {
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(undefined),
+      stillFrame: true,
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    const sample = { timestamp: 0, duration: 0, draw: vi.fn(), close: vi.fn() };
+    scene.presentSample(sample);
+    const original = scene.getRenderCount?.() ?? 0;
+    await applyDisplayAdjustment(scene, { gamma: 2, contrast: 1.8 });
+    expect(scene.getRenderCount?.()).toBe(original + 1);
+    const filtered = pixiMock.sprites.filter(
+      (sprite) => sprite.filters?.length,
+    );
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.filters).toHaveLength(2);
+    const inspection = filtered[0]?.filters?.[0] as {
+      resources: { inspectionUniforms: { uniforms: Record<string, unknown> } };
+    };
+    expect(inspection.resources.inspectionUniforms.uniforms).toMatchObject({
+      uGamma: 2,
+      uAuto: 0,
+    });
+
+    await applyDisplayAdjustment(scene, {
+      gamma: 2,
+      contrast: 1.8,
+      autoContrast: true,
+    });
+    expect(scene.getRenderCount?.()).toBe(original + 2);
+    expect(inspection.resources.inspectionUniforms.uniforms).toMatchObject({
+      uGamma: 2,
+      uAuto: 1,
+    });
+    expect(pixiMock.displayFilters.at(-1)).toMatchObject({
+      contrast: expect.any(Function),
+    });
+    const auto = pixiMock.displayFilters.at(-1) as {
+      contrast: ReturnType<typeof vi.fn>;
+    };
+    expect(auto.contrast).toHaveBeenCalledWith(0, true);
+    await applyDisplayAdjustment(scene, {
+      gamma: 2,
+      contrast: 1.8,
+      autoContrast: true,
+    });
+    expect(scene.getRenderCount?.()).toBe(original + 2);
+
+    await applyDisplayAdjustment(scene, {
+      gamma: 1,
+      contrast: 1.8,
+      autoContrast: false,
+    });
+    expect(scene.getRenderCount?.()).toBe(original + 3);
+    expect(filtered[0]?.filters).toHaveLength(1);
+    const manual = pixiMock.displayFilters.at(-1) as {
+      contrast: ReturnType<typeof vi.fn>;
+    };
+    expect(manual.contrast).toHaveBeenCalledWith(0.8, true);
+    await applyDisplayAdjustment(scene, { gamma: 2, autoContrast: true });
+    expect(scene.getRenderCount?.()).toBe(original + 4);
+    await applyDisplayAdjustment(scene, {});
+    expect(scene.getRenderCount?.()).toBe(original + 5);
+    const identity = pixiMock.displayFilters.at(-1) as {
+      brightness: ReturnType<typeof vi.fn>;
+      contrast: ReturnType<typeof vi.fn>;
+    };
+    expect(filtered[0]?.filters).toStrictEqual([identity]);
+    expect(identity.brightness).toHaveBeenCalledWith(1, false);
+    expect(identity.contrast).toHaveBeenCalledWith(0, true);
+    scene.destroy();
+  });
+
+  it.each([
+    { width: 3, height: 2, tiles: 6 },
+    { width: 2048, height: 1, tiles: 8 },
+  ])(
+    "uploads complete Auto lookup-table rows for $width×$height images",
+    async ({ width, height, tiles }) => {
+      const { createPixiMediaScene } = await import("./pixi-media-scene");
+      const { gpuUploadBufferImageResource } =
+        await vi.importActual<typeof import("pixi.js")>("pixi.js");
+      const scene = await createPixiMediaScene({
+        ...createSceneOptions(undefined),
+        stillFrame: true,
+      });
+      scene.initializeMedia({ width, height });
+      scene.presentSample({
+        timestamp: 0,
+        duration: 0,
+        draw: vi.fn(),
+        close: vi.fn(),
+      });
+      await applyDisplayAdjustment(scene, { gamma: 2, autoContrast: true });
+      const sprite = pixiMock.sprites.find(
+        (candidate) => candidate.filters?.length,
+      );
+      const inspection = sprite?.filters?.[0] as {
+        resources: { uLut: import("pixi.js").BufferImageSource };
+      };
+      const source = inspection.resources.uLut;
+      const writeTexture = vi.fn();
+      const gpu = {
+        device: { queue: { writeTexture } },
+      } as unknown as Parameters<typeof gpuUploadBufferImageResource.upload>[2];
+      gpuUploadBufferImageResource.upload(source, {} as GPUTexture, gpu);
+      const [, resource, layout, size] = writeTexture.mock.calls[0]!;
+      expect(resource).toBe(source.resource);
+      expect(layout).toEqual({
+        offset: 0,
+        rowsPerImage: tiles,
+        bytesPerRow: 256 * 4,
+      });
+      expect(size).toEqual({
+        width: 256,
+        height: tiles,
+        depthOrArrayLayers: 1,
+      });
+      expect(source.resource.byteLength).toBe(256 * tiles * 4);
+      scene.destroy();
+    },
+  );
+
+  it("keeps the media on the staging canvas when the device refuses a decoded frame", async () => {
+    // The refusal lands on the capability probe, which is the first copy the
+    // scene asks for. Firefox refuses every one after it too, and the point of
+    // asking first is that none of them is a presented frame.
+    pixiMock.copyExternalImageToTexture.mockImplementationOnce(() => {
+      throw new TypeError("source could not be converted");
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const presented = presentedFrame(2000);
+    channel.present(presented);
+
+    expect(pixiMock.externalSources).toStrictEqual([]);
+    expect(stagingContext.drawImage).toHaveBeenCalledTimes(1);
+    expect(presented.frame.close).toHaveBeenCalledTimes(1);
+    expect(pixiMock.render).toHaveBeenCalled();
+  });
+
+  it("captures at the media's size off the staging canvas, whatever was decoded", async () => {
+    // Decode size follows the viewport. The exported still must not.
+    pixiMock.copyExternalImageToTexture.mockImplementationOnce(() => {
+      throw new TypeError("source could not be converted");
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(2000, { height: 120, width: 160 }));
+    const capture = await scene.captureFrame?.(undefined);
+
+    expect(capture).toMatchObject({ height: 240, mediaTime: 2, width: 320 });
+    expect(pixiMock.extractCanvas).not.toHaveBeenCalled();
+  });
+
+  it("captures the pixels the compositor put on screen", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(2000));
+    const capture = await scene.captureFrame?.(undefined);
+
+    expect(capture).toMatchObject({ height: 240, mediaTime: 2, width: 320 });
+    expect(pixiMock.extractCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures with baseline sampling while preserving pixel inspection on screen", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      pixelInspection: { minScale: 3 },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setViewportTransform?.({ scale: 4 });
+    channel.present(presentedFrame(2000, { height: 120, width: 160 }));
+    const source = pixiMock.externalSources[0]!;
+    expect(source.scaleMode).toBe("nearest");
+    pixiMock.extractCanvas.mockImplementationOnce(() => {
+      expect(source.scaleMode).toBe("linear");
+      return { height: 240, width: 320 };
+    });
+
+    const capture = await scene.captureFrame?.(undefined);
+
+    expect(capture).toMatchObject({ height: 240, mediaTime: 2, width: 320 });
+    expect(source.scaleMode).toBe("nearest");
+    expect(pixiMock.sprites.at(-1)?.destroy).toHaveBeenCalledTimes(1);
+    scene.destroy();
+  });
+
+  it("restores display sampling and releases the detached sprite when capture fails", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      pixelInspection: { minScale: 3 },
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setViewportTransform?.({ scale: 4 });
+    channel.present(presentedFrame(2000));
+    const source = pixiMock.externalSources[0]!;
+    pixiMock.extractCanvas.mockImplementationOnce(() => {
+      expect(source.scaleMode).toBe("linear");
+      throw new Error("capture failed");
+    });
+
+    expect(() => scene.captureFrame?.(undefined)).toThrow("capture failed");
+
+    expect(source.scaleMode).toBe("nearest");
+    expect(pixiMock.sprites.at(-1)?.destroy).toHaveBeenCalledTimes(1);
+    scene.destroy();
+  });
+
+  it("paints the media at its own size when decode sizes alternate", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const media = pixiMock.sprites[0];
+    const sizes = [
+      { height: 240, width: 320 },
+      { height: 120, width: 160 },
+      { height: 240, width: 320 },
+      { height: 90, width: 120 },
+      { height: 240, width: 320 },
+    ];
+    const painted = sizes.map((size, index) => {
+      channel.present(presentedFrame((index + 1) * 1000, size));
+
+      return {
+        height: media.scale.y * media.quad.height,
+        width: media.scale.x * media.quad.width,
+      };
+    });
+
+    expect(painted).toStrictEqual(
+      sizes.map(() => ({ height: 240, width: 320 })),
+    );
+  });
+
+  it("crops a media region out of the frame the compositor presented", async () => {
+    const load = createDeferred<readonly DetectionFrame[]>();
+    const detectionTimeline = createBufferedDetectionTimeline({
+      source: { loadFrames: () => load.promise },
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      detectionTimeline,
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setPresentation(
+      {
+        renderers: [
+          annotationRenderers.region({
+            id: "head-crop",
+            region: { kind: RegionRendererRegionKind.Bounds },
+            source: {
+              kind: RegionRendererSourceKind.Media,
+              region: { kind: RegionRendererRegionKind.Bounds },
+            },
+            target: { className: "head" },
+          }),
+        ],
+      },
+      1,
+    );
+
+    const prepared = detectionTimeline.prepare(1);
+
+    load.resolve([
+      {
+        detections: [
+          {
+            className: "head",
+            rect: { height: 30, width: 40, x: 160, y: 120 },
+          },
+        ],
+        mediaTime: 1,
+      },
+    ]);
+    await prepared;
+    // A proxy decode: the same picture at half the media's resolution.
+    channel.present(presentedFrame(1000, { height: 120, width: 160 }));
+
+    const presentedSource = pixiMock.externalSources.at(-1);
+    const crop = pixiMock.textures.find((texture) => texture.frame);
+
+    expect(crop?.source).toBe(presentedSource);
+    expect({ ...crop?.frame }).toStrictEqual({
+      height: 30,
+      width: 40,
+      x: 140,
+      y: 105,
+    });
+  });
+
+  it("publishes the detections a load lands after the picture already went up", async () => {
+    const load = createDeferred<readonly DetectionFrame[]>();
+    const detectionTimeline = createBufferedDetectionTimeline({
+      source: { loadFrames: () => load.promise },
+    });
+    const onPresentationUpdate = vi.fn();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      detectionTimeline,
+      onPresentationUpdate,
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const prepared = detectionTimeline.prepare(1);
+    channel.present(presentedFrame(1000));
+
+    expect(onPresentationUpdate.mock.lastCall?.[0]).toMatchObject({
+      activeDetectionCount: 0,
+      activeDetectionFrameTime: null,
+    });
+
+    load.resolve([
+      {
+        detections: [{ rect: { height: 10, width: 10, x: 0, y: 0 } }],
+        mediaTime: 1,
+      },
+    ]);
+    await prepared;
+
+    expect(onPresentationUpdate.mock.lastCall?.[0]).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
+    });
+  });
+
+  it("keeps driving the ticker when the source has no frame channel", async () => {
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(createSceneOptions(undefined));
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    expect(pixiMock.tickerAdd).toHaveBeenCalled();
+    expect(pixiMock.render).not.toHaveBeenCalled();
+    expect(scene.getRenderCount?.()).toBeNull();
+  });
+});
+
+/**
+ * Writes the same display adjustment and waits out the dynamic `pixi.js` import
+ * it goes through. Overlapping those imports leaves all but the first resolving
+ * against the real Pixi rather than the mock, so they go one at a time, and the
+ * filter each one builds is what says the write landed.
+ */
+async function applyDisplayAdjustment(
+  scene: MediaRendererScene,
+  adjustments: MediaDisplayAdjustments = { brightness: 1.4, contrast: 0.8 },
+) {
+  const built = pixiMock.displayFilters.length + 1;
+
+  scene.setDisplayAdjustments?.(adjustments);
+  await vi.waitFor(() => expect(pixiMock.displayFilters).toHaveLength(built));
+}
+
+/**
+ * `Required` is what keeps the cases exhaustive: a presentation field added to
+ * the contract lands here as a missing property.
+ */
+function createPopulatedPresentation(): Required<MediaRendererPresentation> {
+  return {
+    annotationAntialiasing: false,
+    annotationOverlayStyle: {},
+    backgroundColor: 0x101010,
+    boxCornerStyle: createStyle(),
+    boxStyle: createStyle(),
+    ellipseStyle: createStyle(),
+    focusStyle: createStyle(),
+    interactionStyle: createStyle(),
+    keypointStyle: createStyle(),
+    labelStyle: createStyle(),
+    markerStyle: createStyle(),
+    maskHaloStyle: createStyle(),
+    maskStyle: createStyle(),
+    orientedBoxStyle: createStyle(),
+    percentageBarStyle: createStyle(),
+    polygonStyle: createStyle(),
+    polylineStyle: createStyle(),
+    renderers: [annotationRenderers.marker()],
+    visibility: {},
+  };
+}
+
+/** Styles compare by identity, so a fresh one is a changed one. */
+function createStyle() {
+  return { resolve: () => undefined };
+}
+
+function changePresentationField(
+  applied: Required<MediaRendererPresentation>,
+  field: keyof MediaRendererPresentation,
+): MediaRendererPresentation {
+  if (field === "backgroundColor") {
+    return { ...applied, backgroundColor: applied.backgroundColor + 1 };
+  }
+  if (field === "annotationAntialiasing") {
+    return {
+      ...applied,
+      annotationAntialiasing: !applied.annotationAntialiasing,
+    };
+  }
+
+  return { ...applied, [field]: createPopulatedPresentation()[field] };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
+}
+
+/**
+ * Animation frames the test drives by hand. A scene that coalesces on the
+ * display refresh cannot be measured against a refresh that never arrives.
+ */
+function stubAnimationFrames() {
+  let nextHandle = 0;
+  const callbacks = new Map<number, () => void>();
+
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+    nextHandle += 1;
+    callbacks.set(nextHandle, callback);
+    return nextHandle;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+    callbacks.delete(handle);
+  });
+
+  return {
+    pending: () => callbacks.size,
+    run() {
+      const due = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of due) {
+        callback();
+      }
+    },
+  };
+}
+
+function createDepthMap(): DepthMap {
+  return {
+    height: 24,
+    kind: "disparity_px",
+    samples: {
+      encoding: "scaled16",
+      scale: 256,
+      values: new Uint16Array(32 * 24).fill(2560),
+    },
+    width: 32,
+  };
+}
+
+/** A timeline whose answer for a media time is whatever the test says it is
+ *  at the moment it is asked. */
+function stubDetectionTimeline(
+  answer: () => DetectionFrame | undefined,
+): MediaRendererSceneOptions["detectionTimeline"] {
+  return {
+    async prepare() {},
+    prefetch() {},
+    selectFrame: () => answer(),
+    getBufferedFrames: () => [],
+    getState: () => createIdleDetectionBufferState(),
+    destroy() {},
+  };
+}
+
+function createChannel() {
+  let handler: ((presented: PresentedVideoFrame) => void) | null = null;
+
+  return {
+    channel: {
+      onPresentedFrame(next: (presented: PresentedVideoFrame) => void) {
+        handler = next;
+      },
+    },
+    present(presented: PresentedVideoFrame) {
+      handler?.(presented);
+    },
+  };
+}
+
+function presentedFrame(
+  mediaTimeMs: number,
+  size: { readonly height: number; readonly width: number } = {
+    height: 240,
+    width: 320,
+  },
+) {
+  return {
+    frame: {
+      close: vi.fn(),
+      displayHeight: size.height,
+      displayWidth: size.width,
+    },
+    frameId: { index: mediaTimeMs / 1000, ticks: mediaTimeMs },
+    mediaTimeMs,
+    mediaTimeS: mediaTimeMs / 1000,
+  } as unknown as PresentedVideoFrame & {
+    readonly frame: { readonly close: ReturnType<typeof vi.fn> };
+  };
+}
+
+function createSceneOptions(
+  presentedFrames: MediaRendererSceneOptions["presentedFrames"],
+): MediaRendererSceneOptions {
+  return {
+    annotationOverlayStyle: null,
+    backgroundColor: undefined,
+    boxCornerStyle: undefined,
+    boxStyle: undefined,
+    canInteract: () => false,
+    ellipseStyle: undefined,
+    markerStyle: undefined,
+    maskHaloStyle: undefined,
+    container: {
+      appendChild: vi.fn(),
+      clientHeight: 360,
+      clientWidth: 640,
+    } as unknown as HTMLElement,
+    detectionTimeline: createBufferedDetectionTimeline({
+      source: createArrayDetectionFrameSource([]),
+    }),
+    diagnostics: undefined,
+    editingEngine: undefined,
+    fit: MediaRendererFit.Contain,
+    focusStyle: null,
+    interaction: undefined,
+    interactionStyle: null,
+    keypointStyle: null,
+    labelStyle: null,
+    maskBrush: undefined,
+    maskStyle: null,
+    maxDevicePixelRatio: 1,
+    orientedBoxStyle: undefined,
+    percentageBarStyle: undefined,
+    polygonStyle: undefined,
+    polylineStyle: null,
+    presentedFrames,
+    previewOverlay: undefined,
+    regionRenderers: [],
+    renderPreparation: undefined,
+    shapeStyle: null,
+    visibility: undefined,
+  };
+}

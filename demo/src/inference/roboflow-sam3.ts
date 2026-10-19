@@ -33,6 +33,12 @@ export interface Sam3FrameBatchRequest {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * The request shape for the single-frame SAM3 proxy in
+ * `demo/server/roboflow-sam3-plugin.ts`, which forwards a body to Roboflow
+ * unchanged and so states none of it. Demo playback runs through
+ * `inferSam3FrameBatchStream`.
+ */
 export async function inferSam3Frame(
   request: Sam3FrameRequest,
   context: Sam3FrameContext,

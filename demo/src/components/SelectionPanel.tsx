@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import {
   KeypointVisibility,
   MediaRendererPlaybackState,
@@ -7,11 +7,14 @@ import {
 import { formatExactTime, formatInteger, formatTime } from "../format";
 
 export const SelectionPanel = memo(function SelectionPanel({
+  depthReadout = null,
   hoveredDetectionPick,
   onClearSelection,
   playbackState,
   selectedDetectionPick,
 }: {
+  /** Sits above the detection details, which change height as picks come and go. */
+  readonly depthReadout?: ReactNode;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly onClearSelection: () => void;
   readonly playbackState: MediaRendererPlaybackState | null;
@@ -32,6 +35,8 @@ export const SelectionPanel = memo(function SelectionPanel({
           </button>
         ) : null}
       </header>
+
+      {depthReadout}
 
       <p className="selection-panel__hint">
         {interactionEnabled

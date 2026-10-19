@@ -22,13 +22,18 @@ const chunksDir = resolve(options.chunksDir ?? `${fixtureDir}/detections`);
 const fixture = JSON.parse(await readFile(inputPath, "utf8"));
 const frames = fixture.frames ?? [];
 const duration = fixture.video?.duration ?? getFixtureDuration(frames);
+/** Source frame intervals can end past the reported duration on VFR media. */
+const timelineEndTime = Math.max(duration, getFixtureDuration(frames));
 const chunkCount = Math.max(
   1,
-  Math.ceil(duration / options.chunkDurationSeconds),
+  Math.ceil(timelineEndTime / options.chunkDurationSeconds),
 );
 const chunks = Array.from({ length: chunkCount }, (_, chunkIndex) => ({
   chunkIndex,
-  endTime: Math.min(duration, (chunkIndex + 1) * options.chunkDurationSeconds),
+  endTime: Math.min(
+    timelineEndTime,
+    (chunkIndex + 1) * options.chunkDurationSeconds,
+  ),
   frames: [],
   startTime: chunkIndex * options.chunkDurationSeconds,
 }));

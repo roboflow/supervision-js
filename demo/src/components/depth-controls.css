@@ -1,0 +1,56 @@
+.depth-controls__range {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.depth-controls__lock {
+  background: #ffffff;
+  border: 1px solid #ddd6fe;
+  border-radius: var(--radius-md);
+  color: var(--violet);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  grid-column: 1 / -1;
+  min-height: 1.9rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.depth-controls__lock:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+
+.depth-controls__lock:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* One height whatever the range says, so nothing below it moves. */
+.depth-controls__legend {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.depth-controls__legend > span {
+  block-size: 0.55rem;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(23, 18, 36, 0.12);
+}
+
+.depth-controls__legend p {
+  color: var(--muted);
+  display: flex;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  justify-content: space-between;
+  line-height: 1rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.depth-controls__legend small {
+  font-size: inherit;
+}

@@ -122,6 +122,18 @@ describe("detection picker", () => {
           id: "mask",
           mask: encodeBinaryMask(Uint8Array.from([1, 0, 0, 0]), 2, 2),
         },
+        {
+          id: "oriented-box",
+          // A quadrilateral rotated 45 degrees around (90, 10).
+          orientedBox: {
+            points: [
+              { x: 90, y: 0 },
+              { x: 100, y: 10 },
+              { x: 90, y: 20 },
+              { x: 80, y: 10 },
+            ],
+          },
+        },
       ],
       mediaTime: 0,
     };
@@ -132,6 +144,14 @@ describe("detection picker", () => {
     expect(pickDetectionAtPoint(mixedFrame, { x: 32, y: 10 })?.target).toBe(
       DetectionPickTarget.Polyline,
     );
+    expect(pickDetectionAtPoint(mixedFrame, { x: 90, y: 10 })).toMatchObject({
+      detection: expect.objectContaining({ id: "oriented-box" }),
+      target: DetectionPickTarget.OrientedBox,
+    });
+    // Inside the quadrilateral's axis-aligned bounds but outside its rotated
+    // edges, proving the hit test follows the actual quadrilateral rather than
+    // its bounding box.
+    expect(pickDetectionAtPoint(mixedFrame, { x: 82, y: 2 })).toBeNull();
     expect(pickDetectionAtPoint(mixedFrame, { x: 50, y: 5 })).toMatchObject({
       geometryIndex: 0,
       target: DetectionPickTarget.Keypoint,
@@ -359,6 +379,176 @@ describe("detection picker", () => {
         { maskMediaDimensions: { height: 200, width: 200 } },
       )?.detection.id,
     ).toBe("small-box");
+  });
+
+  it("can pick the front detection across mixed geometry and unequal areas", () => {
+    const box = { id: "box", rect: { x: 40, y: 40, width: 20, height: 20 } };
+    const polygon = {
+      id: "polygon",
+      polygon: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+          { x: 100, y: 100 },
+          { x: 0, y: 100 },
+        ],
+      },
+    };
+    const overlap = { x: 40, y: 40 };
+    const cases = [
+      [box, polygon],
+      [
+        { ...polygon, zIndex: 9 },
+        { ...box, zIndex: 1 },
+      ],
+      [
+        { ...box, zIndex: 3 },
+        { ...polygon, zIndex: 3 },
+      ],
+    ];
+    for (const detections of cases) {
+      const mixed = { detections, mediaTime: 0 };
+      expect(pickDetectionAtPoint(mixed, overlap)?.detection.id).toBe("box");
+      expect(
+        pickDetectionAtPoint(mixed, overlap, { preferTopmost: true })?.detection
+          .id,
+      ).toBe("polygon");
+    }
+    expect(
+      pickDetectionAtPoint(
+        { detections: [polygon, box], mediaTime: 0 },
+        overlap,
+        { preferTopmost: true },
+      )?.detection.id,
+    ).toBe("box");
+  });
+
+  it("opts masks into the same zIndex/frame ordering while preserving holes and eligibility", () => {
+    const mask = encodeBinaryMask(Uint8Array.from([1, 0, 1, 1]), 2, 2);
+    const lowerMask = { id: "lower", mask, zIndex: -1 };
+    const box = {
+      id: "box",
+      rect: { x: 1, y: 1, width: 2, height: 2 },
+      zIndex: 0,
+    };
+    const polygon = {
+      id: "polygon",
+      polygon: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 2, y: 0 },
+          { x: 2, y: 2 },
+          { x: 0, y: 2 },
+        ],
+      },
+      zIndex: 1,
+    };
+    const upperMask = { id: "upper", mask, zIndex: 2, locked: true };
+    const mixed = {
+      detections: [lowerMask, box, polygon, upperMask],
+      mediaTime: 0,
+    };
+    const options = { preferTopmost: true, maskOrder: "detection" as const };
+    expect(
+      pickDetectionAtPoint(mixed, { x: 0.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("upper");
+    expect(
+      pickDetectionAtPoint(mixed, { x: 1.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("polygon");
+    expect(
+      pickDetectionAtPoint(
+        mixed,
+        { x: 0.5, y: 0.5 },
+        { ...options, includeLocked: false },
+      )?.detection.id,
+    ).toBe("polygon");
+    expect(
+      pickDetectionAtPoint(
+        mixed,
+        { x: 0.5, y: 0.5 },
+        { ...options, filter: (detection) => detection.id !== "upper" },
+      )?.detection.id,
+    ).toBe("polygon");
+    const tied = {
+      detections: [lowerMask, box, polygon, { ...upperMask, zIndex: 1 }],
+      mediaTime: 0,
+    };
+    expect(
+      pickDetectionAtPoint(tied, { x: 0.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("upper");
+    expect(
+      pickDetectionAtPoint(
+        {
+          ...mixed,
+          detections: [upperMask, box, polygon, lowerMask].map(
+            ({ zIndex: _order, ...detection }) => detection,
+          ),
+        },
+        { x: 0.5, y: 0.5 },
+        options,
+      )?.detection.id,
+    ).toBe("lower");
+  });
+
+  it("keeps masks below editable geometry and ignores derived bounds", () => {
+    const mask = {
+      id: "mask",
+      zIndex: 99,
+      rect: { x: 1, y: 1, width: 2, height: 2 },
+      mask: encodeBinaryMask(Uint8Array.from([1, 0, 0, 0]), 2, 2),
+    };
+    const box = { id: "box", rect: { x: 0.5, y: 0.5, width: 1, height: 1 } };
+    const masked = { detections: [box, mask], mediaTime: 0 };
+    const options = { preferTopmost: true, keypointPadding: 0, edgePadding: 0 };
+    expect(
+      pickDetectionAtPoint(masked, { x: 0.5, y: 0.5 }, options)?.detection.id,
+    ).toBe("box");
+    expect(
+      pickDetectionAtPoint(
+        { detections: [mask], mediaTime: 0 },
+        { x: 0.5, y: 0.5 },
+        options,
+      )?.target,
+    ).toBe(DetectionPickTarget.Mask);
+    expect(
+      pickDetectionAtPoint(masked, { x: 1.5, y: 1.5 }, options),
+    ).toBeNull();
+    const polygon = {
+      id: "polygon",
+      rect: { x: 50, y: 50, width: 100, height: 100 },
+      polygon: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+          { x: 0, y: 100 },
+        ],
+      },
+    };
+    expect(
+      pickDetectionAtPoint(
+        { detections: [polygon], mediaTime: 0 },
+        { x: 90, y: 90 },
+        options,
+      ),
+    ).toBeNull();
+    const skeleton = {
+      id: "skeleton",
+      rect: { x: 50, y: 50, width: 100, height: 100 },
+      keypoints: {
+        points: [
+          { x: 40, y: 40 },
+          { x: 60, y: 40 },
+        ],
+        edges: [[0, 1] as const],
+      },
+    };
+    expect(
+      pickDetectionAtPoint(
+        { detections: [skeleton], mediaTime: 0 },
+        { x: 40, y: 40 },
+        options,
+      )?.target,
+    ).toBe(DetectionPickTarget.Keypoint);
   });
 
   it("keeps id-based picks stable across reorder and honors z-order ties", () => {

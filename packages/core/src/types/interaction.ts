@@ -6,6 +6,7 @@ export enum DetectionPickTarget {
   Keypoint = "keypoint",
   Label = "label",
   Mask = "mask",
+  OrientedBox = "orientedBox",
   Polygon = "polygon",
   Polyline = "polyline",
 }
@@ -33,6 +34,13 @@ export interface DetectionPickResult {
 }
 
 export interface DetectionPickOptions {
+  /** Pick editable geometry by zIndex, then frame order, rather than area.
+   *  Rects accompanying masks or paths are bounds, not independent box targets;
+   *  mask fills stay below vector geometry unless maskOrder is "detection".
+   *  Defaults to false. */
+  readonly preferTopmost?: boolean;
+  /** Include masks in detection order when preferTopmost is enabled. */
+  readonly maskOrder?: "detection";
   readonly padding?: number;
   readonly polylinePadding?: number;
   readonly keypointPadding?: number;
@@ -65,10 +73,18 @@ export type DetectionSelectionOptions = DetectionSelectionOptionsBase &
     | {
         readonly detectionId: string | number;
         readonly detectionIndex?: number;
+        readonly detectionIds?: never;
       }
     | {
         readonly detectionId?: string | number;
         readonly detectionIndex: number;
+        readonly detectionIds?: never;
+      }
+    | {
+        /** Ordered selection; takes precedence over singular selectors. */
+        readonly detectionIds: readonly (string | number)[];
+        readonly detectionId?: string | number;
+        readonly detectionIndex?: number;
       }
   );
 

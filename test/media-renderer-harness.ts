@@ -75,6 +75,7 @@ const mockState = vi.hoisted(() => {
       fill: ReturnType<typeof vi.fn>;
       lineTo: ReturnType<typeof vi.fn>;
       moveTo: ReturnType<typeof vi.fn>;
+      poly: ReturnType<typeof vi.fn>;
       quadraticCurveTo: ReturnType<typeof vi.fn>;
       rect: ReturnType<typeof vi.fn>;
       roundRect: ReturnType<typeof vi.fn>;
@@ -83,6 +84,7 @@ const mockState = vi.hoisted(() => {
       x: number;
       y: number;
     }>,
+    bufferImageSourceOptions: [] as unknown[],
     imageSourceDestroy: vi.fn(),
     imageSourceOptions: [] as unknown[],
     meshGeometryDestroy: vi.fn(),
@@ -109,8 +111,11 @@ const mockState = vi.hoisted(() => {
       visible: boolean;
       width: number;
     }>,
+    render: vi.fn(),
     tickerAdd: vi.fn(),
     tickerRemove: vi.fn(),
+    tickerStart: vi.fn(),
+    tickerStop: vi.fn(),
     textureDestroy: vi.fn(),
     textureOptions: [] as unknown[],
     textureUpdate: vi.fn(),
@@ -148,7 +153,10 @@ const mockState = vi.hoisted(() => {
     getTracks: vi.fn(async () => mediaMock.tracks),
     getVideoTracks: vi.fn(async () => mediaMock.videoTracks),
     inputConstructor: vi.fn(),
-    iteratorReturn: vi.fn(async () => undefined),
+    iteratorReturn: vi.fn(async () => ({
+      done: true as const,
+      value: undefined,
+    })),
     primaryVideoTrack: {} as Record<string, unknown>,
     sampleNextCalls: [] as number[],
     samples: [] as MockVideoSample[],
@@ -189,15 +197,34 @@ vi.mock("pixi.js", () => {
   class Application {
     canvas = {
       addEventListener: pixiMock.canvasAddEventListener,
+      height: 360,
       removeEventListener: pixiMock.canvasRemoveEventListener,
       style: {},
+      width: 640,
     };
-    renderer = { name: "webgl", resize: pixiMock.rendererResize };
     screen = { height: 360, width: 640 };
+    renderer = {
+      name: "webgl",
+      resolution: 1,
+      screen: this.screen,
+      resize: (width: number, height: number, resolution: number) => {
+        Object.assign(this.screen, { width, height });
+        this.renderer.resolution = resolution;
+        this.canvas.width = Math.round(width * resolution);
+        this.canvas.height = Math.round(height * resolution);
+        pixiMock.rendererResize.call(this.renderer, width, height, resolution);
+      },
+    };
     stage = { addChild: pixiMock.stageAddChild };
-    ticker = { add: pixiMock.tickerAdd, remove: pixiMock.tickerRemove };
+    ticker = {
+      add: pixiMock.tickerAdd,
+      remove: pixiMock.tickerRemove,
+      start: pixiMock.tickerStart,
+      stop: pixiMock.tickerStop,
+    };
     destroy = pixiMock.appDestroy;
     init = pixiMock.appInit;
+    render = pixiMock.render;
 
     constructor() {
       pixiMock.canvasInstances.push(this.canvas);
@@ -205,6 +232,8 @@ vi.mock("pixi.js", () => {
   }
 
   class CanvasSource {
+    scaleMode = "linear";
+    style = { update: vi.fn() };
     destroy = pixiMock.canvasSourceDestroy;
     update = pixiMock.canvasSourceUpdate;
 
@@ -219,6 +248,16 @@ vi.mock("pixi.js", () => {
 
     constructor(options: unknown) {
       pixiMock.imageSourceOptions.push(options);
+    }
+  }
+
+  class BufferImageSource {
+    destroy = pixiMock.imageSourceDestroy;
+    style = {};
+    update = vi.fn();
+
+    constructor(options: unknown) {
+      pixiMock.bufferImageSourceOptions.push(options);
     }
   }
 
@@ -276,15 +315,21 @@ vi.mock("pixi.js", () => {
 
       return children[0];
     }
+
+    removeChildren() {
+      return this.children.splice(0);
+    }
   }
 
   class Graphics {
+    destroy = vi.fn();
     circle = vi.fn(() => this);
     closePath = vi.fn(() => this);
     clear = vi.fn(() => this);
     fill = vi.fn(() => this);
     lineTo = vi.fn(() => this);
     moveTo = vi.fn(() => this);
+    poly = vi.fn(() => this);
     quadraticCurveTo = vi.fn(() => this);
     rect = vi.fn(() => this);
     roundRect = vi.fn(() => this);
@@ -372,6 +417,17 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class BlurFilter {
+    destroy = vi.fn();
+    quality: number;
+    strength: number;
+
+    constructor(options: { quality?: number; strength: number }) {
+      this.quality = options.quality ?? 4;
+      this.strength = options.strength;
+    }
+  }
+
   class MeshGeometry {
     destroy = pixiMock.meshGeometryDestroy;
 
@@ -437,17 +493,6 @@ vi.mock("pixi.js", () => {
     }
   }
 
-  class BlurFilter {
-    destroy = vi.fn();
-    quality: number;
-    strength: number;
-
-    constructor(options: { quality?: number; strength: number }) {
-      this.quality = options.quality ?? 4;
-      this.strength = options.strength;
-    }
-  }
-
   class Filter {
     destroy = vi.fn();
     padding = 0;
@@ -464,6 +509,7 @@ vi.mock("pixi.js", () => {
     Application,
     Assets,
     BlurFilter,
+    BufferImageSource,
     CanvasSource,
     Container,
     defaultFilterVert: "default-filter-vertex",
@@ -472,12 +518,14 @@ vi.mock("pixi.js", () => {
     ImageSource,
     Mesh,
     MeshGeometry,
+    PrepareSystem: class {},
     Rectangle,
     Sprite,
     Shader,
     Text,
     Texture,
     UniformGroup,
+    extensions: { add: vi.fn() },
   };
 });
 
@@ -553,7 +601,19 @@ vi.mock("mediabunny", () => {
     }
   }
 
+  /** One key packet per mock sample. */
+  class EncodedPacketSink {
+    async *packets() {
+      yield* mediaMock.samples.map((sample) => ({
+        duration: sample.duration,
+        timestamp: sample.timestamp,
+        type: "key" as const,
+      }));
+    }
+  }
+
   return {
+    EncodedPacketSink,
     Input,
     MATROSKA: { name: "Matroska" },
     MP4: { name: "MP4" },
@@ -565,7 +625,9 @@ vi.mock("mediabunny", () => {
 });
 
 vi.stubGlobal("document", {
+  addEventListener: vi.fn(),
   createElement: domMock.createElement,
+  removeEventListener: vi.fn(),
 });
 
 vi.stubGlobal("window", {
@@ -606,6 +668,7 @@ export function resetMocks() {
   pixiMock.containerAddChild.mockClear();
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
+  pixiMock.bufferImageSourceOptions.length = 0;
   pixiMock.imageSourceDestroy.mockClear();
   pixiMock.imageSourceOptions.length = 0;
   pixiMock.meshGeometryDestroy.mockClear();
@@ -617,8 +680,11 @@ export function resetMocks() {
   pixiMock.rendererResize.mockClear();
   pixiMock.stageAddChild.mockClear();
   pixiMock.spriteInstances.length = 0;
+  pixiMock.render.mockClear();
   pixiMock.tickerAdd.mockClear();
   pixiMock.tickerRemove.mockClear();
+  pixiMock.tickerStart.mockClear();
+  pixiMock.tickerStop.mockClear();
   pixiMock.textureDestroy.mockClear();
   pixiMock.textureOptions.length = 0;
   pixiMock.textureUpdate.mockClear();
@@ -658,6 +724,7 @@ export function resetMocks() {
     getDisplayHeight: mediaMock.getDisplayHeight,
     getDisplayWidth: mediaMock.getDisplayWidth,
     getFirstTimestamp: mediaMock.getFirstTimestamp,
+    getTimeResolution: vi.fn(async () => 1_000_000),
     type: "video",
   };
   mediaMock.getPrimaryVideoTrack.mockResolvedValue(mediaMock.primaryVideoTrack);
@@ -679,6 +746,10 @@ export function resetMocks() {
   domMock.cancelAnimationFrame.mockClear();
   domMock.createElement.mockClear();
   domMock.createElement.mockImplementation((tagName: string) => {
+    if (tagName === "div") {
+      return { appendChild: domMock.appendChild, remove: vi.fn(), style: {} };
+    }
+
     if (tagName !== "canvas") {
       throw new Error(`Unexpected element: ${tagName}`);
     }
@@ -686,6 +757,7 @@ export function resetMocks() {
     return {
       getContext: domMock.getContext,
       height: 0,
+      style: {},
       width: 0,
     };
   });

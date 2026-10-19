@@ -1,3 +1,5 @@
+import type { MediaErrorKind } from "#types/media-rendering";
+
 /**
  * Media-session operating mode.
  *
@@ -36,12 +38,35 @@ export enum MediaSessionStatus {
  * Subsystem currently affecting session readiness or presentation.
  */
 export enum MediaSessionActivityKind {
+  /**
+   * Playback is held waiting for a producer to emit detections for the frame
+   * about to be shown, which is a wait on inference rather than on transfer or
+   * decode. `DetectionsBuffering` is the transfer of detections that already
+   * exist, and `PlaybackBuffering` is the wait for media bytes.
+   */
+  DetectionsAwaitingCoverage = "detectionsAwaitingCoverage",
   DetectionsBuffering = "detectionsBuffering",
   DetectionsLoading = "detectionsLoading",
   Error = "error",
   MediaNormalizing = "mediaNormalizing",
   MediaOpening = "mediaOpening",
+  /**
+   * The picture is waiting on media the source has not handed over yet, which
+   * is the bytes and their decode rather than anything downstream of them.
+   * `PlaybackBuffering` is what a transport reports once it has already
+   * stopped; this is reported from the read itself, including the reads a seek
+   * makes while the transport still reads as paused.
+   */
+  MediaSourceReading = "mediaSourceReading",
   PlaybackBuffering = "playbackBuffering",
+  /**
+   * The render-preparation gate held the picture for artifacts that never
+   * arrived and let it go. Nothing is blocked: the frames reaching the screen
+   * are the ones whose artifacts were given up on. What is waited on is
+   * preparation finishing another frame, which is what lets the gate hold the
+   * picture again; `RenderPreparing` covers the holds that are running.
+   */
+  RenderPreparationAbandoned = "renderPreparationAbandoned",
   RenderPreparing = "renderPreparing",
 }
 
@@ -73,6 +98,14 @@ export interface MediaSessionActivity {
    */
   readonly blockingPresentation: boolean;
   readonly detail?: string | null;
+  /**
+   * Stable failure classification when this activity reports an error.
+   *
+   * Prefer this over `errorMessage` for control flow: messages are diagnostic
+   * text and may name vendor internals. Absent when the reporting subsystem
+   * does not classify its failures.
+   */
+  readonly errorKind?: MediaErrorKind | null;
   readonly errorMessage?: string | null;
   readonly kind: MediaSessionActivityKind;
   readonly label: string;

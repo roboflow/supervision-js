@@ -43,6 +43,13 @@ export enum RenderPreparationArtifactKind {
   MaskFrame = "maskFrame",
   /** Frame-level ID-mask artifact rasterized from semantic polygons. */
   PolygonFrame = "polygonFrame",
+  /** A clip's 8-bit preview depth, decoded ahead of playback. */
+  DepthFrame = "depthFrame",
+  /**
+   * A clip's exact 16-bit depth, loaded for the frame at rest and its
+   * neighbours: `preparedCount` frames kept, `pendingCount` loading.
+   */
+  ExactDepthFrame = "exactDepthFrame",
 }
 
 /**
@@ -53,6 +60,34 @@ export enum RenderPreparationArtifactFrameStatus {
   Empty = "empty",
   Pending = "pending",
   Prepared = "prepared",
+}
+
+/**
+ * Why an enabled render-preparation gate is holding playback.
+ *
+ * The two holds are different events for a viewer. One says the picture is
+ * incomplete; the other says the picture is finished and the gate is banking a
+ * lead in front of it. A host shown only that playback stopped cannot tell them
+ * apart, and describing the second as missing media is wrong on any source.
+ */
+export enum RenderPreparationGateHoldReason {
+  /** The frame about to be presented lacks the required raster quality. */
+  ActiveFrameUnprepared = "activeFrameUnprepared",
+  /** That frame is ready, and the prepared lead in front of it is short. */
+  LeadBelowRequirement = "leadBelowRequirement",
+}
+
+/**
+ * The hold an enabled gate is applying, absent when it is not holding.
+ */
+export interface RenderPreparationGateHoldDiagnostics {
+  readonly reason: RenderPreparationGateHoldReason;
+  /**
+   * Prepared lead the wait has to reach before it ends, after the target
+   * window's own span has capped it. Against `preparedAheadSeconds` it gives a
+   * host the progress of the wait.
+   */
+  readonly requiredAheadSeconds: number;
 }
 
 /**
@@ -69,9 +104,42 @@ export interface RenderPreparationWorkerFactory {
  */
 export interface RenderPreparationMaskFrameOptions {
   /**
+   * The box the host paints prepared masks into, in CSS pixels, with the pixel
+   * ratio it paints them at. A mask frame's id raster is then capped to the
+   * size that box can show; absent, it is cooked at the detections' own
+   * resolution. Exact depth frames the box cannot show at least twice over
+   * go up to the GPU decimated by that whole factor; readouts still read every
+   * sample.
+   */
+  readonly display?: {
+    readonly boxHeight: number;
+    readonly boxWidth: number;
+    readonly devicePixelRatio: number;
+    readonly maxDevicePixelRatio?: number;
+  };
+  /**
+   * Scale of the display-fitted width cap for previews during rapid movement.
+   * Default: 0.5. Rasters never exceed native mask dimensions.
+   * Positive values up to 1 are accepted; invalid values use the default.
+   * A value of 1 keeps the full display-fitted resolution during motion.
+   * Once motion settles, the visible frame uses the full fitted resolution.
+   * Without a display box, masks keep their native resolution.
+   */
+  readonly previewScale?: number;
+  /**
    * Maximum number of prepared mask frames retained in memory.
    */
   readonly maxCacheFrameCount?: number;
+  /**
+   * Byte budget for retained prepared mask payloads and reserved renderer
+   * backing, including exact region coverage. Values below 16 MiB are raised
+   * to 16 MiB. This budget and `maxCacheFrameCount` both trigger eviction;
+   * the active frame remains protected even when it exceeds the budget.
+   * Transient preparation allocations and unrelated renderer resources are
+   * excluded. Default: 64 MiB per reported GB of device memory, clamped to
+   * 256 MiB–1 GiB; 256 MiB when unavailable.
+   */
+  readonly maxCacheBytes?: number;
   /**
    * Maximum number of mask frames queued for preparation.
    */
@@ -95,21 +163,106 @@ export interface RenderPreparationMaskFrameOptions {
 }
 
 /**
- * Playback gate for prepared render artifacts.
+ * Prepared-artifact playback gate, off unless `enabled` says otherwise.
+ *
+ * Off, preparation runs behind the picture and a frame the prepared window
+ * does not cover reaches no annotation layer instead of holding playback back.
+ * On, playback waits until the prepared window leads the playhead, so masks and
+ * polygons arrive with their frame rather than after it.
+ *
+ * A source the renderer pulls samples from is held between the sample it
+ * decoded and the draw. A source that presents its own frames owns the
+ * playhead, so it is held by stopping the producer and starting it again,
+ * before playback begins and at any frame after it whose artifacts are
+ * missing. The renderer reports `Buffering` for as long as either wait lasts.
+ *
+ * `maxWaitSeconds` bounds every one of those waits, so preparation that has
+ * stopped producing costs one wait and the frames after it are drawn without
+ * their artifacts.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
-   * Pause playback while required artifacts are not prepared.
+   * Pause playback while required artifacts are unprepared. A session turns
+   * this on by default for playback. Its initial opening frame may appear
+   * before annotations arrive. `playbackGate: false` on the session turns it
+   * off. A renderer created directly leaves it off.
    */
   readonly enabled?: boolean;
   /**
-   * Soft target ahead of the active frame.
+   * Raster quality required by an enabled gate. Default: "adaptive", which
+   * accepts smaller previews during rapid movement. "fine" waits for the full
+   * display-fitted raster and prepares its lead at that quality. An enabled
+   * fine gate overrides `maskFrame.previewScale` during playback, scrubbing,
+   * and seeking. This can increase CPU work and buffering.
+   * `maxWaitSeconds` still bounds the wait; on expiry, playback may use a
+   * preview or omit an unfinished artifact.
    */
-  readonly minimumAheadSeconds?: number;
+  readonly quality?: "adaptive" | "fine";
   /**
-   * Required ahead time before playback can continue.
+   * How long an enabled gate holds the picture for artifacts that are not
+   * prepared, before it gives up and lets the frames through without them.
+   * Defaults to two seconds, and bounds every wait the gate makes: the one
+   * before playback begins, the one that stops a running producer at a frame,
+   * and the per-sample one of a renderer that pulls its own samples. `Infinity`
+   * holds indefinitely, and `0` never holds for artifacts at all.
+   *
+   * Preparation falls behind for as long as the machine is losing, and that
+   * looks no different to the gate from a cook still on its way. A gate that
+   * gave up holds off until preparation finishes another frame, so a machine
+   * that is merely slow keeps stopping the picture and catching up, and one
+   * that has stopped producing costs one wait rather than one a frame.
+   */
+  readonly maxWaitSeconds?: number;
+  /**
+   * How long the prepared lead may fall to before playback stops, in seconds
+   * of the viewer's own time. Defaults to 0.1s. A rate multiplies it, because
+   * one wall second of runway is eight seconds of timeline at 8x, and a
+   * `requiredAheadSeconds` too small to fund the margin holds it below the lead
+   * that ends a stop rather than letting the two meet.
+   */
+  readonly stopBelowWallSeconds?: number;
+  /**
+   * How much lead a stop banks on top of `stopBelowWallSeconds` before
+   * playback resumes, in seconds of the viewer's own time. Defaults to 0.2s,
+   * so a stop lasts about as long as it takes to cook that margin and no
+   * longer. This is what sets the length of a stop; `requiredAheadSeconds`
+   * only caps it.
+   */
+  readonly resumeMarginWallSeconds?: number;
+  /**
+   * Ceiling on the lead the two thresholds above may ask for, in seconds of
+   * timeline. Defaults to none, which asks only that the frame about to be
+   * presented is no longer pending.
+   *
+   * This is unrelated to the detection playback gate's field of the same name,
+   * which is a minimum coverage lead.
+   *
+   * It buys no cooked frames: how far ahead preparation cooks and how much of
+   * that it keeps are the prepared window's own prefetch and cache spans, sized
+   * by the session rather than by this. The gate reads them only as a second
+   * ceiling, so a span too small to hold the lead lowers it further. All this can
+   * do is shorten a stop, by holding the resume lead below what the wall clock
+   * asked for. With the default thresholds that lead is 0.3s of timeline per
+   * unit of rate, so a ceiling only starts to bite once the rate lifts the lead
+   * above it: the 1s a session sets first does so near 3.3x.
    */
   readonly requiredAheadSeconds?: number;
+}
+
+/**
+ * The two lead thresholds a gate is applying right now, in seconds of
+ * timeline, which is the only unit a prepared window can compare a lead
+ * against. The wall-clock options above describe how long a viewer is left
+ * looking at a still picture; turning those into timeline needs the playback
+ * rate, so the renderer resolves them per call and the window stays blind to
+ * the rate.
+ */
+export interface ResolvedRenderPreparationGateThresholds {
+  readonly enabled?: boolean;
+  /** Lead at or above which a stop that is running ends. */
+  readonly resumeAtSeconds: number;
+  /** Lead below which playback stops. */
+  readonly stopBelowSeconds: number;
 }
 
 /**
@@ -135,13 +288,46 @@ export interface RenderPreparationArtifactWindowDiagnostics {
  */
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
+  readonly gateHold?: RenderPreparationGateHoldDiagnostics | null;
+  /** Times this family held the playback gate since it opened. Only depth reports it. */
+  readonly gateHoldCount?: number;
   readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
+  /**
+   * A `DepthFrame` window's depth: `"preview"` for the preview video,
+   * `"exact"` for exact frames loaded ahead for playback.
+   */
+  readonly precision?: "exact" | "preview";
   readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
+  /** Retained payload and renderer backing budget, and its current reservation. */
+  readonly maxPreparedBytes?: number;
+  readonly preparedBytes?: number;
+  /** Prepared rasters currently at the coarse tier, owed a fine cook once settled. */
+  readonly coarseCount?: number;
   readonly pendingCount: number;
+  /**
+   * Frames in the unbroken run of prepared frames starting at the active
+   * detection frame.
+   *
+   * This is a count of frames, not of media time. Above 1x the preparer strides,
+   * so N frames here do not cover N frame durations of playback, and the two
+   * numbers diverge by design. Deriving one from the other is wrong in both
+   * directions.
+   * With playback gate quality "fine", only fine rasters count as prepared.
+   */
   readonly preparedAheadFrameCount?: number;
+  /**
+   * Media-time reach of that same unbroken run, in seconds, measured forward
+   * from the active detection frame and wrapping at the media end on a looping
+   * clip.
+   *
+   * The run stops at the first frame that is not prepared, so this is how long
+   * playback can continue before annotations stop, not the furthest frame
+   * prepared anywhere. It is also what a detection gate compares against its
+   * required lead, so it stays a single comparable scalar.
+   */
   readonly preparedAheadSeconds?: number;
   readonly prefetchCount?: number;
   readonly preparedCount: number;
@@ -161,15 +347,83 @@ export interface RenderPreparationDiagnostics {
 }
 
 /**
+ * Which depth a clip draws while playback runs.
+ *
+ * - `"preview"`: the 8-bit preview video, decoded ahead of the playhead.
+ * - `"exact"`: the exact 16-bit PNGs, loaded ahead of the playhead; the
+ *   playback gate holds for them. A clip whose exact frames stop loading
+ *   falls back to its preview.
+ * - `"auto"` (the default): the exact PNGs while they keep up, the preview
+ *   otherwise. Exact depth takes over once its lead reaches three quarters
+ *   of what it loads ahead, and hands back when the lead falls under a
+ *   quarter or a frame is missing, waiting longer each time before it tries
+ *   again. A clip without a preview plays exact depth.
+ *
+ * Whichever is drawn is the depth of the frame on screen;
+ * `getActiveDepth().precision` says which.
+ */
+export type DepthPlaybackSource = "auto" | "exact" | "preview";
+
+/**
+ * Memory and timing for a depth clip. Every byte budget defaults to a size
+ * that scales with the clip's resolution, so a 4K clip keeps as many seconds
+ * as a 720p one, within a ceiling.
+ */
+export interface RenderPreparationDepthOptions {
+  /** Defaults to `"auto"`. See {@link DepthPlaybackSource}. */
+  readonly playback?: DepthPlaybackSource;
+  /**
+   * Exact frames loaded ahead for playback, in bytes. Defaults to room for
+   * twice `previewPrefetchSeconds` plus a quarter second of exact frames, at
+   * least 96 MiB and at most 512 MiB; a shorter budget lowers the lead exact
+   * playback reaches. A budget under one frame still holds the frame on
+   * screen.
+   */
+  readonly maxExactPlaybackCacheBytes?: number;
+  /**
+   * Decoded preview frames kept, in bytes. Defaults to room for twice
+   * `previewPrefetchSeconds` plus a quarter second of the clip, at least
+   * 96 MiB and at most 512 MiB. A budget shorter than the playback gate's lead
+   * lowers the lead the gate waits for; one under one frame still holds the
+   * frame on screen.
+   */
+  readonly maxPreviewCacheBytes?: number;
+  /**
+   * How far ahead of the playhead the preview, and exact frames when they
+   * play, are decoded while playing, in seconds of media. Defaults to 1.
+   * Above 1x it stretches by how many frames each present moves; a drag
+   * spends the same span both ways, most of it the way the hand heads.
+   */
+  readonly previewPrefetchSeconds?: number;
+}
+
+/**
  * Render-preparation configuration.
  *
  * Most applications can use the session defaults. Tune this when dense masks,
  * long videos, worker policy, or playback gating need explicit behavior.
  */
 export interface RenderPreparationOptions {
+  /** Budgets and timing for depth clips. */
+  readonly depth?: RenderPreparationDepthOptions;
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
+  /**
+   * Hold playback until prepared artifacts cover the frame about to be
+   * presented.
+   *
+   * Both kinds of source are held at every frame: one between its decoded
+   * sample and the draw, the other by stopping the producer that owns the
+   * playhead and starting it again. `maxWaitSeconds` is what makes stopping a
+   * running producer safe, and `playbackGateReach` on the renderer's state
+   * reports the furthest any of its gates reaches.
+   *
+   * A renderer created directly leaves this off. `createMediaSession()` turns it
+   * on for playback; the initial opening frame does not wait for future
+   * annotations. Pass `playbackGate: false` to the session to opt out. See
+   * {@link RenderPreparationPlaybackGateOptions}.
+   */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;
   readonly workerFactory?: RenderPreparationWorkerFactory;
 }
