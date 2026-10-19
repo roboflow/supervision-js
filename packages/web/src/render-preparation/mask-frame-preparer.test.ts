@@ -38,6 +38,34 @@ const maskPreparationJob: MaskFramePreparationJob = {
 };
 
 describe("mask frame preparer", () => {
+  it.each([0, 300])(
+    "preserves overlapping independent coverage through main-thread fallback (%i)",
+    async (detectionIndex) => {
+      resetMocks();
+      const preparer = createMaskFramePreparer({
+        renderPreparation: { mode: RenderPreparationMode.MainThread },
+      });
+      const frame = await preparer.prepare({
+        ...maskPreparationJob,
+        independentMasks: true,
+        instructions: [detectionIndex, detectionIndex + 1].map((index) => ({
+          ...maskPreparationJob.instructions[0]!,
+          detectionIndex: index,
+        })),
+      });
+      expect(
+        frame?.packedMaskCoverage?.map((entry) => entry.detectionIndex),
+      ).toEqual([detectionIndex, detectionIndex + 1]);
+      expect(
+        frame?.packedMaskCoverage?.every(
+          (entry) =>
+            entry.data[0] === 1 && entry.data[entry.textureWidth] === 1,
+        ),
+      ).toBe(true);
+      preparer.destroy();
+    },
+  );
+
   it("rejects unavailable workers in strict worker mode", () => {
     const originalWorker = globalThis.Worker;
 

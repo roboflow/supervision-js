@@ -14,13 +14,19 @@ const radiusBody = `
   return min(ceil(maxWidth + pixelWidth * 0.5), ${MAX_ID_MASK_STROKE_WIDTH + 1}.0);
 `;
 
-export const idMaskStrokeCoverageGlsl = `
+export const sampleIdMaskCellGlsl = `
 float sampleMaskIdCell(ivec2 cell) {
   int x = clamp(cell.x, 0, int(uTextureSize.x) - 1);
   int y = clamp(cell.y, 0, int(uTextureSize.y) - 1);
   return floor(texelFetch(uTexture, ivec2(x, y), 0).r * 255.0 + 0.5);
 }
+`;
 
+export function createIdMaskStrokeCoverageGlsl(
+  sampleCell = sampleIdMaskCellGlsl,
+) {
+  return `
+${sampleCell}
 float subtexelStrokeCoverage(float distance, float width, float alignment, float pixelWidth) {
   ${coverageBody}
 }
@@ -115,14 +121,23 @@ vec2 findNeighborStroke(float centerId, ivec2 sourceCell, vec2 cell, float pixel
   return stroke;
 }
 `;
+}
 
-export const idMaskStrokeCoverageWgsl = `
+export const idMaskStrokeCoverageGlsl = createIdMaskStrokeCoverageGlsl();
+
+export const sampleIdMaskCellWgsl = `
 fn sampleMaskIdCell(cell: vec2<i32>) -> f32 {
   let x = clamp(cell.x, 0, i32(maskUniforms.uTextureSize.x) - 1);
   let y = clamp(cell.y, 0, i32(maskUniforms.uTextureSize.y) - 1);
   return floor(textureLoad(uTexture, vec2<i32>(x, y), 0).r * 255.0 + 0.5);
 }
+`;
 
+export function createIdMaskStrokeCoverageWgsl(
+  sampleCell = sampleIdMaskCellWgsl,
+) {
+  return `
+${sampleCell}
 fn subtexelStrokeCoverage(distance: f32, width: f32, alignment: f32, pixelWidth: f32) -> f32 {
   ${coverageBody}
 }
@@ -217,3 +232,6 @@ fn findNeighborStroke(centerId: f32, sourceCell: vec2<i32>, cell: vec2<f32>, pix
   return stroke;
 }
 `;
+}
+
+export const idMaskStrokeCoverageWgsl = createIdMaskStrokeCoverageWgsl();

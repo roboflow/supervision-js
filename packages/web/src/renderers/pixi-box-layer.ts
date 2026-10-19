@@ -48,6 +48,8 @@ export function createPixiBoxLayer(options: {
   readonly boxStyle: BoxStyle | null | undefined;
   readonly Container?: new () => PixiContainer;
   readonly container?: PixiContainer;
+  /** Ordered rendering retains each frame detection independently of its public ID. */
+  readonly retainByIndex?: boolean;
   readonly Graphics?: new () => PixiGraphics;
   readonly resolveContextState?: (
     detection: Detection,
@@ -119,7 +121,9 @@ export function createPixiBoxLayer(options: {
           );
 
         for (const { detectionIndex, detection } of orderedDetections) {
-          const key = detectionKey(detection, detectionIndex);
+          const key = options.retainByIndex
+            ? `index:${detectionIndex}`
+            : detectionKey(detection, detectionIndex);
           const instruction = boxStyle.resolve(detection, {
             detectionIndex,
             frame: detectionFrame,
@@ -182,17 +186,23 @@ export function createPixiBoxLayer(options: {
     },
 
     invalidateDetection(id) {
-      invalidatedDetections.add(`id:${String(id)}`);
+      invalidatedDetections.add(keyForId(id));
       isDirty = true;
     },
 
     translateDetection(id, x, y) {
-      const display = retainedEntries.get(`id:${String(id)}`);
+      const display = retainedEntries.get(keyForId(id));
       if (!display) return false;
       display.position?.set?.(x, y);
       return true;
     },
   };
+
+  function keyForId(id: string | number) {
+    return options.retainByIndex
+      ? `index:${lastDrawnDetectionFrame?.detections.findIndex((detection) => detection.id === id) ?? -1}`
+      : `id:${String(id)}`;
+  }
 
   function retainRenderedBox(
     detectionIndex: number,

@@ -70,6 +70,7 @@ export interface MediaRendererSceneOptions {
   readonly labelStyle: LabelStyle | null | undefined;
   readonly maskHaloStyle: MaskHaloStyle | null | undefined;
   readonly maskStyle: MaskStyle | null | undefined;
+  readonly maskOrder?: MediaRendererOptions["maskOrder"];
   readonly markerStyle: MarkerStyle | null | undefined;
   readonly orientedBoxStyle: OrientedBoxStyle | null | undefined;
   readonly percentageBarStyle: PercentageBarStyle | null | undefined;

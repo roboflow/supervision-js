@@ -15,6 +15,7 @@ import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import type { Detection } from "supervision-js-core";
 import type {
+  DetectionPickOptions,
   DetectionPickPoint,
   DetectionPickResult,
   DetectionSelectionOptions,
@@ -105,6 +106,7 @@ export function createPixiInteractionLayer(options: {
   readonly pickMaskDetectionAtPoint?: (
     point: DetectionPickPoint,
     mediaTime: number,
+    pickOptions?: DetectionPickOptions,
   ) => DetectionPickResult | null;
   readonly pickLabelDetectionAtPoint?: (
     point: DetectionPickPoint,
@@ -483,27 +485,48 @@ export function createPixiInteractionLayer(options: {
       viewportScale: options.getViewportScale?.() ?? 1,
     });
 
+    const orderedMasks =
+      options.interaction.preferTopmost &&
+      options.interaction.maskOrder === "detection";
     if (
       geometryPick &&
+      !orderedMasks &&
       (options.interaction.preferTopmost ||
         POINT_PRECISE_PICK_TARGETS.has(geometryPick.target))
     ) {
       return geometryPick;
     }
 
-    const maskPick = options.pickMaskDetectionAtPoint?.(
-      pickPoint,
-      currentMediaTime,
-    );
+    const maskPick =
+      options.interaction.maskOrder === "detection"
+        ? options.pickMaskDetectionAtPoint?.(pickPoint, currentMediaTime, {
+            ...options.interaction,
+            filter: (detection, detectionIndex) =>
+              canPickDetection(detection) &&
+              (options.interaction.filter?.(detection, detectionIndex) ?? true),
+          })
+        : options.pickMaskDetectionAtPoint?.(pickPoint, currentMediaTime);
 
     const activeMaskPick = rebaseDetectionPickToFrame(
       maskPick ?? null,
       activeFrame,
     );
 
-    return activeMaskPick && canPickDetection(activeMaskPick.detection)
-      ? activeMaskPick
-      : geometryPick;
+    if (!activeMaskPick || !canPickDetection(activeMaskPick.detection))
+      return geometryPick;
+    if (orderedMasks && geometryPick) {
+      const maskOrder =
+        activeMaskPick.detection.zIndex ?? activeMaskPick.detectionIndex;
+      const geometryOrder =
+        geometryPick.detection.zIndex ?? geometryPick.detectionIndex;
+      if (
+        geometryOrder > maskOrder ||
+        (geometryOrder === maskOrder &&
+          geometryPick.detectionIndex >= activeMaskPick.detectionIndex)
+      )
+        return geometryPick;
+    }
+    return activeMaskPick;
   }
 
   function createPickFromSelection(

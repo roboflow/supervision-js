@@ -1,3 +1,4 @@
+import { createPackedMaskCoverageEntries } from "./packed-mask-coverage";
 import {
   compositeMaskFrame,
   createIdMaskPlane,
@@ -177,8 +178,13 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
     const regionMaskCoverage = createRegionMaskCoverageFrame(
       message.job.instructions,
     );
-    const coverageTransfers =
-      getRegionMaskCoverageTransfers(regionMaskCoverage);
+    const packedMaskCoverage = message.job.independentMasks
+      ? createPackedMaskCoverageEntries(message.job.instructions)
+      : undefined;
+    const coverageTransfers = [
+      ...getRegionMaskCoverageTransfers(regionMaskCoverage),
+      ...(packedMaskCoverage?.map((entry) => entry.data.buffer) ?? []),
+    ];
     const idMaskFrame = createIdMaskRasterFrame(
       message.job.instructions,
       message.job.maxRasterWidth,
@@ -205,6 +211,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           maxStrokeWidth: idMaskFrame.maxStrokeWidth,
           raster: idMaskFrame.data,
           screenStrokes,
+          packedMaskCoverage,
           regionMaskCoverage,
           requestId: message.requestId,
           sourceWidth: idMaskFrame.sourceWidth,
@@ -272,6 +279,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           imageBitmap,
           screenStrokes,
           key: message.job.key,
+          packedMaskCoverage,
           regionMaskCoverage,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,
@@ -292,6 +300,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
         imageData,
         screenStrokes,
         key: message.job.key,
+        packedMaskCoverage,
         regionMaskCoverage,
         requestId: message.requestId,
         type: MaskPreparationWorkerMessageType.Complete,

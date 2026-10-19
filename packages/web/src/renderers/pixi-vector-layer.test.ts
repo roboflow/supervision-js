@@ -54,23 +54,28 @@ describe("pixi vector layer", () => {
     expect(display.stroke).not.toHaveBeenCalled();
   });
 
-  it("recycles graphics when frame-scoped detection ids change", () => {
-    const frames = [
-      createFrame(0, ["pose-0", "pose-1"]),
-      createFrame(1, ["pose-2"]),
-    ];
-    const layer = createLayer(frames);
-    const container = layer.createContainer() as unknown as FakeContainer;
+  it.each([false, true])(
+    "recycles graphics when frame-scoped detection ids change (retainByIndex: %s)",
+    (retainByIndex) => {
+      const frames = [
+        createFrame(0, ["pose-0", "pose-1"]),
+        createFrame(1, ["pose-2"]),
+      ];
+      const layer = createLayer(frames, keypointStyle, retainByIndex);
+      const container = layer.createContainer() as unknown as FakeContainer;
 
-    layer.drawFrame(0);
-    expect(container.children).toHaveLength(2);
+      layer.drawFrame(0);
+      expect(container.children).toHaveLength(2);
 
-    layer.drawFrame(1);
-    expect(container.children).toHaveLength(2);
-    expect(container.children.filter((child) => child.visible)).toHaveLength(1);
-    expect(layer.translateDetection("pose-0", 1, 2)).toBe(false);
-    expect(layer.translateDetection("pose-2", 3, 4)).toBe(true);
-  });
+      layer.drawFrame(1);
+      expect(container.children).toHaveLength(2);
+      expect(container.children.filter((child) => child.visible)).toHaveLength(
+        1,
+      );
+      expect(layer.translateDetection("pose-0", 1, 2)).toBe(false);
+      expect(layer.translateDetection("pose-2", 3, 4)).toBe(true);
+    },
+  );
 
   it("does not allocate graphics when the matching style is disabled", () => {
     const frame = createFrame(0, ["pose-0"]);
@@ -416,9 +421,11 @@ const keypointStyle: KeypointStyle = {
 function createLayer(
   frames: readonly DetectionFrame[],
   style: KeypointStyle | null = keypointStyle,
+  retainByIndex = false,
 ) {
   return createPixiVectorLayer({
     Container: FakeContainer as never,
+    retainByIndex,
     detectionTimeline: createTimeline(frames),
     Graphics: FakeGraphics as never,
     keypointStyle: style,

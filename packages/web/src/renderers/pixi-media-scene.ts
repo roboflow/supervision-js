@@ -423,13 +423,17 @@ export async function createPixiMediaScene(
   };
   // Editable geometry uses retained displays, so boxes and vectors can share
   // one ordered parent without changing the dense, non-editing raster paths.
-  const retainedGeometry = options.editingEngine ? new Container() : undefined;
+  const retainedGeometry =
+    options.editingEngine || options.maskOrder === "detection"
+      ? new Container()
+      : undefined;
   const boxLayer = createPixiBoxLayer({
+    retainByIndex: options.maskOrder === "detection",
     container: retainedGeometry,
     boxStyle: options.boxStyle,
-    Container: options.editingEngine ? Container : undefined,
+    Container: retainedGeometry ? Container : undefined,
     detectionTimeline: annotationDetectionTimeline,
-    Graphics: options.editingEngine ? Graphics : undefined,
+    Graphics: retainedGeometry ? Graphics : undefined,
     resolveContextState,
   });
   let heatmapLayer: ReturnType<typeof createPixiHeatmapLayer> | undefined;
@@ -488,7 +492,7 @@ export async function createPixiMediaScene(
   let polygonLayer =
     options.polygonStyle !== undefined &&
     currentPolygonStyle &&
-    !options.editingEngine
+    !retainedGeometry
       ? createPixiPolygonLayer({
           BufferImageSource,
           Container,
@@ -509,6 +513,7 @@ export async function createPixiMediaScene(
       : undefined;
   polygonLayer?.setPlaybackActive(isPlaybackActive);
   const vectorLayer = createPixiVectorLayer({
+    retainByIndex: options.maskOrder === "detection",
     container: retainedGeometry,
     Container,
     Graphics,
@@ -588,6 +593,8 @@ export async function createPixiMediaScene(
         detectionTimeline: options.detectionTimeline,
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: initialMaskPreparationStyle,
+        orderedContainer:
+          options.maskOrder === "detection" ? retainedGeometry : undefined,
         onPreparedWindowChange: handlePreparedWindowChange,
         onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
@@ -734,8 +741,9 @@ export async function createPixiMediaScene(
           Rectangle,
           canInteract: options.canInteract,
           detectionTimeline: annotationDetectionTimeline,
-          interaction: options.interaction ?? {
-            mode: MediaInteractionMode.Always,
+          interaction: {
+            ...(options.interaction ?? { mode: MediaInteractionMode.Always }),
+            maskOrder: options.maskOrder,
           },
           canPickDetection: (detection) =>
             !resolveAnnotationStyleState(detection, currentVisibility).hidden,
@@ -757,8 +765,9 @@ export async function createPixiMediaScene(
             drawAnnotationOverlay(currentMediaTime, overlayNow());
             renderOnChange();
           },
-          pickMaskDetectionAtPoint: (point, mediaTime) =>
-            maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
+          pickMaskDetectionAtPoint: (point, mediaTime, pickOptions) =>
+            maskLayer?.pickDetectionAtPoint(point, mediaTime, pickOptions) ??
+            null,
           pickLabelDetectionAtPoint: (point, mediaTime) =>
             labelLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
           releasePointer: (pointerId) => {
@@ -2073,6 +2082,8 @@ export async function createPixiMediaScene(
         detectionTimeline: options.detectionTimeline,
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: preparationStyle,
+        orderedContainer:
+          options.maskOrder === "detection" ? retainedGeometry : undefined,
         onPreparedWindowChange: handlePreparedWindowChange,
         onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
@@ -2404,7 +2415,7 @@ export async function createPixiMediaScene(
   }
 
   function ensurePolygonLayer(polygonStyle: PolygonStyle) {
-    if (options.editingEngine) {
+    if (retainedGeometry) {
       return undefined;
     }
 

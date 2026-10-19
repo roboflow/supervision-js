@@ -378,6 +378,7 @@ vi.mock("pixi.js", () => {
   class Graphics {
     alpha = 1;
     cut = vi.fn(() => this);
+    destroy = vi.fn();
     circle = vi.fn(() => this);
     closePath = vi.fn(() => this);
     clear = vi.fn(() => this);

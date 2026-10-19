@@ -1,3 +1,8 @@
+import {
+  createPixiOrderedMaskUnits,
+  PACKED_MASK_UNIT_BACKING_BYTES,
+} from "./pixi-ordered-mask-units";
+import { pickPackedMaskAtPoint } from "./packed-mask-picker";
 import { createPixiMaskScreenStrokeRenderer } from "#renderers/pixi-mask-screen-stroke";
 import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
@@ -20,6 +25,8 @@ import {
 } from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type {
+  DetectionPickOptions,
+  DetectionFrame,
   DetectionPickPoint,
   DetectionPickResult,
 } from "supervision-js-core";
@@ -164,6 +171,7 @@ export interface PixiMaskLayer {
   pickDetectionAtPoint(
     point: DetectionPickPoint,
     mediaTime: number,
+    options?: DetectionPickOptions,
   ): DetectionPickResult | null;
   /**
    * The raster on screen, for a caller drawing the same detection frame it
@@ -220,6 +228,7 @@ export interface PixiActiveRegionMaskCoverage {
 
 export function createPixiMaskLayer(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
+  readonly orderedContainer?: PixiContainer;
   readonly BufferImageSource?: BufferImageSourceConstructor;
   readonly Container?: ContainerConstructor;
   readonly Graphics?: new () => PixiGraphics;
@@ -259,6 +268,10 @@ export function createPixiMaskLayer(options: {
     readonly mediaTime: number;
   }) => readonly SerializableMaskInstruction[];
 }): PixiMaskLayer {
+  let currentMaskStyle = options.maskStyle;
+  let orderedUnits: ReturnType<typeof createPixiOrderedMaskUnits> | undefined;
+  let activeDetectionFrame: DetectionFrame | undefined;
+  let activeViewportScale = 1;
   let mediaHeight = 0;
   let mediaWidth = 0;
   let idMaskRenderer:
@@ -288,9 +301,11 @@ export function createPixiMaskLayer(options: {
   let strokeViewportScale: number | undefined;
   const preparedRenderWindow = createPreparedRenderWindow({
     artifactKind: options.artifactKind,
+    independentMasks: options.orderedContainer !== undefined,
     detectionTimeline: options.detectionTimeline,
     maskStyle: options.maskStyle,
     onMaskFrameEvicted(key) {
+      orderedUnits?.releaseFrame(key);
       destroyTexture(key);
 
       if (key === visibleMaskFrameKey) {
@@ -303,6 +318,7 @@ export function createPixiMaskLayer(options: {
       }
     },
     onMaskFramesCleared() {
+      orderedUnits?.clear();
       destroyTextures();
       hideSprite();
     },
@@ -323,6 +339,26 @@ export function createPixiMaskLayer(options: {
       maskSprite.width = mediaWidth;
       maskSprite.height = mediaHeight;
 
+      if (
+        options.orderedContainer &&
+        options.BufferImageSource &&
+        options.Mesh &&
+        options.MeshGeometry &&
+        options.Shader &&
+        options.UniformGroup
+      ) {
+        orderedUnits = createPixiOrderedMaskUnits({
+          ...options,
+          BufferImageSource: options.BufferImageSource,
+          Mesh: options.Mesh,
+          MeshGeometry: options.MeshGeometry,
+          Shader: options.Shader,
+          UniformGroup: options.UniformGroup,
+          container: options.orderedContainer,
+          mediaHeight,
+          mediaWidth,
+        });
+      }
       idMaskRenderer = createIdMaskRenderer();
       idMaskRenderer?.setOpacity(maskOpacity);
       haloRenderer = createHaloRenderer();
@@ -351,6 +387,8 @@ export function createPixiMaskLayer(options: {
       const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
 
       if (preparedFrame?.maskFrame) {
+        activeDetectionFrame = preparedFrame.detectionFrame;
+        activeViewportScale = viewportScale;
         showMaskFrame(
           preparedFrame.maskFrame,
           preparedFrame.detectionFrame.mediaTime,
@@ -366,7 +404,12 @@ export function createPixiMaskLayer(options: {
     redrawViewportStyles(viewportScale) {
       if (!isFillVisible) return;
       const frame = activeIdMaskFrame ?? activeRgbaMaskFrame;
-      if (frame) screenStrokeRenderer?.render(frame, viewportScale);
+      if (frame) {
+        if (orderedUnits) {
+          activeViewportScale = viewportScale;
+          renderOrderedMasks(frame, viewportScale);
+        } else screenStrokeRenderer?.render(frame, viewportScale);
+      }
     },
 
     getDrawnState() {
@@ -406,12 +449,22 @@ export function createPixiMaskLayer(options: {
       return preparedRenderWindow.waitForReady(mediaTime, gateOptions, signal);
     },
 
-    pickDetectionAtPoint(point, mediaTime) {
+    pickDetectionAtPoint(point, mediaTime, pickOptions = {}) {
       const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
       const maskFrame = preparedFrame?.maskFrame;
 
       if (!preparedFrame || !maskFrame) {
         return null;
+      }
+
+      if (options.orderedContainer) {
+        return pickPackedMaskAtPoint(
+          preparedFrame.detectionFrame,
+          maskFrame.packedMaskCoverage ?? [],
+          point,
+          { height: mediaHeight, width: mediaWidth },
+          pickOptions,
+        );
       }
 
       if (maskFrame.kind !== PreparedMaskFrameKind.IdMask) {
@@ -500,12 +553,16 @@ export function createPixiMaskLayer(options: {
 
     setMaskStyle(nextMaskStyle) {
       if (nextMaskStyle !== undefined) {
+        if (nextMaskStyle) currentMaskStyle = nextMaskStyle;
         maskOpacity = resolveMaskStyleOpacity(nextMaskStyle);
         applyMaskOpacity();
       }
 
       preparedRenderWindow.setMaskStyle(nextMaskStyle);
       refreshHalo();
+      const activeFrame = activeIdMaskFrame ?? activeRgbaMaskFrame;
+      if (activeFrame && orderedUnits && isFillVisible)
+        renderOrderedMasks(activeFrame, activeViewportScale);
     },
 
     setMaskHaloStyle(nextMaskHaloStyle) {
@@ -533,6 +590,7 @@ export function createPixiMaskLayer(options: {
       isDestroyed = true;
       preparedRenderWindow.destroy();
       destroyTextures();
+      orderedUnits?.clear();
       idMaskRenderer?.destroy();
       screenStrokeRenderer?.destroy();
       haloRenderer?.destroy();
@@ -561,6 +619,12 @@ export function createPixiMaskLayer(options: {
       return;
     }
 
+    if (orderedUnits) {
+      hideFill();
+      renderOrderedMasks(maskFrame, viewportScale);
+      return;
+    }
+
     if (
       !screenStrokeRenderer &&
       maskFrame.screenStrokes?.length &&
@@ -582,6 +646,35 @@ export function createPixiMaskLayer(options: {
     }
 
     showRgbaMaskFrame(maskFrame);
+  }
+
+  function renderOrderedMasks(
+    maskFrame: PreparedMaskFrame,
+    viewportScale: number,
+  ) {
+    if (!orderedUnits || !activeDetectionFrame || visibleMaskMediaTime === null)
+      return;
+    const frame = activeDetectionFrame;
+    orderedUnits.render(
+      maskFrame.key,
+      frame,
+      maskFrame.packedMaskCoverage ?? [],
+      (detectionIndex) => {
+        const detection = frame.detections[detectionIndex];
+        return detection
+          ? currentMaskStyle.resolve(detection, {
+              detectionIndex,
+              frame,
+              mediaTime: visibleMaskMediaTime!,
+            })
+          : undefined;
+      },
+      viewportScale,
+      maskOpacity,
+      rasterDisplay
+        ? resolveDisplayPixelRatio(rasterDisplay) * rasterResolutionScale
+        : 1,
+    );
   }
 
   function resolveIdMaskStatus() {
@@ -686,6 +779,9 @@ export function createPixiMaskLayer(options: {
       maskFrame.kind === PreparedMaskFrameKind.IdMask
         ? pixels * (needsFourChannelIds(maskFrame.width) ? 8 : 1)
         : pixels * 4;
+    for (const entry of maskFrame.packedMaskCoverage ?? []) {
+      bytes += entry.data.byteLength + PACKED_MASK_UNIT_BACKING_BYTES;
+    }
     for (const entry of maskFrame.regionMaskCoverage?.entries ?? []) {
       bytes += entry.width * entry.height * 8;
     }
@@ -777,6 +873,7 @@ export function createPixiMaskLayer(options: {
 
     idMaskRenderer?.hide();
     screenStrokeRenderer?.hide();
+    orderedUnits?.hide();
   }
 
   /**
@@ -787,6 +884,7 @@ export function createPixiMaskLayer(options: {
     visibleMaskMediaTime = null;
     visibleMaskFrameKey = null;
     visibleMaskFrameId = null;
+    activeDetectionFrame = undefined;
     activeIdMaskFrame = null;
     activeRgbaMaskFrame = null;
     hideFill();

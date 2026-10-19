@@ -12,7 +12,10 @@ export default defineConfig({
     emptyOutDir: true,
     outDir: path.join(repoRoot, "benchmark/masks/gpu/dist"),
     rollupOptions: {
-      input: path.join(repoRoot, "benchmark/masks/gpu/index.html"),
+      input: {
+        benchmark: path.join(repoRoot, "benchmark/masks/gpu/index.html"),
+        order: path.join(repoRoot, "benchmark/masks/gpu/session-order.html"),
+      },
     },
   },
   root: repoRoot,

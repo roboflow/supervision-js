@@ -170,6 +170,7 @@ export function resolvePreparedWindowFrameCount(options: {
 
 export function createPreparedRenderWindow(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
+  readonly independentMasks?: boolean;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle?: MaskStyle | null;
   readonly maxMaskFrameCacheSize?: number;
@@ -257,6 +258,11 @@ export function createPreparedRenderWindow(options: {
         (total, entry) => total + entry.data.byteLength,
         0,
       ) ?? 0;
+    const packedCoverageBytes =
+      maskFrame.packedMaskCoverage?.reduce(
+        (total, entry) => total + entry.data.byteLength,
+        0,
+      ) ?? 0;
     const backingBytes = options.resolveMaskFrameBackingBytes
       ? options.resolveMaskFrameBackingBytes(maskFrame)
       : pixels * (maskFrame.kind === PreparedMaskFrameKind.IdMask ? 1 : 4);
@@ -268,7 +274,11 @@ export function createPreparedRenderWindow(options: {
       ) ?? 0;
     const bytes = Math.max(
       1,
-      payloadBytes + coverageBytes + strokeBytes + backingBytes,
+      payloadBytes +
+        coverageBytes +
+        packedCoverageBytes +
+        strokeBytes +
+        backingBytes,
     );
     preparedMaskBytesByKey.set(key, bytes);
     preparedMaskBytes += bytes;
@@ -538,6 +548,7 @@ export function createPreparedRenderWindow(options: {
       const displayWidth = options.resolveMaskDisplayWidth?.();
       void maskFramePreparer
         .prepare({
+          independentMasks: options.independentMasks,
           displayWidth,
           instructions,
           key,

@@ -71,3 +71,30 @@ the configured budget. See
 
 See [Detections And Rendering](../guides/detections-and-rendering.md) for the
 semantic-mask and prepared-artifact boundary.
+
+## Draw masks in detection order
+
+By default, masks draw below vector geometry. Set `renderer.maskOrder` when
+creating the session to interleave masks with boxes, polygons and other retained
+shapes:
+
+```ts
+const session = await createMediaSession({
+  container,
+  media,
+  detections,
+  renderer: {
+    maskOrder: "detection",
+    interaction: { preferTopmost: true },
+  },
+});
+```
+
+Higher `Detection.zIndex` draws in front. Missing values use the detection's
+frame index, and equal values follow frame order. Each mask preserves its own
+coverage, so transparent overlaps reveal lower detections and holes remain
+transparent. `preferTopmost` makes pointer picking follow this same stack.
+Labels and interaction overlays keep their established positions above it.
+
+This mode retains independent cropped mask coverage and one active texture per
+mask. Omit `maskOrder` to keep the dense mask layer used by existing sessions.
