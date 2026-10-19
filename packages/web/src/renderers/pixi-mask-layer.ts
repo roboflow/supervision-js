@@ -530,11 +530,21 @@ export function createPixiMaskLayer(options: {
     setRasterDisplay(display, resolutionScale = 1) {
       if (isDestroyed) return;
       const previousWidth = resolveMaxRasterWidth();
+      const previousPixelRatio = rasterDisplay
+        ? resolveDisplayPixelRatio(rasterDisplay) * rasterResolutionScale
+        : 1;
+      const pixelRatio = resolveDisplayPixelRatio(display) * resolutionScale;
       rasterDisplay = display;
       rasterResolutionScale = resolutionScale;
-      idMaskRenderer?.setStrokePixelRatio(
-        resolveDisplayPixelRatio(display) * resolutionScale,
-      );
+      idMaskRenderer?.setStrokePixelRatio(pixelRatio);
+      const activeFrame = activeIdMaskFrame ?? activeRgbaMaskFrame;
+      if (
+        pixelRatio !== previousPixelRatio &&
+        activeFrame &&
+        orderedUnits &&
+        isFillVisible
+      )
+        renderOrderedMasks(activeFrame, activeViewportScale);
       const nextWidth = resolveMaxRasterWidth();
       if (mediaWidth > 0 && previousWidth !== nextWidth) {
         preparedRenderWindow.invalidateRasterSize();

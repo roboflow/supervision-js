@@ -27,9 +27,14 @@ including its one-annotator-per-PR and frozen-fixture requirements.
 
 ## Local Development
 
-Use Node.js 20.19 or newer.
+Use Node.js 20.19 or newer and [Git LFS](https://git-lfs.com). The demo's
+sample media and fixtures are stored in Git LFS; without it, they are checked
+out as small pointer files, the demo reports them as an unsupported format, and
+the pre-push hook (`git lfs pre-push`) fails.
 
 ```sh
+git lfs install
+git lfs pull   # needed if you cloned before installing Git LFS
 npm install
 npm run dev
 ```
