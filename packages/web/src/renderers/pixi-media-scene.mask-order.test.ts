@@ -77,6 +77,8 @@ describe("mask order through the media renderer", () => {
     );
     window.devicePixelRatio = 1;
     const container = createContainer();
+    const maskStyle = style(1);
+    const resolve = vi.fn(maskStyle.resolve);
     const renderer = await createRenderer(false, false, {
       container,
       source: createStaticImageMediaSource({
@@ -87,7 +89,7 @@ describe("mask order through the media renderer", () => {
       src: undefined,
       maskOrder: "detection",
       labelStyle: null,
-      maskStyle: style(1),
+      maskStyle: { ...maskStyle, resolve },
       detectionFrames: [{ mediaTime: 0, detections: [{ id: "red", mask }] }],
       renderPreparation: { mode: RenderPreparationMode.MainThread },
     });
@@ -97,6 +99,14 @@ describe("mask order through the media renderer", () => {
       const sources = pixiMock.bufferImageSourceOptions.length;
       const meshes = pixiMock.meshInstances.length;
       expect(paint.uStrokePixelRatio).toBe(1);
+
+      const resolutions = resolve.mock.calls.length;
+      renderer.setViewportTransform({ x: 200, y: 20 });
+      expect(resolve.mock.calls.length - resolutions).toBeLessThanOrEqual(1);
+      const afterPan = resolve.mock.calls.length;
+      Object.defineProperty(container, "clientWidth", { value: 720 });
+      resize();
+      expect(resolve).toHaveBeenCalledTimes(afterPan);
 
       // A wider letterbox leaves the image scale unchanged while DPR doubles.
       Object.defineProperty(container, "clientWidth", { value: 800 });
