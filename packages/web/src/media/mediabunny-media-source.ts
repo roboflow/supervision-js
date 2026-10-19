@@ -2,6 +2,7 @@ import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
 import { readMediabunnyFrameClock } from "#media/mediabunny-frame-clock";
 import { normalizeMediaSourcePresentationTimeline } from "#media/presentation-timeline-media-source";
 import type { DecodedMediaSource } from "./media-source";
+import { createMediabunnySampleSink } from "./mediabunny-sample-sink";
 import type { MediaFrameClock } from "#types/media-frame-clock";
 import type { MediaRendererSource } from "#types/media-renderer";
 import { MediaErrorKind } from "supervision-js-core";
@@ -143,7 +144,9 @@ export async function openMediabunnyMediaSource(
         trackCount: tracks.length,
         videoTrackCount: videoTracks.length,
       },
-      sampleSink: new VideoSampleSink(primaryVideoTrack),
+      sampleSink: createMediabunnySampleSink(
+        new VideoSampleSink(primaryVideoTrack),
+      ),
     });
   } catch (error) {
     input.dispose();
