@@ -46,7 +46,7 @@ const mockState = vi.hoisted(() => {
     assetLoad: vi.fn(async () => ({ height: 16, width: 16 })),
     assetUnload: vi.fn(async () => undefined),
     appDestroy: vi.fn(),
-    appInit: vi.fn(async () => undefined),
+    appInit: vi.fn(async (_options?: unknown) => undefined),
     canvasAddEventListener: vi.fn(),
     canvasInstances: [] as Array<{
       style: Record<string, string>;
@@ -69,6 +69,8 @@ const mockState = vi.hoisted(() => {
       on: ReturnType<typeof vi.fn>;
     }>,
     graphicsInstances: [] as Array<{
+      alpha: number;
+      cut: ReturnType<typeof vi.fn>;
       circle: ReturnType<typeof vi.fn>;
       closePath: ReturnType<typeof vi.fn>;
       clear: ReturnType<typeof vi.fn>;
@@ -116,6 +118,7 @@ const mockState = vi.hoisted(() => {
     tickerRemove: vi.fn(),
     tickerStart: vi.fn(),
     tickerStop: vi.fn(),
+    tickerUpdates: [] as Array<() => void>,
     textureDestroy: vi.fn(),
     textureOptions: [] as unknown[],
     textureUpdate: vi.fn(),
@@ -195,6 +198,12 @@ vi.mock("pixi.js", () => {
     unload: pixiMock.assetUnload,
   };
   class Application {
+    private tickerRunning = false;
+    private tickerListeners: Array<{
+      callback: () => void;
+      context?: unknown;
+      priority: number;
+    }> = [];
     canvas = {
       addEventListener: pixiMock.canvasAddEventListener,
       height: 360,
@@ -204,6 +213,7 @@ vi.mock("pixi.js", () => {
     };
     screen = { height: 360, width: 640 };
     renderer = {
+      background: { color: 0 },
       name: "webgl",
       resolution: 1,
       screen: this.screen,
@@ -217,17 +227,61 @@ vi.mock("pixi.js", () => {
     };
     stage = { addChild: pixiMock.stageAddChild };
     ticker = {
-      add: pixiMock.tickerAdd,
-      remove: pixiMock.tickerRemove,
-      start: pixiMock.tickerStart,
-      stop: pixiMock.tickerStop,
+      add: (...args: [() => void, unknown?, number?]) => {
+        pixiMock.tickerAdd(...args);
+        const [callback, context, priority = 0] = args;
+        this.tickerListeners.push({ callback, context, priority });
+        this.tickerListeners.sort(
+          (left, right) => right.priority - left.priority,
+        );
+      },
+      remove: (...args: [() => void, unknown?]) => {
+        pixiMock.tickerRemove(...args);
+        const [callback, context] = args;
+        this.tickerListeners = this.tickerListeners.filter(
+          (listener) =>
+            listener.callback !== callback || listener.context !== context,
+        );
+      },
+      start: () => {
+        pixiMock.tickerStart();
+        // Pixi initializes lastTime when starting its private ticker.
+        domMock.performanceNow();
+        this.tickerRunning = true;
+      },
+      stop: () => {
+        pixiMock.tickerStop();
+        this.tickerRunning = false;
+      },
     };
-    destroy = pixiMock.appDestroy;
-    init = pixiMock.appInit;
+    destroy = () => {
+      this.tickerRunning = false;
+      this.tickerListeners = [];
+      pixiMock.appDestroy();
+    };
+    init = async (options: { autoStart?: boolean }) => {
+      await pixiMock.appInit(options);
+      // TickerPlugin installs this even with autoStart:false. Stopping during
+      // NORMAL does not skip this LOW listener in the current update.
+      this.tickerListeners.push({
+        callback: this.render,
+        context: this,
+        priority: -25,
+      });
+      this.tickerRunning = options.autoStart !== false;
+    };
     render = pixiMock.render;
 
     constructor() {
       pixiMock.canvasInstances.push(this.canvas);
+      pixiMock.tickerUpdates.push(() => {
+        if (!this.tickerRunning) return;
+        for (const listener of [...this.tickerListeners]) {
+          if (this.tickerListeners.includes(listener)) {
+            listener.callback.call(listener.context);
+          }
+        }
+      });
     }
   }
 
@@ -322,6 +376,8 @@ vi.mock("pixi.js", () => {
   }
 
   class Graphics {
+    alpha = 1;
+    cut = vi.fn(() => this);
     destroy = vi.fn();
     circle = vi.fn(() => this);
     closePath = vi.fn(() => this);
@@ -685,6 +741,7 @@ export function resetMocks() {
   pixiMock.tickerRemove.mockClear();
   pixiMock.tickerStart.mockClear();
   pixiMock.tickerStop.mockClear();
+  pixiMock.tickerUpdates.length = 0;
   pixiMock.textureDestroy.mockClear();
   pixiMock.textureOptions.length = 0;
   pixiMock.textureUpdate.mockClear();
@@ -809,4 +866,9 @@ export function flushAnimationFrame(now: number) {
 
   domMock.performanceNow.mockReturnValue(now);
   callback(now);
+}
+
+export function flushPixiTicker(now: number) {
+  domMock.performanceNow.mockReturnValue(now);
+  for (const update of pixiMock.tickerUpdates) update();
 }

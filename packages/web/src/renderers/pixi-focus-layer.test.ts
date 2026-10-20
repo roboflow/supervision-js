@@ -110,6 +110,69 @@ afterEach(() => {
 });
 
 describe("pixi focus layer", () => {
+  it.each([undefined, 150])(
+    "preserves visible alpha when duration changes from %s and the fade reverses",
+    (initialDuration) => {
+      let visible = true;
+      const layer = createPixiFocusLayer({
+        Graphics,
+        focusStyle: new BaseFocusStyle({
+          shouldRender: () => visible,
+          targetMode: FocusTargetMode.Ambient,
+          ...(initialDuration === undefined
+            ? {}
+            : { transitionDurationMs: initialDuration }),
+        }),
+      });
+      const display = layer.createDisplay({
+        width: 120,
+        height: 80,
+      }) as Graphics;
+      const draw = () =>
+        layer.drawFrame({
+          frame,
+          hoveredPick: null,
+          mediaTime: frame.mediaTime,
+          selectedPick: null,
+        });
+      const started = initialDuration === undefined ? 1_200_000 : 0;
+      draw();
+      layer.tick(started);
+      layer.tick(started + 150);
+      expect(display.alpha).toBe(1);
+      visible = false;
+      draw();
+      layer.tick(started + 150);
+      layer.tick(started + 225);
+      const interruptedAlpha = display.alpha;
+      expect(interruptedAlpha).toBeGreaterThan(0);
+      expect(interruptedAlpha).toBeLessThan(1);
+
+      layer.setFocusStyle(
+        new BaseFocusStyle({
+          shouldRender: () => visible,
+          targetMode: FocusTargetMode.Ambient,
+          transitionDurationMs: 300,
+        }),
+      );
+      draw();
+      const updatedTime =
+        initialDuration === undefined ? 120_000 : started + 225;
+      layer.tick(updatedTime);
+      expect(display.alpha).toBe(interruptedAlpha);
+
+      visible = true;
+      draw();
+      layer.tick(updatedTime);
+      expect(display.alpha).toBe(interruptedAlpha);
+      layer.tick(updatedTime + 300);
+      expect(display.alpha).toBe(1);
+      expect(layer.isAnimating()).toBe(false);
+      layer.destroy();
+      display.destroy();
+    },
+  );
+
   it("clips a held focus overlay after camera pan without rebuilding its cutout", () => {
     const viewport = { x: 10, y: 20, width: 80, height: 40 };
     const layer = createPixiFocusLayer({

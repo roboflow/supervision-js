@@ -506,6 +506,38 @@ test("clean consumer installs the tarball without the repository", () => {
   }
 });
 
+test("clean consumer assigns BaseFocusStyle with exact optional property types", () => {
+  const fixturePath = path.join(consumerDir, "focus-style.ts");
+  writeFileSync(
+    fixturePath,
+    [
+      'import { BaseFocusStyle, createMediaSession, type FocusStyle } from "supervision";',
+      "export const focus: FocusStyle = new BaseFocusStyle();",
+      'export const presentation: NonNullable<Parameters<typeof createMediaSession>[0]["presentation"]> = {',
+      "  focusStyle: new BaseFocusStyle(),",
+      "};",
+    ].join("\n"),
+  );
+  run(
+    process.execPath,
+    [
+      path.join(rootDir, "node_modules/typescript/lib/tsc.js"),
+      "--noEmit",
+      "--strict",
+      "--exactOptionalPropertyTypes",
+      "--skipLibCheck",
+      "--module",
+      "NodeNext",
+      "--moduleResolution",
+      "NodeNext",
+      "--target",
+      "ES2022",
+      fixturePath,
+    ],
+    consumerDir,
+  );
+});
+
 test("clean consumer resolves package entrypoints and the standalone worker", () => {
   const output = run(
     process.execPath,

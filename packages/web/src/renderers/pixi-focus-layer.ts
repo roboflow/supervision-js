@@ -173,6 +173,9 @@ export interface PixiFocusLayer {
   syncViewportBounds(): void;
   releaseMaskTexture(texture: PixiTexture): void;
   tick(timestamp: number): void;
+  settle(): void;
+  isAnimating(): boolean;
+  getTransitionDuration(): number | undefined;
   setFocusStyle(focusStyle: FocusStyle | null | undefined): void;
   destroy(): void;
 }
@@ -219,6 +222,10 @@ export function createPixiFocusLayer(options: {
   let currentAlpha = 0;
   let targetAlpha = 0;
   let lastTick: number | null = null;
+  let transitionDurationMs: number | undefined;
+  let transitionStartedAt: number | null = null;
+  let transitionFromAlpha = 0;
+  let hasResolvedFrame = false;
   let isDestroyed = false;
   let hasIdMaskShaderFailed = false;
   let vectorFocusSignature: VectorFocusSignature | null = null;
@@ -315,13 +322,30 @@ export function createPixiFocusLayer(options: {
         return;
       }
 
-      const resolvedInstruction = focusStyle.resolve({
+      const styleContext = {
         frame: context.frame,
         hoveredPick: context.hoveredPick,
         mediaTime: context.mediaTime,
         selectedPick: context.selectedPick,
         viewportScale: context.viewportScale,
-      });
+      };
+      const duration = focusStyle.transitionDurationMs;
+      const resolvedDuration =
+        typeof duration === "function" ? duration(styleContext) : duration;
+      const nextTransitionDurationMs =
+        resolvedDuration === undefined
+          ? undefined
+          : Number.isFinite(resolvedDuration)
+            ? Math.max(0, resolvedDuration)
+            : 0;
+      if (nextTransitionDurationMs !== transitionDurationMs) {
+        transitionStartedAt = null;
+        transitionFromAlpha = currentAlpha;
+      }
+      transitionDurationMs = nextTransitionDurationMs;
+      const isFirstFrame = !hasResolvedFrame;
+      hasResolvedFrame = true;
+      const resolvedInstruction = focusStyle.resolve(styleContext);
       // Ambient focus targets every detection in the frame, so a class the
       // caller has hidden would otherwise be cut out of the overlay.
       const instruction = resolvedInstruction
@@ -343,11 +367,13 @@ export function createPixiFocusLayer(options: {
         }
         resetHeldFocus();
         transitionToHidden();
+        if (isFirstFrame && transitionDurationMs !== undefined) settle();
         return;
       }
 
       heldFill = instruction.fill;
-      targetAlpha = 1;
+      setTargetAlpha(1);
+      if (isFirstFrame && transitionDurationMs !== undefined) settle();
       if (focusDisplay) focusDisplay.visible = true;
 
       if (drawIdMaskFocus(context.idMaskArtifact, instruction)) {
@@ -373,14 +399,40 @@ export function createPixiFocusLayer(options: {
       }
       const elapsed = Math.max(0, timestamp - (lastTick ?? timestamp));
       lastTick = timestamp;
-      const progress = Math.min(1, elapsed / 120);
+      transitionStartedAt ??= timestamp;
+      const progress =
+        transitionDurationMs === undefined
+          ? Math.min(1, elapsed / 120)
+          : transitionDurationMs <= 0
+            ? 1
+            : Math.min(
+                1,
+                (timestamp - transitionStartedAt) / transitionDurationMs,
+              );
       const eased = 1 - (1 - progress) ** 3;
-      currentAlpha += (targetAlpha - currentAlpha) * eased;
+      currentAlpha =
+        transitionDurationMs === undefined
+          ? currentAlpha + (targetAlpha - currentAlpha) * eased
+          : transitionFromAlpha + (targetAlpha - transitionFromAlpha) * eased;
       if (Math.abs(targetAlpha - currentAlpha) < 0.001) {
         currentAlpha = targetAlpha;
       }
       focusDisplay.alpha = currentAlpha;
       if (currentAlpha === 0 && targetAlpha === 0) hide();
+    },
+
+    settle,
+
+    isAnimating() {
+      return (
+        transitionDurationMs !== undefined &&
+        transitionDurationMs > 0 &&
+        currentAlpha !== targetAlpha
+      );
+    },
+
+    getTransitionDuration() {
+      return transitionDurationMs;
     },
 
     setFocusStyle(nextFocusStyle) {
@@ -389,10 +441,28 @@ export function createPixiFocusLayer(options: {
       }
 
       focusStyle = nextFocusStyle;
+      if (focusStyle === null) {
+        setTargetAlpha(0);
+        settle();
+      }
     },
 
     syncViewportBounds,
   };
+
+  function setTargetAlpha(alpha: number) {
+    if (targetAlpha === alpha) return;
+    targetAlpha = alpha;
+    transitionStartedAt = null;
+    transitionFromAlpha = currentAlpha;
+  }
+
+  function settle() {
+    currentAlpha = targetAlpha;
+    transitionStartedAt = null;
+    if (focusDisplay) focusDisplay.alpha = currentAlpha;
+    if (currentAlpha === 0) hide();
+  }
 
   function syncViewportBounds(force = false) {
     if (!options.Rectangle) return;
@@ -745,7 +815,7 @@ export function createPixiFocusLayer(options: {
   }
 
   function transitionToHidden() {
-    targetAlpha = 0;
+    setTargetAlpha(0);
     if (currentAlpha === 0) hide();
   }
 
@@ -765,7 +835,7 @@ export function createPixiFocusLayer(options: {
     }
 
     isHoldingOverlay = true;
-    targetAlpha = 1;
+    setTargetAlpha(1);
     if (focusDisplay) focusDisplay.visible = true;
 
     if (
