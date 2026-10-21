@@ -48,18 +48,17 @@ this ownership and security posture in place:
    `roboflow`, repository `supervision-js`, workflow `publish-npm.yml`, and
    environment `npm-publish` for the **npm publish** action.
 3. GitHub's `npm-publish` environment requires release-owner approval.
-4. The `npm-publish` environment holds a `RELEASE_GITHUB_TOKEN` environment
-   secret scoped only to `supervision-js`, with **Contents: write** and
-   **Workflows: write**. It is used only after verification to create the
-   stable tag and GitHub Release; do not expose it to checkout, install, build,
-   or npm-publish steps. Checkout must use `persist-credentials: false` so its
-   short-lived `GITHUB_TOKEN` cannot override the dedicated token during the
-   tag push.
+4. GitHub Actions creates the short-lived `GITHUB_TOKEN` automatically for
+   each job. The workflow grants it **Contents: write** to create the stable
+   tag and GitHub Release. This is a repository-scoped GitHub App installation
+   token; no personal access token or manually configured GitHub secret is
+   required. Checkout uses `persist-credentials: false`, and the tag step
+   configures Git to authenticate through `gh` using that job token.
 5. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
 If publishing access breaks, compare the trusted-publisher fields with the
-workflow before changing credentials. Each npm package supports one trusted
-publisher.
+workflow before changing credentials. The npm trusted-publisher configuration is
+separate from GitHub tag and release authentication.
 
 ## Choose The Version And Tag
 

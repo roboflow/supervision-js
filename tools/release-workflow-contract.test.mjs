@@ -30,21 +30,23 @@ test("npm publish waits for the selected dist-tag to propagate", async () => {
   );
 });
 
-test("release tagging uses the protected workflow-capable token only at the release boundary", async () => {
+test("GitHub releases use the automatic job token without a personal access token", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /contents: read/);
+  assert.match(workflow, /contents: write/);
+  assert.match(workflow, /id-token: write/);
+  assert.doesNotMatch(workflow, /secrets\.|RELEASE_GITHUB_TOKEN/);
   assert.match(
     workflow,
     /name: Check out repository[\s\S]*?fetch-depth: 0[\s\S]*?persist-credentials: false/,
   );
   assert.match(
     workflow,
-    /name: Create or verify release tag[\s\S]*?RELEASE_GITHUB_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}[\s\S]*?git push "https:\/\/x-access-token:\$\{RELEASE_GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/,
+    /name: Create or verify release tag[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}[\s\S]*?gh auth setup-git --hostname github\.com\n *git push origin "refs\/tags\/\$\{tag\}"/,
   );
   assert.match(
     workflow,
-    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}/,
+    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}/,
   );
 });
 
