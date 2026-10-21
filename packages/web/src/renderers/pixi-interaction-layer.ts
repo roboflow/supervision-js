@@ -429,7 +429,15 @@ export function createPixiInteractionLayer(options: {
         (detection, detectionIndex) => {
           if (!canPickDetection(detection)) return [];
           const rect = getDetectionRect(detection);
-          if (!rect || !intersects(rect, marqueeRect!)) return [];
+          if (
+            !rect ||
+            !matchesMarquee(
+              rect,
+              marqueeRect!,
+              options.interaction.marqueeSelectionMode,
+            )
+          )
+            return [];
           return [
             {
               detection,
@@ -820,7 +828,7 @@ function rectFromPoints(start: DetectionPickPoint, end: DetectionPickPoint) {
   };
 }
 
-function intersects(
+function matchesMarquee(
   rect: {
     readonly x: number;
     readonly y: number;
@@ -833,8 +841,17 @@ function intersects(
     readonly width: number;
     readonly height: number;
   },
+  mode: "intersects" | "contained" | undefined,
 ) {
   const { x: left, y: top } = centerRectToTopLeftRect(rect);
+  if (mode === "contained") {
+    return (
+      left >= marquee.x &&
+      left + rect.width <= marquee.x + marquee.width &&
+      top >= marquee.y &&
+      top + rect.height <= marquee.y + marquee.height
+    );
+  }
   return (
     left <= marquee.x + marquee.width &&
     left + rect.width >= marquee.x &&

@@ -104,6 +104,8 @@ export interface MediaInteractionOptions extends Omit<
    */
   readonly onSelect?: (pick: DetectionPickResult | null) => void;
   readonly multiSelect?: boolean;
+  /** Select intersecting bounds by default, or require full containment. */
+  readonly marqueeSelectionMode?: "intersects" | "contained";
   /**
    * Reports selection membership changes, not per-frame geometry updates for
    * stable detection ids. Each pick is the snapshot that produced that
