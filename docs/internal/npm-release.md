@@ -48,17 +48,24 @@ this ownership and security posture in place:
    `roboflow`, repository `supervision-js`, workflow `publish-npm.yml`, and
    environment `npm-publish` for the **npm publish** action.
 3. GitHub's `npm-publish` environment requires release-owner approval.
-4. GitHub Actions creates the short-lived `GITHUB_TOKEN` automatically for
-   each job. The workflow grants it **Contents: write** to create the stable
-   tag and GitHub Release. This is a repository-scoped GitHub App installation
-   token; no personal access token or manually configured GitHub secret is
-   required. Checkout uses `persist-credentials: false`, and the tag step
-   configures Git to authenticate through `gh` using that job token.
+4. Install a release GitHub App on `roboflow/supervision-js` with repository
+   **Contents: write** and **Workflows: write** permissions. In the
+   `npm-publish` environment, set the `RELEASE_APP_CLIENT_ID` variable to its
+   Client ID and the `RELEASE_APP_PRIVATE_KEY` secret to its generated PEM
+   private key. Webhooks and user authorization are not needed. The workflow
+   creates a short-lived installation token after verification and before npm
+   publication, so missing App access fails before an immutable upload. Only
+   the tag and GitHub Release steps use that token; the action revokes it when
+   the job ends. Checkout must use `persist-credentials: false`.
 5. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
 If publishing access breaks, compare the trusted-publisher fields with the
 workflow before changing credentials. The npm trusted-publisher configuration is
-separate from GitHub tag and release authentication.
+separate from GitHub tag and release authentication. The App needs
+**Workflows: write** to recover an older release commit whose workflow files
+have changed relative to `main`; the automatic `GITHUB_TOKEN` cannot receive
+that permission. After migrating the workflow, remove the obsolete
+`RELEASE_GITHUB_TOKEN` secret.
 
 ## Choose The Version And Tag
 

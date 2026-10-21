@@ -30,23 +30,40 @@ test("npm publish waits for the selected dist-tag to propagate", async () => {
   );
 });
 
-test("GitHub releases use the automatic job token without a personal access token", async () => {
+test("GitHub releases use a repository-scoped App token after verification", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /contents: write/);
+  assert.match(workflow, /contents: read/);
   assert.match(workflow, /id-token: write/);
-  assert.doesNotMatch(workflow, /secrets\.|RELEASE_GITHUB_TOKEN/);
+  assert.doesNotMatch(workflow, /RELEASE_GITHUB_TOKEN/);
   assert.match(
     workflow,
     /name: Check out repository[\s\S]*?fetch-depth: 0[\s\S]*?persist-credentials: false/,
   );
+  const tokenStart = workflow.indexOf("      - name: Create release App token");
+  const tokenEnd = workflow.indexOf("      - name: Publish generated tarball");
+  assert.ok(
+    tokenStart > workflow.indexOf("      - name: Smoke-test clean consumer"),
+  );
+  assert.ok(tokenStart < tokenEnd);
+  const tokenStep = workflow.slice(tokenStart, tokenEnd);
+  assert.match(tokenStep, /if: inputs\.dist_tag == 'latest'/);
+  assert.match(tokenStep, /uses: actions\/create-github-app-token@v3/);
+  assert.match(tokenStep, /client-id: \$\{\{ vars\.RELEASE_APP_CLIENT_ID \}\}/);
+  assert.match(
+    tokenStep,
+    /private-key: \$\{\{ secrets\.RELEASE_APP_PRIVATE_KEY \}\}/,
+  );
+  assert.match(tokenStep, /permission-contents: write/);
+  assert.match(tokenStep, /permission-workflows: write/);
+  assert.doesNotMatch(tokenStep, /owner:|repositories:|skip-token-revoke:/);
   assert.match(
     workflow,
-    /name: Create or verify release tag[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}[\s\S]*?gh auth setup-git --hostname github\.com\n *git push origin "refs\/tags\/\$\{tag\}"/,
+    /name: Create or verify release tag[\s\S]*?GH_TOKEN: \$\{\{ steps\.release_token\.outputs\.token \}\}[\s\S]*?gh auth setup-git --hostname github\.com\n *git push origin "refs\/tags\/\$\{tag\}"/,
   );
   assert.match(
     workflow,
-    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}/,
+    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ steps\.release_token\.outputs\.token \}\}/,
   );
 });
 

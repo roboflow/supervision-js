@@ -18,7 +18,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -103,6 +103,16 @@ jobs:
 
       - name: Smoke-test clean consumer
         run: npm run package:tarball:smoke
+
+      - name: Create release App token
+        if: inputs.dist_tag == 'latest'
+        id: release_token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
 
       - name: Publish generated tarball
         shell: bash
@@ -194,7 +204,7 @@ jobs:
         if: inputs.dist_tag == 'latest'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release_token.outputs.token }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
@@ -224,7 +234,7 @@ jobs:
         if: inputs.dist_tag == 'latest'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release_token.outputs.token }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
