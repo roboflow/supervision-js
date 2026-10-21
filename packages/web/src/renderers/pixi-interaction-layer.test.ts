@@ -1665,64 +1665,88 @@ describe("pixi interaction layer", () => {
     expect(layer.getState().selectedPicks).toEqual([]);
   });
 
-  it("keeps marquee multi-selection through the editing-engine pointer sequence", () => {
-    const onCommit = vi.fn();
-    const onSelectionChange = vi.fn();
-    const editingEngine = createAnnotationEditingEngine({ onCommit });
-    const layer = createPixiInteractionLayer({
-      Container: FakeContainer as never,
-      Rectangle: FakeRectangle as never,
-      canInteract: () => true,
-      detectionTimeline: createTimeline({
-        ...frame,
-        detections: [
-          { id: "first", rect: { x: 30, y: 30, width: 20, height: 20 } },
-          { id: "second", rect: { x: 70, y: 30, width: 20, height: 20 } },
-          { id: "outside", rect: { x: 120, y: 30, width: 20, height: 20 } },
-        ],
-      }),
-      editingEngine,
-      interaction: {
-        mode: MediaInteractionMode.Always,
-        multiSelect: true,
-        onSelectionChange,
-      },
-    });
-    const display = layer.createDisplay({
-      width: 160,
-      height: 80,
-    }) as FakeContainer;
-    layer.drawFrame(frame.mediaTime);
-    display.emit(
-      "pointerdown",
-      createPointerEvent(display, 5, 5, {
-        button: 0,
-        pointerId: 1,
-        shiftKey: true,
-      }),
-    );
-    display.emit(
-      "pointermove",
-      createPointerEvent(display, 90, 60, { pointerId: 1, shiftKey: true }),
-    );
-    display.emit(
-      "pointerup",
-      createPointerEvent(display, 90, 60, {
-        button: 0,
-        pointerId: 1,
-        shiftKey: true,
-      }),
-    );
-    display.emit(
-      "pointertap",
-      createPointerEvent(display, 90, 60, { shiftKey: true }),
-    );
-    expect(
-      layer.getState().selectedPicks.map((pick) => pick.detection.id),
-    ).toEqual(["first", "second"]);
-    expect(onSelectionChange).toHaveBeenCalledOnce();
-    expect(onCommit).not.toHaveBeenCalled();
-  });
+  it.each([
+    { mode: undefined, reverse: false },
+    { mode: "intersects", reverse: false },
+    { mode: "contained", reverse: false },
+    { mode: undefined, reverse: true },
+    { mode: "intersects", reverse: true },
+    { mode: "contained", reverse: true },
+  ] as const)(
+    "keeps $mode marquee selection through the editing-engine sequence (reverse=$reverse)",
+    ({ mode, reverse }) => {
+      const onCommit = vi.fn();
+      const onSelectionChange = vi.fn();
+      const editingEngine = createAnnotationEditingEngine({ onCommit });
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline({
+          ...frame,
+          detections: [
+            { id: "first", rect: { x: 30, y: 30, width: 20, height: 20 } },
+            { id: "second", rect: { x: 70, y: 30, width: 20, height: 20 } },
+            { id: "boundary", rect: { x: 50, y: 50, width: 10, height: 20 } },
+            { id: "outside", rect: { x: 120, y: 30, width: 20, height: 20 } },
+          ],
+        }),
+        editingEngine,
+        interaction: {
+          mode: MediaInteractionMode.Always,
+          multiSelect: true,
+          marqueeSelectionMode: mode,
+          onSelectionChange,
+        },
+      });
+      const display = layer.createDisplay({
+        width: 160,
+        height: 80,
+      }) as FakeContainer;
+      layer.drawFrame(frame.mediaTime);
+      display.emit(
+        "pointerdown",
+        createPointerEvent(display, reverse ? 75 : 5, reverse ? 60 : 5, {
+          button: 0,
+          pointerId: 1,
+          shiftKey: true,
+        }),
+      );
+      display.emit(
+        "pointermove",
+        createPointerEvent(display, reverse ? 5 : 75, reverse ? 5 : 60, {
+          pointerId: 1,
+          shiftKey: true,
+        }),
+      );
+      display.emit(
+        "pointerup",
+        createPointerEvent(display, reverse ? 5 : 75, reverse ? 5 : 60, {
+          button: 0,
+          pointerId: 1,
+          shiftKey: true,
+        }),
+      );
+      display.emit(
+        "pointertap",
+        createPointerEvent(display, reverse ? 5 : 75, reverse ? 5 : 60, {
+          shiftKey: true,
+        }),
+      );
+      expect(
+        layer.getState().selectedPicks.map((pick) => pick.detection.id),
+      ).toEqual(
+        mode === "contained"
+          ? ["first", "boundary"]
+          : ["first", "second", "boundary"],
+      );
+      expect(onSelectionChange).toHaveBeenCalledOnce();
+      expect(onSelectionChange.mock.calls[0]?.[0]).toEqual(
+        layer.getState().selectedPicks,
+      );
+      expect(onCommit).not.toHaveBeenCalled();
+    },
+  );
 
   it("previews a dragged keypoint at the pointer before the gesture commits", () => {
     const onCommit = vi.fn();

@@ -405,6 +405,11 @@ Select mode changes selection without starting a move. Shift-click and the
 secondary button still delete an editable polygon/polyline vertex when its
 selected vertex handle is hit; active creation tools keep their gesture priority.
 
+Marquee selection includes intersecting detection bounds by default. Set
+`interaction.marqueeSelectionMode: "contained"` to select only detections whose
+entire bounds lie inside the rectangle, including bounds exactly on its edges.
+This applies in either drag direction and leaves Shift-click selection unchanged.
+
 Restore host-owned selections with
 `session.renderer.setSelectedDetection({ detectionIds: selectedIds })`.
 Duplicate ids are ignored, missing or hidden detections are excluded, and the
