@@ -6,7 +6,7 @@ summary: Update playback gates, playback feedback, and interaction highlights fr
 
 # Migrating to 0.2
 
-Upgrade to `0.2.12-dataman465.0` with:
+Install the package with:
 
 ```sh
 npm install supervision
