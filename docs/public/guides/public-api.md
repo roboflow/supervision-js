@@ -405,6 +405,26 @@ Select mode changes selection without starting a move. Shift-click and the
 secondary button still delete an editable polygon/polyline vertex when its
 selected vertex handle is hit; active creation tools keep their gesture priority.
 
+Use `interaction.onPointerPress` when a host gesture needs the renderer's
+resolved target before selection or editing begins. It receives normalized
+`input`, the visible composed `pick` (including labels and masks, or `null`
+for empty space), and `selectedHandle` for the primary selected detection's
+semantic handle. This follows existing primary-selection routing; a matching
+handle need not have a drawn editing overlay. The handle includes its owning
+`pick`, which can differ from the detection underneath it. Repeated hits and
+locked detections are reported even when selection does not change.
+
+Return `"continue"` to keep the renderer's normal behavior, or `"handled"`
+to skip its selection, editing, marquee, and subsequent tap handling for that
+press. The host owns movement, completion, and cancellation of its gesture;
+let release and cancellation events continue to the renderer so it can retire
+its tap suppression. Return `"continue"` only while preserving selection and
+editing state: the default route uses the snapshot resolved before the callback.
+Return `"handled"` when the host changes that state. Without this callback,
+the renderer retains its default selection and editing routing. Modifier keys
+are forwarded to editing engines independently of this callback. A handled
+press does not suppress the renderer's ordinary hover and cursor updates.
+
 Marquee selection includes intersecting detection bounds by default. Set
 `interaction.marqueeSelectionMode: "contained"` to select only detections whose
 entire bounds lie inside the rectangle, including bounds exactly on its edges.
