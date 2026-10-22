@@ -877,16 +877,25 @@ export async function createPixiMediaScene(
     if (options.editingEngine) event.preventDefault();
   };
   const handlePointerCancel = (event: PointerEvent) => {
-    const engine = options.editingEngine;
-    if (engine?.getState().pointerId === event.pointerId) engine.cancel();
+    interactionLayer?.pointerCancel(event.pointerId);
   };
+  const handlePointerUp = (event: PointerEvent) => {
+    interactionLayer?.pointerUpFallback(event.pointerId);
+  };
+  if (interactionLayer) {
+    window.addEventListener("pointercancel", handlePointerCancel, true);
+    rendererCanvas.addEventListener?.(
+      "lostpointercapture",
+      handlePointerCancel,
+    );
+    window.addEventListener("pointerup", handlePointerUp, true);
+  }
   if (interactionLayer || options.editingEngine) {
     rendererCanvas.tabIndex = 0;
     rendererCanvas.addEventListener?.("keydown", handleKeyDown);
   }
   if (options.editingEngine) {
     rendererCanvas.addEventListener?.("contextmenu", handleContextMenu);
-    rendererCanvas.addEventListener?.("pointercancel", handlePointerCancel);
   }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
@@ -1973,15 +1982,19 @@ export async function createPixiMediaScene(
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
+      if (interactionLayer) {
+        window.removeEventListener("pointercancel", handlePointerCancel, true);
+        rendererCanvas.removeEventListener?.(
+          "lostpointercapture",
+          handlePointerCancel,
+        );
+        window.removeEventListener("pointerup", handlePointerUp, true);
+      }
       if (interactionLayer || options.editingEngine) {
         rendererCanvas.removeEventListener?.("keydown", handleKeyDown);
       }
       if (options.editingEngine) {
         rendererCanvas.removeEventListener?.("contextmenu", handleContextMenu);
-        rendererCanvas.removeEventListener?.(
-          "pointercancel",
-          handlePointerCancel,
-        );
       }
       app.destroy(
         { removeView: true },

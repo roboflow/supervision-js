@@ -10,10 +10,53 @@ import {
   encodeBinaryMask,
 } from "supervision-js-core";
 
-import { createReactNativeAnnotationGestureAdapter } from "./annotation-gesture-adapter";
+import {
+  createReactNativeAnnotationGestureAdapter,
+  type ReactNativeAnnotationGestureAdapter,
+} from "./annotation-gesture-adapter";
 import { resolveReactNativeFrameLayout } from "./index";
 
+const legacyAdapter: ReactNativeAnnotationGestureAdapter = {
+  pointerDown: () => null,
+  pointerMove() {},
+  pointerUp() {},
+  keyDown() {},
+  cancel() {},
+};
+
 describe("React Native annotation gesture adapter", () => {
+  it("keeps native adapters written before contact cancellation assignable", () => {
+    expect(legacyAdapter.pointerCancel).toBeUndefined();
+  });
+  it("retains accepted draft vertices when a native contact is interrupted", () => {
+    const engine = createAnnotationEditingEngine();
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polygon,
+      createDetection: (points) => ({
+        polygon: { points: points as { x: number; y: number }[] },
+      }),
+    });
+    const adapter = createReactNativeAnnotationGestureAdapter({
+      editingEngine: engine,
+      getFrame: () => ({ mediaTime: 0, detections: [] }),
+      getLayout: () =>
+        resolveReactNativeFrameLayout({
+          canvasHeight: 100,
+          canvasWidth: 100,
+          mediaHeight: 100,
+          mediaWidth: 100,
+        }),
+    });
+    adapter.pointerDown({ x: 10, y: 10, timestamp: 0, pointerId: 7 });
+    adapter.pointerCancel?.(8);
+    expect(engine.getState().pointerId).toBe(7);
+    adapter.pointerCancel?.(7);
+    expect(engine.getState().pointerId).toBeNull();
+    expect(engine.undoCreation()).toBe(true);
+    adapter.cancel();
+    expect(engine.undoCreation()).toBe(false);
+  });
+
   it("maps native touches into shared handle and drag gestures", () => {
     const detection = {
       id: "box",

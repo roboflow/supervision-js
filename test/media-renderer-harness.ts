@@ -173,6 +173,8 @@ const mockState = vi.hoisted(() => {
     videoTracks: [{ type: "video" }],
   };
   const domMock = {
+    windowAddEventListener: vi.fn(),
+    windowRemoveEventListener: vi.fn(),
     appendChild: vi.fn(),
     cancelAnimationFrame: vi.fn(),
     createElement: vi.fn(),
@@ -687,6 +689,8 @@ vi.stubGlobal("document", {
 });
 
 vi.stubGlobal("window", {
+  addEventListener: domMock.windowAddEventListener,
+  removeEventListener: domMock.windowRemoveEventListener,
   cancelAnimationFrame: domMock.cancelAnimationFrame,
   devicePixelRatio: 1,
   requestAnimationFrame: domMock.requestAnimationFrame,
@@ -799,6 +803,8 @@ export function resetMocks() {
   mediaMock.urlSourceConstructor.mockClear();
   mediaMock.videoSampleSinkConstructor.mockClear();
   mediaMock.videoTracks = [{ type: "video" }];
+  domMock.windowAddEventListener.mockClear();
+  domMock.windowRemoveEventListener.mockClear();
   domMock.appendChild.mockClear();
   domMock.cancelAnimationFrame.mockClear();
   domMock.createElement.mockClear();

@@ -54,6 +54,7 @@ export type {
   AnnotationHandleDefinition,
   AnnotationOverlayStyle,
   AnnotationPointerInput,
+  BuiltInAnnotationEditingEngine,
   DraftUndoAnnotationEditingEngine,
   DetectionId,
   EditableDetection,
