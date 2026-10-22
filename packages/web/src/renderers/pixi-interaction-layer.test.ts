@@ -498,6 +498,26 @@ describe("pixi interaction layer", () => {
     );
   });
 
+  it("retains host capture ownership while another pointer completes an edit", () => {
+    const h = createPressHarness((press) =>
+      press.input.pointerId === 8 ? "handled" : "continue",
+    );
+    h.send("pointerdown", 230, 180, { pointerId: 8 });
+    expect(h.capture).not.toHaveBeenCalled();
+    h.send("pointerdown", 40, 40, { pointerId: 7 });
+    h.send("pointermove", 50, 50, { pointerId: 7 });
+    expect(h.capture).toHaveBeenCalledExactlyOnceWith(7);
+    h.layer.pointerCaptureLost(8);
+    h.send("pointerup", 60, 60, { pointerId: 7 });
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    h.send("pointerup", 230, 180, { pointerId: 8 });
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+      expect.objectContaining({ id: "a" }),
+    );
+  });
+
   it("does not begin a marquee or consume another pointer's tap for a handled empty press", async () => {
     const h = createPressHarness((press) =>
       press.input.pointerId === 7 ? "handled" : "continue",
@@ -2752,6 +2772,7 @@ function createPressHarness(
       },
     ],
   };
+  const capture = vi.fn();
   const onCommit = vi.fn();
   const onSelectionChange = vi.fn();
   const engine = createAnnotationEditingEngine({ onCommit });
@@ -2770,6 +2791,7 @@ function createPressHarness(
     canInteract: () => true,
     detectionTimeline: createTimeline(pressFrame),
     editingEngine: engine,
+    capturePointer: capture,
     interaction: {
       mode: MediaInteractionMode.Always,
       multiSelect: true,
@@ -2806,6 +2828,7 @@ function createPressHarness(
   return {
     layer,
     engine,
+    capture,
     onCommit,
     onPointerPress,
     onSelectionChange,

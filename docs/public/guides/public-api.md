@@ -421,7 +421,9 @@ let release and cancellation events continue to the renderer so it can retire
 its tap suppression. Return `"continue"` only while preserving selection and
 editing state: the default route uses the snapshot resolved before the callback.
 Return `"handled"` when the host changes that state. Without this callback,
-existing interaction behavior is unchanged.
+the renderer retains its default selection and editing routing. Modifier keys
+are forwarded to editing engines independently of this callback. A handled
+press does not suppress the renderer's ordinary hover and cursor updates.
 
 Marquee selection includes intersecting detection bounds by default. Set
 `interaction.marqueeSelectionMode: "contained"` to select only detections whose
