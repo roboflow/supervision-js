@@ -2,18 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   AnnotationGestureStateKind,
+  AnnotationGeometryKind,
   BaseBoxStyle,
   BaseKeypointStyle,
   BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
+  createAnnotationEditingEngine,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
+  type Point,
+  type Rect,
 } from "supervision-js-core";
 
 import {
   createRenderer,
+  domMock,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -39,6 +44,124 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it.each(["pointercancel", "lostpointercapture"])(
+    "retains routed polygon vertices after native %s and accepts the next contact",
+    async (eventType) => {
+      resetMocks();
+      const onCommit = vi.fn();
+      const releasePointer = vi.fn();
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        releasePointer,
+      });
+      const interrupt = vi.spyOn(engine, "pointerCancel");
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Polygon,
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      });
+      const renderer = await createRenderer(false, false, {
+        editingEngine: engine,
+      });
+      const listeners =
+        eventType === "pointercancel"
+          ? domMock.windowAddEventListener
+          : pixiMock.canvasAddEventListener;
+      const cancel = listeners.mock.calls.find(
+        ([type]) => type === eventType,
+      )?.[1] as ((event: PointerEvent) => void) | undefined;
+      expect(cancel).toBeTypeOf("function");
+
+      sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
+      const ownerState = engine.getState();
+      cancel!({ pointerId: 8 } as PointerEvent);
+      expect(engine.getState()).toEqual(ownerState);
+      cancel!({ pointerId: 7 } as PointerEvent);
+      expect(engine.getState()).toMatchObject({
+        kind: AnnotationGestureStateKind.Creating,
+        pointerId: null,
+        preview: {
+          polygon: {
+            points: [
+              { x: 10, y: 20 },
+              { x: 10, y: 20 },
+            ],
+          },
+        },
+      });
+      expect(releasePointer).toHaveBeenCalledExactlyOnceWith(7);
+      expect(onCommit).not.toHaveBeenCalled();
+
+      interrupt.mockClear();
+      if (eventType === "lostpointercapture") {
+        cancel!({ pointerId: 7 } as PointerEvent);
+        expect(interrupt).not.toHaveBeenCalled();
+      }
+      sendInteractionPointer("pointerdown", 8, { x: 60, y: 20 }, 300);
+      sendInteractionPointer("pointerup", 8, { x: 60, y: 20 }, 301);
+      sendInteractionPointer("pointerdown", 9, { x: 60, y: 80 }, 600);
+      engine.keyDown("Enter");
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        {
+          polygon: {
+            points: [
+              { x: 10, y: 20 },
+              { x: 60, y: 20 },
+              { x: 60, y: 80 },
+            ],
+          },
+        },
+        null,
+      );
+      renderer.destroy();
+      if (eventType === "pointercancel")
+        expect(domMock.windowRemoveEventListener).toHaveBeenCalledWith(
+          eventType,
+          cancel,
+          true,
+        );
+      else
+        expect(pixiMock.canvasRemoveEventListener).toHaveBeenCalledWith(
+          eventType,
+          cancel,
+        );
+    },
+  );
+
+  it("retires a routed press through the native pointer-up fallback and removes its listener", async () => {
+    resetMocks();
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+    });
+    const pointerUp = domMock.windowAddEventListener.mock.calls.find(
+      ([type]) => type === "pointerup",
+    )?.[1] as (event: PointerEvent) => void;
+    expect(domMock.windowAddEventListener).toHaveBeenCalledWith(
+      "pointerup",
+      expect.any(Function),
+      true,
+    );
+    sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
+    expect(engine.getState().pointerId).toBe(7);
+    pointerUp({ pointerId: 7 } as PointerEvent);
+    await Promise.resolve();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(onCommit).not.toHaveBeenCalled();
+    renderer.destroy();
+    expect(domMock.windowRemoveEventListener).toHaveBeenCalledWith(
+      "pointerup",
+      pointerUp,
+      true,
+    );
+  });
+
   it.each([
     [0, 1, [0x0000ff, 0xff0000]],
     [1, 0, [0xff0000, 0x0000ff]],
@@ -308,6 +431,19 @@ describe("editing gestures in the Pixi media scene", () => {
     renderer.destroy();
   });
 });
+
+function sendInteractionPointer(
+  eventType: "pointerdown" | "pointerup",
+  pointerId: number,
+  point: Point,
+  timeStamp = 0,
+) {
+  const handler = pixiMock.containerInstances
+    .flatMap((container) => container.on.mock.calls)
+    .find(([type]) => type === eventType)?.[1];
+  expect(handler).toBeTypeOf("function");
+  handler({ button: 0, getLocalPosition: () => point, pointerId, timeStamp });
+}
 
 function visibleFillColors(): number[] {
   type SceneDisplay = {

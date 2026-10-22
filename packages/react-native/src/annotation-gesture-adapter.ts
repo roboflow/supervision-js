@@ -30,6 +30,7 @@ export interface ReactNativeAnnotationGestureAdapter {
   ): DetectionPickResult | null;
   pointerMove(input: ReactNativeAnnotationGestureInput): void;
   pointerUp(input: ReactNativeAnnotationGestureInput): void;
+  pointerCancel?(pointerId?: number): void;
   keyDown(key: string): void;
   cancel(): void;
 }
@@ -107,6 +108,16 @@ export function createReactNativeAnnotationGestureAdapter(options: {
           mapCanvasPointUnbounded(options.getLayout(), input),
         ),
       );
+    },
+
+    pointerCancel(pointerId) {
+      const engine = options.editingEngine;
+      if (engine.pointerCancel) engine.pointerCancel(pointerId);
+      else if (
+        pointerId !== undefined &&
+        engine.getState().pointerId === pointerId
+      )
+        engine.cancel();
     },
 
     keyDown(key) {

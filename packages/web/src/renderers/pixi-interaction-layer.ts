@@ -21,6 +21,7 @@ import type {
   DetectionSelectionOptions,
   MediaInteractionOptions,
   AnnotationEditingEngine,
+  AnnotationPointerInput,
 } from "supervision-js-core";
 import { DetectionPickTarget, MediaInteractionMode } from "supervision-js-core";
 
@@ -92,6 +93,9 @@ export interface PixiInteractionLayer {
   ): DetectionPickResult | null;
   getState(): PixiInteractionLayerState;
   cycleSelection(direction?: 1 | -1): DetectionPickResult | null;
+  pointerCancel(pointerId: number): void;
+  pointerCaptureLost(pointerId: number): void;
+  pointerUpFallback(pointerId: number): void;
   destroy(): void;
 }
 
@@ -133,11 +137,24 @@ export function createPixiInteractionLayer(options: {
   let selectedPicks: DetectionPickResult[] = [];
   let marqueeStart: DetectionPickPoint | null = null;
   let marqueeRect: PixiInteractionLayerState["marqueeRect"] = null;
-  let didDragMarquee = false;
   let pointerPoint: DetectionPickPoint | null = null;
-  let suppressNextTap = false;
+  let suppressedTap: AnnotationPointerInput | null = null;
+  let defaultPress: {
+    kind: "editing" | "marquee";
+    input: AnnotationPointerInput;
+  } | null = null;
   let activeFrame: DetectionFrame | undefined;
   let isDestroyed = false;
+  const unsubscribeEditing = options.editingEngine?.subscribe((state) => {
+    const press = defaultPress;
+    if (press?.kind !== "editing") return;
+    if (
+      state.kind === AnnotationGestureStateKind.Idle ||
+      (press.input.pointerId !== undefined &&
+        state.pointerId !== press.input.pointerId)
+    )
+      retirePress(press);
+  });
 
   return {
     createDisplay({ width, height }) {
@@ -237,42 +254,56 @@ export function createPixiInteractionLayer(options: {
       return next;
     },
 
+    pointerCancel,
+    pointerCaptureLost(pointerId) {
+      if (defaultPress) pointerCancel(pointerId);
+    },
+    pointerUpFallback(pointerId) {
+      const press = defaultPress;
+      const tap = suppressedTap;
+      queueMicrotask(() => {
+        if (tap && suppressedTap === tap && samePointer(tap, { pointerId }))
+          suppressedTap = null;
+        if (
+          press &&
+          defaultPress === press &&
+          press.input.pointerId === pointerId
+        ) {
+          pointerCancel(pointerId);
+        }
+      });
+    },
     destroy() {
       isDestroyed = true;
+      unsubscribeEditing?.();
+      if (defaultPress) pointerCancel(defaultPress.input.pointerId);
+      suppressedTap = null;
       setHoveredPick(null);
       setSelectedPick(null);
     },
   };
 
   function handlePointerMove(event: PixiInteractionPointerEvent) {
+    if (isOtherPressPointer(event)) return;
     if (!canHandleInteraction()) {
       setHoveredPick(null);
       return;
     }
 
     const editingEngine = options.editingEngine;
+    // Pixi emits local and global moves inside the hit area. Marquees and
+    // editing use the global route to keep moving outside.
     if (
-      editingEngine &&
-      editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
+      defaultPress?.kind === "marquee" ||
+      (editingEngine &&
+        editingEngine.getState().kind !== AnnotationGestureStateKind.Idle)
     ) {
-      // Pixi sends both local and global moves inside the hit area. Active
-      // editing uses the global route so captured drags also continue outside.
       return;
     }
 
     pointerPoint = getPoint(event);
     updateCursor(pointerPoint);
 
-    if (marqueeStart) {
-      const point = getPoint(event);
-      if (Math.hypot(point.x - marqueeStart.x, point.y - marqueeStart.y) >= 4) {
-        didDragMarquee = true;
-        marqueeRect = rectFromPoints(marqueeStart, point);
-        options.interaction.onMarqueeChange?.(marqueeRect);
-        notifyStateChange();
-      }
-      return;
-    }
     const hoverChanged = setHoveredPick(pickFromPointerEvent(event));
     if (!hoverChanged && editingEngine?.hasCreationTool()) {
       notifyStateChange();
@@ -280,6 +311,23 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handleGlobalPointerMove(event: PixiInteractionPointerEvent) {
+    if (isOtherPressPointer(event)) return;
+    if (defaultPress?.kind === "marquee") {
+      if (!canHandleInteraction() || !marqueeStart) return;
+      pointerPoint = getPoint(event);
+      updateCursor(pointerPoint);
+      if (
+        Math.hypot(
+          pointerPoint.x - marqueeStart.x,
+          pointerPoint.y - marqueeStart.y,
+        ) >= 4
+      ) {
+        marqueeRect = rectFromPoints(marqueeStart, pointerPoint);
+        options.interaction.onMarqueeChange?.(marqueeRect);
+        notifyStateChange();
+      }
+      return;
+    }
     const editingEngine = options.editingEngine;
     const state = editingEngine?.getState();
     if (
@@ -287,7 +335,7 @@ export function createPixiInteractionLayer(options: {
       !state ||
       state.kind === AnnotationGestureStateKind.Idle ||
       !canHandleInteraction() ||
-      (state.pointerId !== null && event.pointerId !== state.pointerId)
+      isOtherEditingPointer(event)
     ) {
       return;
     }
@@ -312,19 +360,15 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerTap(event: PixiInteractionPointerEvent) {
+    if (isOtherPressPointer(event) || isOtherEditingPointer(event)) return;
+    if (suppressedTap && samePointer(suppressedTap, event)) {
+      suppressedTap = null;
+      return;
+    }
     if (!canHandleInteraction()) {
       return;
     }
 
-    if (suppressNextTap) {
-      suppressNextTap = false;
-      return;
-    }
-
-    if (didDragMarquee) {
-      didDragMarquee = false;
-      return;
-    }
     const pick = pickFromPointerEvent(event);
     if (options.interaction.multiSelect && event.shiftKey) {
       toggleSelectedPick(pick);
@@ -334,8 +378,14 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerDown(event: PixiInteractionPointerEvent) {
-    if (!canHandleInteraction()) return;
+    if (
+      !canHandleInteraction() ||
+      isOtherPressPointer(event) ||
+      isOtherEditingPointer(event)
+    )
+      return;
     const point = getPoint(event);
+    const input = toPointerInput(event, point);
     pointerPoint = point;
     const pick = pickFromPointerEvent(event);
     const selected = selectedPick?.detection;
@@ -357,7 +407,8 @@ export function createPixiInteractionLayer(options: {
         (event.button === 2 || event.shiftKey)
       ) {
         options.editingEngine.deleteVertex(selected, handle.geometryIndex);
-        suppressNextTap = event.button === undefined || event.button === 0;
+        if (event.button === undefined || event.button === 0)
+          suppressedTap = input;
         notifyStateChange();
         return;
       }
@@ -380,7 +431,7 @@ export function createPixiInteractionLayer(options: {
         // Selection modifiers must run before the editing engine captures a
         // move. The following pointertap belongs to this same toggle.
         toggleSelectedPick(pick);
-        suppressNextTap = true;
+        suppressedTap = input;
         return;
       }
 
@@ -391,40 +442,55 @@ export function createPixiInteractionLayer(options: {
       if (pick && !handle && !options.editingEngine.hasCreationTool()) {
         setSelectedPick(pick);
       }
-      if (event.pointerId !== undefined) {
-        options.capturePointer?.(event.pointerId);
-      }
-      const input = toPointerInput(event, point);
+      const press = { kind: "editing" as const, input };
+      defaultPress = press;
       if (handle && selected) {
         options.editingEngine.beginHandleDrag(selected, handle, input);
       } else {
         options.editingEngine.pointerDown(input, pick);
       }
-      suppressNextTap = true;
+      if (defaultPress === press) capturePress(press);
+      suppressedTap = input;
       notifyStateChange();
       return;
     }
 
     if (options.interaction.multiSelect && !pick) {
-      marqueeStart = getPoint(event);
-      didDragMarquee = false;
+      const press = { kind: "marquee" as const, input };
+      defaultPress = press;
+      marqueeStart = point;
+      marqueeRect = null;
+      capturePress(press);
     }
   }
 
   function handlePointerUp(event: PixiInteractionPointerEvent) {
+    if (isOtherPressPointer(event) || isOtherEditingPointer(event)) return;
+    const press = defaultPress;
+    defaultPress = null;
+    const completedRect = press?.kind === "marquee" ? marqueeRect : null;
+    if (press?.kind === "marquee") {
+      marqueeStart = null;
+      marqueeRect = null;
+    }
+    const tap = suppressedTap;
+    if (tap && samePointer(tap, event)) {
+      queueMicrotask(() => {
+        if (suppressedTap === tap) suppressedTap = null;
+      });
+    }
     const editingEngine = options.editingEngine;
     if (
       editingEngine &&
       editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
     ) {
       editingEngine.pointerUp(toPointerInput(event, getPoint(event)));
-      if (event.pointerId !== undefined) {
-        options.releasePointer?.(event.pointerId);
-      }
       notifyStateChange();
     }
-    if (!marqueeStart) return;
-    if (didDragMarquee && marqueeRect && activeFrame) {
+    if (press) releasePress(press);
+    if (press?.kind !== "marquee" || defaultPress) return;
+    if (completedRect && activeFrame) {
+      suppressedTap = press?.input ?? toPointerInput(event, getPoint(event));
       const nextPicks = activeFrame.detections.flatMap(
         (detection, detectionIndex) => {
           if (!canPickDetection(detection)) return [];
@@ -433,7 +499,7 @@ export function createPixiInteractionLayer(options: {
             !rect ||
             !matchesMarquee(
               rect,
-              marqueeRect!,
+              completedRect,
               options.interaction.marqueeSelectionMode,
             )
           )
@@ -456,10 +522,78 @@ export function createPixiInteractionLayer(options: {
       );
       setSelectedPicks(nextPicks);
     }
-    marqueeStart = null;
-    marqueeRect = null;
     options.interaction.onMarqueeChange?.(null);
     notifyStateChange();
+  }
+
+  function pointerCancel(pointerId?: number) {
+    const press = defaultPress;
+    if (press && !samePointer(press.input, { pointerId })) return;
+    if (press) defaultPress = null;
+    const tap = suppressedTap;
+    if (press && tap && samePointer(tap, { pointerId })) suppressedTap = null;
+    if (press?.kind === "marquee") {
+      marqueeStart = null;
+      marqueeRect = null;
+      options.interaction.onMarqueeChange?.(null);
+    }
+    const engine = options.editingEngine;
+    if (engine?.pointerCancel) engine.pointerCancel(pointerId);
+    else if (
+      engine &&
+      pointerId !== undefined &&
+      engine.getState().pointerId === pointerId
+    ) {
+      engine.cancel();
+    }
+    if (press) releasePress(press);
+    notifyStateChange();
+  }
+
+  function samePointer(
+    first: Pick<AnnotationPointerInput, "pointerId">,
+    second: Pick<AnnotationPointerInput, "pointerId">,
+  ) {
+    return (
+      first.pointerId === undefined ||
+      second.pointerId === undefined ||
+      first.pointerId === second.pointerId
+    );
+  }
+
+  function isOtherPressPointer(event: PixiInteractionPointerEvent) {
+    return defaultPress !== null && !samePointer(defaultPress.input, event);
+  }
+
+  function capturePress(press: NonNullable<typeof defaultPress>) {
+    if (press.input.pointerId !== undefined)
+      options.capturePointer?.(press.input.pointerId);
+  }
+
+  function retirePress(press: NonNullable<typeof defaultPress>) {
+    if (defaultPress !== press) return;
+    defaultPress = null;
+    releasePress(press);
+  }
+
+  function releasePress(press: NonNullable<typeof defaultPress>) {
+    const pointerId = press.input.pointerId;
+    if (
+      pointerId !== undefined &&
+      defaultPress?.input.pointerId !== pointerId
+    ) {
+      options.releasePointer?.(pointerId);
+    }
+  }
+
+  function isOtherEditingPointer(event: PixiInteractionPointerEvent) {
+    const pointerId = options.editingEngine?.getState().pointerId;
+    return (
+      pointerId !== undefined &&
+      pointerId !== null &&
+      event.pointerId !== undefined &&
+      event.pointerId !== pointerId
+    );
   }
 
   function pickFromPointerEvent(event: PixiInteractionPointerEvent) {

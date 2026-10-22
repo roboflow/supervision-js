@@ -97,6 +97,24 @@ editing engine, commit detections to their chosen persistence/source, and own
 undo. `MediaSession` only receives the caller-owned engine to route gestures
 and render previews.
 
+The engine separates an active contact from a persistent multi-click draft.
+`pointerCancel()` interrupts that contact: continuous gestures are discarded,
+while multi-click vertices accepted on pointer-down remain available. Deliberate
+`cancel()` discards the entire edit. Pointer-down also accepts path closure;
+contact interruption cannot roll back an emitted commit. The browser interaction
+adapter owns DOM capture, press routing, and marquee lifetime. It routes native
+cancellation and unexpected capture loss to the engine's optional capability,
+falling back to whole-edit cancellation only for an explicitly matching legacy
+owner. The built-in factory guarantees the capability without requiring it on
+existing custom engines.
+
+Editing transitions settle internal state before external callbacks. Commit
+callbacks run before terminal idle subscribers; subscribers may release the host
+context needed to reconcile the committed geometry. Reentrant gestures supersede
+remaining preview and state notifications from the completed transition.
+Explicit cancellation or gesture replacement in a pointer-release callback can
+preempt a pending commit.
+
 `AnnotationOverlayStyle` remains a core renderer-neutral contract so browser
 and React Native hosts share editing vocabulary. Pixi display objects and other
 renderer implementation types must never appear in public declarations. Live
