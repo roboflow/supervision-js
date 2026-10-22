@@ -112,6 +112,8 @@ Editing transitions settle internal state before external callbacks. Commit
 callbacks run before terminal idle subscribers; subscribers may release the host
 context needed to reconcile the committed geometry. Reentrant gestures supersede
 remaining preview and state notifications from the completed transition.
+Explicit cancellation or gesture replacement in a pointer-release callback can
+preempt a pending commit.
 
 `AnnotationOverlayStyle` remains a core renderer-neutral contract so browser
 and React Native hosts share editing vocabulary. Pixi display objects and other

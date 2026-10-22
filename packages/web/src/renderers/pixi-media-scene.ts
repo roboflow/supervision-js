@@ -879,6 +879,9 @@ export async function createPixiMediaScene(
   const handlePointerCancel = (event: PointerEvent) => {
     interactionLayer?.pointerCancel(event.pointerId);
   };
+  const handlePointerCaptureLost = (event: PointerEvent) => {
+    interactionLayer?.pointerCaptureLost(event.pointerId);
+  };
   const handlePointerUp = (event: PointerEvent) => {
     interactionLayer?.pointerUpFallback(event.pointerId);
   };
@@ -886,7 +889,7 @@ export async function createPixiMediaScene(
     window.addEventListener("pointercancel", handlePointerCancel, true);
     rendererCanvas.addEventListener?.(
       "lostpointercapture",
-      handlePointerCancel,
+      handlePointerCaptureLost,
     );
     window.addEventListener("pointerup", handlePointerUp, true);
   }
@@ -1986,7 +1989,7 @@ export async function createPixiMediaScene(
         window.removeEventListener("pointercancel", handlePointerCancel, true);
         rendererCanvas.removeEventListener?.(
           "lostpointercapture",
-          handlePointerCancel,
+          handlePointerCaptureLost,
         );
         window.removeEventListener("pointerup", handlePointerUp, true);
       }

@@ -94,6 +94,7 @@ export interface PixiInteractionLayer {
   getState(): PixiInteractionLayerState;
   cycleSelection(direction?: 1 | -1): DetectionPickResult | null;
   pointerCancel(pointerId: number): void;
+  pointerCaptureLost(pointerId: number): void;
   pointerUpFallback(pointerId: number): void;
   destroy(): void;
 }
@@ -254,6 +255,9 @@ export function createPixiInteractionLayer(options: {
     },
 
     pointerCancel,
+    pointerCaptureLost(pointerId) {
+      if (defaultPress) pointerCancel(pointerId);
+    },
     pointerUpFallback(pointerId) {
       const press = defaultPress;
       const tap = suppressedTap;
@@ -287,27 +291,19 @@ export function createPixiInteractionLayer(options: {
     }
 
     const editingEngine = options.editingEngine;
+    // Pixi emits local and global moves inside the hit area. Marquees and
+    // editing use the global route to keep moving outside.
     if (
-      editingEngine &&
-      editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
+      defaultPress?.kind === "marquee" ||
+      (editingEngine &&
+        editingEngine.getState().kind !== AnnotationGestureStateKind.Idle)
     ) {
-      // Pixi sends both local and global moves inside the hit area. Active
-      // editing uses the global route so captured drags also continue outside.
       return;
     }
 
     pointerPoint = getPoint(event);
     updateCursor(pointerPoint);
 
-    if (marqueeStart) {
-      const point = getPoint(event);
-      if (Math.hypot(point.x - marqueeStart.x, point.y - marqueeStart.y) >= 4) {
-        marqueeRect = rectFromPoints(marqueeStart, point);
-        options.interaction.onMarqueeChange?.(marqueeRect);
-        notifyStateChange();
-      }
-      return;
-    }
     const hoverChanged = setHoveredPick(pickFromPointerEvent(event));
     if (!hoverChanged && editingEngine?.hasCreationTool()) {
       notifyStateChange();
@@ -317,7 +313,19 @@ export function createPixiInteractionLayer(options: {
   function handleGlobalPointerMove(event: PixiInteractionPointerEvent) {
     if (isOtherPressPointer(event)) return;
     if (defaultPress?.kind === "marquee") {
-      if (canHandleInteraction()) handlePointerMove(event);
+      if (!canHandleInteraction() || !marqueeStart) return;
+      pointerPoint = getPoint(event);
+      updateCursor(pointerPoint);
+      if (
+        Math.hypot(
+          pointerPoint.x - marqueeStart.x,
+          pointerPoint.y - marqueeStart.y,
+        ) >= 4
+      ) {
+        marqueeRect = rectFromPoints(marqueeStart, pointerPoint);
+        options.interaction.onMarqueeChange?.(marqueeRect);
+        notifyStateChange();
+      }
       return;
     }
     const editingEngine = options.editingEngine;

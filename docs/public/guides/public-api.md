@@ -453,7 +453,7 @@ directly can call the same method without supplying coordinates:
 
 ```ts
 canvas.addEventListener("pointercancel", (event) => {
-  engine.pointerCancel(event.pointerId);
+  engine.pointerCancel?.(event.pointerId);
 });
 ```
 
@@ -469,6 +469,8 @@ Editing callbacks can start another gesture. The engine settles its internal
 state before calling them and does not overwrite that successor with completion
 cleanup. `onCommit` runs before terminal idle subscriptions, allowing hosts to
 consume gesture context before releasing it in an idle subscriber.
+Explicit cancellation or gesture replacement in `releasePointer` can preempt a
+pending commit.
 
 Browser-routed box creation, movement, and resizing stay inside the natural
 media dimensions in both previews and commits. Moving a box preserves its size
@@ -578,6 +580,12 @@ React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
+
+Route interrupted native contacts through the adapter's optional capability:
+
+```ts
+gestureAdapter.pointerCancel?.(pointerId);
+```
 
 The experimental `./react/live-inference` entrypoint owns the live VisionCamera
 worklet through `useReactNativeLiveInference()`; applications provide model
