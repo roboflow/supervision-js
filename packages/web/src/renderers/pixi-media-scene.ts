@@ -876,12 +876,17 @@ export async function createPixiMediaScene(
   const handleContextMenu = (event: Event) => {
     if (options.editingEngine) event.preventDefault();
   };
+  const handlePointerCancel = (event: PointerEvent) => {
+    const engine = options.editingEngine;
+    if (engine?.getState().pointerId === event.pointerId) engine.cancel();
+  };
   if (interactionLayer || options.editingEngine) {
     rendererCanvas.tabIndex = 0;
     rendererCanvas.addEventListener?.("keydown", handleKeyDown);
   }
   if (options.editingEngine) {
     rendererCanvas.addEventListener?.("contextmenu", handleContextMenu);
+    rendererCanvas.addEventListener?.("pointercancel", handlePointerCancel);
   }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
@@ -1973,6 +1978,10 @@ export async function createPixiMediaScene(
       }
       if (options.editingEngine) {
         rendererCanvas.removeEventListener?.("contextmenu", handleContextMenu);
+        rendererCanvas.removeEventListener?.(
+          "pointercancel",
+          handlePointerCancel,
+        );
       }
       app.destroy(
         { removeView: true },

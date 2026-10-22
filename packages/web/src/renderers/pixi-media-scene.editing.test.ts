@@ -2,14 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   AnnotationGestureStateKind,
+  AnnotationGeometryKind,
   BaseBoxStyle,
   BaseKeypointStyle,
   BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
+  createAnnotationEditingEngine,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
+  type Rect,
 } from "supervision-js-core";
 
 import {
@@ -39,6 +42,42 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it("cancels only the owner of a native cancelled pointer and accepts the next contact", async () => {
+    resetMocks();
+    const onCommit = vi.fn();
+    const releasePointer = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit, releasePointer });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+    });
+    const cancel = pixiMock.canvasAddEventListener.mock.calls.find(
+      ([type]) => type === "pointercancel",
+    )?.[1] as ((event: PointerEvent) => void) | undefined;
+    expect(cancel).toBeTypeOf("function");
+
+    engine.pointerDown({ point: { x: 10, y: 20 }, timestamp: 0, pointerId: 7 });
+    const ownerState = engine.getState();
+    cancel!({ pointerId: 8 } as PointerEvent);
+    expect(engine.getState()).toEqual(ownerState);
+    cancel!({ pointerId: 7 } as PointerEvent);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(releasePointer).toHaveBeenCalledExactlyOnceWith(7);
+    expect(onCommit).not.toHaveBeenCalled();
+
+    engine.pointerDown({ point: { x: 30, y: 40 }, timestamp: 1, pointerId: 8 });
+    engine.pointerUp({ point: { x: 60, y: 80 }, timestamp: 2, pointerId: 8 });
+    expect(onCommit).toHaveBeenCalledOnce();
+    renderer.destroy();
+    expect(pixiMock.canvasRemoveEventListener).toHaveBeenCalledWith(
+      "pointercancel",
+      cancel,
+    );
+  });
+
   it.each([
     [0, 1, [0x0000ff, 0xff0000]],
     [1, 0, [0xff0000, 0x0000ff]],
