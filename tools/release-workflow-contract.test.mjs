@@ -30,21 +30,33 @@ test("npm publish waits for the selected dist-tag to propagate", async () => {
   );
 });
 
-test("release tagging uses the protected workflow-capable token only at the release boundary", async () => {
+test("npm uses OIDC and GitHub releases use the automatic token in a separate job", async () => {
   const workflow = await readFile(workflowPath, "utf8");
+  const releaseStart = workflow.indexOf("\n  github-release:");
+  assert.ok(releaseStart > 0, "GitHub releases must run in a separate job");
+  const publishJob = workflow.slice(0, releaseStart);
+  const releaseJob = workflow.slice(releaseStart);
 
-  assert.match(workflow, /contents: read/);
-  assert.match(
+  assert.match(publishJob, /contents: read/);
+  assert.match(publishJob, /id-token: write/);
+  assert.doesNotMatch(publishJob, /contents: write/);
+  assert.match(releaseJob, /needs: publish/);
+  assert.match(releaseJob, /if: inputs\.dist_tag == 'latest'/);
+  assert.match(releaseJob, /contents: write/);
+  assert.doesNotMatch(releaseJob, /id-token: write/);
+  assert.match(releaseJob, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(releaseJob, /persist-credentials: false/);
+  assert.doesNotMatch(
     workflow,
-    /name: Check out repository[\s\S]*?fetch-depth: 0[\s\S]*?persist-credentials: false/,
+    /secrets\.|create-github-app-token|RELEASE_APP_|recovery_run_id/,
   );
   assert.match(
-    workflow,
-    /name: Create or verify release tag[\s\S]*?RELEASE_GITHUB_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}[\s\S]*?git push "https:\/\/x-access-token:\$\{RELEASE_GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/,
+    releaseJob,
+    /name: Create or verify release tag[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}[\s\S]*?gh auth setup-git --hostname github\.com\n *git push origin "refs\/tags\/\$\{tag\}"/,
   );
   assert.match(
-    workflow,
-    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}/,
+    releaseJob,
+    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}/,
   );
 });
 

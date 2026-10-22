@@ -11,15 +11,9 @@ on:
         options:
           - next
           - latest
-      recovery_run_id:
-        description: "Recovery only: failed Publish npm package run ID after npm upload succeeded."
-        required: false
-        type: string
 
 permissions:
-  actions: read
   contents: read
-  id-token: write
 
 concurrency:
   group: npm-publish
@@ -32,6 +26,9 @@ jobs:
       (startsWith(github.ref, 'refs/heads/release/') && inputs.dist_tag == 'next')
     name: Verify and publish supervision
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     environment:
       name: npm-publish
 
@@ -39,51 +36,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Resolve release source
-        id: release_source
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
-        run: |
-          set -euo pipefail
-          release_sha="${GITHUB_SHA}"
-
-          if [[ -n "${RECOVERY_RUN_ID}" ]]; then
-            if ! [[ "${RECOVERY_RUN_ID}" =~ ^[0-9]+$ ]]; then
-              echo "recovery_run_id must be a GitHub Actions run ID." >&2
-              exit 1
-            fi
-
-            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RECOVERY_RUN_ID}")"
-            workflow_name="$(jq --raw-output '.name' <<<"${run}")"
-            event="$(jq --raw-output '.event' <<<"${run}")"
-            head_branch="$(jq --raw-output '.head_branch' <<<"${run}")"
-            conclusion="$(jq --raw-output '.conclusion' <<<"${run}")"
-            release_sha="$(jq --raw-output '.head_sha' <<<"${run}")"
-
-            if [[ "${workflow_name}" != "Publish npm package" \
-              || "${event}" != "workflow_dispatch" \
-              || "${head_branch}" != "main" \
-              || "${conclusion}" != "failure" \
-              || ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "recovery_run_id must identify a failed Publish npm package dispatch from main." >&2
-              exit 1
-            fi
-
-            if ! git merge-base --is-ancestor "${release_sha}" origin/main; then
-              echo "Recovery run head ${release_sha} is not reachable from main." >&2
-              exit 1
-            fi
-
-            git checkout --detach "${release_sha}"
-          fi
-
-          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
-          echo "recovery=$([[ -n "${RECOVERY_RUN_ID}" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -108,7 +63,6 @@ jobs:
         shell: bash
         env:
           DIST_TAG: ${{ inputs.dist_tag }}
-          RECOVERY: ${{ steps.release_source.outputs.recovery }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
@@ -129,17 +83,7 @@ jobs:
               exit 1
             fi
 
-            if [[ "${RECOVERY}" != "true" ]]; then
-              echo "supervision@${version} is already published. To recover its GitHub Release, dispatch this workflow from main with recovery_run_id set to the failed Publish npm package run ID." >&2
-              exit 1
-            fi
-
-            echo "supervision@${version} is already published; continuing the verified run recovery."
-            exit 0
-          fi
-
-          if [[ "${RECOVERY}" == "true" ]]; then
-            echo "Recovery run's supervision@${version} is not published; refusing to publish a recovery source." >&2
+            echo "supervision@${version} is already published. Use a new version for a new publish; rerun only the failed GitHub release job if npm already succeeded." >&2
             exit 1
           fi
 
@@ -190,11 +134,31 @@ jobs:
 
           exit 1
 
+  github-release:
+    needs: publish
+    if: inputs.dist_tag == 'latest'
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out published source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
       - name: Create or verify release tag
-        if: inputs.dist_tag == 'latest'
         shell: bash
         env:
-          RELEASE_GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
@@ -217,13 +181,13 @@ jobs:
           fi
 
           git tag --annotate "${tag}" "${release_sha}" --message "supervision ${tag}"
-          git push "https://x-access-token:${RELEASE_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}"
+          gh auth setup-git --hostname github.com
+          git push origin "refs/tags/${tag}"
 
       - name: Create GitHub Release
-        if: inputs.dist_tag == 'latest'
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
