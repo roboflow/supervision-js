@@ -21,6 +21,7 @@ import type {
   DetectionSelectionOptions,
   MediaInteractionOptions,
   AnnotationEditingEngine,
+  AnnotationPointerInput,
 } from "supervision-js-core";
 import { DetectionPickTarget, MediaInteractionMode } from "supervision-js-core";
 
@@ -92,6 +93,7 @@ export interface PixiInteractionLayer {
   ): DetectionPickResult | null;
   getState(): PixiInteractionLayerState;
   cycleSelection(direction?: 1 | -1): DetectionPickResult | null;
+  cancelHandledPress(pointerId: number): void;
   destroy(): void;
 }
 
@@ -136,6 +138,7 @@ export function createPixiInteractionLayer(options: {
   let didDragMarquee = false;
   let pointerPoint: DetectionPickPoint | null = null;
   let suppressNextTap = false;
+  const handledPresses = new Map<number | undefined, AnnotationPointerInput>();
   let activeFrame: DetectionFrame | undefined;
   let isDestroyed = false;
 
@@ -215,6 +218,10 @@ export function createPixiInteractionLayer(options: {
       return createState();
     },
 
+    cancelHandledPress(pointerId) {
+      handledPresses.delete(pointerId);
+    },
+
     cycleSelection(direction = 1) {
       const visibleDetections = activeFrame?.detections.flatMap(
         (detection, detectionIndex) =>
@@ -239,6 +246,7 @@ export function createPixiInteractionLayer(options: {
 
     destroy() {
       isDestroyed = true;
+      handledPresses.clear();
       setHoveredPick(null);
       setSelectedPick(null);
     },
@@ -284,6 +292,7 @@ export function createPixiInteractionLayer(options: {
     const state = editingEngine?.getState();
     if (
       !editingEngine ||
+      handledPresses.has(event.pointerId) ||
       !state ||
       state.kind === AnnotationGestureStateKind.Idle ||
       !canHandleInteraction() ||
@@ -312,6 +321,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerTap(event: PixiInteractionPointerEvent) {
+    if (handledPresses.delete(event.pointerId)) return;
     if (!canHandleInteraction()) {
       return;
     }
@@ -336,6 +346,7 @@ export function createPixiInteractionLayer(options: {
   function handlePointerDown(event: PixiInteractionPointerEvent) {
     if (!canHandleInteraction()) return;
     const point = getPoint(event);
+    const input = toPointerInput(event, point);
     pointerPoint = point;
     const pick = pickFromPointerEvent(event);
     const selected = selectedPick?.detection;
@@ -345,6 +356,18 @@ export function createPixiInteractionLayer(options: {
           point,
         )
       : undefined;
+
+    if (
+      options.interaction.onPointerPress?.({
+        input,
+        pick,
+        selectedHandle:
+          handle && selectedPick ? { pick: selectedPick, handle } : null,
+      }) === "handled"
+    ) {
+      handledPresses.set(event.pointerId, input);
+      return;
+    }
 
     if (
       options.editingEngine &&
@@ -394,7 +417,6 @@ export function createPixiInteractionLayer(options: {
       if (event.pointerId !== undefined) {
         options.capturePointer?.(event.pointerId);
       }
-      const input = toPointerInput(event, point);
       if (handle && selected) {
         options.editingEngine.beginHandleDrag(selected, handle, input);
       } else {
@@ -412,6 +434,18 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerUp(event: PixiInteractionPointerEvent) {
+    const pointerId = event.pointerId;
+    const handledPress = handledPresses.get(pointerId);
+    if (handledPress) {
+      // Pixi emits the matching tap synchronously after pointerup. An outside
+      // release may have no tap, so retire that press after dispatch completes.
+      globalThis.queueMicrotask(() => {
+        if (handledPresses.get(pointerId) === handledPress) {
+          handledPresses.delete(pointerId);
+        }
+      });
+      return;
+    }
     const editingEngine = options.editingEngine;
     if (
       editingEngine &&

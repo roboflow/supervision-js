@@ -1,4 +1,8 @@
 import type { Detection, DetectionFrame } from "#types/detections";
+import type {
+  AnnotationHandleDefinition,
+  AnnotationPointerInput,
+} from "#types/editing";
 
 export enum DetectionPickTarget {
   Box = "box",
@@ -94,6 +98,20 @@ export interface MediaInteractionOptions extends Omit<
   "viewportScale"
 > {
   readonly mode?: MediaInteractionMode;
+  /**
+   * Runs before default selection, editing, or marquee handling, including empty
+   * presses and repeated hits. Return "handled" to skip those defaults and the
+   * press's subsequent tap, or "continue" to keep them. Hosts own any ongoing
+   * gesture and should let its release or cancellation reach the renderer.
+   */
+  readonly onPointerPress?: (press: {
+    readonly input: AnnotationPointerInput;
+    readonly pick: DetectionPickResult | null;
+    readonly selectedHandle: {
+      readonly pick: DetectionPickResult;
+      readonly handle: AnnotationHandleDefinition;
+    } | null;
+  }) => "handled" | "continue";
   readonly onHover?: (pick: DetectionPickResult | null) => void;
   /**
    * Reports selection identity changes. A stable, frame-unique detection id

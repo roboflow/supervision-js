@@ -22,7 +22,8 @@ import {
   MediaInteractionMode,
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
-import type { DetectionFrame, Rect } from "supervision-js-core";
+import type { DetectionFrame, Point, Rect } from "supervision-js-core";
+import type { MediaInteractionOptions } from "supervision-js-core";
 
 const frame: DetectionFrame = {
   detections: [
@@ -49,6 +50,193 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it.each([
+    {
+      name: "body",
+      point: [40, 40],
+      selection: [],
+      pick: "a",
+      kind: AnnotationGestureStateKind.Moving,
+    },
+    {
+      name: "repeated body",
+      point: [40, 40],
+      selection: ["a"],
+      pick: "a",
+      kind: AnnotationGestureStateKind.Moving,
+    },
+    {
+      name: "composed label",
+      point: [100, 110],
+      selection: ["b"],
+      pick: "a",
+      kind: AnnotationGestureStateKind.Moving,
+    },
+    {
+      name: "composed mask",
+      point: [200, 20],
+      selection: ["mask"],
+      pick: "mask",
+      kind: AnnotationGestureStateKind.Idle,
+    },
+    {
+      name: "locked body",
+      point: [140, 40],
+      selection: ["locked"],
+      pick: "locked",
+      kind: AnnotationGestureStateKind.Idle,
+    },
+    {
+      name: "primary handle",
+      point: [60, 60],
+      selection: ["b", "a"],
+      pick: "b",
+      handle: ["a", "se"],
+      kind: AnnotationGestureStateKind.Resizing,
+    },
+    {
+      name: "empty",
+      point: [230, 180],
+      selection: ["a", "b"],
+      pick: null,
+      kind: AnnotationGestureStateKind.Idle,
+    },
+    {
+      name: "Shift toggle",
+      point: [80, 70],
+      selection: ["a"],
+      pick: "b",
+      shiftKey: true,
+      kind: AnnotationGestureStateKind.Idle,
+    },
+    {
+      name: "secondary vertex",
+      point: [160, 90],
+      selection: ["polygon"],
+      pick: "polygon",
+      handle: ["polygon", "vertex-0"],
+      button: 2,
+      kind: AnnotationGestureStateKind.Idle,
+    },
+    {
+      name: "selected keypoint",
+      point: [40, 130],
+      selection: ["pose"],
+      pick: "pose",
+      handle: ["pose", "kp-0"],
+      button: 2,
+      kind: AnnotationGestureStateKind.Idle,
+    },
+  ])(
+    "resolves $name before defaults and honors its disposition",
+    (testCase) => {
+      for (const disposition of ["handled", "continue"] as const) {
+        const h = createPressHarness(disposition);
+        h.layer.setSelectedDetection({ detectionIds: testCase.selection });
+        h.onSelectionChange.mockClear();
+        h.send("pointerdown", testCase.point[0]!, testCase.point[1]!, {
+          button: testCase.button,
+          shiftKey: testCase.shiftKey,
+        });
+        expect(h.onPointerPress).toHaveBeenCalledOnce();
+        const press = h.onPointerPress.mock.calls[0]![0];
+        expect(press.input).toMatchObject({
+          point: { x: testCase.point[0], y: testCase.point[1] },
+          pointerId: 7,
+          timestamp: expect.any(Number),
+          button: testCase.button ?? 0,
+          shiftKey: testCase.shiftKey ?? false,
+          mediaDimensions: { width: 240, height: 200 },
+        });
+        expect(press.pick?.detection.id ?? null).toBe(testCase.pick);
+        expect(
+          press.selectedHandle
+            ? [
+                press.selectedHandle.pick.detection.id,
+                press.selectedHandle.handle.id,
+              ]
+            : undefined,
+        ).toEqual(testCase.handle);
+        expect(h.selectionAtPress).toEqual(testCase.selection);
+        if (testCase.name === "composed label")
+          expect(press.pick?.target).toBe(DetectionPickTarget.Label);
+        if (testCase.name === "composed mask")
+          expect(press.pick?.target).toBe(DetectionPickTarget.Mask);
+        if (testCase.name === "selected keypoint")
+          expect(press.selectedHandle?.handle.geometryIndex).toBe(0);
+        expect(h.engine.getState().kind).toBe(
+          disposition === "handled"
+            ? AnnotationGestureStateKind.Idle
+            : testCase.kind,
+        );
+        h.send("pointerup", testCase.point[0]!, testCase.point[1]!, {
+          button: testCase.button,
+          shiftKey: testCase.shiftKey,
+        });
+        if (disposition === "handled") {
+          expect(
+            h.layer.getState().selectedPicks.map((pick) => pick.detection.id),
+          ).toEqual(testCase.selection);
+          expect(h.onSelectionChange).not.toHaveBeenCalled();
+          expect(h.onCommit).not.toHaveBeenCalled();
+        } else if (testCase.name === "secondary vertex") {
+          expect(h.onCommit.mock.calls[0]?.[0].polygon.points).toHaveLength(3);
+        } else if (testCase.name === "Shift toggle") {
+          expect(
+            h.layer.getState().selectedPicks.map((pick) => pick.detection.id),
+          ).toEqual(["a", "b"]);
+        }
+      }
+    },
+  );
+
+  it("does not begin a marquee or consume another pointer's tap for a handled empty press", async () => {
+    const h = createPressHarness((press) =>
+      press.input.pointerId === 7 ? "handled" : "continue",
+    );
+    h.layer.setSelectedDetection({ detectionIds: ["a", "b"] });
+    h.send("pointerdown", 230, 180);
+    h.send("pointermove", 10, 10);
+    expect(h.layer.getState().marqueeRect).toBeNull();
+    h.send("pointerdown", 140, 40, { pointerId: 8 });
+    h.send("pointerup", 140, 40, { pointerId: 8 });
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("locked");
+    h.send("pointerup", 230, 180);
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("locked");
+
+    h.send("pointerdown", 230, 180);
+    h.send("pointerupoutside", 260, 210);
+    await Promise.resolve();
+    h.onPointerPress.mockImplementation(() => "continue");
+    h.send("pointerdown", 40, 40);
+    h.send("pointerup", 40, 40);
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
+  });
+
+  it("leaves an existing creation draft untouched during a handled press", () => {
+    const h = createPressHarness("handled");
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({
+        polyline: { points: points as readonly Point[] },
+      }),
+    });
+    h.engine.pointerDown({
+      point: { x: 10, y: 10 },
+      timestamp: 0,
+      pointerId: 7,
+    });
+    h.engine.pointerUp({ point: { x: 10, y: 10 }, timestamp: 1, pointerId: 7 });
+    const pointerUp = vi.spyOn(h.engine, "pointerUp");
+    const draft = h.engine.getState();
+    h.send("pointerdown", 40, 40);
+    h.send("pointermove", 70, 70);
+    h.send("pointerup", 70, 70);
+    expect(h.engine.getState()).toEqual(draft);
+    expect(pointerUp).not.toHaveBeenCalled();
+    expect(h.onCommit).not.toHaveBeenCalled();
+  });
+
   it.each([
     [4, "mask", DetectionPickTarget.Mask, false],
     [0, "polygon", DetectionPickTarget.Polygon, false],
@@ -2081,5 +2269,129 @@ function cloneDetectionFrame(sourceFrame: DetectionFrame): DetectionFrame {
   return {
     ...sourceFrame,
     detections: sourceFrame.detections.map((detection) => ({ ...detection })),
+  };
+}
+
+function createPressHarness(
+  disposition:
+    | "handled"
+    | "continue"
+    | NonNullable<MediaInteractionOptions["onPointerPress"]>,
+) {
+  const pressFrame: DetectionFrame = {
+    mediaTime: 0,
+    detections: [
+      { id: "a", rect: { x: 40, y: 40, width: 40, height: 40 } },
+      { id: "b", rect: { x: 80, y: 70, width: 50, height: 40 } },
+      {
+        id: "locked",
+        locked: true,
+        rect: { x: 140, y: 40, width: 30, height: 30 },
+      },
+      {
+        id: "mask",
+        rect: { x: 200, y: 20, width: 20, height: 20 },
+        mask: encodeBinaryMask(new Uint8Array([1]), 1, 1),
+      },
+      { id: "under-label", rect: { x: 100, y: 110, width: 40, height: 40 } },
+      {
+        id: "polygon",
+        polygon: {
+          points: [
+            { x: 160, y: 90 },
+            { x: 190, y: 90 },
+            { x: 190, y: 120 },
+            { x: 160, y: 120 },
+          ],
+        },
+      },
+      {
+        id: "pose",
+        keypoints: {
+          points: [
+            { x: 40, y: 130 },
+            { x: 70, y: 130 },
+          ],
+          edges: [[0, 1]],
+        },
+      },
+    ],
+  };
+  const onCommit = vi.fn();
+  const onSelectionChange = vi.fn();
+  const engine = createAnnotationEditingEngine({ onCommit });
+  let selectionAtPress: (string | number | undefined)[] = [];
+  const onPointerPress = vi.fn<
+    NonNullable<MediaInteractionOptions["onPointerPress"]>
+  >((press) => {
+    selectionAtPress = layer
+      .getState()
+      .selectedPicks.map((pick) => pick.detection.id);
+    return typeof disposition === "function" ? disposition(press) : disposition;
+  });
+  const layer = createPixiInteractionLayer({
+    Container,
+    Rectangle,
+    canInteract: () => true,
+    detectionTimeline: createTimeline(pressFrame),
+    editingEngine: engine,
+    interaction: {
+      mode: MediaInteractionMode.Always,
+      multiSelect: true,
+      preferTopmost: true,
+      onPointerPress,
+      onSelectionChange,
+    },
+    pickLabelDetectionAtPoint: (point) =>
+      point.x === 100 && point.y === 110
+        ? {
+            detection: pressFrame.detections[0]!,
+            detectionIndex: 0,
+            frame: pressFrame,
+            mediaTime: 0,
+            point,
+            target: DetectionPickTarget.Label,
+          }
+        : null,
+    pickMaskDetectionAtPoint: (point) =>
+      point.x === 200 && point.y === 20
+        ? {
+            detection: pressFrame.detections[3]!,
+            detectionIndex: 3,
+            frame: pressFrame,
+            mediaTime: 0,
+            point,
+            target: DetectionPickTarget.Mask,
+          }
+        : null,
+  });
+  const display = layer.createDisplay({ width: 240, height: 200 }) as Container;
+  const boundary = new EventBoundary(display);
+  layer.drawFrame(0);
+  return {
+    layer,
+    engine,
+    onCommit,
+    onPointerPress,
+    onSelectionChange,
+    get selectionAtPress() {
+      return selectionAtPress;
+    },
+    send(
+      type: string,
+      x: number,
+      y: number,
+      options: { pointerId?: number; button?: number; shiftKey?: boolean } = {},
+    ) {
+      const event = new FederatedPointerEvent(boundary);
+      event.type = type;
+      event.pointerType = "mouse";
+      event.pointerId = options.pointerId ?? 7;
+      event.button = options.button ?? 0;
+      event.shiftKey = options.shiftKey ?? false;
+      event.timeStamp = 500;
+      event.global.set(x, y);
+      boundary.mapEvent(event);
+    },
   };
 }

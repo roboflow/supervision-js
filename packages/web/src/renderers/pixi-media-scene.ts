@@ -876,6 +876,12 @@ export async function createPixiMediaScene(
   const handleContextMenu = (event: Event) => {
     if (options.editingEngine) event.preventDefault();
   };
+  const handlePointerCancel = (event: PointerEvent) => {
+    interactionLayer?.cancelHandledPress(event.pointerId);
+  };
+  if (options.interaction?.onPointerPress) {
+    rendererCanvas.addEventListener?.("pointercancel", handlePointerCancel);
+  }
   if (interactionLayer || options.editingEngine) {
     rendererCanvas.tabIndex = 0;
     rendererCanvas.addEventListener?.("keydown", handleKeyDown);
@@ -1968,6 +1974,12 @@ export async function createPixiMediaScene(
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
+      if (options.interaction?.onPointerPress) {
+        rendererCanvas.removeEventListener?.(
+          "pointercancel",
+          handlePointerCancel,
+        );
+      }
       if (interactionLayer || options.editingEngine) {
         rendererCanvas.removeEventListener?.("keydown", handleKeyDown);
       }
