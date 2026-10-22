@@ -174,6 +174,8 @@ const mockState = vi.hoisted(() => {
   };
   const domMock = {
     appendChild: vi.fn(),
+    windowAddEventListener: vi.fn(),
+    windowRemoveEventListener: vi.fn(),
     cancelAnimationFrame: vi.fn(),
     createElement: vi.fn(),
     getContext: vi.fn(),
@@ -687,6 +689,8 @@ vi.stubGlobal("document", {
 });
 
 vi.stubGlobal("window", {
+  addEventListener: domMock.windowAddEventListener,
+  removeEventListener: domMock.windowRemoveEventListener,
   cancelAnimationFrame: domMock.cancelAnimationFrame,
   devicePixelRatio: 1,
   requestAnimationFrame: domMock.requestAnimationFrame,
@@ -708,6 +712,8 @@ vi.stubGlobal(
 );
 
 export function resetMocks() {
+  domMock.windowAddEventListener.mockReset();
+  domMock.windowRemoveEventListener.mockReset();
   pixiMock.alphaMaskInstances.length = 0;
   pixiMock.assetLoad.mockClear();
   pixiMock.assetLoad.mockResolvedValue({ height: 16, width: 16 });

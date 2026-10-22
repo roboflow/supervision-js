@@ -408,17 +408,20 @@ selected vertex handle is hit; active creation tools keep their gesture priority
 Use `interaction.onPointerPress` when a host gesture needs the renderer's
 resolved target before selection or editing begins. It receives normalized
 `input`, the visible composed `pick` (including labels and masks, or `null`
-for empty space), and `selectedHandle` when the press hits a selected handle.
-The handle includes its owning `pick`, which can differ from the detection
-underneath the handle. Repeated hits and locked detections are reported even
-when selection does not change.
+for empty space), and `selectedHandle` for the primary selected detection's
+semantic handle. This follows existing primary-selection routing; a matching
+handle need not have a drawn editing overlay. The handle includes its owning
+`pick`, which can differ from the detection underneath it. Repeated hits and
+locked detections are reported even when selection does not change.
 
 Return `"continue"` to keep the renderer's normal behavior, or `"handled"`
 to skip its selection, editing, marquee, and subsequent tap handling for that
 press. The host owns movement, completion, and cancellation of its gesture;
 let release and cancellation events continue to the renderer so it can retire
-its tap suppression. Without this callback, existing interaction behavior is
-unchanged.
+its tap suppression. Return `"continue"` only while preserving selection and
+editing state: the default route uses the snapshot resolved before the callback.
+Return `"handled"` when the host changes that state. Without this callback,
+existing interaction behavior is unchanged.
 
 Marquee selection includes intersecting detection bounds by default. Set
 `interaction.marqueeSelectionMode: "contained"` to select only detections whose

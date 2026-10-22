@@ -880,7 +880,7 @@ export async function createPixiMediaScene(
     interactionLayer?.cancelHandledPress(event.pointerId);
   };
   if (options.interaction?.onPointerPress) {
-    rendererCanvas.addEventListener?.("pointercancel", handlePointerCancel);
+    window.addEventListener("pointercancel", handlePointerCancel, true);
   }
   if (interactionLayer || options.editingEngine) {
     rendererCanvas.tabIndex = 0;
@@ -1975,10 +1975,7 @@ export async function createPixiMediaScene(
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
       if (options.interaction?.onPointerPress) {
-        rendererCanvas.removeEventListener?.(
-          "pointercancel",
-          handlePointerCancel,
-        );
+        window.removeEventListener("pointercancel", handlePointerCancel, true);
       }
       if (interactionLayer || options.editingEngine) {
         rendererCanvas.removeEventListener?.("keydown", handleKeyDown);

@@ -209,8 +209,56 @@ describe("pixi interaction layer", () => {
     await Promise.resolve();
     h.onPointerPress.mockImplementation(() => "continue");
     h.send("pointerdown", 40, 40);
-    h.send("pointerup", 40, 40);
+    h.send("pointermove", 50, 50);
+    h.send("pointerup", 60, 60);
     expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+      expect.objectContaining({ id: "a" }),
+    );
+  });
+
+  it.each(["altKey", "ctrlKey", "metaKey"] as const)(
+    "routes a modified %s press to the host and an unmodified edit to completion",
+    (modifier) => {
+      const h = createPressHarness((press) =>
+        press.input[modifier] ? "handled" : "continue",
+      );
+      h.layer.setSelectedDetection({ detectionIds: ["a", "b"] });
+      h.send("pointerdown", 40, 40, { [modifier]: true });
+      h.send("pointerup", 40, 40, { [modifier]: true });
+      expect(h.onPointerPress.mock.calls[0]![0].input[modifier]).toBe(true);
+      expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(
+        h.layer.getState().selectedPicks.map((pick) => pick.detection.id),
+      ).toEqual(["a", "b"]);
+      expect(h.onCommit).not.toHaveBeenCalled();
+
+      h.send("pointerdown", 40, 40);
+      h.send("pointermove", 50, 50);
+      h.send("pointerup", 60, 60);
+      expect(h.onPointerPress.mock.calls[1]![0].input[modifier]).toBe(false);
+      expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+        { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+        expect.objectContaining({ id: "a" }),
+      );
+    },
+  );
+
+  it("retires a lost handled press when the same pointer starts a continued edit", () => {
+    const h = createPressHarness("handled");
+    h.send("pointerdown", 230, 180);
+    h.onPointerPress.mockReturnValue("continue");
+    h.send("pointerdown", 40, 40);
+    h.send("pointermove", 50, 50);
+    h.send("pointerup", 60, 60);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+      expect.objectContaining({ id: "a" }),
+    );
   });
 
   it("leaves an existing creation draft untouched during a handled press", () => {
@@ -2381,7 +2429,14 @@ function createPressHarness(
       type: string,
       x: number,
       y: number,
-      options: { pointerId?: number; button?: number; shiftKey?: boolean } = {},
+      options: {
+        pointerId?: number;
+        button?: number;
+        shiftKey?: boolean;
+        altKey?: boolean;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+      } = {},
     ) {
       const event = new FederatedPointerEvent(boundary);
       event.type = type;
@@ -2389,6 +2444,9 @@ function createPressHarness(
       event.pointerId = options.pointerId ?? 7;
       event.button = options.button ?? 0;
       event.shiftKey = options.shiftKey ?? false;
+      event.altKey = options.altKey ?? false;
+      event.ctrlKey = options.ctrlKey ?? false;
+      event.metaKey = options.metaKey ?? false;
       event.timeStamp = 500;
       event.global.set(x, y);
       boundary.mapEvent(event);

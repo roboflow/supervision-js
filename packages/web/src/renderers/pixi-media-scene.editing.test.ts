@@ -2,18 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   AnnotationGestureStateKind,
+  AnnotationGeometryKind,
   BaseBoxStyle,
   BaseKeypointStyle,
   BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
+  createAnnotationEditingEngine,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
+  type Point,
+  type Rect,
 } from "supervision-js-core";
 
 import {
   createRenderer,
+  domMock,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -39,6 +44,112 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it("retires a handled press cancelled on its capture host and completes the next edit", async () => {
+    resetMocks();
+    const windowEvents = new EventTarget();
+    domMock.windowAddEventListener.mockImplementation(
+      (...args: Parameters<EventTarget["addEventListener"]>) =>
+        windowEvents.addEventListener(...args),
+    );
+    domMock.windowRemoveEventListener.mockImplementation(
+      (...args: Parameters<EventTarget["removeEventListener"]>) =>
+        windowEvents.removeEventListener(...args),
+    );
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({
+        polyline: { points: points as readonly Point[] },
+      }),
+    });
+    engine.pointerDown({ point: { x: 10, y: 20 }, timestamp: 0, pointerId: 7 });
+    const draft = engine.getState();
+    const onPointerPress = vi.fn((): "handled" | "continue" => "handled");
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+      interaction: { onPointerPress },
+    });
+    const display = pixiMock.containerInstances.find((container) =>
+      container.on.mock.calls.some(([type]) => type === "pointerdown"),
+    )!;
+    const send = (
+      type: string,
+      point: Point,
+      pointerId = 7,
+      timeStamp = 500,
+    ) => {
+      const handler = display.on.mock.calls.find(
+        ([name]) => name === type,
+      )![1] as (event: unknown) => void;
+      handler({
+        pointerId,
+        timeStamp,
+        button: 0,
+        getLocalPosition: () => point,
+      });
+    };
+    const cancelListener = domMock.windowAddEventListener.mock.calls.find(
+      ([type]) => type === "pointercancel",
+    )?.[1];
+    try {
+      send("pointerdown", { x: 50, y: 60 });
+      send("globalpointermove", { x: 70, y: 80 });
+      expect(engine.getState()).toEqual(draft);
+
+      const captureHost = new EventTarget();
+      const cancel = (pointerId: number) => {
+        const event = new Event("pointercancel");
+        Object.defineProperties(event, {
+          pointerId: { value: pointerId },
+          target: { value: captureHost },
+        });
+        windowEvents.dispatchEvent(event);
+        expect(event.target).toBe(captureHost);
+      };
+      cancel(8);
+      send("globalpointermove", { x: 70, y: 80 });
+      expect(engine.getState()).toEqual(draft);
+      cancel(7);
+      send("globalpointermove", { x: 70, y: 80 });
+      expect(engine.getState().preview?.polyline?.points).toEqual([
+        { x: 10, y: 20 },
+        { x: 70, y: 80 },
+      ]);
+
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Box,
+        createDetection: (rect) => ({ rect: rect as Rect }),
+      });
+      onPointerPress.mockReturnValue("continue");
+      send("pointerdown", { x: 10, y: 20 }, 8, 0);
+      send("globalpointermove", { x: 80, y: 90 }, 8, 300);
+      send("pointerup", { x: 80, y: 90 }, 8, 400);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        { rect: { x: 45, y: 55, width: 70, height: 70 } },
+        null,
+      );
+      expect(domMock.windowAddEventListener).toHaveBeenCalledExactlyOnceWith(
+        "pointercancel",
+        expect.any(Function),
+        true,
+      );
+      expect(
+        pixiMock.canvasAddEventListener.mock.calls.some(
+          ([type]) => type === "pointercancel",
+        ),
+      ).toBe(false);
+    } finally {
+      renderer.destroy();
+    }
+    expect(domMock.windowRemoveEventListener).toHaveBeenCalledExactlyOnceWith(
+      "pointercancel",
+      cancelListener,
+      true,
+    );
+  });
+
   it.each([
     [0, 1, [0x0000ff, 0xff0000]],
     [1, 0, [0xff0000, 0x0000ff]],

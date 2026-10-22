@@ -62,6 +62,9 @@ type PixiInteractionContainer = {
 
 type PixiInteractionPointerEvent = {
   getLocalPosition(container: PixiInteractionContainer): DetectionPickPoint;
+  readonly altKey?: boolean;
+  readonly ctrlKey?: boolean;
+  readonly metaKey?: boolean;
   readonly shiftKey?: boolean;
   readonly pointerId?: number;
   readonly button?: number;
@@ -344,6 +347,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerDown(event: PixiInteractionPointerEvent) {
+    handledPresses.delete(event.pointerId);
     if (!canHandleInteraction()) return;
     const point = getPoint(event);
     const input = toPointerInput(event, point);
@@ -757,11 +761,14 @@ export function createPixiInteractionLayer(options: {
     point: DetectionPickPoint,
   ) {
     return {
+      altKey: event.altKey,
       button: event.button,
+      ctrlKey: event.ctrlKey,
       detail: event.detail,
       mediaDimensions: options.getMediaDimensions?.() ?? displayDimensions,
       point,
       pointerId: event.pointerId,
+      metaKey: event.metaKey,
       shiftKey: event.shiftKey,
       timestamp: event.timeStamp ?? Date.now(),
     };
