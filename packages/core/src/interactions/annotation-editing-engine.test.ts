@@ -21,6 +21,152 @@ import {
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it.each(["box", "freehand", "move", "resize"] as const)(
+    "keeps the initiating pointer in control of a %s gesture",
+    (kind) => {
+      const onCommit = vi.fn();
+      const onCancel = vi.fn();
+      const capturePointer = vi.fn();
+      const releasePointer = vi.fn();
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        onCancel,
+        capturePointer,
+        releasePointer,
+      });
+      const detection = {
+        id: "box",
+        rect: { x: 20, y: 30, width: 10, height: 20 },
+      };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === "se",
+      )!;
+      const start = {
+        point: kind === "resize" ? handle.point : { x: 20, y: 30 },
+        timestamp: 0,
+        pointerId: 7,
+      };
+      if (kind === "resize") {
+        engine.beginHandleDrag(detection, handle, start);
+      } else {
+        if (kind === "box")
+          engine.setCreationTool({
+            geometry: AnnotationGeometryKind.Box,
+            createDetection: (rect) => ({ rect: rect as Rect }),
+          });
+        if (kind === "freehand")
+          engine.setCreationTool({
+            geometry: AnnotationGeometryKind.Mask,
+            mode: "freehand",
+            createDetection: (points) => ({
+              polyline: { points: points as Point[] },
+            }),
+          });
+        engine.pointerDown(
+          start,
+          pickDetectionAtPoint(
+            { mediaTime: 0, detections: [detection] },
+            start.point,
+          ),
+        );
+      }
+      const ownerState = engine.getState();
+      expect(ownerState.pointerId).toBe(7);
+      const other = { point: { x: 90, y: 90 }, timestamp: 300, pointerId: 8 };
+      engine.pointerMove(other);
+      engine.pointerDown(other);
+      engine.beginHandleDrag(detection, handle, other);
+      engine.pointerUp(other);
+      expect(engine.getState()).toEqual(ownerState);
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(onCancel).not.toHaveBeenCalled();
+      expect(capturePointer).toHaveBeenCalledExactlyOnceWith(7);
+      expect(releasePointer).not.toHaveBeenCalled();
+
+      const end = { point: { x: 60, y: 70 }, timestamp: 400, pointerId: 7 };
+      const intermediate = { x: 50, y: 60 };
+      engine.pointerMove({ ...end, point: intermediate });
+      engine.pointerUp(end);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onCommit).toHaveBeenCalledOnce();
+      expect(onCommit.mock.calls[0]?.[0]).toMatchObject(
+        kind === "freehand"
+          ? { polyline: { points: [start.point, intermediate, end.point] } }
+          : {
+              rect:
+                kind === "box"
+                  ? { x: 40, y: 50, width: 40, height: 40 }
+                  : kind === "move"
+                    ? { x: 60, y: 70, width: 10, height: 20 }
+                    : { x: 37.5, y: 45, width: 45, height: 50 },
+            },
+      );
+      expect(releasePointer).toHaveBeenCalledExactlyOnceWith(7);
+    },
+  );
+
+  it("lets a new pointer continue a multi-click draft after the previous press ends", () => {
+    const onCommit = vi.fn();
+    const capturePointer = vi.fn();
+    const releasePointer = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      capturePointer,
+      releasePointer,
+    });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({
+        polyline: { points: points as Point[] },
+      }),
+    });
+    const first = { point: { x: 10, y: 10 }, timestamp: 0, pointerId: 7 };
+    const second = { point: { x: 70, y: 70 }, timestamp: 300, pointerId: 8 };
+    engine.pointerDown(first);
+    const firstState = engine.getState();
+    engine.pointerDown(second);
+    engine.pointerMove(second);
+    engine.pointerUp(second);
+    expect(engine.getState()).toEqual(firstState);
+    engine.pointerUp({ ...first, timestamp: 1 });
+    engine.pointerDown(second);
+    engine.pointerUp({ ...second, timestamp: 301 });
+    engine.keyDown("Enter");
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { polyline: { points: [first.point, second.point] } },
+      null,
+    );
+    expect(capturePointer.mock.calls).toEqual([[7], [8]]);
+    expect(releasePointer.mock.calls).toEqual([[7], [8]]);
+  });
+
+  it.each([
+    [7, undefined],
+    [undefined, 8],
+  ] as const)(
+    "accepts omitted pointer identity (start: %s, end: %s)",
+    (startId, endId) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Box,
+        createDetection: (rect) => ({ rect: rect as Rect }),
+      });
+      engine.pointerDown({
+        point: { x: 10, y: 10 },
+        timestamp: 0,
+        pointerId: startId,
+      });
+      const end = { point: { x: 70, y: 70 }, timestamp: 300, pointerId: endId };
+      engine.pointerMove(end);
+      engine.pointerUp(end);
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        { rect: { x: 40, y: 40, width: 60, height: 60 } },
+        null,
+      );
+    },
+  );
+
   it("undoes draft vertices before a polygon can commit", () => {
     const onCommit = vi.fn();
     const onCancel = vi.fn();

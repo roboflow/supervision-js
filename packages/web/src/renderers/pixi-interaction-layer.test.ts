@@ -22,7 +22,7 @@ import {
   MediaInteractionMode,
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
-import type { DetectionFrame, Rect } from "supervision-js-core";
+import type { DetectionFrame, Point, Rect } from "supervision-js-core";
 
 const frame: DetectionFrame = {
   detections: [
@@ -284,11 +284,80 @@ describe("pixi interaction layer", () => {
     },
   );
 
+  it("releases each multi-click press while retaining the draft and unidentified hover", () => {
+    const onCommit = vi.fn();
+    const editingEngine = createAnnotationEditingEngine({ onCommit });
+    editingEngine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({
+        polyline: { points: points as readonly Point[] },
+      }),
+    });
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      editingEngine,
+      interaction: { mode: MediaInteractionMode.Always },
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 100,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 30, 40, { pointerId: 7, timeStamp: 0 }),
+    );
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 30, 40, { pointerId: 7, timeStamp: 1 }),
+    );
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 70, 70, { pointerId: 8, timeStamp: 300 }),
+    );
+    display.emit("globalpointermove", createPointerEvent(display, 80, 60));
+    expect(editingEngine.getState().preview?.polyline?.points).toEqual([
+      { x: 30, y: 40 },
+      { x: 70, y: 70 },
+      { x: 80, y: 60 },
+    ]);
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 10, 15, { pointerId: 7 }),
+    );
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 10, 15, { pointerId: 7 }),
+    );
+    expect(layer.getState().selectedPick).toBeNull();
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 70, 70, { pointerId: 8, timeStamp: 301 }),
+    );
+    editingEngine.keyDown("Enter");
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      {
+        polyline: {
+          points: [
+            { x: 30, y: 40 },
+            { x: 70, y: 70 },
+          ],
+        },
+      },
+      null,
+    );
+  });
+
   it.each(["move", "resize", "create"] as const)(
     "keeps a %s preview bounded and synchronized with captured moves outside the media",
     (gesture) => {
       const onCommit = vi.fn();
       const onPreview = vi.fn();
+      const capturePointer = vi.fn();
+      const releasePointer = vi.fn();
       const editingEngine = createAnnotationEditingEngine({
         onCommit,
         onPreview,
@@ -301,12 +370,14 @@ describe("pixi interaction layer", () => {
         Container,
         Rectangle,
         canInteract: () => true,
+        capturePointer,
         detectionTimeline: createTimeline({
           ...frame,
           detections: [detection],
         }),
         editingEngine,
         interaction: { mode: MediaInteractionMode.Always },
+        releasePointer,
       });
       const display = layer.createDisplay({
         width: 120,
@@ -362,9 +433,16 @@ describe("pixi interaction layer", () => {
       expect(onCommit).not.toHaveBeenCalled();
 
       // A different pointer cannot take over the captured gesture.
+      const ownerPoint = layer.getState().pointerPoint;
+      sendPointer("pointerdown", 80, 60, 2);
       sendPointer("pointermove", 300, 200, 2);
+      sendPointer("pointerup", 300, 200, 2);
       expect(editingEngine.getState().preview?.rect).toEqual(expected);
+      expect(layer.getState().pointerPoint).toEqual(ownerPoint);
       expect(onPreview).toHaveBeenCalledTimes(2);
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(capturePointer).toHaveBeenCalledExactlyOnceWith(1);
+      expect(releasePointer).not.toHaveBeenCalled();
 
       // Re-entering the hit area must not dispatch the same move twice.
       sendPointer("pointermove", 80, 60);
@@ -379,6 +457,7 @@ describe("pixi interaction layer", () => {
       expect(editingEngine.getState().kind).toBe(
         AnnotationGestureStateKind.Idle,
       );
+      expect(releasePointer).toHaveBeenCalledExactlyOnceWith(1);
       expect(layer.getState().hoveredPick).toBeNull();
 
       const finalPoint = layer.getState().pointerPoint;

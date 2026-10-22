@@ -287,7 +287,7 @@ export function createPixiInteractionLayer(options: {
       !state ||
       state.kind === AnnotationGestureStateKind.Idle ||
       !canHandleInteraction() ||
-      (state.pointerId !== null && event.pointerId !== state.pointerId)
+      isOtherEditingPointer(event)
     ) {
       return;
     }
@@ -312,6 +312,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerTap(event: PixiInteractionPointerEvent) {
+    if (isOtherEditingPointer(event)) return;
     if (!canHandleInteraction()) {
       return;
     }
@@ -334,7 +335,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerDown(event: PixiInteractionPointerEvent) {
-    if (!canHandleInteraction()) return;
+    if (!canHandleInteraction() || isOtherEditingPointer(event)) return;
     const point = getPoint(event);
     pointerPoint = point;
     const pick = pickFromPointerEvent(event);
@@ -412,6 +413,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerUp(event: PixiInteractionPointerEvent) {
+    if (isOtherEditingPointer(event)) return;
     const editingEngine = options.editingEngine;
     if (
       editingEngine &&
@@ -460,6 +462,16 @@ export function createPixiInteractionLayer(options: {
     marqueeRect = null;
     options.interaction.onMarqueeChange?.(null);
     notifyStateChange();
+  }
+
+  function isOtherEditingPointer(event: PixiInteractionPointerEvent) {
+    const pointerId = options.editingEngine?.getState().pointerId;
+    return (
+      pointerId !== undefined &&
+      pointerId !== null &&
+      event.pointerId !== undefined &&
+      event.pointerId !== pointerId
+    );
   }
 
   function pickFromPointerEvent(event: PixiInteractionPointerEvent) {

@@ -74,6 +74,7 @@ export function createAnnotationEditingEngine(
       tool = nextTool;
     },
     pointerDown(input, pick = null) {
+      if (isOtherPointer(input)) return;
       if (input.button !== undefined && input.button !== 0) return;
       if (tool) {
         beginCreation(input);
@@ -82,7 +83,7 @@ export function createAnnotationEditingEngine(
       }
     },
     pointerMove(input) {
-      if (!gesture) return;
+      if (!gesture || isOtherPointer(input)) return;
       switch (gesture.kind) {
         case "box":
           gesture = { ...gesture, current: input };
@@ -142,8 +143,13 @@ export function createAnnotationEditingEngine(
       }
     },
     pointerUp(input) {
-      if (!gesture) return;
-      if (gesture.kind === "path") return;
+      if (!gesture || isOtherPointer(input)) return;
+      if (gesture.kind === "path") {
+        release(gesture.pointerId ?? undefined);
+        gesture.pointerId = null;
+        setState({ ...state, pointerId: null });
+        return;
+      }
       const active = gesture;
       gesture = null;
       release(active.start.pointerId);
@@ -219,6 +225,7 @@ export function createAnnotationEditingEngine(
       return true;
     },
     beginHandleDrag(detection, handle, input) {
+      if (isOtherPointer(input)) return;
       if (detection.locked || detection.mask) return;
       capture(input.pointerId);
       gesture = {
@@ -308,6 +315,8 @@ export function createAnnotationEditingEngine(
       return;
     }
 
+    capture(input.pointerId);
+    gesture.pointerId = input.pointerId ?? null;
     const minimum =
       tool.minVertices ??
       (tool.geometry === AnnotationGeometryKind.Polygon ? 3 : 2);
@@ -452,11 +461,11 @@ export function createAnnotationEditingEngine(
         state.kind === AnnotationGestureStateKind.Idle
           ? AnnotationGestureStateKind.Creating
           : state.kind,
-      pointerId:
-        state.pointerId ??
-        (gesture && "pointerId" in gesture
-          ? (gesture.pointerId ?? null)
-          : null),
+      pointerId: gesture
+        ? "start" in gesture
+          ? (gesture.start.pointerId ?? null)
+          : gesture.pointerId
+        : null,
       preview,
     });
   }
@@ -485,6 +494,14 @@ export function createAnnotationEditingEngine(
     state = Object.freeze(next);
     options.onStateChange?.(state);
     for (const listener of stateListeners) listener(state);
+  }
+
+  function isOtherPointer(input: AnnotationPointerInput) {
+    return (
+      state.pointerId !== null &&
+      input.pointerId !== undefined &&
+      state.pointerId !== input.pointerId
+    );
   }
 
   function scale() {
