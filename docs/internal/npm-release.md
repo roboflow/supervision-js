@@ -48,24 +48,19 @@ this ownership and security posture in place:
    `roboflow`, repository `supervision-js`, workflow `publish-npm.yml`, and
    environment `npm-publish` for the **npm publish** action.
 3. GitHub's `npm-publish` environment requires release-owner approval.
-4. Install a release GitHub App on `roboflow/supervision-js` with repository
-   **Contents: write** and **Workflows: write** permissions. In the
-   `npm-publish` environment, set the `RELEASE_APP_CLIENT_ID` variable to its
-   Client ID and the `RELEASE_APP_PRIVATE_KEY` secret to its generated PEM
-   private key. Webhooks and user authorization are not needed. The workflow
-   creates a short-lived installation token after verification and before npm
-   publication, so missing App access fails before an immutable upload. Only
-   the tag and GitHub Release steps use that token; the action revokes it when
-   the job ends. Checkout must use `persist-credentials: false`.
+4. The separate `github-release` job uses GitHub Actions' automatic
+   `GITHUB_TOKEN` with **Contents: write** to create the tag and GitHub Release.
+   The npm job has **Contents: read** and **id-token: write**. No personal
+   access token, dedicated GitHub App, or manually configured GitHub secret is
+   needed. Both jobs check out the exact workflow commit, and checkout uses
+   `persist-credentials: false`.
 5. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
 If publishing access breaks, compare the trusted-publisher fields with the
 workflow before changing credentials. The npm trusted-publisher configuration is
-separate from GitHub tag and release authentication. The App needs
-**Workflows: write** to recover an older release commit whose workflow files
-have changed relative to `main`; the automatic `GITHUB_TOKEN` cannot receive
-that permission. After migrating the workflow, remove the obsolete
-`RELEASE_GITHUB_TOKEN` secret.
+separate from GitHub tag and release authentication. After merging this
+workflow, remove the obsolete `RELEASE_GITHUB_TOKEN` secret. No replacement
+secret or variable is required.
 
 ## Choose The Version And Tag
 
@@ -137,12 +132,7 @@ If publishing fails before uploading the package, fix the failure in a pull
 request and rerun the workflow from `main`. npm versions are immutable once
 published: never try to overwrite one. Publish a new patch version instead.
 
-If package publishing succeeds but GitHub Release creation fails, do not start
-a new default dispatch from a later `main` commit: that would build a different
-source tree for an immutable version. Start **Publish npm package** from `main`
-with `recovery_run_id` set to the failed run's numeric GitHub Actions ID. The
-workflow reads that run's `head_sha`, confirms it was a failed main dispatch of
-this workflow, checks out that commit, and then verifies or creates the matching
-`v<version>` tag before creating the GitHub Release. It rejects an
-already-published version without that verified recovery run, and it refuses to
-publish a missing version during recovery.
+If npm publishing succeeds but the `github-release` job fails, use **Re-run
+failed jobs** on that original workflow run. The successful npm job is not
+repeated, and the release job uses the original run's commit. Do not dispatch a
+new publish or rebuild the same immutable npm version from a later commit.

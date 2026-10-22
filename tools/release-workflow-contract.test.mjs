@@ -30,40 +30,33 @@ test("npm publish waits for the selected dist-tag to propagate", async () => {
   );
 });
 
-test("GitHub releases use a repository-scoped App token after verification", async () => {
+test("npm uses OIDC and GitHub releases use the automatic token in a separate job", async () => {
   const workflow = await readFile(workflowPath, "utf8");
+  const releaseStart = workflow.indexOf("\n  github-release:");
+  assert.ok(releaseStart > 0, "GitHub releases must run in a separate job");
+  const publishJob = workflow.slice(0, releaseStart);
+  const releaseJob = workflow.slice(releaseStart);
 
-  assert.match(workflow, /contents: read/);
-  assert.match(workflow, /id-token: write/);
-  assert.doesNotMatch(workflow, /RELEASE_GITHUB_TOKEN/);
-  assert.match(
+  assert.match(publishJob, /contents: read/);
+  assert.match(publishJob, /id-token: write/);
+  assert.doesNotMatch(publishJob, /contents: write/);
+  assert.match(releaseJob, /needs: publish/);
+  assert.match(releaseJob, /if: inputs\.dist_tag == 'latest'/);
+  assert.match(releaseJob, /contents: write/);
+  assert.doesNotMatch(releaseJob, /id-token: write/);
+  assert.match(releaseJob, /ref: \$\{\{ github\.sha \}\}/);
+  assert.match(releaseJob, /persist-credentials: false/);
+  assert.doesNotMatch(
     workflow,
-    /name: Check out repository[\s\S]*?fetch-depth: 0[\s\S]*?persist-credentials: false/,
-  );
-  const tokenStart = workflow.indexOf("      - name: Create release App token");
-  const tokenEnd = workflow.indexOf("      - name: Publish generated tarball");
-  assert.ok(
-    tokenStart > workflow.indexOf("      - name: Smoke-test clean consumer"),
-  );
-  assert.ok(tokenStart < tokenEnd);
-  const tokenStep = workflow.slice(tokenStart, tokenEnd);
-  assert.match(tokenStep, /if: inputs\.dist_tag == 'latest'/);
-  assert.match(tokenStep, /uses: actions\/create-github-app-token@v3/);
-  assert.match(tokenStep, /client-id: \$\{\{ vars\.RELEASE_APP_CLIENT_ID \}\}/);
-  assert.match(
-    tokenStep,
-    /private-key: \$\{\{ secrets\.RELEASE_APP_PRIVATE_KEY \}\}/,
-  );
-  assert.match(tokenStep, /permission-contents: write/);
-  assert.match(tokenStep, /permission-workflows: write/);
-  assert.doesNotMatch(tokenStep, /owner:|repositories:|skip-token-revoke:/);
-  assert.match(
-    workflow,
-    /name: Create or verify release tag[\s\S]*?GH_TOKEN: \$\{\{ steps\.release_token\.outputs\.token \}\}[\s\S]*?gh auth setup-git --hostname github\.com\n *git push origin "refs\/tags\/\$\{tag\}"/,
+    /secrets\.|create-github-app-token|RELEASE_APP_|recovery_run_id/,
   );
   assert.match(
-    workflow,
-    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ steps\.release_token\.outputs\.token \}\}/,
+    releaseJob,
+    /name: Create or verify release tag[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}[\s\S]*?gh auth setup-git --hostname github\.com\n *git push origin "refs\/tags\/\$\{tag\}"/,
+  );
+  assert.match(
+    releaseJob,
+    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ github\.token \}\}/,
   );
 });
 
