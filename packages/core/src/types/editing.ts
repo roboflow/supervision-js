@@ -40,7 +40,7 @@ export interface AnnotationHandleDefinition {
 export interface AnnotationPointerInput {
   readonly point: Point;
   readonly timestamp: number;
-  /** Natural media size. When provided, box gestures stay within the media. */
+  /** Natural media size. Bounds box gestures and dragged or inserted polygon vertices. */
   readonly mediaDimensions?: Pick<Rect, "width" | "height">;
   readonly button?: number;
   readonly shiftKey?: boolean;

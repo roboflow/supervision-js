@@ -346,6 +346,78 @@ describe("annotation editing engine", () => {
     },
   );
 
+  it.each(["vertex-0", "add-0"])(
+    "bounds polygon %s previews and commits to the media",
+    (handleId) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const detection = {
+        id: "polygon",
+        polygon: {
+          points: [
+            { x: 20, y: 20 },
+            { x: 60, y: 20 },
+            { x: 60, y: 60 },
+          ],
+        },
+      };
+      const handle = getAnnotationHandles(detection).find(
+        (entry) => entry.id === handleId,
+      )!;
+      engine.beginHandleDrag(detection, handle, {
+        point: handle.point,
+        timestamp: 0,
+        mediaDimensions: { width: 100, height: 80 },
+      });
+      const index = handleId === "vertex-0" ? 0 : 1;
+      for (const [point, expected] of [
+        [
+          { x: -50, y: -30 },
+          { x: 0, y: 0 },
+        ],
+        [
+          { x: 150, y: 120 },
+          { x: 100, y: 80 },
+        ],
+        [
+          { x: 40, y: 30 },
+          { x: 40, y: 30 },
+        ],
+      ]) {
+        engine.pointerMove({ point: point!, timestamp: 16 });
+        expect(engine.getState().preview?.polygon?.points[index]).toEqual(
+          expected,
+        );
+      }
+      engine.pointerUp({ point: { x: -50, y: 120 }, timestamp: 32 });
+      const points = [...detection.polygon.points];
+      if (handleId === "vertex-0") points[0] = { x: 0, y: 80 };
+      else points.splice(1, 0, { x: 0, y: 80 });
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+        { ...detection, polygon: { points } },
+        detection,
+      );
+      expect(detection.polygon.points[0]).toEqual({ x: 20, y: 20 });
+    },
+  );
+
+  it("keeps polygon handle coordinates unbounded without media dimensions", () => {
+    const detection = {
+      polygon: {
+        points: [
+          { x: 20, y: 20 },
+          { x: 60, y: 20 },
+          { x: 60, y: 60 },
+        ],
+      },
+    };
+    const handle = getAnnotationHandles(detection)[0]!;
+    expect(
+      applyAnnotationHandleDrag(detection, handle, { x: -50, y: 120 }).polygon
+        ?.points[0],
+    ).toEqual({ x: -50, y: 120 });
+  });
+
   it.each([
     ["nw", { x: -200, y: -200 }, { x: 35, y: 25, width: 70, height: 50 }],
     ["n", { x: 50, y: -200 }, { x: 50, y: 25, width: 40, height: 50 }],

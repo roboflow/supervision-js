@@ -114,6 +114,14 @@ export function applyAnnotationHandleDrag(
     };
   }
 
+  const polygonPoint =
+    detection.polygon && mediaDimensions
+      ? {
+          x: Math.max(0, Math.min(point.x, mediaDimensions.width)),
+          y: Math.max(0, Math.min(point.y, mediaDimensions.height)),
+        }
+      : point;
+
   if (
     handle.kind === AnnotationHandleKind.AddVertex &&
     handle.edgeIndex !== undefined
@@ -122,13 +130,18 @@ export function applyAnnotationHandleDrag(
     const geometry = detection[key];
     if (!geometry) return detection;
     const points = [...geometry.points];
-    points.splice(handle.edgeIndex + 1, 0, point);
+    points.splice(handle.edgeIndex + 1, 0, polygonPoint);
     return { ...detection, [key]: { points } };
   }
 
   if (handle.geometryIndex === undefined) return detection;
   if (detection.polygon)
-    return replacePathPoint(detection, "polygon", handle.geometryIndex, point);
+    return replacePathPoint(
+      detection,
+      "polygon",
+      handle.geometryIndex,
+      polygonPoint,
+    );
   if (detection.polyline)
     return replacePathPoint(detection, "polyline", handle.geometryIndex, point);
   if (detection.keypoints) {
