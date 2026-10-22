@@ -454,7 +454,11 @@ const emptyPolygonStyle: PolygonStyle = { resolve: () => undefined };
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("document", documentMock);
-  vi.stubGlobal("window", { devicePixelRatio: 1 });
+  vi.stubGlobal("window", {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    devicePixelRatio: 1,
+  });
   vi.stubGlobal("ResizeObserver", undefined);
   vi.stubGlobal("GPUTextureUsage", {
     COPY_DST: 1,
@@ -539,7 +543,7 @@ describe("the prepared annotation window under push presentation", () => {
   );
 
   it("updates mask rasters above the video grid when display quality increases", async () => {
-    vi.stubGlobal("window", { devicePixelRatio: 4 });
+    vi.stubGlobal("window", { ...window, devicePixelRatio: 4 });
     const scene = await createScene({
       detectionFrames: [
         {

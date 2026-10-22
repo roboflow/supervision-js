@@ -494,7 +494,11 @@ const documentMock = {
 
 beforeEach(() => {
   vi.stubGlobal("document", documentMock);
-  vi.stubGlobal("window", { devicePixelRatio: 1 });
+  vi.stubGlobal("window", {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    devicePixelRatio: 1,
+  });
   vi.stubGlobal("ResizeObserver", undefined);
   vi.stubGlobal("GPUTextureUsage", {
     COPY_DST: 1,
@@ -578,7 +582,7 @@ describe("push-presented Pixi scene", () => {
   });
 
   it("keeps capped annotation density stable as the camera moves", async () => {
-    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    vi.stubGlobal("window", { ...window, devicePixelRatio: 2 });
     const preparation =
       await import("#render-preparation/prepared-render-window");
     const createWindow = vi.spyOn(preparation, "createPreparedRenderWindow");
@@ -616,7 +620,7 @@ describe("push-presented Pixi scene", () => {
   });
 
   it("keeps canvas, mask and decode sizing together across quality changes and container resizes", async () => {
-    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    vi.stubGlobal("window", { ...window, devicePixelRatio: 2 });
     let resized = () => {};
     vi.stubGlobal(
       "ResizeObserver",
@@ -729,7 +733,7 @@ describe("push-presented Pixi scene", () => {
   });
 
   it("refreshes selected mask capture density when a resize keeps the fitted picture unchanged", async () => {
-    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    vi.stubGlobal("window", { ...window, devicePixelRatio: 2 });
     let resized = () => {};
     vi.stubGlobal(
       "ResizeObserver",
@@ -855,7 +859,7 @@ describe("push-presented Pixi scene", () => {
   });
 
   it("changes mask detail for AA without resizing video or canvas", async () => {
-    vi.stubGlobal("window", { devicePixelRatio: 1 });
+    vi.stubGlobal("window", { ...window, devicePixelRatio: 1 });
     const preparation =
       await import("#render-preparation/prepared-render-window");
     const originalCreateWindow = preparation.createPreparedRenderWindow;
@@ -907,7 +911,7 @@ describe("push-presented Pixi scene", () => {
   it.each([0, -1, NaN, Infinity, undefined])(
     "uses the same default DPR for canvas and decode with cap %s on opening and live updates",
     async (cap) => {
-      vi.stubGlobal("window", { devicePixelRatio: 3 });
+      vi.stubGlobal("window", { ...window, devicePixelRatio: 3 });
       const channel = createChannel();
       const onDisplayChange = vi.fn();
       const { createPixiMediaScene } = await import("./pixi-media-scene");

@@ -876,6 +876,23 @@ export async function createPixiMediaScene(
   const handleContextMenu = (event: Event) => {
     if (options.editingEngine) event.preventDefault();
   };
+  const handlePointerCancel = (event: PointerEvent) => {
+    interactionLayer?.pointerCancel(event.pointerId);
+  };
+  const handlePointerCaptureLost = (event: PointerEvent) => {
+    interactionLayer?.pointerCaptureLost(event.pointerId);
+  };
+  const handlePointerUp = (event: PointerEvent) => {
+    interactionLayer?.pointerUpFallback(event.pointerId);
+  };
+  if (interactionLayer) {
+    window.addEventListener("pointercancel", handlePointerCancel, true);
+    rendererCanvas.addEventListener?.(
+      "lostpointercapture",
+      handlePointerCaptureLost,
+    );
+    window.addEventListener("pointerup", handlePointerUp, true);
+  }
   if (interactionLayer || options.editingEngine) {
     rendererCanvas.tabIndex = 0;
     rendererCanvas.addEventListener?.("keydown", handleKeyDown);
@@ -1968,6 +1985,14 @@ export async function createPixiMediaScene(
       maskBrushPreview?.destroy();
       unsubscribeFastTranslate?.();
       unsubscribeEditingState?.();
+      if (interactionLayer) {
+        window.removeEventListener("pointercancel", handlePointerCancel, true);
+        rendererCanvas.removeEventListener?.(
+          "lostpointercapture",
+          handlePointerCaptureLost,
+        );
+        window.removeEventListener("pointerup", handlePointerUp, true);
+      }
       if (interactionLayer || options.editingEngine) {
         rendererCanvas.removeEventListener?.("keydown", handleKeyDown);
       }
