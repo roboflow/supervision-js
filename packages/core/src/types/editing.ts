@@ -73,10 +73,12 @@ export interface AnnotationEditingEngineOptions {
   readonly viewportScale?: () => number;
   readonly onStateChange?: (state: AnnotationEditingState) => void;
   readonly onPreview?: (preview: Detection | null) => void;
+  /** Runs before terminal idle subscribers; getState() already reflects completion. */
   readonly onCommit?: (
     detection: Detection,
     previous: Detection | null,
   ) => void;
+  /** Whole-edit cancellation; a contact interruption that retains a draft does not call this. */
   readonly onCancel?: () => void;
   readonly onFastTranslate?: (
     id: string | number,
@@ -96,6 +98,9 @@ export interface AnnotationEditingEngine {
   ): void;
   pointerMove(input: AnnotationPointerInput): void;
   pointerUp(input: AnnotationPointerInput): void;
+  /** Ends an interrupted contact without discarding accepted multi-click vertices.
+   * An omitted identity addresses the active contact; no active contact is a no-op. */
+  pointerCancel?(pointerId?: number): void;
   keyDown(key: string): void;
   /** Remove the last multi-click draft vertex. Returns false when no path is active.
    * Consumes the final vertex by cancelling the draft, without committing it. */
@@ -106,6 +111,7 @@ export interface AnnotationEditingEngine {
     input: AnnotationPointerInput,
   ): void;
   deleteVertex(detection: Detection, vertexIndex: number): Detection | null;
+  /** Discards the gesture and all uncommitted draft vertices. */
   cancel(): void;
   hasCreationTool(): boolean;
   subscribe(listener: (state: AnnotationEditingState) => void): () => void;
@@ -117,6 +123,10 @@ export interface AnnotationEditingEngine {
 /** The built-in editing engine guarantees multi-click draft Undo. */
 export interface DraftUndoAnnotationEditingEngine extends AnnotationEditingEngine {
   undoCreation(): boolean;
+}
+
+export interface BuiltInAnnotationEditingEngine extends DraftUndoAnnotationEditingEngine {
+  pointerCancel(pointerId?: number): void;
 }
 
 export interface PreviewOverlayPoint extends Point {

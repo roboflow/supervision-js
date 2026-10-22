@@ -21,7 +21,10 @@ import type {
 } from "#types/media-rendering";
 import type { DetectionFrame } from "#types/detections";
 import { AnnotationGestureStateKind } from "#types/editing";
-import type { AnnotationEditingEngine } from "#types/editing";
+import type {
+  AnnotationEditingEngine,
+  DraftUndoAnnotationEditingEngine,
+} from "#types/editing";
 import { createAnnotationEditingEngine } from "#interactions/annotation-editing-engine";
 
 /**
@@ -153,9 +156,22 @@ const legacyEditingEngine: AnnotationEditingEngine = {
   subscribeFastTranslate: () => () => {},
 };
 
+const legacyDraftUndoEngine: DraftUndoAnnotationEditingEngine = {
+  ...legacyEditingEngine,
+  undoCreation: () => false,
+};
+
 describe("public contract compatibility", () => {
   it("keeps editing engines written before draft Undo assignable", () => {
     expect(legacyEditingEngine.undoCreation).toBeUndefined();
+    expect(legacyEditingEngine.pointerCancel).toBeUndefined();
+    expect(legacyDraftUndoEngine.pointerCancel).toBeUndefined();
+  });
+
+  it("guarantees contact cancellation on the built-in editing engine", () => {
+    const engine: Required<Pick<AnnotationEditingEngine, "pointerCancel">> =
+      createAnnotationEditingEngine();
+    expect(engine.pointerCancel()).toBeUndefined();
   });
 
   it("guarantees draft Undo on the built-in editing engine", () => {

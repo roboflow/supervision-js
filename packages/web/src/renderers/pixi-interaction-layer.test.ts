@@ -22,7 +22,12 @@ import {
   MediaInteractionMode,
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
-import type { DetectionFrame, Point, Rect } from "supervision-js-core";
+import type {
+  AnnotationEditingEngine,
+  DetectionFrame,
+  Point,
+  Rect,
+} from "supervision-js-core";
 import type { MediaInteractionOptions } from "supervision-js-core";
 
 const frame: DetectionFrame = {
@@ -50,6 +55,250 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it("releases browser capture when the host interrupts the engine directly", () => {
+    const h = createDefaultPressHarness();
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    h.send("pointerdown", 7, 40, 40);
+    expect(h.capture).toHaveBeenCalledExactlyOnceWith(7);
+    h.engine.pointerCancel?.(7);
+    expect(h.release).toHaveBeenCalledExactlyOnceWith(7);
+    h.layer.pointerCancel(7);
+    expect(h.release).toHaveBeenCalledTimes(1);
+    h.send("pointerdown", 8, 50, 40);
+    h.send("pointerup", 8, 110, 75, 400);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+  });
+
+  it("preserves capture and tap suppression for a same-id successor started during cancellation", () => {
+    let started = false;
+    const engine = createAnnotationEditingEngine({
+      onCancel: () => {
+        if (started) return;
+        started = true;
+        h.send("pointerdown", 7, 50, 40);
+      },
+    });
+    const h = createDefaultPressHarness(engine);
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    h.layer.setSelectedDetection({ detectionId: "player-1" });
+    h.send("pointerdown", 7, 40, 40);
+    h.layer.pointerCancel(7);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+    expect(h.release).not.toHaveBeenCalled();
+    h.send("pointerup", 7, 110, 75, 400);
+    h.send("pointertap", 7, 110, 75);
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("player-1");
+    expect(h.release).toHaveBeenCalledExactlyOnceWith(7);
+  });
+
+  it("owns marquee movement and cancellation without applying an interrupted selection", () => {
+    const h = createDefaultPressHarness();
+    h.send("pointerdown", 7, 110, 75);
+    h.send("globalpointermove", 7, 0, 0);
+    const dragged = h.layer.getState().marqueeRect;
+    expect(dragged).not.toBeNull();
+    h.send("pointermove", 8, 80, 60);
+    h.send("pointerdown", 8, 80, 60);
+    h.send("pointerup", 8, 80, 60);
+    h.layer.pointerCancel(8);
+    expect(h.layer.getState().marqueeRect).toEqual(dragged);
+    h.layer.pointerCancel(7);
+    h.send("pointerup", 7, 0, 0);
+    expect(h.layer.getState().selectedPicks).toEqual([]);
+    expect(h.layer.getState().marqueeRect).toBeNull();
+    h.send("pointerdown", 8, 110, 75);
+    h.send("globalpointermove", 8, 0, 0);
+    h.send("pointerup", 8, 0, 0);
+    h.layer.pointerCancel(8);
+    h.send("pointertap", 8, 0, 0);
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("player-1");
+    expect(h.capture.mock.calls).toEqual([[7], [8]]);
+    expect(h.release.mock.calls).toEqual([[7], [8]]);
+  });
+
+  it("updates a marquee once per Pixi move inside and outside the hit area", () => {
+    const onMarqueeChange = vi.fn();
+    const layer = createPixiInteractionLayer({
+      Container,
+      Rectangle,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      interaction: {
+        mode: MediaInteractionMode.Always,
+        multiSelect: true,
+        onMarqueeChange,
+      },
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 80,
+    }) as Container;
+    const boundary = new EventBoundary(display);
+    const send = (type: string, x: number, y: number) => {
+      const event = new FederatedPointerEvent(boundary);
+      event.type = type;
+      event.pointerId = 7;
+      event.pointerType = "mouse";
+      event.button = 0;
+      event.global.set(x, y);
+      boundary.mapEvent(event);
+    };
+    layer.drawFrame(frame.mediaTime);
+    send("pointerdown", 110, 75);
+    send("pointermove", 80, 60);
+    expect(onMarqueeChange).toHaveBeenCalledExactlyOnceWith({
+      x: 80,
+      y: 60,
+      width: 30,
+      height: 15,
+    });
+    send("pointermove", 150, 100);
+    expect(onMarqueeChange).toHaveBeenCalledTimes(2);
+    expect(layer.getState().marqueeRect).toEqual({
+      x: 110,
+      y: 75,
+      width: 40,
+      height: 25,
+    });
+    layer.destroy();
+  });
+
+  it("ignores capture loss outside a layer-owned press", () => {
+    const h = createDefaultPressHarness();
+    const cancel = vi.spyOn(h.engine, "pointerCancel");
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    h.send("pointerdown", 7, 40, 40);
+    h.send("pointerup", 7, 110, 75, 400);
+    h.onStateChange.mockClear();
+    h.layer.pointerCaptureLost(7);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(h.onStateChange).not.toHaveBeenCalled();
+
+    h.engine.pointerDown({
+      point: { x: 40, y: 40 },
+      timestamp: 500,
+      pointerId: 8,
+    });
+    h.layer.pointerCaptureLost(8);
+    expect(h.engine.getState().pointerId).toBe(8);
+    h.layer.pointerCancel(7);
+    expect(h.engine.getState().pointerId).toBe(8);
+    h.layer.pointerCancel(8);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+  });
+
+  it.each([true, false])(
+    "preserves multi-click drafts after normal capture release (capability: %s)",
+    (hasCapability) => {
+      const builtIn = createAnnotationEditingEngine();
+      const { pointerCancel: _pointerCancel, ...legacy } = builtIn;
+      const h = createDefaultPressHarness(hasCapability ? builtIn : legacy);
+      h.engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Polygon,
+        createDetection: (points) => ({
+          polygon: { points: points as Point[] },
+        }),
+      });
+      h.send("pointerdown", 7, 40, 40);
+      h.send("pointerup", 7, 40, 40, 1);
+      h.layer.pointerCancel(7);
+      expect(h.engine.getState().kind).toBe(
+        AnnotationGestureStateKind.Creating,
+      );
+      if (!hasCapability) return;
+      h.send("pointerdown", 8, 100, 40, 300);
+      h.layer.pointerCancel(8);
+      expect(h.engine.getState().preview?.polygon?.points).toEqual([
+        { x: 40, y: 40 },
+        { x: 100, y: 40 },
+        { x: 100, y: 40 },
+      ]);
+      expect(h.engine.undoCreation?.()).toBe(true);
+      expect(h.engine.getState().kind).toBe(
+        AnnotationGestureStateKind.Creating,
+      );
+      expect(h.release.mock.calls).toEqual([[7], [8]]);
+    },
+  );
+
+  it("keeps the closing press tap suppressed after its normal capture release", () => {
+    const h = createDefaultPressHarness();
+    h.layer.setSelectedDetection({ detectionId: "player-1" });
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polygon,
+      createDetection: (points) => ({ polygon: { points: points as Point[] } }),
+    });
+    const points = [
+      { x: 40, y: 40 },
+      { x: 100, y: 40 },
+      { x: 100, y: 70 },
+    ];
+    points.forEach((point, index) => {
+      h.send("pointerdown", 7, point.x, point.y, index * 300);
+      h.send("pointerup", 7, point.x, point.y, index * 300 + 1);
+    });
+    h.send("pointerdown", 7, 40, 40, 900);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    h.layer.pointerCancel(7);
+    h.send("pointertap", 7, 110, 75);
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("player-1");
+  });
+
+  it("scopes legacy custom-engine cancellation to an explicitly matching owner", () => {
+    const builtIn = createAnnotationEditingEngine();
+    const { pointerCancel: _pointerCancel, ...legacy } = builtIn;
+    const h = createDefaultPressHarness(legacy);
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    h.send("pointerdown", 7, 40, 40);
+    h.layer.pointerCancel(8);
+    expect(h.engine.getState().pointerId).toBe(7);
+    h.layer.pointerCancel(7);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(h.release).toHaveBeenCalledExactlyOnceWith(7);
+  });
+
+  it("retires a consumed native up without cancelling a fresh same-id press", async () => {
+    const h = createDefaultPressHarness();
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    h.send("pointerdown", 7, 40, 40);
+    h.layer.pointerUpFallback(7);
+    await Promise.resolve();
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(h.release).toHaveBeenCalledExactlyOnceWith(7);
+    h.send("pointerdown", 7, 40, 40);
+    h.layer.pointerUpFallback(7);
+    h.engine.pointerCancel?.(7);
+    h.send("pointerdown", 7, 50, 50);
+    await Promise.resolve();
+    expect(h.engine.getState().pointerId).toBe(7);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+  });
+
+  it("keeps editing tap suppression attached to its originating pointer", () => {
+    const h = createDefaultPressHarness();
+    h.send("pointerdown", 7, 15, 20);
+    h.send("pointerup", 7, 15, 20);
+    h.send("pointertap", 8, 110, 70);
+    expect(h.layer.getState().selectedPick).toBeNull();
+    h.send("pointertap", 7, 15, 20);
+    expect(h.layer.getState().selectedPick).toBeNull();
+  });
+
   it.each([
     {
       name: "body",
@@ -189,6 +438,65 @@ describe("pixi interaction layer", () => {
       }
     },
   );
+
+  it("retires concurrent handled contacts independently while default editing keeps its own lifecycle", async () => {
+    const h = createPressHarness((press) =>
+      press.input.altKey ? "handled" : "continue",
+    );
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({
+        polyline: { points: points as readonly Point[] },
+      }),
+    });
+    h.engine.pointerDown({
+      point: { x: 10, y: 10 },
+      timestamp: 0,
+      pointerId: 1,
+    });
+    h.engine.pointerUp({ point: { x: 10, y: 10 }, timestamp: 1, pointerId: 1 });
+    const move = vi.spyOn(h.engine, "pointerMove");
+    h.send("pointerdown", 40, 40, { pointerId: 7, altKey: true });
+    h.send("pointerdown", 40, 40, { pointerId: 8, altKey: true });
+    expect(h.onPointerPress).toHaveBeenCalledTimes(2);
+    h.send("pointermove", 60, 60, { pointerId: 7 });
+    h.send("pointermove", 60, 60, { pointerId: 8 });
+    expect(move).not.toHaveBeenCalled();
+    h.layer.pointerUpFallback(7);
+    h.send("pointerdown", 40, 40, { pointerId: 7, altKey: true });
+    h.layer.pointerCancel(8);
+    await Promise.resolve();
+    h.send("pointermove", 60, 60, { pointerId: 7 });
+    expect(move).not.toHaveBeenCalled();
+    h.send("pointermove", 60, 60, { pointerId: 8 });
+    expect(move).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ pointerId: 8 }),
+    );
+    h.layer.pointerUpFallback(7);
+    await Promise.resolve();
+    h.send("pointermove", 60, 60, { pointerId: 7 });
+    expect(move).toHaveBeenCalledTimes(2);
+
+    h.engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    h.send("pointerdown", 40, 40, { pointerId: 9 });
+    h.layer.pointerCancel(8);
+    expect(h.engine.getState().pointerId).toBe(9);
+    h.layer.pointerCancel(9);
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    h.send("pointerdown", 40, 40, { pointerId: 9 });
+    h.send("pointermove", 80, 80, { pointerId: 9 });
+    h.layer.pointerUpFallback(9);
+    h.send("pointerup", 80, 80, { pointerId: 9 });
+    await Promise.resolve();
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { rect: { x: 60, y: 60, width: 40, height: 40 } },
+      null,
+    );
+  });
 
   it("does not begin a marquee or consume another pointer's tap for a handled empty press", async () => {
     const h = createPressHarness((press) =>
@@ -520,11 +828,80 @@ describe("pixi interaction layer", () => {
     },
   );
 
+  it("releases each multi-click press while retaining the draft and unidentified hover", () => {
+    const onCommit = vi.fn();
+    const editingEngine = createAnnotationEditingEngine({ onCommit });
+    editingEngine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({
+        polyline: { points: points as readonly Point[] },
+      }),
+    });
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      editingEngine,
+      interaction: { mode: MediaInteractionMode.Always },
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 100,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 30, 40, { pointerId: 7, timeStamp: 0 }),
+    );
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 30, 40, { pointerId: 7, timeStamp: 1 }),
+    );
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 70, 70, { pointerId: 8, timeStamp: 300 }),
+    );
+    display.emit("globalpointermove", createPointerEvent(display, 80, 60));
+    expect(editingEngine.getState().preview?.polyline?.points).toEqual([
+      { x: 30, y: 40 },
+      { x: 70, y: 70 },
+      { x: 80, y: 60 },
+    ]);
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 10, 15, { pointerId: 7 }),
+    );
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 10, 15, { pointerId: 7 }),
+    );
+    expect(layer.getState().selectedPick).toBeNull();
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 70, 70, { pointerId: 8, timeStamp: 301 }),
+    );
+    editingEngine.keyDown("Enter");
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      {
+        polyline: {
+          points: [
+            { x: 30, y: 40 },
+            { x: 70, y: 70 },
+          ],
+        },
+      },
+      null,
+    );
+  });
+
   it.each(["move", "resize", "create"] as const)(
     "keeps a %s preview bounded and synchronized with captured moves outside the media",
     (gesture) => {
       const onCommit = vi.fn();
       const onPreview = vi.fn();
+      const capturePointer = vi.fn();
+      const releasePointer = vi.fn();
       const editingEngine = createAnnotationEditingEngine({
         onCommit,
         onPreview,
@@ -537,12 +914,14 @@ describe("pixi interaction layer", () => {
         Container,
         Rectangle,
         canInteract: () => true,
+        capturePointer,
         detectionTimeline: createTimeline({
           ...frame,
           detections: [detection],
         }),
         editingEngine,
         interaction: { mode: MediaInteractionMode.Always },
+        releasePointer,
       });
       const display = layer.createDisplay({
         width: 120,
@@ -598,9 +977,16 @@ describe("pixi interaction layer", () => {
       expect(onCommit).not.toHaveBeenCalled();
 
       // A different pointer cannot take over the captured gesture.
+      const ownerPoint = layer.getState().pointerPoint;
+      sendPointer("pointerdown", 80, 60, 2);
       sendPointer("pointermove", 300, 200, 2);
+      sendPointer("pointerup", 300, 200, 2);
       expect(editingEngine.getState().preview?.rect).toEqual(expected);
+      expect(layer.getState().pointerPoint).toEqual(ownerPoint);
       expect(onPreview).toHaveBeenCalledTimes(2);
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(capturePointer).toHaveBeenCalledExactlyOnceWith(1);
+      expect(releasePointer).not.toHaveBeenCalled();
 
       // Re-entering the hit area must not dispatch the same move twice.
       sendPointer("pointermove", 80, 60);
@@ -615,6 +1001,7 @@ describe("pixi interaction layer", () => {
       expect(editingEngine.getState().kind).toBe(
         AnnotationGestureStateKind.Idle,
       );
+      expect(releasePointer).toHaveBeenCalledExactlyOnceWith(1);
       expect(layer.getState().hoveredPick).toBeNull();
 
       const finalPoint = layer.getState().pointerPoint;
@@ -1949,7 +2336,7 @@ describe("pixi interaction layer", () => {
         }),
       );
       display.emit(
-        "pointermove",
+        "globalpointermove",
         createPointerEvent(display, reverse ? 5 : 75, reverse ? 5 : 60, {
           pointerId: 1,
           shiftKey: true,
@@ -2450,6 +2837,42 @@ function createPressHarness(
       event.timeStamp = 500;
       event.global.set(x, y);
       boundary.mapEvent(event);
+    },
+  };
+}
+
+function createDefaultPressHarness(customEngine?: AnnotationEditingEngine) {
+  const engine = customEngine ?? createAnnotationEditingEngine();
+  const capture = vi.fn();
+  const release = vi.fn();
+  const onStateChange = vi.fn();
+  const layer = createPixiInteractionLayer({
+    Container: FakeContainer as never,
+    Rectangle: FakeRectangle as never,
+    canInteract: () => true,
+    detectionTimeline: createTimeline(frame),
+    editingEngine: engine,
+    interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+    capturePointer: capture,
+    releasePointer: release,
+    onStateChange,
+  });
+  const display = layer.createDisplay({
+    width: 120,
+    height: 80,
+  }) as FakeContainer;
+  layer.drawFrame(0.1);
+  return {
+    engine,
+    capture,
+    release,
+    layer,
+    onStateChange,
+    send(type: string, pointerId: number, x: number, y: number, timeStamp = 0) {
+      display.emit(
+        type,
+        createPointerEvent(display, x, y, { pointerId, timeStamp, button: 0 }),
+      );
     },
   };
 }

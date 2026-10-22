@@ -5,6 +5,7 @@ import type { MediaStreamRendererSourceOptions } from "#media/media-stream-media
 import {
   createAnnotationEditingEngine,
   type DraftUndoAnnotationEditingEngine,
+  type BuiltInAnnotationEditingEngine,
 } from "../editing";
 
 /**
@@ -45,6 +46,9 @@ describe("browser public contract compatibility", () => {
       createAnnotationEditingEngine();
 
     expect(engine.undoCreation()).toBe(false);
+    const builtIn: BuiltInAnnotationEditingEngine =
+      createAnnotationEditingEngine();
+    builtIn.pointerCancel();
   });
 
   it("keeps controllers written before live ingestion assignable", () => {

@@ -6,7 +6,7 @@ import {
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
   type AnnotationPointerInput,
-  type DraftUndoAnnotationEditingEngine,
+  type BuiltInAnnotationEditingEngine,
 } from "#types/editing";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
@@ -31,7 +31,7 @@ type ActiveGesture =
       kind: "path";
       points: Point[];
       lastTimestamp: number | null;
-      pointerId: number | null;
+      press: AnnotationPointerInput | null;
     }
   | {
       kind: "freehand";
@@ -57,7 +57,7 @@ type ActiveGesture =
 
 export function createAnnotationEditingEngine(
   options: AnnotationEditingEngineOptions = {},
-): DraftUndoAnnotationEditingEngine {
+): BuiltInAnnotationEditingEngine {
   let tool: AnnotationCreationTool | null = null;
   let gesture: ActiveGesture | null = null;
   let state: AnnotationEditingState = idleState();
@@ -70,10 +70,11 @@ export function createAnnotationEditingEngine(
     getState: () => state,
     setCreationTool(nextTool) {
       if (nextTool === tool) return;
-      if (gesture) cancel();
       tool = nextTool;
+      if (gesture) cancel();
     },
     pointerDown(input, pick = null) {
+      if (isOtherPointer(input)) return;
       if (input.button !== undefined && input.button !== 0) return;
       if (tool) {
         beginCreation(input);
@@ -82,23 +83,26 @@ export function createAnnotationEditingEngine(
       }
     },
     pointerMove(input) {
-      if (!gesture) return;
+      if (!gesture || isOtherPointer(input)) return;
       switch (gesture.kind) {
         case "box":
           gesture = { ...gesture, current: input };
-          setPreview(resolveBoxPreview(gesture));
+          setPreview(resolveBoxPreview(gesture), gesture);
           break;
         case "move": {
           const moved =
             gesture.moved || exceedsMoveThreshold(gesture.start, input);
-          gesture = { ...gesture, current: input, moved };
+          const active = (gesture = { ...gesture, current: input, moved });
           if (moved) {
-            const { preview, dx, dy } = resolveMovePreview(gesture, input);
-            setPreview(preview);
-            if (gesture.detection.id !== undefined) {
-              options.onFastTranslate?.(gesture.detection.id, dx, dy);
+            const { preview, dx, dy } = resolveMovePreview(active, input);
+            setPreview(preview, active);
+            const nextState = state;
+            const id = active.detection.id;
+            if (gesture === active && id !== undefined) {
+              options.onFastTranslate?.(id, dx, dy);
               for (const listener of fastTranslateListeners) {
-                listener(gesture.detection.id, dx, dy);
+                if (state !== nextState) break;
+                listener(id, dx, dy);
               }
             }
           }
@@ -119,12 +123,16 @@ export function createAnnotationEditingEngine(
                 input.point,
                 input.mediaDimensions ?? gesture.start.mediaDimensions,
               ),
+              gesture,
             );
           }
           break;
         }
         case "path":
-          setPreview(resolvePathPreview([...gesture.points, input.point]));
+          setPreview(
+            resolvePathPreview([...gesture.points, input.point]),
+            gesture,
+          );
           break;
         case "freehand": {
           const previous = gesture.points.at(-1);
@@ -136,19 +144,35 @@ export function createAnnotationEditingEngine(
             gesture.points.push(input.point);
           }
           gesture = { ...gesture, current: input };
-          setPreview(resolvePathPreview(gesture.points));
+          setPreview(resolvePathPreview(gesture.points), gesture);
           break;
         }
       }
     },
     pointerUp(input) {
-      if (!gesture) return;
-      if (gesture.kind === "path") return;
+      if (!gesture || isOtherPointer(input)) return;
+      if (gesture.kind === "path") {
+        const active = gesture;
+        const press = active.press;
+        if (!press) return;
+        active.press = null;
+        const next = installState({ ...state, pointerId: null });
+        release(press.pointerId);
+        notifyStateChange(next);
+        return;
+      }
       const active = gesture;
+      const activeTool = tool;
       gesture = null;
+      const next = installState(idleState());
       release(active.start.pointerId);
+      if (state !== next) return;
       if (active.kind === "box") {
-        const preview = resolveBoxPreview({ ...active, current: input });
+        const preview = resolveBoxPreview(
+          { ...active, current: input },
+          activeTool,
+        );
+        if (state !== next) return;
         const duration = input.timestamp - active.start.timestamp;
         const diagonal =
           Math.hypot(
@@ -160,47 +184,56 @@ export function createAnnotationEditingEngine(
           !rect ||
           rect.width < 1 ||
           rect.height < 1 ||
-          (duration < CLICK_CANCEL_MS && diagonal <= CLICK_CANCEL_DIAGONAL)
+          (duration < CLICK_CANCEL_MS && diagonal <= CLICK_CANCEL_DIAGONAL) ||
+          activeTool?.shouldCommit?.(rect) === false
         ) {
-          rejectCreation();
+          if (state === next) rejectCreation(next, activeTool);
           return;
         }
-        if (tool?.shouldCommit?.(rect) === false) {
-          rejectCreation();
-          return;
-        }
-        commit(preview, null);
+        if (state === next) commit(preview, null, next);
         return;
       }
       if (active.kind === "freehand") {
         const points = [...active.points, input.point];
-        if (points.length < 2 || tool?.shouldCommit?.(points) === false) {
-          rejectCreation();
+        if (points.length < 2 || activeTool?.shouldCommit?.(points) === false) {
+          if (state === next) rejectCreation(next, activeTool);
           return;
         }
-        commit(tool!.createDetection(points), null);
-        return;
-      }
-      if (active.kind === "move") {
-        if (!active.moved) {
-          setState(idleState());
-          return;
-        }
-        const { preview } = resolveMovePreview(active, input);
-        commit(preview, active.detection);
+        const preview = activeTool!.createDetection(points);
+        if (state === next) commit(preview, null, next);
         return;
       }
       if (!active.moved) {
-        setState(idleState());
+        notifyStateChange(next);
         return;
       }
-      const preview = applyAnnotationHandleDrag(
-        active.detection,
-        active.handle,
-        input.point,
-        input.mediaDimensions ?? active.start.mediaDimensions,
-      );
-      commit(preview, active.detection);
+      const preview =
+        active.kind === "move"
+          ? resolveMovePreview(active, input).preview
+          : applyAnnotationHandleDrag(
+              active.detection,
+              active.handle,
+              input.point,
+              input.mediaDimensions ?? active.start.mediaDimensions,
+            );
+      commit(preview, active.detection, next);
+    },
+    pointerCancel(pointerId) {
+      const press = activePress();
+      if (!press || isOtherPointer({ pointerId })) return;
+      if (gesture?.kind !== "path") {
+        cancel();
+        return;
+      }
+      const active = gesture;
+      active.press = null;
+      active.lastTimestamp = null;
+      const last = active.points.at(-1)!;
+      const preview = resolvePathPreview([...active.points, last]);
+      if (gesture !== active) return;
+      const next = installState({ ...state, pointerId: null, preview });
+      release(press.pointerId);
+      publishPreview(next);
     },
     keyDown(key) {
       if (key === "Escape") {
@@ -215,12 +248,12 @@ export function createAnnotationEditingEngine(
       gesture.lastTimestamp = null;
       const last = gesture.points.at(-1);
       if (!last) cancel();
-      else setPreview(resolvePathPreview([...gesture.points, last]));
+      else setPreview(resolvePathPreview([...gesture.points, last]), gesture);
       return true;
     },
     beginHandleDrag(detection, handle, input) {
+      if (isOtherPointer(input)) return;
       if (detection.locked || detection.mask) return;
-      capture(input.pointerId);
       gesture = {
         current: input,
         detection,
@@ -229,13 +262,16 @@ export function createAnnotationEditingEngine(
         moved: false,
         start: input,
       };
-      setState({
-        activeDetectionId: detection.id ?? null,
-        activeHandleId: handle.id,
-        kind: AnnotationGestureStateKind.Resizing,
-        pointerId: input.pointerId ?? null,
-        preview: null,
-      });
+      setState(
+        {
+          activeDetectionId: detection.id ?? null,
+          activeHandleId: handle.id,
+          kind: AnnotationGestureStateKind.Resizing,
+          pointerId: input.pointerId ?? null,
+          preview: null,
+        },
+        input.pointerId,
+      );
     },
     deleteVertex(detection, vertexIndex) {
       const next = deleteAnnotationVertex(detection, vertexIndex);
@@ -264,29 +300,19 @@ export function createAnnotationEditingEngine(
           ? "freehand"
           : "multiClick");
     if (mode === "drag") {
-      capture(input.pointerId);
-      gesture = { current: input, kind: "box", start: input };
-      const preview = resolveBoxPreview(gesture);
-      options.onPreview?.(preview);
-      setState({
-        activeDetectionId: null,
-        activeHandleId: null,
-        kind: AnnotationGestureStateKind.Creating,
-        pointerId: input.pointerId ?? null,
-        preview,
-      });
+      const active = (gesture = { current: input, kind: "box", start: input });
+      setPreview(resolveBoxPreview(active), active, input.pointerId);
       return;
     }
 
     if (mode === "freehand") {
-      capture(input.pointerId);
-      gesture = {
+      const active = (gesture = {
         current: input,
         kind: "freehand",
         points: [input.point],
         start: input,
-      };
-      setPreview(resolvePathPreview([input.point]));
+      });
+      setPreview(resolvePathPreview([input.point]), active, input.pointerId);
       return;
     }
 
@@ -297,17 +323,21 @@ export function createAnnotationEditingEngine(
     )
       return;
     if (gesture?.kind !== "path") {
-      capture(input.pointerId);
-      gesture = {
+      const active = (gesture = {
         kind: "path",
         lastTimestamp: input.timestamp,
-        pointerId: input.pointerId ?? null,
+        press: input,
         points: [input.point],
-      };
-      setPreview(resolvePathPreview([input.point, input.point]));
+      });
+      setPreview(
+        resolvePathPreview([input.point, input.point]),
+        active,
+        input.pointerId,
+      );
       return;
     }
 
+    gesture.press = input;
     const minimum =
       tool.minVertices ??
       (tool.geometry === AnnotationGeometryKind.Polygon ? 3 : 2);
@@ -332,11 +362,14 @@ export function createAnnotationEditingEngine(
     }
     gesture.points.push(input.point);
     gesture.lastTimestamp = input.timestamp;
-    setPreview(resolvePathPreview([...gesture.points, input.point]));
+    setPreview(
+      resolvePathPreview([...gesture.points, input.point]),
+      gesture,
+      input.pointerId,
+    );
   }
 
   function beginMove(pick: DetectionPickResult, input: AnnotationPointerInput) {
-    capture(input.pointerId);
     gesture = {
       current: input,
       detection: pick.detection,
@@ -344,16 +377,22 @@ export function createAnnotationEditingEngine(
       moved: false,
       start: input,
     };
-    setState({
-      activeDetectionId: pick.detection.id ?? null,
-      activeHandleId: null,
-      kind: AnnotationGestureStateKind.Moving,
-      pointerId: input.pointerId ?? null,
-      preview: null,
-    });
+    setState(
+      {
+        activeDetectionId: pick.detection.id ?? null,
+        activeHandleId: null,
+        kind: AnnotationGestureStateKind.Moving,
+        pointerId: input.pointerId ?? null,
+        preview: null,
+      },
+      input.pointerId,
+    );
   }
 
-  function resolveBoxPreview(active: Extract<ActiveGesture, { kind: "box" }>) {
+  function resolveBoxPreview(
+    active: Extract<ActiveGesture, { kind: "box" }>,
+    activeTool = tool,
+  ) {
     const dimensions =
       active.current.mediaDimensions ?? active.start.mediaDimensions;
     const start = boundPoint(active.start.point, dimensions);
@@ -368,7 +407,7 @@ export function createAnnotationEditingEngine(
       width: right - left,
       height: bottom - top,
     };
-    return tool!.createDetection(rect);
+    return activeTool!.createDetection(rect);
   }
 
   function resolveMovePreview(
@@ -420,71 +459,119 @@ export function createAnnotationEditingEngine(
 
   function commitPath() {
     if (!tool || gesture?.kind !== "path") return;
+    const active = gesture;
+    const activeTool = tool;
     const minimum =
-      tool.minVertices ??
-      (tool.geometry === AnnotationGeometryKind.Polygon ? 3 : 2);
-    if (gesture.points.length < minimum) {
+      activeTool.minVertices ??
+      (activeTool.geometry === AnnotationGeometryKind.Polygon ? 3 : 2);
+    if (active.points.length < minimum) {
       cancel();
       return;
     }
-    const preview = tool.createDetection(gesture.points);
-    if (tool.shouldCommit?.(gesture.points) === false) {
+    const preview = activeTool.createDetection(active.points);
+    if (gesture !== active) return;
+    const accepted = activeTool.shouldCommit?.(active.points) !== false;
+    if (gesture !== active) return;
+    if (!accepted) {
       cancel();
       return;
     }
-    release(gesture.pointerId ?? undefined);
     gesture = null;
-    commit(preview, null);
+    const next = installState(idleState());
+    release(active.press?.pointerId);
+    if (state === next) commit(preview, null, next);
   }
 
-  function commit(detection: Detection, previous: Detection | null) {
+  function commit(
+    detection: Detection,
+    previous: Detection | null,
+    next = installState(idleState()),
+  ) {
     options.onCommit?.(detection, previous);
-    options.onPreview?.(null);
-    setState(idleState());
+    publishPreview(next);
   }
 
-  function setPreview(preview: Detection) {
-    options.onPreview?.(preview);
-    setState({
+  function setPreview(
+    preview: Detection,
+    active: ActiveGesture,
+    pointerToCapture?: number,
+  ) {
+    if (gesture !== active) return;
+    const next = installState({
       activeDetectionId: state.activeDetectionId,
       activeHandleId: state.activeHandleId,
       kind:
         state.kind === AnnotationGestureStateKind.Idle
           ? AnnotationGestureStateKind.Creating
           : state.kind,
-      pointerId:
-        state.pointerId ??
-        (gesture && "pointerId" in gesture
-          ? (gesture.pointerId ?? null)
-          : null),
+      pointerId: activePress()?.pointerId ?? null,
       preview,
     });
+    capture(pointerToCapture);
+    publishPreview(next);
   }
 
-  function rejectCreation() {
-    const onRejected = tool?.onRejected;
-    cancel();
-    onRejected?.();
+  function publishPreview(next: AnnotationEditingState) {
+    if (state !== next) return;
+    options.onPreview?.(next.preview);
+    notifyStateChange(next);
+  }
+
+  function rejectCreation(
+    next: AnnotationEditingState,
+    activeTool: AnnotationCreationTool | null,
+  ) {
+    finishCancel(next);
+    if (state === next) activeTool?.onRejected?.();
   }
 
   function cancel() {
-    const pointerId =
-      gesture && "start" in gesture
-        ? gesture.start.pointerId
-        : gesture?.kind === "path"
-          ? (gesture.pointerId ?? undefined)
-          : undefined;
-    release(pointerId);
+    const press = activePress();
     gesture = null;
-    options.onPreview?.(null);
-    options.onCancel?.();
-    setState(idleState());
+    const next = installState(idleState());
+    release(press?.pointerId);
+    finishCancel(next);
   }
 
-  function setState(next: AnnotationEditingState) {
+  function finishCancel(next: AnnotationEditingState) {
+    if (state !== next) return;
+    options.onPreview?.(null);
+    if (state !== next) return;
+    options.onCancel?.();
+    notifyStateChange(next);
+  }
+
+  function installState(next: AnnotationEditingState) {
     state = Object.freeze(next);
-    options.onStateChange?.(state);
-    for (const listener of stateListeners) listener(state);
+    return state;
+  }
+
+  function setState(next: AnnotationEditingState, pointerToCapture?: number) {
+    const installed = installState(next);
+    capture(pointerToCapture);
+    notifyStateChange(installed);
+  }
+
+  function notifyStateChange(next: AnnotationEditingState) {
+    if (state !== next) return;
+    options.onStateChange?.(next);
+    for (const listener of stateListeners) {
+      if (state !== next) break;
+      listener(next);
+    }
+  }
+
+  function activePress() {
+    return gesture?.kind === "path" ? gesture.press : (gesture?.start ?? null);
+  }
+
+  function isOtherPointer(input: Pick<AnnotationPointerInput, "pointerId">) {
+    const pointerId = activePress()?.pointerId;
+    return (
+      pointerId !== undefined &&
+      input.pointerId !== undefined &&
+      pointerId !== input.pointerId
+    );
   }
 
   function scale() {

@@ -451,11 +451,44 @@ committed history only when `engine.getState().kind` is
 first if needed. Escape, tool changes, and media changes still cancel through
 `engine.cancel()`; draft vertices never enter persisted history.
 
-`createAnnotationEditingEngine()` returns a `DraftUndoAnnotationEditingEngine`
-that guarantees `undoCreation()`. The method is optional on the broader
-`AnnotationEditingEngine` interface so existing custom engines remain
-compatible; hosts using a custom engine check that capability before routing
-draft Undo to it.
+`createAnnotationEditingEngine()` returns a `BuiltInAnnotationEditingEngine`
+that guarantees `undoCreation()` and `pointerCancel()`. Both methods are optional
+on the broader `AnnotationEditingEngine` interface; existing custom engines and
+`DraftUndoAnnotationEditingEngine` implementations remain compatible.
+
+A native `pointercancel` or unexpected loss of pointer capture ends the active
+contact. Continuous box, freehand, move, and resize gestures are discarded.
+Multi-click drafts retain every vertex accepted on `pointerDown`, including the
+interrupted contact's vertex, and can continue with another contact. Interruption
+resets double-click timing and removes the hover preview tail; it does not call
+`onCancel()` or `onRejected()` when the draft survives. Polygon closure and
+double-click completion also take effect on `pointerDown`; interruption cannot
+undo a detection already committed there. Normal capture release after
+`pointerUp` leaves a multi-click draft intact.
+
+The session routes these native interruptions automatically. Hosts routing input
+directly can call the same method without supplying coordinates:
+
+```ts
+canvas.addEventListener("pointercancel", (event) => {
+  engine.pointerCancel?.(event.pointerId);
+});
+```
+
+`pointerCancel()` without an identity addresses the active contact, including
+unidentified input. A different known pointer or a draft between contacts is a
+no-op. `cancel()` deliberately discards the whole edit, including a draft between
+contacts; use it for Escape, tool changes, and media changes. Custom engines can
+implement `pointerCancel` to provide contact-specific behavior. For a custom
+engine without it, the session falls back to `cancel()` only when the engine
+reports the interrupted pointer as its owner.
+
+Editing callbacks can start another gesture. The engine settles its internal
+state before calling them and does not overwrite that successor with completion
+cleanup. `onCommit` runs before terminal idle subscriptions, allowing hosts to
+consume gesture context before releasing it in an idle subscriber.
+Explicit cancellation or gesture replacement in `releasePointer` can preempt a
+pending commit.
 
 Browser-routed box creation, movement, and resizing stay inside the natural
 media dimensions in both previews and commits. Moving a box preserves its size
@@ -565,6 +598,12 @@ React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
+
+Route interrupted native contacts through the adapter's optional capability:
+
+```ts
+gestureAdapter.pointerCancel?.(pointerId);
+```
 
 The experimental `./react/live-inference` entrypoint owns the live VisionCamera
 worklet through `useReactNativeLiveInference()`; applications provide model

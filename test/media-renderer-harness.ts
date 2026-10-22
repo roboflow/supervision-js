@@ -173,9 +173,9 @@ const mockState = vi.hoisted(() => {
     videoTracks: [{ type: "video" }],
   };
   const domMock = {
-    appendChild: vi.fn(),
     windowAddEventListener: vi.fn(),
     windowRemoveEventListener: vi.fn(),
+    appendChild: vi.fn(),
     cancelAnimationFrame: vi.fn(),
     createElement: vi.fn(),
     getContext: vi.fn(),
@@ -712,8 +712,6 @@ vi.stubGlobal(
 );
 
 export function resetMocks() {
-  domMock.windowAddEventListener.mockReset();
-  domMock.windowRemoveEventListener.mockReset();
   pixiMock.alphaMaskInstances.length = 0;
   pixiMock.assetLoad.mockClear();
   pixiMock.assetLoad.mockResolvedValue({ height: 16, width: 16 });
@@ -805,6 +803,8 @@ export function resetMocks() {
   mediaMock.urlSourceConstructor.mockClear();
   mediaMock.videoSampleSinkConstructor.mockClear();
   mediaMock.videoTracks = [{ type: "video" }];
+  domMock.windowAddEventListener.mockReset();
+  domMock.windowRemoveEventListener.mockReset();
   domMock.appendChild.mockClear();
   domMock.cancelAnimationFrame.mockClear();
   domMock.createElement.mockClear();
