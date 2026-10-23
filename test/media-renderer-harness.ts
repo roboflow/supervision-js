@@ -803,8 +803,8 @@ export function resetMocks() {
   mediaMock.urlSourceConstructor.mockClear();
   mediaMock.videoSampleSinkConstructor.mockClear();
   mediaMock.videoTracks = [{ type: "video" }];
-  domMock.windowAddEventListener.mockClear();
-  domMock.windowRemoveEventListener.mockClear();
+  domMock.windowAddEventListener.mockReset();
+  domMock.windowRemoveEventListener.mockReset();
   domMock.appendChild.mockClear();
   domMock.cancelAnimationFrame.mockClear();
   domMock.createElement.mockClear();

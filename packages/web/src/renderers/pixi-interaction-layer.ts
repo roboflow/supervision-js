@@ -62,6 +62,9 @@ type PixiInteractionContainer = {
 
 type PixiInteractionPointerEvent = {
   getLocalPosition(container: PixiInteractionContainer): DetectionPickPoint;
+  readonly altKey?: boolean;
+  readonly ctrlKey?: boolean;
+  readonly metaKey?: boolean;
   readonly shiftKey?: boolean;
   readonly pointerId?: number;
   readonly button?: number;
@@ -138,6 +141,7 @@ export function createPixiInteractionLayer(options: {
   let marqueeStart: DetectionPickPoint | null = null;
   let marqueeRect: PixiInteractionLayerState["marqueeRect"] = null;
   let pointerPoint: DetectionPickPoint | null = null;
+  const handledPresses = new Map<number | undefined, AnnotationPointerInput>();
   let suppressedTap: AnnotationPointerInput | null = null;
   let defaultPress: {
     kind: "editing" | "marquee";
@@ -256,25 +260,13 @@ export function createPixiInteractionLayer(options: {
 
     pointerCancel,
     pointerCaptureLost(pointerId) {
-      if (defaultPress) pointerCancel(pointerId);
+      if (defaultPress && !handledPresses.has(pointerId))
+        pointerCancel(pointerId);
     },
-    pointerUpFallback(pointerId) {
-      const press = defaultPress;
-      const tap = suppressedTap;
-      queueMicrotask(() => {
-        if (tap && suppressedTap === tap && samePointer(tap, { pointerId }))
-          suppressedTap = null;
-        if (
-          press &&
-          defaultPress === press &&
-          press.input.pointerId === pointerId
-        ) {
-          pointerCancel(pointerId);
-        }
-      });
-    },
+    pointerUpFallback: deferPressRetirement,
     destroy() {
       isDestroyed = true;
+      handledPresses.clear();
       unsubscribeEditing?.();
       if (defaultPress) pointerCancel(defaultPress.input.pointerId);
       suppressedTap = null;
@@ -332,6 +324,7 @@ export function createPixiInteractionLayer(options: {
     const state = editingEngine?.getState();
     if (
       !editingEngine ||
+      handledPresses.has(event.pointerId) ||
       !state ||
       state.kind === AnnotationGestureStateKind.Idle ||
       !canHandleInteraction() ||
@@ -360,6 +353,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerTap(event: PixiInteractionPointerEvent) {
+    if (handledPresses.delete(event.pointerId)) return;
     if (isOtherPressPointer(event) || isOtherEditingPointer(event)) return;
     if (suppressedTap && samePointer(suppressedTap, event)) {
       suppressedTap = null;
@@ -378,6 +372,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerDown(event: PixiInteractionPointerEvent) {
+    handledPresses.delete(event.pointerId);
     if (
       !canHandleInteraction() ||
       isOtherPressPointer(event) ||
@@ -395,6 +390,18 @@ export function createPixiInteractionLayer(options: {
           point,
         )
       : undefined;
+
+    if (
+      options.interaction.onPointerPress?.({
+        input,
+        pick,
+        selectedHandle:
+          handle && selectedPick ? { pick: selectedPick, handle } : null,
+      }) === "handled"
+    ) {
+      handledPresses.set(event.pointerId, input);
+      return;
+    }
 
     if (
       options.editingEngine &&
@@ -465,6 +472,10 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerUp(event: PixiInteractionPointerEvent) {
+    if (handledPresses.has(event.pointerId)) {
+      deferPressRetirement(event.pointerId);
+      return;
+    }
     if (isOtherPressPointer(event) || isOtherEditingPointer(event)) return;
     const press = defaultPress;
     defaultPress = null;
@@ -526,7 +537,27 @@ export function createPixiInteractionLayer(options: {
     notifyStateChange();
   }
 
+  function deferPressRetirement(pointerId?: number) {
+    const press = defaultPress;
+    const tap = suppressedTap;
+    const handled = handledPresses.get(pointerId);
+    // Pixi dispatches pointertap synchronously after pointerup.
+    queueMicrotask(() => {
+      if (handled && handledPresses.get(pointerId) === handled)
+        handledPresses.delete(pointerId);
+      if (tap && suppressedTap === tap && samePointer(tap, { pointerId }))
+        suppressedTap = null;
+      if (
+        press &&
+        defaultPress === press &&
+        press.input.pointerId === pointerId
+      )
+        pointerCancel(pointerId);
+    });
+  }
+
   function pointerCancel(pointerId?: number) {
+    handledPresses.delete(pointerId);
     const press = defaultPress;
     if (press && !samePointer(press.input, { pointerId })) return;
     if (press) defaultPress = null;
@@ -857,7 +888,10 @@ export function createPixiInteractionLayer(options: {
     point: DetectionPickPoint,
   ) {
     return {
+      altKey: event.altKey,
       button: event.button,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
       detail: event.detail,
       mediaDimensions: options.getMediaDimensions?.() ?? displayDimensions,
       point,
