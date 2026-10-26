@@ -880,6 +880,9 @@ export async function createPixiMediaScene(
     interactionLayer?.pointerCancel(event.pointerId);
   };
   const handlePointerCaptureLost = (event: PointerEvent) => {
+    // Released capture can be lost before the browser dispatches pointerup.
+    // Keep the press alive for Pixi's release and the native release fallback.
+    if (event.buttons === 0) return;
     interactionLayer?.pointerCaptureLost(event.pointerId);
   };
   const handlePointerUp = (event: PointerEvent) => {

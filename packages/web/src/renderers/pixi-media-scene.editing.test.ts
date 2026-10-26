@@ -129,6 +129,32 @@ describe("editing gestures in the Pixi media scene", () => {
     },
   );
 
+  it("commits when released capture is lost before pointerup", async () => {
+    resetMocks();
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+    });
+    const lost = pixiMock.canvasAddEventListener.mock.calls.find(
+      ([type]) => type === "lostpointercapture",
+    )![1] as (event: PointerEvent) => void;
+    sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
+    sendInteractionPointer("globalpointermove", 7, { x: 60, y: 80 });
+    lost({ pointerId: 7, buttons: 0 } as PointerEvent);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+    sendInteractionPointer("pointerup", 7, { x: 60, y: 80 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { rect: { x: 35, y: 50, width: 50, height: 60 } },
+      null,
+    );
+    renderer.destroy();
+  });
+
   it("retires a routed press through the native pointer-up fallback and removes its listener", async () => {
     resetMocks();
     const onCommit = vi.fn();
