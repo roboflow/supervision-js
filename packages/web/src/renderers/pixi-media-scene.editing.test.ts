@@ -151,7 +151,7 @@ describe("editing gestures in the Pixi media scene", () => {
     sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
     expect(engine.getState().pointerId).toBe(7);
     pointerUp({ pointerId: 7 } as PointerEvent);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
     expect(onCommit).not.toHaveBeenCalled();
     renderer.destroy();
