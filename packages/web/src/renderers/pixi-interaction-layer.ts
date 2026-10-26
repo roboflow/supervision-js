@@ -541,8 +541,9 @@ export function createPixiInteractionLayer(options: {
     const press = defaultPress;
     const tap = suppressedTap;
     const handled = handledPresses.get(pointerId);
-    // Pixi dispatches pointertap synchronously after pointerup.
-    queueMicrotask(() => {
+    // Native listeners can run microtasks before Pixi receives this release.
+    // Retire only after the complete pointerup/pointertap dispatch has finished.
+    setTimeout(() => {
       if (handled && handledPresses.get(pointerId) === handled)
         handledPresses.delete(pointerId);
       if (tap && suppressedTap === tap && samePointer(tap, { pointerId }))
@@ -553,7 +554,7 @@ export function createPixiInteractionLayer(options: {
         press.input.pointerId === pointerId
       )
         pointerCancel(pointerId);
-    });
+    }, 0);
   }
 
   function pointerCancel(pointerId?: number) {

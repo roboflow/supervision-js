@@ -129,6 +129,72 @@ describe("editing gestures in the Pixi media scene", () => {
     },
   );
 
+  it("commits when released capture is lost before pointerup", async () => {
+    resetMocks();
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Box,
+      createDetection: (rect) => ({ rect: rect as Rect }),
+    });
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+    });
+    const lost = pixiMock.canvasAddEventListener.mock.calls.find(
+      ([type]) => type === "lostpointercapture",
+    )![1] as (event: PointerEvent) => void;
+    sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
+    sendInteractionPointer("globalpointermove", 7, { x: 60, y: 80 });
+    lost({ pointerId: 7, buttons: 0 } as PointerEvent);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+    await Promise.resolve();
+    sendInteractionPointer("pointerup", 7, { x: 60, y: 80 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { rect: { x: 35, y: 50, width: 50, height: 60 } },
+      null,
+    );
+    renderer.destroy();
+  });
+
+  it.each(["creating", "moving"])(
+    "retires an abandoned %s gesture when released capture is lost without pointerup",
+    async (kind) => {
+      resetMocks();
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      if (kind === "creating") {
+        engine.setCreationTool({
+          geometry: AnnotationGeometryKind.Box,
+          createDetection: (rect) => ({ rect: rect as Rect }),
+        });
+      }
+      const renderer = await createRenderer(false, false, {
+        editingEngine: engine,
+        detectionFrames: [
+          { detections: [SUBJECT], frameIndex: 0, mediaTime: 0 },
+        ],
+      });
+      await vi.waitFor(() =>
+        expect(renderer.getState().activeDetectionCount).toBe(1),
+      );
+      const lost = pixiMock.canvasAddEventListener.mock.calls.find(
+        ([type]) => type === "lostpointercapture",
+      )![1] as (event: PointerEvent) => void;
+      sendInteractionPointer("pointerdown", 7, { x: 100, y: 90 });
+      sendInteractionPointer("globalpointermove", 7, { x: 110, y: 100 });
+      lost({ pointerId: 7, buttons: 0 } as PointerEvent);
+      expect(engine.getState().kind).toBe(kind);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onCommit).not.toHaveBeenCalled();
+      sendInteractionPointer("pointerdown", 8, { x: 100, y: 90 });
+      sendInteractionPointer("globalpointermove", 8, { x: 110, y: 100 });
+      sendInteractionPointer("pointerup", 8, { x: 110, y: 100 }, 300);
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      renderer.destroy();
+    },
+  );
+
   it("retires a routed press through the native pointer-up fallback and removes its listener", async () => {
     resetMocks();
     const onCommit = vi.fn();
@@ -151,7 +217,7 @@ describe("editing gestures in the Pixi media scene", () => {
     sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
     expect(engine.getState().pointerId).toBe(7);
     pointerUp({ pointerId: 7 } as PointerEvent);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
     expect(onCommit).not.toHaveBeenCalled();
     renderer.destroy();
@@ -543,7 +609,7 @@ describe("editing gestures in the Pixi media scene", () => {
 });
 
 function sendInteractionPointer(
-  eventType: "pointerdown" | "pointerup",
+  eventType: "pointerdown" | "pointerup" | "globalpointermove",
   pointerId: number,
   point: Point,
   timeStamp = 0,
