@@ -269,6 +269,22 @@ describe("pixi interaction layer", () => {
     expect(h.release).toHaveBeenCalledExactlyOnceWith(7);
   });
 
+  it("commits a native drag when microtasks run before Pixi receives pointerup", async () => {
+    const h = createPressHarness(() => "continue");
+    h.send("pointerdown", 40, 40, { pointerId: 7 });
+    h.send("pointermove", 60, 60, { pointerId: 7 });
+    h.layer.pointerUpFallback(7);
+    await Promise.resolve();
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Moving);
+    h.send("pointerup", 60, 60, { pointerId: 7 });
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+      expect.objectContaining({ id: "a" }),
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+  });
+
   it("retires a consumed native up without cancelling a fresh same-id press", async () => {
     const h = createDefaultPressHarness();
     h.engine.setCreationTool({
@@ -277,14 +293,14 @@ describe("pixi interaction layer", () => {
     });
     h.send("pointerdown", 7, 40, 40);
     h.layer.pointerUpFallback(7);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
     expect(h.release).toHaveBeenCalledExactlyOnceWith(7);
     h.send("pointerdown", 7, 40, 40);
     h.layer.pointerUpFallback(7);
     h.engine.pointerCancel?.(7);
     h.send("pointerdown", 7, 50, 50);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(h.engine.getState().pointerId).toBe(7);
     expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
   });
@@ -465,7 +481,7 @@ describe("pixi interaction layer", () => {
     h.layer.pointerUpFallback(7);
     h.send("pointerdown", 40, 40, { pointerId: 7, altKey: true });
     h.layer.pointerCancel(8);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     h.send("pointermove", 60, 60, { pointerId: 7 });
     expect(move).not.toHaveBeenCalled();
     h.send("pointermove", 60, 60, { pointerId: 8 });
@@ -473,7 +489,7 @@ describe("pixi interaction layer", () => {
       expect.objectContaining({ pointerId: 8 }),
     );
     h.layer.pointerUpFallback(7);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     h.send("pointermove", 60, 60, { pointerId: 7 });
     expect(move).toHaveBeenCalledTimes(2);
 
@@ -490,7 +506,7 @@ describe("pixi interaction layer", () => {
     h.send("pointermove", 80, 80, { pointerId: 9 });
     h.layer.pointerUpFallback(9);
     h.send("pointerup", 80, 80, { pointerId: 9 });
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
     expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
       { rect: { x: 60, y: 60, width: 40, height: 40 } },
