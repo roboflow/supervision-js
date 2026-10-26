@@ -569,7 +569,7 @@ describe("editing gestures in the Pixi media scene", () => {
 });
 
 function sendInteractionPointer(
-  eventType: "pointerdown" | "pointerup",
+  eventType: "pointerdown" | "pointerup" | "globalpointermove",
   pointerId: number,
   point: Point,
   timeStamp = 0,
