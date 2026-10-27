@@ -1,6 +1,7 @@
 import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
+  AnnotationHandleKind,
   type AnnotationCreationTool,
   type AnnotationEditingEngineOptions,
   type AnnotationEditingState,
@@ -8,6 +9,7 @@ import {
   type AnnotationPointerInput,
   type BuiltInAnnotationEditingEngine,
 } from "#types/editing";
+import { getOrientedRectangleGeometry } from "#utils/oriented-rectangle";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
 import {
@@ -122,6 +124,7 @@ export function createAnnotationEditingEngine(
                 gesture.handle,
                 input.point,
                 input.mediaDimensions ?? gesture.start.mediaDimensions,
+                gesture.start.point,
               ),
               gesture,
             );
@@ -179,13 +182,21 @@ export function createAnnotationEditingEngine(
             input.point.x - active.start.point.x,
             input.point.y - active.start.point.y,
           ) * scale();
-        const rect = preview.rect;
+        const rect =
+          activeTool?.geometry === AnnotationGeometryKind.OrientedBox &&
+          preview.orientedBox
+            ? getOrientedRectangleGeometry(preview.orientedBox)
+            : preview.rect;
         if (
           !rect ||
           rect.width < 1 ||
           rect.height < 1 ||
           (duration < CLICK_CANCEL_MS && diagonal <= CLICK_CANCEL_DIAGONAL) ||
-          activeTool?.shouldCommit?.(rect) === false
+          activeTool?.shouldCommit?.(
+            activeTool.geometry === AnnotationGeometryKind.OrientedBox
+              ? preview.orientedBox!.points
+              : rect,
+          ) === false
         ) {
           if (state === next) rejectCreation(next, activeTool);
           return;
@@ -215,6 +226,7 @@ export function createAnnotationEditingEngine(
               active.handle,
               input.point,
               input.mediaDimensions ?? active.start.mediaDimensions,
+              active.start.point,
             );
       commit(preview, active.detection, next);
     },
@@ -266,7 +278,10 @@ export function createAnnotationEditingEngine(
         {
           activeDetectionId: detection.id ?? null,
           activeHandleId: handle.id,
-          kind: AnnotationGestureStateKind.Resizing,
+          kind:
+            handle.kind === AnnotationHandleKind.Rotate
+              ? AnnotationGestureStateKind.Rotating
+              : AnnotationGestureStateKind.Resizing,
           pointerId: input.pointerId ?? null,
           preview: null,
         },
@@ -294,7 +309,8 @@ export function createAnnotationEditingEngine(
     if (!tool) return;
     const mode =
       tool.mode ??
-      (tool.geometry === AnnotationGeometryKind.Box
+      (tool.geometry === AnnotationGeometryKind.Box ||
+      tool.geometry === AnnotationGeometryKind.OrientedBox
         ? "drag"
         : tool.geometry === AnnotationGeometryKind.Mask
           ? "freehand"
@@ -407,7 +423,16 @@ export function createAnnotationEditingEngine(
       width: right - left,
       height: bottom - top,
     };
-    return activeTool!.createDetection(rect);
+    return activeTool!.createDetection(
+      activeTool!.geometry === AnnotationGeometryKind.OrientedBox
+        ? [
+            { x: left, y: top },
+            { x: right, y: top },
+            { x: right, y: bottom },
+            { x: left, y: bottom },
+          ]
+        : rect,
+    );
   }
 
   function resolveMovePreview(

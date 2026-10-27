@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Oriented rectangle editing</title>
+  </head>
+  <body>
+    <main>
+      <h1>Oriented rectangle editing</h1>
+      <p>
+        Draw a rectangle, then select it to resize in its local axes or drag the
+        small rotation control. Escape cancels an edit. Scroll to zoom.
+      </p>
+      <nav>
+        <button id="select">Select</button
+        ><button id="draw">Draw rectangle</button><button id="undo">Undo</button
+        ><button id="redo">Redo</button><button id="reset">Reset view</button>
+      </nav>
+      <div id="viewer"></div>
+      <output id="status" aria-live="polite">Loading…</output>
+      <output id="zoom" aria-label="Zoom">1x</output>
+      <details>
+        <summary>Committed ordered geometry</summary>
+        <pre id="geometry"></pre>
+      </details>
+    </main>
+    <script type="module" src="/src/oriented-box.ts"></script>
+  </body>
+</html>

@@ -5,5 +5,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: environment.VITE_VANILLA_BASE_PATH || "/examples/vanilla/",
+    build: {
+      rollupOptions: {
+        input: { main: "index.html", orientedBox: "oriented-box.html" },
+      },
+    },
   };
 });

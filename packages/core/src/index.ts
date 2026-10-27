@@ -552,3 +552,9 @@ export type {
   DetectionStylePredicate,
   DetectionStyleValue,
 } from "#types/style";
+
+export {
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+  type OrientedRectangleGeometry,
+} from "#utils/oriented-rectangle";

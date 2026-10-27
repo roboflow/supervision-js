@@ -508,6 +508,11 @@ interpreting every cancellation as a click.
 
 The generated API reference has a separate Editing module for this entrypoint.
 
+Native oriented-rectangle creation, rotation and local-axis resize are available
+from `supervision/editing`. See [Oriented Box](../annotation-renderers/oriented-box.md)
+for ordered corner helpers, gesture semantics and a standalone example. General
+quadrilaterals remain renderable, pickable and movable.
+
 `Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
 and `height` are its extent. `TopLeftRect` is only for explicit canvas/layout
 boundaries. There is no legacy top-left rectangle mode. `Rect` also stays

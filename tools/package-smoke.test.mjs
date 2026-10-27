@@ -340,6 +340,18 @@ test("built editing entrypoint exposes advanced host-owned editing APIs", async 
   assert.equal(typeof editing.createAnnotationEditingEngine, "function");
   assert.equal(typeof editing.createEditableAnnotationFrameSession, "function");
   assert.equal(typeof editing.createMaskBrushEditor, "function");
+  assert.equal(editing.AnnotationGeometryKind.OrientedBox, "orientedBox");
+  assert.equal(editing.AnnotationHandleKind.Rotate, "rotate");
+  const oriented = editing.createOrientedBoxGeometry(
+    { x: 20, y: 30, width: 40, height: 10 },
+    Math.PI,
+  );
+  const rectangle = editing.getOrientedRectangleGeometry(oriented);
+  assert.ok(Math.abs(rectangle.rotation - Math.PI) < 1e-8);
+  assert.equal(
+    editing.getAnnotationHandles({ orientedBox: oriented }).length,
+    9,
+  );
 });
 
 test("built heatmap path retains Pixi prepare registration", () => {

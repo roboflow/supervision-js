@@ -11,6 +11,11 @@ import {
 } from "#types/detections";
 import { distanceToSegment } from "#utils/geometry";
 
+import {
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+} from "#utils/oriented-rectangle";
+
 const HANDLE_RADIUS = 6;
 const ADD_HANDLE_RADIUS = 3.6;
 const HANDLE_HIT_SIZE = 16;
@@ -54,6 +59,10 @@ export function getAnnotationHandles(
       ...keypointHandles,
     ];
   }
+  if (detection.orientedBox && !detection.rect) {
+    const rectangle = getOrientedRectangleGeometry(detection.orientedBox);
+    if (rectangle) return getOrientedBoxHandles(rectangle, viewportScale);
+  }
   if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
   return [];
 }
@@ -68,6 +77,11 @@ export function pickAnnotationHandle(
     const dx = Math.abs(point.x - handle.point.x);
     const dy = Math.abs(point.y - handle.point.y);
     if (dx > handle.hitSize / 2 || dy > handle.hitSize / 2) continue;
+    if (
+      handle.kind === AnnotationHandleKind.Rotate &&
+      Math.hypot(dx, dy) > handle.hitSize / 2
+    )
+      continue;
     // Clustered handles (face keypoints, a tiny box's corners) share hit
     // areas; the nearest one is what the pointer is on. Later handles draw on
     // top, so they win exact ties.
@@ -85,7 +99,59 @@ export function applyAnnotationHandleDrag(
   handle: AnnotationHandleDefinition,
   point: Point,
   mediaDimensions?: Pick<Rect, "width" | "height">,
+  startPoint?: Point,
 ): Detection {
+  if (detection.orientedBox && handle.id.startsWith("obb-")) {
+    const rectangle = getOrientedRectangleGeometry(detection.orientedBox);
+    if (!rectangle) return detection;
+    if (handle.kind === AnnotationHandleKind.Rotate) {
+      const start = startPoint ?? handle.point;
+      if (Math.hypot(point.x - rectangle.x, point.y - rectangle.y) < 1e-9)
+        return detection;
+      const delta =
+        Math.atan2(point.y - rectangle.y, point.x - rectangle.x) -
+        Math.atan2(start.y - rectangle.y, start.x - rectangle.x);
+      return {
+        ...detection,
+        orientedBox: createOrientedBoxGeometry(
+          rectangle,
+          rectangle.rotation + delta,
+        ),
+      };
+    }
+    if (handle.kind === AnnotationHandleKind.Resize) {
+      const cos = Math.cos(rectangle.rotation);
+      const sin = Math.sin(rectangle.rotation);
+      const dx = point.x - rectangle.x;
+      const dy = point.y - rectangle.y;
+      const px = dx * cos + dy * sin;
+      const py = -dx * sin + dy * cos;
+      const id = handle.id.slice(4);
+      let left = -rectangle.width / 2;
+      let right = rectangle.width / 2;
+      let top = -rectangle.height / 2;
+      let bottom = rectangle.height / 2;
+      // Crossing clamps at a positive extent, preserving ordered local axes.
+      if (id.includes("w")) left = Math.min(px, right - 1);
+      if (id.includes("e")) right = Math.max(px, left + 1);
+      if (id.includes("n")) top = Math.min(py, bottom - 1);
+      if (id.includes("s")) bottom = Math.max(py, top + 1);
+      const cx = (left + right) / 2;
+      const cy = (top + bottom) / 2;
+      return {
+        ...detection,
+        orientedBox: createOrientedBoxGeometry(
+          {
+            x: rectangle.x + cx * cos - cy * sin,
+            y: rectangle.y + cx * sin + cy * cos,
+            width: right - left,
+            height: bottom - top,
+          },
+          rectangle.rotation,
+        ),
+      };
+    }
+  }
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
     const rect = resizeRect(detection.rect, handle.id, point, mediaDimensions);
     const boxRelative = detection.keypoints?.boxRelative;
@@ -376,4 +442,47 @@ export function findClosestAnnotationSegment(
     if (!best || distance < best.distance) best = { index, distance };
   }
   return best;
+}
+
+function getOrientedBoxHandles(
+  rectangle: Rect & { readonly rotation: number },
+  scale: number,
+): AnnotationHandleDefinition[] {
+  const cos = Math.cos(rectangle.rotation);
+  const sin = Math.sin(rectangle.rotation);
+  const project = ({ x, y }: Point): Point => ({
+    x: rectangle.x + x * cos - y * sin,
+    y: rectangle.y + x * sin + y * cos,
+  });
+  const handles = getBoxHandles(
+    { x: 0, y: 0, width: rectangle.width, height: rectangle.height },
+    HANDLE_RADIUS / scale,
+    HANDLE_HIT_SIZE / scale,
+  ).map((handle) => ({
+    ...handle,
+    cursor: rotatedResizeCursor(handle.cursor, rectangle.rotation),
+    id: `obb-${handle.id}`,
+    point: project(handle.point),
+  }));
+  const stemFrom = project({ x: 0, y: -rectangle.height / 2 });
+  return [
+    ...handles,
+    {
+      id: "obb-rotate",
+      kind: AnnotationHandleKind.Rotate,
+      cursor: "grab",
+      point: project({ x: 0, y: -rectangle.height / 2 - 24 / scale }),
+      stemFrom,
+      radius: 4 / scale,
+      hitSize: 20 / scale,
+    },
+  ];
+}
+
+function rotatedResizeCursor(cursor: string, rotation: number): string {
+  const cursors = ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"];
+  const index = cursors.indexOf(cursor);
+  return cursors[
+    (((index + Math.round(rotation / (Math.PI / 4))) % 4) + 4) % 4
+  ]!;
 }

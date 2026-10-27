@@ -818,7 +818,8 @@ export async function createPixiMediaScene(
     // no mask, so hiding it would blank the stroke as it is drawn.
     const nextEditingId =
       (state.kind === AnnotationGestureStateKind.Moving ||
-        state.kind === AnnotationGestureStateKind.Resizing) &&
+        state.kind === AnnotationGestureStateKind.Resizing ||
+        state.kind === AnnotationGestureStateKind.Rotating) &&
       state.activeDetectionId !== null &&
       state.preview &&
       !state.preview.mask
@@ -3127,7 +3128,8 @@ export async function createPixiMediaScene(
 
     return state !== undefined &&
       (state.kind === AnnotationGestureStateKind.Moving ||
-        state.kind === AnnotationGestureStateKind.Resizing) &&
+        state.kind === AnnotationGestureStateKind.Resizing ||
+        state.kind === AnnotationGestureStateKind.Rotating) &&
       state.preview !== null &&
       detection.id !== undefined &&
       state.activeDetectionId === detection.id

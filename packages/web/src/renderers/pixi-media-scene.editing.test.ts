@@ -429,35 +429,44 @@ describe("editing gestures in the Pixi media scene", () => {
     renderer.destroy();
   });
 
-  it("hides the edited detection from the base layers while it is edited", async () => {
-    resetMocks();
-    const editing = createEditingEngineHarness();
-    const renderer = await createRenderer(false, false, {
-      boxStyle: new BaseBoxStyle({
-        shape: BoxShape.Rect,
-        stroke: { alpha: 1, color: 0x00ff66, width: 2 },
-      }),
-      detectionFrames: [{ detections: [SUBJECT], frameIndex: 0, mediaTime: 0 }],
-      editingEngine: editing.engine,
-    });
+  it.each([
+    AnnotationGestureStateKind.Moving,
+    AnnotationGestureStateKind.Resizing,
+    AnnotationGestureStateKind.Rotating,
+  ])(
+    "hides the edited detection from the base layers while %s",
+    async (kind) => {
+      resetMocks();
+      const editing = createEditingEngineHarness();
+      const renderer = await createRenderer(false, false, {
+        boxStyle: new BaseBoxStyle({
+          shape: BoxShape.Rect,
+          stroke: { alpha: 1, color: 0x00ff66, width: 2 },
+        }),
+        detectionFrames: [
+          { detections: [SUBJECT], frameIndex: 0, mediaTime: 0 },
+        ],
+        editingEngine: editing.engine,
+      });
 
-    await vi.waitFor(() => {
-      expect(renderer.getState().activeDetectionCount).toBe(1);
-    });
-    const box = pixiMock.graphicsInstances.find(
-      (graphics) => graphics.rect.mock.calls.length > 0,
-    );
-    expect(box).toBeDefined();
-    expect(box!.visible).toBe(true);
+      await vi.waitFor(() => {
+        expect(renderer.getState().activeDetectionCount).toBe(1);
+      });
+      const box = pixiMock.graphicsInstances.find(
+        (graphics) => graphics.rect.mock.calls.length > 0,
+      );
+      expect(box).toBeDefined();
+      expect(box!.visible).toBe(true);
 
-    editing.emitState(movingState());
-    expect(box!.visible).toBe(false);
+      editing.emitState({ ...movingState(), kind });
+      expect(box!.visible).toBe(false);
 
-    editing.emitState(idleState());
-    expect(box!.visible).toBe(true);
+      editing.emitState(idleState());
+      expect(box!.visible).toBe(true);
 
-    renderer.destroy();
-  });
+      renderer.destroy();
+    },
+  );
 
   it("keeps a mask drawn while the brush edits it", async () => {
     resetMocks();

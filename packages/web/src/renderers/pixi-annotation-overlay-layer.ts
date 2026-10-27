@@ -425,7 +425,8 @@ function drawSelectionHandles(
     const source =
       state &&
       (state.kind === AnnotationGestureStateKind.Moving ||
-        state.kind === AnnotationGestureStateKind.Resizing) &&
+        state.kind === AnnotationGestureStateKind.Resizing ||
+        state.kind === AnnotationGestureStateKind.Rotating) &&
       state.preview &&
       state.activeDetectionId === detection.id
         ? state.preview
@@ -438,6 +439,15 @@ function drawSelectionHandles(
             ? style.selectionHandle.keypointAlpha
             : 1;
       if (alpha <= 0) continue;
+      if (handle.stemFrom) {
+        drawPixiPath(
+          graphics,
+          [handle.stemFrom, handle.point],
+          false,
+          stroke,
+          context.viewportScale,
+        );
+      }
       graphics.circle(handle.point.x, handle.point.y, handle.radius);
       graphics.fill({ ...fill, alpha: fill.alpha * alpha });
       graphics.stroke(

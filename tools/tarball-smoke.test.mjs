@@ -714,3 +714,28 @@ test("a consumer that never opens a video source does not bundle the engine", ()
     "No chunk of an image-only build may be the size of the decode worker",
   );
 });
+
+test("clean consumer creates and rotates ordered native rectangles through the editing entrypoint", () => {
+  const output = run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      [
+        'import assert from "node:assert/strict";',
+        'import { AnnotationGeometryKind, AnnotationHandleKind, createOrientedBoxGeometry, getOrientedRectangleGeometry, getAnnotationHandles, createAnnotationEditingEngine } from "supervision/editing";',
+        'const detection = { id: "r", orientedBox: createOrientedBoxGeometry({ x: 100, y: 100, width: 40, height: 40 }, Math.PI) };',
+        "const handle = getAnnotationHandles(detection).find(h => h.kind === AnnotationHandleKind.Rotate);",
+        "let commits = 0;",
+        "const engine = createAnnotationEditingEngine({ onCommit(next, previous) { commits++; assert.equal(previous, detection); assert.equal(next.rect, undefined); assert.ok(Math.abs(getOrientedRectangleGeometry(next.orientedBox).width - 40) < 1e-8); } });",
+        "engine.beginHandleDrag(detection, handle, { point: handle.point, timestamp: 0 });",
+        "engine.pointerMove({ point: { x: 150, y: 100 }, timestamp: 100 });",
+        "engine.pointerUp({ point: { x: 150, y: 100 }, timestamp: 200 });",
+        'assert.equal(commits, 1); assert.equal(AnnotationGeometryKind.OrientedBox, "orientedBox");',
+        'console.log("ordered-rectangle-ok");',
+      ].join("\n"),
+    ],
+    consumerDir,
+  );
+  assert.equal(output.trim(), "ordered-rectangle-ok");
+});

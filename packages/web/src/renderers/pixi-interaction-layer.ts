@@ -921,7 +921,8 @@ export function createPixiInteractionLayer(options: {
       return;
     }
     if (
-      editingState?.kind === AnnotationGestureStateKind.Resizing &&
+      (editingState?.kind === AnnotationGestureStateKind.Resizing ||
+        editingState?.kind === AnnotationGestureStateKind.Rotating) &&
       selectedPick
     ) {
       // Keep the grabbed handle's cursor for the whole drag.

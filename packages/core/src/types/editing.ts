@@ -5,6 +5,7 @@ import type { AnnotationStyleContext, DetectionStyleValue } from "#types/style";
 
 export enum AnnotationGeometryKind {
   Box = "box",
+  OrientedBox = "orientedBox",
   Polygon = "polygon",
   Polyline = "polyline",
   Keypoints = "keypoints",
@@ -16,11 +17,13 @@ export enum AnnotationGestureStateKind {
   Creating = "creating",
   Moving = "moving",
   Resizing = "resizing",
+  Rotating = "rotating",
   DragSelecting = "dragSelecting",
 }
 
 export enum AnnotationHandleKind {
   Resize = "resize",
+  Rotate = "rotate",
   Vertex = "vertex",
   AddVertex = "addVertex",
   Keypoint = "keypoint",
@@ -35,6 +38,8 @@ export interface AnnotationHandleDefinition {
   readonly edgeIndex?: number;
   readonly radius: number;
   readonly hitSize: number;
+  /** Media-space stem drawn from the rectangle edge to a rotation control. */
+  readonly stemFrom?: Point;
 }
 
 export interface AnnotationPointerInput {
@@ -53,6 +58,7 @@ export interface AnnotationPointerInput {
 
 export interface AnnotationCreationTool {
   readonly geometry: AnnotationGeometryKind;
+  /** OrientedBox drag creation supplies four ordered rectangle corners, without a shadow rect. */
   createDetection(geometry: Rect | readonly Point[]): Detection;
   readonly minVertices?: number;
   readonly mode?: "drag" | "multiClick" | "freehand";
