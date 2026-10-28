@@ -58,7 +58,8 @@ export function createReactNativeAnnotationGestureAdapter(options: {
       const selected = options.getSelectedDetection?.();
       const handle = selected
         ? pickAnnotationHandle(
-            getAnnotationHandles(selected, layout.scale),
+            options.editingEngine.getHandles?.(selected, layout.scale) ??
+              getAnnotationHandles(selected, layout.scale),
             point,
           )
         : undefined;

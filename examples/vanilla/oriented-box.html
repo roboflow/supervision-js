@@ -10,14 +10,43 @@
       <h1>Oriented rectangle editing</h1>
       <p>
         Draw a rectangle, then select it to resize in its local axes or drag the
-        small rotation control. Escape cancels an edit. Scroll to zoom.
+        small rotation control. Hold Shift to snap rotation to 15°. Escape
+        cancels an edit. Scroll to zoom.
       </p>
       <nav>
         <button id="select">Select</button
         ><button id="draw">Draw rectangle</button><button id="undo">Undo</button
         ><button id="redo">Redo</button><button id="reset">Reset view</button>
       </nav>
-      <div id="viewer"></div>
+      <section class="properties" aria-label="Selected rectangle">
+        <label class="toggle"
+          ><input id="heading" type="checkbox" checked /> Heading (demo
+          convention)</label
+        >
+        <label
+          >Angle
+          <input
+            id="angle"
+            type="number"
+            step="0.1"
+            aria-describedby="angle-help"
+          />
+          °</label
+        >
+        <button id="rotate-keys" aria-describedby="angle-help">
+          Rotate with arrow keys
+        </button>
+        <button id="next-front">Next front</button>
+        <button id="reverse-front">Reverse front</button>
+      </section>
+      <p id="angle-help" class="instructions">
+        Enter an angle to preview; Enter or leaving the field saves it. Focus
+        Rotate with arrow keys, then use ← / → for 1° (Shift: 15°). Escape
+        cancels a preview. With heading enabled, double-click an edge to make it
+        the front. The small triangle marks the front; choosing a front keeps
+        the footprint.
+      </p>
+      <div id="viewer" aria-label="Rectangle editing canvas"></div>
       <output id="status" aria-live="polite">Loading…</output>
       <output id="zoom" aria-label="Zoom">1x</output>
       <details>

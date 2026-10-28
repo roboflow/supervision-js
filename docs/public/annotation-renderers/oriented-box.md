@@ -109,9 +109,9 @@ Pass the caller-owned engine as `renderer.editingEngine` to a media session.
 Drag creation supplies four clockwise local corners to `createDetection` and
 `shouldCommit`. It needs no accompanying `rect`. The selected rectangle has
 eight local-axis resize controls and a compact rotation control on a short
-stem. Handle geometry and hit testing share `getAnnotationHandles()`: the
+stem. Handle rendering and hit testing share `engine.getHandles()`: the
 rotation glyph has a 4 CSS-pixel radius and a separate circular 20 CSS-pixel
-hit diameter; its center sits 24 CSS pixels outside the first edge. Sizes stay
+hit diameter; by default, its center sits 24 CSS pixels outside the first edge. Sizes stay
 constant while zooming.
 
 Rotation uses the center and the initial press angle, preserving pointer grab
@@ -126,6 +126,56 @@ choose their own admission policy. Escape, tool changes and pointer
 interruption discard continuous edits. A completed edit emits one `onCommit`,
 with its original detection for host-owned undo. Rotation reports
 `AnnotationGestureStateKind.Rotating`.
+
+### Configure rotation constraints and handle placement
+
+Rotation is free by default. Hosts can constrain the candidate angle with
+`resolveRotation`, for example to snap to 15-degree increments while Shift is held:
+
+```ts
+const step = Math.PI / 12;
+const engine = createAnnotationEditingEngine({
+  resolveRotation(radians, { detection, initialRotation, input }) {
+    return input.shiftKey ? Math.round(radians / step) * step : radians;
+  },
+  // Ordered edges: 0 top, 1 right, 2 bottom, 3 left.
+  rotationHandle: { edgeIndex: 1, offset: 32 },
+  onCommit(detection, previous) {
+    // Persist the result and record the previous detection for undo.
+  },
+});
+```
+
+The resolver receives an absolute clockwise angle in radians, the original
+detection, its initial rotation, and the latest pointer input with modifiers.
+Each preview and commit is resolved once from the original geometry and raw
+pointer position; previous constrained previews never accumulate into the next
+candidate. Return finite radians. The engine normalizes the result to the
+geometry helper's `[-PI, PI]` convention and preserves the original center,
+ordered width/height, corner identities, id and metadata. The resolver applies
+only to rotation; it does not constrain movement, resizing or creation.
+
+`rotationHandle` can also be `(detection) => ({ edgeIndex, offset })` for
+annotation-specific placement. The default is edge `0` with a `24` CSS-pixel
+outward offset; offset must be finite and nonnegative. Placement changes only
+the control and its stem. It does not change corner ordering or infer a heading.
+
+The browser renderer routes modifier press and release events during rotation,
+so Shift snapping updates immediately while the pointer is stationary. Hosts
+routing input directly can call `engine.setModifiers({ shiftKey: true })` and
+`engine.setModifiers({})` on release. Omitted modifier keys are released. This
+updates only an active rotation that has already crossed the drag threshold;
+it neither starts movement nor commits. The final `pointerUp(input)` modifier
+snapshot is authoritative. Window blur interrupts the active contact.
+
+Use `engine.getHandles(detection, viewportScale)` when drawing or picking
+controls yourself. The scale is CSS pixels per media pixel; omit it to use the
+engine's `viewportScale` callback (or `1`). The pure helper remains backward
+compatible and accepts the same placement configuration as a third argument:
+`getAnnotationHandles(detection, viewportScale, { rotationHandle })`.
+`getHandles` and `setModifiers` are optional capabilities on custom
+`AnnotationEditingEngine` implementations and guaranteed by the built-in
+factory; adapters fall back to the default pure helper for older engines.
 
 Run the self-contained [vanilla editing example](../../../examples/vanilla/oriented-box.html)
 with `npm run example:vanilla:dev` and open

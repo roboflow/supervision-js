@@ -407,10 +407,7 @@ export function createPixiInteractionLayer(options: {
     const pick = pickFromPointerEvent(event);
     const selected = selectedPick?.detection;
     const handle = selected
-      ? pickAnnotationHandle(
-          getAnnotationHandles(selected, options.getViewportScale?.() ?? 1),
-          point,
-        )
+      ? pickAnnotationHandle(getHandles(selected), point)
       : undefined;
 
     if (
@@ -452,6 +449,7 @@ export function createPixiInteractionLayer(options: {
       if (
         options.interaction.multiSelect &&
         event.shiftKey &&
+        !handle &&
         pick &&
         !options.editingEngine.hasCreationTool() &&
         options.editingEngine.getState().kind ===
@@ -924,15 +922,17 @@ export function createPixiInteractionLayer(options: {
     };
   }
 
+  function getHandles(detection: Detection) {
+    const scale = options.getViewportScale?.() ?? 1;
+    return (
+      options.editingEngine?.getHandles?.(detection, scale) ??
+      getAnnotationHandles(detection, scale)
+    );
+  }
+
   function selectedHandleAt(point: DetectionPickPoint | null) {
     if (!point || !selectedPick) return undefined;
-    return pickAnnotationHandle(
-      getAnnotationHandles(
-        selectedPick.detection,
-        options.getViewportScale?.() ?? 1,
-      ),
-      point,
-    );
+    return pickAnnotationHandle(getHandles(selectedPick.detection), point);
   }
 
   function updateCursor(point: DetectionPickPoint) {
@@ -948,10 +948,9 @@ export function createPixiInteractionLayer(options: {
       selectedPick
     ) {
       // Keep the grabbed handle's cursor for the whole drag.
-      const active = getAnnotationHandles(
-        selectedPick.detection,
-        options.getViewportScale?.() ?? 1,
-      ).find((handle) => handle.id === editingState.activeHandleId);
+      const active = getHandles(selectedPick.detection).find(
+        (handle) => handle.id === editingState.activeHandleId,
+      );
       if (active) {
         container.cursor = active.cursor;
         return;

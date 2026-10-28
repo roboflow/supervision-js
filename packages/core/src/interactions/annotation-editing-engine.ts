@@ -9,12 +9,16 @@ import {
   type AnnotationPointerInput,
   type BuiltInAnnotationEditingEngine,
 } from "#types/editing";
-import { getOrientedRectangleGeometry } from "#utils/oriented-rectangle";
+import {
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+} from "#utils/oriented-rectangle";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
 import {
   applyAnnotationHandleDrag,
   deleteAnnotationVertex,
+  getAnnotationHandles,
   offsetDetection,
 } from "#interactions/annotation-handles";
 
@@ -70,6 +74,27 @@ export function createAnnotationEditingEngine(
 
   return {
     getState: () => state,
+    getHandles: (detection, viewportScale = scale()) =>
+      getAnnotationHandles(detection, viewportScale, options),
+    setModifiers(modifiers) {
+      if (
+        gesture?.kind !== "resize" ||
+        !gesture.moved ||
+        gesture.handle.kind !== AnnotationHandleKind.Rotate
+      )
+        return;
+      const active = (gesture = {
+        ...gesture,
+        current: {
+          ...gesture.current,
+          shiftKey: modifiers.shiftKey ?? false,
+          altKey: modifiers.altKey ?? false,
+          ctrlKey: modifiers.ctrlKey ?? false,
+          metaKey: modifiers.metaKey ?? false,
+        },
+      });
+      setPreview(resolveHandlePreview(active, active.current), active);
+    },
     setCreationTool(nextTool) {
       if (nextTool === tool) return;
       tool = nextTool;
@@ -116,18 +141,9 @@ export function createAnnotationEditingEngine(
           // until the pointer has travelled like a move gesture.
           const moved =
             gesture.moved || exceedsMoveThreshold(gesture.start, input);
-          gesture = { ...gesture, current: input, moved };
+          const active = (gesture = { ...gesture, current: input, moved });
           if (moved) {
-            setPreview(
-              applyAnnotationHandleDrag(
-                gesture.detection,
-                gesture.handle,
-                input.point,
-                input.mediaDimensions ?? gesture.start.mediaDimensions,
-                gesture.start.point,
-              ),
-              gesture,
-            );
+            setPreview(resolveHandlePreview(active, input), active);
           }
           break;
         }
@@ -221,14 +237,8 @@ export function createAnnotationEditingEngine(
       const preview =
         active.kind === "move"
           ? resolveMovePreview(active, input).preview
-          : applyAnnotationHandleDrag(
-              active.detection,
-              active.handle,
-              input.point,
-              input.mediaDimensions ?? active.start.mediaDimensions,
-              active.start.point,
-            );
-      commit(preview, active.detection, next);
+          : resolveHandlePreview(active, input);
+      if (state === next) commit(preview, active.detection, next);
     },
     pointerCancel(pointerId) {
       const press = activePress();
@@ -433,6 +443,44 @@ export function createAnnotationEditingEngine(
           ]
         : rect,
     );
+  }
+
+  function resolveHandlePreview(
+    active: Extract<ActiveGesture, { kind: "resize" }>,
+    input: AnnotationPointerInput,
+  ): Detection {
+    const preview = applyAnnotationHandleDrag(
+      active.detection,
+      active.handle,
+      input.point,
+      input.mediaDimensions ?? active.start.mediaDimensions,
+      active.start.point,
+    );
+    if (
+      active.handle.kind !== AnnotationHandleKind.Rotate ||
+      !options.resolveRotation
+    )
+      return preview;
+    const initial =
+      active.detection.orientedBox &&
+      getOrientedRectangleGeometry(active.detection.orientedBox);
+    const candidate =
+      preview.orientedBox && getOrientedRectangleGeometry(preview.orientedBox);
+    if (!initial || !candidate) return preview;
+    const rotation = options.resolveRotation(candidate.rotation, {
+      detection: active.detection,
+      initialRotation: initial.rotation,
+      input,
+    });
+    if (!Number.isFinite(rotation))
+      throw new RangeError("resolveRotation must return finite radians");
+    return {
+      ...active.detection,
+      orientedBox: createOrientedBoxGeometry(
+        initial,
+        Math.atan2(Math.sin(rotation), Math.cos(rotation)),
+      ),
+    };
   }
 
   function resolveMovePreview(

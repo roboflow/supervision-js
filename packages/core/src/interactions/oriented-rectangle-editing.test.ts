@@ -10,6 +10,7 @@ import {
   getOrientedRectangleGeometry,
   pickAnnotationHandle,
   type AnnotationCreationTool,
+  type AnnotationRotationContext,
   type Detection,
   type OrientedBoxGeometry,
   type Point,
@@ -32,6 +33,182 @@ const geometry = (d: Detection) =>
 
 // Hosts receive one immutable previous/next pair per completed edit for their undo history.
 describe("native oriented rectangle editing", () => {
+  it.each([0.25, 1, 4])(
+    "places configured handles on ordered edges at scale %s",
+    (scale) => {
+      const original = detection(Math.PI / 3);
+      const tuple = geometry(original);
+      for (const edgeIndex of [0, 1, 2, 3] as const) {
+        const rotationHandle = { edgeIndex, offset: 37 };
+        const engine = createAnnotationEditingEngine({
+          rotationHandle: () => rotationHandle,
+        });
+        const configured = engine.getHandles(original, scale);
+        expect(configured).toEqual(
+          getAnnotationHandles(original, scale, { rotationHandle }),
+        );
+        const rotate = configured.find((h) => h.id === "obb-rotate")!;
+        const a = original.orientedBox!.points[edgeIndex]!;
+        const b = original.orientedBox!.points[(edgeIndex + 1) % 4]!;
+        expect(rotate.stemFrom!.x).toBeCloseTo((a.x + b.x) / 2);
+        expect(rotate.stemFrom!.y).toBeCloseTo((a.y + b.y) / 2);
+        expect(
+          Math.hypot(
+            rotate.point.x - rotate.stemFrom!.x,
+            rotate.point.y - rotate.stemFrom!.y,
+          ) * scale,
+        ).toBeCloseTo(37);
+        expect(
+          Math.hypot(rotate.point.x - tuple.x, rotate.point.y - tuple.y),
+        ).toBeGreaterThan(
+          Math.hypot(
+            rotate.stemFrom!.x - tuple.x,
+            rotate.stemFrom!.y - tuple.y,
+          ),
+        );
+        expect(configured.filter((h) => h.id !== "obb-rotate")).toEqual(
+          getAnnotationHandles(original, scale).filter(
+            (h) => h.id !== "obb-rotate",
+          ),
+        );
+      }
+    },
+  );
+
+  it("resolves every preview and commit from original geometry and latest modifiers", () => {
+    const original = {
+      ...detection(Math.PI * 0.9),
+      metadata: { owner: "host" },
+    };
+    const resolveRotation = vi.fn(
+      (angle: number, { input }: AnnotationRotationContext) =>
+        input.shiftKey
+          ? Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+          : angle,
+    );
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ resolveRotation, onCommit });
+    const rotate = engine
+      .getHandles(original)
+      .find((h) => h.id === "obb-rotate")!;
+    const start = { x: rotate.point.x + 2, y: rotate.point.y - 3 };
+    const angle = Math.PI / 6;
+    const dx = start.x - rectangle.x,
+      dy = start.y - rectangle.y;
+    const end = {
+      x: rectangle.x + dx * Math.cos(angle) - dy * Math.sin(angle),
+      y: rectangle.y + dx * Math.sin(angle) + dy * Math.cos(angle),
+    };
+    engine.beginHandleDrag(original, rotate, input(start));
+    engine.setModifiers({ shiftKey: true });
+    expect(engine.getState().preview).toBeNull();
+    expect(resolveRotation).not.toHaveBeenCalled();
+    engine.pointerMove(input(end, 100));
+    const raw = engine.getState().preview!;
+    expect(geometry(raw).rotation).toBeCloseTo((-Math.PI * 14) / 15);
+    engine.setModifiers({ shiftKey: true });
+    expect(Math.abs(geometry(engine.getState().preview!).rotation)).toBeCloseTo(
+      Math.PI,
+    );
+    engine.setModifiers({});
+    expect(engine.getState().preview).toEqual(raw);
+    engine.setModifiers({ shiftKey: true });
+    expect(onCommit).not.toHaveBeenCalled();
+    // The final pointer snapshot releases Shift even without an intervening move.
+    engine.pointerUp({ ...input(end, 200), shiftKey: false });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(raw, original);
+    expect(resolveRotation).toHaveBeenCalledTimes(5);
+    for (const [candidate, context] of resolveRotation.mock.calls) {
+      expect(candidate).toBeCloseTo((-Math.PI * 14) / 15);
+      expect(context.detection).toBe(original);
+      expect(context.initialRotation).toBeCloseTo(Math.PI * 0.9);
+    }
+    const committed = onCommit.mock.calls[0]![0] as Detection;
+    expect(geometry(committed)).toMatchObject({
+      x: rectangle.x,
+      y: rectangle.y,
+    });
+    expect(geometry(committed).width).toBeCloseTo(rectangle.width);
+    expect(geometry(committed).height).toBeCloseTo(rectangle.height);
+    expect(committed.metadata).toBe(original.metadata);
+    expect(committed.id).toBe(original.id);
+    expect(committed.rect).toBeUndefined();
+  });
+
+  it("does not apply a rotation resolver cumulatively or to resize gestures", () => {
+    const onCommit = vi.fn();
+    const resolveRotation = vi.fn(
+      (radians: number) => radians + Math.PI * 4 + 0.1,
+    );
+    const original = detection();
+    const engine = createAnnotationEditingEngine({ onCommit, resolveRotation });
+    const rotate = engine
+      .getHandles(original)
+      .find((h) => h.id === "obb-rotate")!;
+    engine.beginHandleDrag(original, rotate, input(rotate.point));
+    const end = { x: 250, y: 130 };
+    engine.pointerMove(input(end, 100));
+    const preview = engine.getState().preview;
+    engine.pointerMove(input(end, 110));
+    expect(engine.getState().preview).toEqual(preview);
+    engine.pointerUp(input(end, 200));
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(preview, original);
+    resolveRotation.mockClear();
+    engine.beginHandleDrag(
+      original,
+      handle(original, "obb-se"),
+      input({ x: 240, y: 170 }),
+    );
+    engine.pointerMove(input({ x: 270, y: 190 }, 300));
+    const resized = engine.getState().preview;
+    engine.setModifiers({ shiftKey: true });
+    expect(engine.getState().preview).toBe(resized);
+    engine.pointerUp(input({ x: 270, y: 190 }, 400));
+    expect(resolveRotation).not.toHaveBeenCalled();
+  });
+
+  it.each(["preview", "commit"])(
+    "does not overwrite cancellation from the %s resolver callback",
+    (phase) => {
+      const original = detection();
+      const rotate = handle(original, "obb-rotate");
+      const onCommit = vi.fn();
+      let cancelOnResolve = false;
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        resolveRotation: (angle) => {
+          if (cancelOnResolve) engine.cancel();
+          return angle;
+        },
+      });
+      engine.beginHandleDrag(original, rotate, input(rotate.point));
+      cancelOnResolve = phase === "preview";
+      engine.pointerMove(input({ x: 250, y: 150 }, 100));
+      cancelOnResolve = true;
+      engine.pointerUp(input({ x: 250, y: 150 }, 200));
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(engine.getState().preview).toBeNull();
+      expect(onCommit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects nonfinite resolver output before publishing geometry and remains cancellable", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      resolveRotation: () => NaN,
+      onCommit,
+    });
+    const original = detection();
+    const rotate = handle(original, "obb-rotate");
+    engine.beginHandleDrag(original, rotate, input(rotate.point));
+    expect(() => engine.pointerMove(input({ x: 250, y: 150 }, 100))).toThrow(
+      RangeError,
+    );
+    expect(engine.getState().preview).toBeNull();
+    engine.keyDown("Escape");
+    engine.pointerUp(input({ x: 250, y: 150 }, 200));
+    expect(onCommit).not.toHaveBeenCalled();
+  });
   it.each([
     0,
     Math.PI / 4,

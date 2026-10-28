@@ -15,6 +15,7 @@ import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
+  createOrientedBoxGeometry,
   DetectionMaskEncoding,
   encodeBinaryMask,
   DetectionPickTarget,
@@ -55,6 +56,59 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it("gives a configured selected rotation handle priority over Shift body selection", () => {
+    const original = {
+      id: "obb",
+      orientedBox: createOrientedBoxGeometry({
+        x: 100,
+        y: 60,
+        width: 80,
+        height: 40,
+      }),
+    };
+    // Put the control on the edge so it also hits the annotation body.
+    const editingEngine = createAnnotationEditingEngine({
+      rotationHandle: { edgeIndex: 1, offset: 0 },
+    });
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline({ ...frame, detections: [original] }),
+      editingEngine,
+      interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+    });
+    const display = layer.createDisplay({
+      width: 200,
+      height: 150,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    layer.setSelectedDetection({ detectionId: original.id });
+    const rotate = editingEngine
+      .getHandles(original)
+      .find((h) => h.id === "obb-rotate")!;
+    display.emit(
+      "pointermove",
+      createPointerEvent(display, rotate.point.x, rotate.point.y),
+    );
+    expect(display.cursor).toBe("grab");
+    const press = createPointerEvent(display, rotate.point.x, rotate.point.y, {
+      button: 0,
+      shiftKey: true,
+      pointerId: 1,
+    });
+    display.emit("pointerdown", press);
+    expect(editingEngine.getState().kind).toBe(
+      AnnotationGestureStateKind.Rotating,
+    );
+    display.emit("pointerup", press);
+    display.emit("pointertap", press);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual([original.id]);
+    layer.destroy();
+  });
+
   it("releases browser capture when the host interrupts the engine directly", () => {
     const h = createDefaultPressHarness();
     h.engine.setCreationTool({

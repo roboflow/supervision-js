@@ -27,7 +27,8 @@ nav {
   gap: 8px;
   margin: 16px 0;
 }
-button {
+button,
+input[type="number"] {
   color: #e4edf4;
   background: #203548;
   border: 1px solid #476078;
@@ -35,7 +36,8 @@ button {
   padding: 8px 14px;
   cursor: pointer;
 }
-button:focus-visible {
+button:focus-visible,
+input:focus-visible {
   outline: 2px solid #71e3bb;
   outline-offset: 2px;
 }
@@ -52,4 +54,33 @@ output {
 pre {
   overflow: auto;
   font-size: 12px;
+}
+
+.properties {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.properties label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+input[type="number"] {
+  width: 80px;
+  padding: 7px;
+}
+input[type="checkbox"] {
+  accent-color: #71e3bb;
+}
+button:disabled,
+input:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.instructions {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 10px 0 16px;
 }

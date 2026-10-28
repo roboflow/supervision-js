@@ -864,6 +864,33 @@ export async function createPixiMediaScene(
       });
     }
   });
+  const handleModifierChange = (event: KeyboardEvent) => {
+    if (!["Shift", "Alt", "Control", "Meta"].includes(event.key)) return;
+    // Window ownership keeps key release visible if focus leaves the canvas
+    // during a captured edit, without consuming the host's keyboard commands.
+    if (
+      options.editingEngine?.getState().kind !==
+      AnnotationGestureStateKind.Rotating
+    )
+      return;
+    options.editingEngine.setModifiers?.({
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+    });
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
+    renderOnChange();
+  };
+  const handleEditingBlur = () => {
+    const state = options.editingEngine?.getState();
+    if (state && state.kind !== AnnotationGestureStateKind.Idle) {
+      // Losing the window interrupts the contact just like native cancellation.
+      if (state.pointerId !== null)
+        interactionLayer?.pointerCancel(state.pointerId);
+      else options.editingEngine?.pointerCancel?.();
+    }
+  };
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Tab" && interactionLayer) {
       interactionLayer.cycleSelection(event.shiftKey ? -1 : 1);
@@ -911,6 +938,9 @@ export async function createPixiMediaScene(
   }
   if (options.editingEngine) {
     rendererCanvas.addEventListener?.("contextmenu", handleContextMenu);
+    window.addEventListener("keydown", handleModifierChange);
+    window.addEventListener("keyup", handleModifierChange);
+    window.addEventListener("blur", handleEditingBlur);
   }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
@@ -2035,6 +2065,9 @@ export async function createPixiMediaScene(
       }
       if (options.editingEngine) {
         rendererCanvas.removeEventListener?.("contextmenu", handleContextMenu);
+        window.removeEventListener("keydown", handleModifierChange);
+        window.removeEventListener("keyup", handleModifierChange);
+        window.removeEventListener("blur", handleEditingBlur);
       }
       app.destroy(
         { removeView: true },

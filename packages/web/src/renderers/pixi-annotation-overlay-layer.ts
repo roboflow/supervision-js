@@ -445,7 +445,22 @@ function drawSelectionHandles(
       state.activeDetectionId === detection.id
         ? state.preview
         : detection;
-    for (const handle of getAnnotationHandles(source, context.viewportScale)) {
+    const handles =
+      engine?.getHandles?.(source, context.viewportScale) ??
+      getAnnotationHandles(source, context.viewportScale);
+    // Stems sit behind the controls, including the edge midpoint they start at.
+    for (const handle of handles) {
+      if (handle.stemFrom) {
+        drawPixiPath(
+          graphics,
+          [handle.stemFrom, handle.point],
+          false,
+          stroke,
+          context.viewportScale,
+        );
+      }
+    }
+    for (const handle of handles) {
       const alpha =
         handle.kind === AnnotationHandleKind.AddVertex
           ? style.selectionHandle.addVertexAlpha
@@ -460,15 +475,6 @@ function drawSelectionHandles(
         right: Math.max(bounds?.right ?? -Infinity, handle.point.x + radius),
         bottom: Math.max(bounds?.bottom ?? -Infinity, handle.point.y + radius),
       };
-      if (handle.stemFrom) {
-        drawPixiPath(
-          graphics,
-          [handle.stemFrom, handle.point],
-          false,
-          stroke,
-          context.viewportScale,
-        );
-      }
       graphics.circle(handle.point.x, handle.point.y, handle.radius);
       graphics.fill({ ...fill, alpha: fill.alpha * alpha });
       graphics.stroke(

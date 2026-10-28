@@ -12,11 +12,18 @@ import {
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
   createOrientedBoxGeometry,
+  distanceToSegment,
+  getOrientedRectangleGeometry,
+  type PreviewOverlayData,
+  type AnnotationPointerInput,
 } from "supervision/editing";
 import "./oriented-box.css";
 
 const viewer = document.querySelector<HTMLDivElement>("#viewer")!;
 const status = document.querySelector<HTMLOutputElement>("#status")!;
+const angle = document.querySelector<HTMLInputElement>("#angle")!;
+const heading = document.querySelector<HTMLInputElement>("#heading")!;
+const rotateKeys = document.querySelector<HTMLButtonElement>("#rotate-keys")!;
 const output = document.querySelector<HTMLPreElement>("#geometry")!;
 let detections: readonly Detection[] = [
   {
@@ -31,20 +38,192 @@ const history: (readonly Detection[])[] = [];
 const future: (readonly Detection[])[] = [];
 let nextId = 1;
 let session: MediaSession;
+let selectedId: string | number | undefined = "rectangle-0";
+let hostPreview: Detection | null = null;
+let keyboardCancelled = false;
+type FrontPress = {
+  readonly detection: Detection;
+  readonly edge: number;
+  readonly point: { x: number; y: number };
+  readonly original: readonly Detection[];
+  moved: boolean;
+};
+let frontPress: FrontPress | null = null;
+let completedFrontPress: FrontPress | null = null;
+function frontEdge(point: { x: number; y: number }) {
+  const detection = selected();
+  if (
+    !heading.checked ||
+    engine.hasCreationTool() ||
+    detection?.locked ||
+    !detection?.orientedBox ||
+    !rectangle(detection)
+  )
+    return null;
+  const scale = session.renderer.getViewportTransform().scale;
+  const points = detection.orientedBox.points;
+  if (
+    points.some(
+      (corner) =>
+        Math.hypot(point.x - corner.x, point.y - corner.y) * scale < 10,
+    )
+  )
+    return null;
+  const distances = points.map(
+    (from, index) =>
+      distanceToSegment(point, from, points[(index + 1) % 4]!) * scale,
+  );
+  const edge = distances.indexOf(Math.min(...distances));
+  return distances[edge]! <= 8 ? { detection, edge } : null;
+}
+function plainPrimary(
+  input: Pick<
+    AnnotationPointerInput,
+    "button" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey"
+  >,
+) {
+  return (
+    !input.button &&
+    !input.shiftKey &&
+    !input.metaKey &&
+    !input.ctrlKey &&
+    !input.altKey
+  );
+}
+function mediaPoint(event: MouseEvent) {
+  const bounds = viewer.getBoundingClientRect();
+  return session.renderer.screenToMedia({
+    x: event.clientX - bounds.left - viewer.clientLeft,
+    y: event.clientY - bounds.top - viewer.clientTop,
+  });
+}
+let rendering = Promise.resolve();
+
+const degrees = (radians: number) => (radians * 180) / Math.PI;
+const radians = (value: number) => (value * Math.PI) / 180;
+// This is host policy, shared by pointer and keyboard rotation.
+const resolveAngle = (value: number, snap: boolean) =>
+  snap ? Math.round(value / radians(15)) * radians(15) : value;
+const selected = () => detections.find((item) => item.id === selectedId);
+const rectangle = (detection: Detection | undefined | null) =>
+  detection?.orientedBox
+    ? getOrientedRectangleGeometry(detection.orientedBox)
+    : null;
+function displayedDetections() {
+  const preview = hostPreview;
+  return preview
+    ? detections.map((item) => (item.id === preview.id ? preview : item))
+    : detections;
+}
+function updateControls(force = false) {
+  const geometry = rectangle(
+    hostPreview ?? engine.getState().preview ?? selected(),
+  );
+  angle.disabled = rotateKeys.disabled = !geometry;
+  for (const id of ["next-front", "reverse-front"])
+    document.querySelector<HTMLButtonElement>(`#${id}`)!.disabled =
+      !geometry || !heading.checked;
+  if (force || document.activeElement !== angle)
+    angle.value = geometry
+      ? String(Number(degrees(geometry.rotation).toFixed(3)))
+      : "";
+}
+function commit(detection: Detection, previous: Detection | null) {
+  hostPreview = null;
+  if (previous && JSON.stringify(previous) === JSON.stringify(detection))
+    return;
+  history.push(detections);
+  future.length = 0;
+  detections = previous
+    ? detections.map((item) => (item.id === previous.id ? detection : item))
+    : [...detections, detection];
+  if (!previous) nextId += 1;
+  engine.setCreationTool(null);
+  void render(detection.id);
+}
+function finishHostPreview(cancel = false) {
+  if (!hostPreview) return;
+  const preview = hostPreview;
+  hostPreview = null;
+  if (cancel) void render();
+  else commit(preview, selected() ?? null);
+  updateControls(true);
+}
+function previewAngle(value: number) {
+  const detection = selected();
+  const geometry = rectangle(detection);
+  if (!detection || !geometry || !Number.isFinite(value)) return;
+  engine.cancel();
+  hostPreview = {
+    ...detection,
+    orientedBox: createOrientedBoxGeometry(geometry, value),
+  };
+  status.textContent = "Angle preview";
+  void render();
+}
+// Front is local +x (edge 1) in this host. Reindexing preserves every vertex.
+function chooseFront(edge: number) {
+  finishHostPreview();
+  const detection = selected();
+  if (!heading.checked || !detection?.orientedBox || !rectangle(detection))
+    return;
+  const points = detection.orientedBox.points;
+  const first = (edge + 3) % 4;
+  commit(
+    {
+      ...detection,
+      orientedBox: {
+        points: [
+          points[first]!,
+          points[(first + 1) % 4]!,
+          points[(first + 2) % 4]!,
+          points[(first + 3) % 4]!,
+        ],
+      },
+    },
+    detection,
+  );
+}
+function headingOverlay(): PreviewOverlayData | null {
+  if (!heading.checked) return null;
+  const preview = engine.getState().preview;
+  const scale = session?.renderer.getViewportTransform().scale ?? 1;
+  const triangles = displayedDetections().flatMap((item) => {
+    const detection = preview?.id === item.id ? preview : item;
+    const geometry = rectangle(detection);
+    if (!geometry) return [];
+    const cos = Math.cos(geometry.rotation);
+    const sin = Math.sin(geometry.rotation);
+    const size = Math.min(7 / scale, geometry.width / 5, geometry.height / 4);
+    const tip = {
+      x: geometry.x + cos * (geometry.width / 2 - size),
+      y: geometry.y + sin * (geometry.width / 2 - size),
+    };
+    return [
+      [
+        tip,
+        {
+          x: tip.x - cos * size - (sin * size) / 2,
+          y: tip.y - sin * size + (cos * size) / 2,
+        },
+        {
+          x: tip.x - cos * size + (sin * size) / 2,
+          y: tip.y - sin * size - (cos * size) / 2,
+        },
+      ],
+    ];
+  });
+  return { draftPolygons: triangles };
+}
 const engine = createAnnotationEditingEngine({
   viewportScale: () => session?.renderer.getViewportTransform().scale ?? 1,
-  onCommit(detection, previous) {
-    history.push(detections);
-    future.length = 0;
-    detections = previous
-      ? detections.map((item) => (item.id === previous.id ? detection : item))
-      : [...detections, detection];
-    nextId += 1;
-    engine.setCreationTool(null);
-    void render(detection.id);
-  },
+  rotationHandle: () => ({ edgeIndex: heading.checked ? 1 : 0 }),
+  resolveRotation: (value, { input }) =>
+    resolveAngle(value, Boolean(input.shiftKey)),
+  onCommit: commit,
   onStateChange(state) {
     status.textContent = state.kind;
+    updateControls();
   },
 });
 
@@ -78,16 +257,23 @@ context.fillRect(-65, -22, 35, 44);
 context.fillRect(30, -22, 35, 44);
 context.restore();
 
-async function render(selectedId?: string | number) {
+function render(id = selectedId) {
+  selectedId = id;
   output.textContent = JSON.stringify(detections, null, 2);
-  if (!session) return;
-  await session.replaceDetectionFrames([{ mediaTime: 0, detections }]);
-  await session.refresh();
-  session.renderer.setSelectedDetection(
-    selectedId === undefined
-      ? { detectionIds: [] }
-      : { detectionId: selectedId },
-  );
+  updateControls();
+  if (!session) return Promise.resolve();
+  rendering = rendering.then(async () => {
+    await session.replaceDetectionFrames([
+      { mediaTime: 0, detections: displayedDetections() },
+    ]);
+    await session.refresh();
+    session.renderer.setSelectedDetection(
+      selectedId === undefined
+        ? { detectionIds: [] }
+        : { detectionId: selectedId },
+    );
+  });
+  return rendering;
 }
 
 async function start() {
@@ -105,7 +291,32 @@ async function start() {
         }),
       ],
     },
-    renderer: { autoPlay: false, editingEngine: engine },
+    renderer: {
+      autoPlay: false,
+      editingEngine: engine,
+      previewOverlay: headingOverlay,
+      interaction: {
+        onPointerPress({ input, pick, selectedHandle }) {
+          frontPress = completedFrontPress = null;
+          if (!plainPrimary(input) || selectedHandle) return "continue";
+          const edge = frontEdge(input.point);
+          if (!edge || (pick && pick.detection.id !== edge.detection.id))
+            return "continue";
+          frontPress = {
+            ...edge,
+            point: input.point,
+            original: detections,
+            moved: false,
+          };
+          // Preserve the selected outline when the press falls just outside it.
+          return pick ? "continue" : "handled";
+        },
+        onSelect(pick) {
+          selectedId = pick?.detection.id;
+          updateControls();
+        },
+      },
+    },
   });
   await render("rectangle-0");
   updateZoom();
@@ -130,10 +341,54 @@ viewer.addEventListener(
   { passive: false },
 );
 
+// A front choice is a completed click, never a replacement drag engine.
+viewer.addEventListener("pointermove", (event) => {
+  if (!frontPress) return;
+  const point = mediaPoint(event);
+  if (
+    Math.hypot(point.x - frontPress.point.x, point.y - frontPress.point.y) *
+      session.renderer.getViewportTransform().scale >
+    4
+  )
+    frontPress.moved = true;
+});
+viewer.addEventListener("pointerup", (event) => {
+  const press = frontPress;
+  frontPress = null;
+  if (!press || press.moved || press.original !== detections) return;
+  const edge = frontEdge(mediaPoint(event));
+  if (
+    edge &&
+    edge.detection.id === press.detection.id &&
+    edge.edge === press.edge
+  )
+    completedFrontPress = press;
+});
+viewer.addEventListener("pointercancel", () => {
+  frontPress = completedFrontPress = null;
+});
+viewer.addEventListener("dblclick", (event) => {
+  const press = completedFrontPress;
+  completedFrontPress = null;
+  if (!press || !plainPrimary(event) || press.original !== detections) return;
+  const edge = frontEdge(mediaPoint(event));
+  if (
+    !edge ||
+    edge.detection.id !== press.detection.id ||
+    edge.edge !== press.edge
+  )
+    return;
+  engine.cancel();
+  chooseFront(edge.edge);
+});
+
 function button(id: string, action: () => void) {
   document
     .querySelector<HTMLButtonElement>(`#${id}`)!
-    .addEventListener("click", action);
+    .addEventListener("click", () => {
+      finishHostPreview();
+      action();
+    });
 }
 button("select", () => {
   engine.setCreationTool(null);
@@ -158,6 +413,8 @@ function restore(from: (readonly Detection[])[], to: (readonly Detection[])[]) {
   if (!snapshot) return;
   to.push(detections);
   detections = snapshot;
+  if (!detections.some((item) => item.id === selectedId))
+    selectedId = detections.at(-1)?.id;
   void render();
 }
 button("undo", () => restore(history, future));
@@ -171,8 +428,55 @@ button("reset", () => {
   });
   updateZoom();
 });
+button("next-front", () => chooseFront(2));
+button("reverse-front", () => chooseFront(3));
+heading.addEventListener("change", () => {
+  finishHostPreview();
+  updateControls();
+  void session.refresh();
+});
+angle.addEventListener("input", () => {
+  if (angle.value !== "") previewAngle(radians(angle.valueAsNumber));
+});
+angle.addEventListener("change", () => finishHostPreview());
+angle.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    finishHostPreview();
+  }
+});
+rotateKeys.addEventListener("focus", () => {
+  keyboardCancelled = false;
+});
+rotateKeys.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  if (keyboardCancelled) return;
+  const geometry = rectangle(hostPreview ?? selected());
+  if (!geometry) return;
+  const step = event.shiftKey ? 15 : 1;
+  previewAngle(
+    geometry.rotation + radians(event.key === "ArrowRight" ? step : -step),
+  );
+});
+rotateKeys.addEventListener("keyup", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  keyboardCancelled = false;
+  finishHostPreview();
+});
+rotateKeys.addEventListener("blur", () => {
+  keyboardCancelled = false;
+  finishHostPreview();
+});
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") engine.cancel();
+  if (event.key === "Escape") {
+    event.preventDefault();
+    keyboardCancelled = true;
+    finishHostPreview(true);
+    engine.cancel();
+    updateControls(true);
+  }
 });
 void start().catch((error: unknown) => {
   status.textContent = String(error);

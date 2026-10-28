@@ -509,7 +509,10 @@ interpreting every cancellation as a click.
 The generated API reference has a separate Editing module for this entrypoint.
 
 Native oriented-rectangle creation, rotation and local-axis resize are available
-from `supervision/editing`. See [Oriented Box](../annotation-renderers/oriented-box.md)
+from `supervision/editing`. `resolveRotation` constrains each rotation candidate
+with the current pointer modifiers; `rotationHandle` configures its ordered edge
+and CSS-pixel offset. Built-in engines expose `getHandles()` and `setModifiers()`
+for direct-input hosts; both remain optional on custom engines. See [Oriented Box](../annotation-renderers/oriented-box.md)
 for ordered corner helpers, gesture semantics and a standalone example. General
 quadrilaterals remain renderable, pickable and movable.
 

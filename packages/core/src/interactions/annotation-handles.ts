@@ -1,6 +1,8 @@
 import {
   AnnotationHandleKind,
   type AnnotationHandleDefinition,
+  type AnnotationHandleOptions,
+  type AnnotationRotationHandleOptions,
 } from "#types/editing";
 import {
   type Detection,
@@ -23,6 +25,7 @@ const HANDLE_HIT_SIZE = 16;
 export function getAnnotationHandles(
   detection: Detection,
   viewportScale = 1,
+  options: AnnotationHandleOptions = {},
 ): readonly AnnotationHandleDefinition[] {
   if (detection.locked || detection.mask) return [];
   const radius = HANDLE_RADIUS / viewportScale;
@@ -61,7 +64,13 @@ export function getAnnotationHandles(
   }
   if (detection.orientedBox && !detection.rect) {
     const rectangle = getOrientedRectangleGeometry(detection.orientedBox);
-    if (rectangle) return getOrientedBoxHandles(rectangle, viewportScale);
+    if (rectangle) {
+      const placement =
+        typeof options.rotationHandle === "function"
+          ? options.rotationHandle(detection)
+          : options.rotationHandle;
+      return getOrientedBoxHandles(rectangle, viewportScale, placement);
+    }
   }
   if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
   return [];
@@ -447,6 +456,7 @@ export function findClosestAnnotationSegment(
 function getOrientedBoxHandles(
   rectangle: Rect & { readonly rotation: number },
   scale: number,
+  placement: AnnotationRotationHandleOptions = {},
 ): AnnotationHandleDefinition[] {
   const cos = Math.cos(rectangle.rotation);
   const sin = Math.sin(rectangle.rotation);
@@ -464,14 +474,35 @@ function getOrientedBoxHandles(
     id: `obb-${handle.id}`,
     point: project(handle.point),
   }));
-  const stemFrom = project({ x: 0, y: -rectangle.height / 2 });
+  const edge = placement.edgeIndex ?? 0;
+  const offset = (placement.offset ?? 24) / scale;
+  if (!Number.isFinite(offset) || offset < 0) {
+    throw new RangeError(
+      "Rotation handle offset must be finite and nonnegative",
+    );
+  }
+  const normals: readonly Point[] = [
+    { x: 0, y: -1 },
+    { x: 1, y: 0 },
+    { x: 0, y: 1 },
+    { x: -1, y: 0 },
+  ];
+  const normal = normals[edge]!;
+  const local = {
+    x: (normal.x * rectangle.width) / 2,
+    y: (normal.y * rectangle.height) / 2,
+  };
+  const stemFrom = project(local);
   return [
     ...handles,
     {
       id: "obb-rotate",
       kind: AnnotationHandleKind.Rotate,
       cursor: "grab",
-      point: project({ x: 0, y: -rectangle.height / 2 - 24 / scale }),
+      point: project({
+        x: local.x + normal.x * offset,
+        y: local.y + normal.y * offset,
+      }),
       stemFrom,
       radius: 4 / scale,
       hitSize: 20 / scale,

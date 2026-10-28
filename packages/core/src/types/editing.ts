@@ -56,6 +56,35 @@ export interface AnnotationPointerInput {
   readonly pointerId?: number;
 }
 
+/** Keyboard modifier snapshot; omitted keys are released. */
+export type AnnotationModifierKeys = Pick<
+  AnnotationPointerInput,
+  "shiftKey" | "altKey" | "ctrlKey" | "metaKey"
+>;
+
+/** Rotation handle placement on an ordered rectangle's local edge. */
+export interface AnnotationRotationHandleOptions {
+  /** Ordered top/right/bottom/left edge; defaults to 0 (top). */
+  readonly edgeIndex?: 0 | 1 | 2 | 3;
+  /** Outward distance from the edge in CSS pixels; defaults to 24. */
+  readonly offset?: number;
+}
+
+export interface AnnotationHandleOptions {
+  readonly rotationHandle?:
+    | AnnotationRotationHandleOptions
+    | ((detection: Detection) => AnnotationRotationHandleOptions);
+}
+
+export interface AnnotationRotationContext {
+  /** Original detection at gesture start, with its metadata and ordered axes. */
+  readonly detection: Detection;
+  /** Initial clockwise radians, in the geometry helper's [-PI, PI] convention. */
+  readonly initialRotation: number;
+  /** Latest raw pointer input, including the current modifier snapshot. */
+  readonly input: AnnotationPointerInput;
+}
+
 export interface AnnotationCreationTool {
   readonly geometry: AnnotationGeometryKind;
   /** OrientedBox drag creation supplies four ordered rectangle corners, without a shadow rect. */
@@ -75,7 +104,14 @@ export interface AnnotationEditingState {
   readonly pointerId: number | null;
 }
 
-export interface AnnotationEditingEngineOptions {
+export interface AnnotationEditingEngineOptions extends AnnotationHandleOptions {
+  /** Constrain an absolute clockwise rotation candidate in radians. Called once
+   * per preview or commit from original geometry, never from a prior preview.
+   * Return finite radians; the engine normalizes the result to [-PI, PI]. */
+  readonly resolveRotation?: (
+    radians: number,
+    context: AnnotationRotationContext,
+  ) => number;
   readonly viewportScale?: () => number;
   readonly onStateChange?: (state: AnnotationEditingState) => void;
   readonly onPreview?: (preview: Detection | null) => void;
@@ -97,6 +133,13 @@ export interface AnnotationEditingEngineOptions {
 
 export interface AnnotationEditingEngine {
   getState(): AnnotationEditingState;
+  /** Configured semantic handles; adapters fall back to getAnnotationHandles. */
+  getHandles?(
+    detection: Detection,
+    viewportScale?: number,
+  ): readonly AnnotationHandleDefinition[];
+  /** Recompute an already-moved rotation preview without moving or committing. */
+  setModifiers?(modifiers: AnnotationModifierKeys): void;
   setCreationTool(tool: AnnotationCreationTool | null): void;
   pointerDown(
     input: AnnotationPointerInput,
@@ -133,6 +176,11 @@ export interface DraftUndoAnnotationEditingEngine extends AnnotationEditingEngin
 
 export interface BuiltInAnnotationEditingEngine extends DraftUndoAnnotationEditingEngine {
   pointerCancel(pointerId?: number): void;
+  getHandles(
+    detection: Detection,
+    viewportScale?: number,
+  ): readonly AnnotationHandleDefinition[];
+  setModifiers(modifiers: AnnotationModifierKeys): void;
 }
 
 export interface PreviewOverlayPoint extends Point {

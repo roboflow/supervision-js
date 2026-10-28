@@ -11,7 +11,7 @@ import {
   DetectionMaskEncoding,
   createAnnotationEditingEngine,
   createOrientedBoxGeometry,
-  getAnnotationHandles,
+  getOrientedRectangleGeometry,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
@@ -48,6 +48,73 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it("updates stationary rotation on modifier press/release and cleans up window ownership", async () => {
+    resetMocks();
+    const subject: Detection = {
+      id: "rotate",
+      orientedBox: createOrientedBoxGeometry({
+        x: 200,
+        y: 150,
+        width: 80,
+        height: 40,
+      }),
+    };
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      resolveRotation: (angle, { input }) =>
+        input.shiftKey
+          ? Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+          : angle,
+    });
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+      orientedBoxStyle: new BaseOrientedBoxStyle(),
+      detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+    });
+    await renderer.refresh();
+    renderer.setSelectedDetection({ detectionId: subject.id! });
+    renderer.setViewportTransform({ scale: 1, x: 0, y: 0 });
+    const rotate = engine
+      .getHandles(subject)
+      .find((h) => h.id === "obb-rotate")!;
+    sendInteractionPointer("pointerdown", 7, rotate.point);
+    sendInteractionPointer("globalpointermove", 7, { x: 230, y: 120 }, 100);
+    const raw = engine.getState().preview!;
+    const keydown = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "keydown",
+    )![1] as (event: unknown) => void;
+    const keyup = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "keyup",
+    )![1] as (event: unknown) => void;
+    const preventDefault = vi.fn();
+    keydown({ key: "Shift", shiftKey: true, preventDefault });
+    expect(
+      getOrientedRectangleGeometry(engine.getState().preview!.orientedBox!)!
+        .rotation,
+    ).toBeCloseTo(Math.PI / 4);
+    keyup({ key: "Shift", shiftKey: false, preventDefault });
+    expect(engine.getState().preview).toEqual(raw);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    const blur = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "blur",
+    )![1] as () => void;
+    blur();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(onCommit).not.toHaveBeenCalled();
+    renderer.destroy();
+    for (const name of ["keydown", "keyup", "blur"]) {
+      const listener = domMock.windowAddEventListener.mock.calls.find(
+        ([event]) => event === name,
+      )![1];
+      expect(domMock.windowRemoveEventListener).toHaveBeenCalledWith(
+        name,
+        listener,
+      );
+    }
+  });
+
   it("includes edge-touching rotation handles in the picture crop and hit area", async () => {
     resetMocks();
     const subject = {
@@ -57,7 +124,9 @@ describe("editing gestures in the Pixi media scene", () => {
         0,
       ),
     } satisfies Detection;
-    const engine = createAnnotationEditingEngine();
+    const engine = createAnnotationEditingEngine({
+      rotationHandle: { offset: 40 },
+    });
     const renderer = await createRenderer(false, false, {
       container: {
         appendChild: domMock.appendChild,
@@ -79,10 +148,10 @@ describe("editing gestures in the Pixi media scene", () => {
     for (const scale of [0.5, 0.25]) {
       renderer.setViewportTransform({ scale, x: 0, y: 60 });
       flushPixiTicker(0);
-      const rotate = getAnnotationHandles(subject, scale).find(
-        (handle) => handle.id === "obb-rotate",
-      )!;
-      expect(rotate.point).toEqual({ x: 200, y: -24 / scale });
+      const rotate = engine
+        .getHandles(subject, scale)
+        .find((handle) => handle.id === "obb-rotate")!;
+      expect(rotate.point).toEqual({ x: 200, y: -40 / scale });
       const hitArea = hitDisplay.hitArea as {
         contains(x: number, y: number): boolean;
       };
@@ -92,7 +161,7 @@ describe("editing gestures in the Pixi media scene", () => {
       const mediaTop = (480 - 720 * 0.5) / 2;
       // The public handle's full hit radius fits above the image, inside the
       // canvas. Zoom does not change the control's CSS distance from the edge.
-      expect(top).toBe(Math.floor(mediaTop - 34));
+      expect(top).toBe(Math.floor(mediaTop - 50));
       expect(
         pixiMock.graphicsInstances.some((graphics) =>
           graphics.circle.mock.calls.some(
@@ -104,9 +173,9 @@ describe("editing gestures in the Pixi media scene", () => {
       expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Rotating);
       sendInteractionPointer("globalpointermove", 7, { x: 240, y: -20 });
       const preview = engine.getState().preview!;
-      const previewRotate = getAnnotationHandles(preview, scale).find(
-        (handle) => handle.id === "obb-rotate",
-      )!;
+      const previewRotate = engine
+        .getHandles(preview, scale)
+        .find((handle) => handle.id === "obb-rotate")!;
       expect(
         (
           hitDisplay.hitArea as { contains(x: number, y: number): boolean }

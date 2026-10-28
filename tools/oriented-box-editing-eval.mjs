@@ -23,7 +23,7 @@ const results = [];
 try {
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 1200,
-    height: 900,
+    height: 1100,
     deviceScaleFactor: 1,
     mobile: false,
   });
@@ -52,13 +52,14 @@ try {
     x: viewport.x + viewport.width / 2 + (p.x - 400) * scale,
     y: viewport.y + viewport.height / 2 + (p.y - 250) * scale,
   });
-  async function mouse(type, p, buttons = 0) {
+  async function mouse(type, p, buttons = 0, clickCount = 1, modifiers = 0) {
     await cdp.send("Input.dispatchMouseEvent", {
       type,
       ...p,
       button: type === "mouseMoved" ? "none" : "left",
       buttons,
-      clickCount: type === "mouseMoved" ? 0 : 1,
+      clickCount: type === "mouseMoved" ? 0 : clickCount,
+      modifiers,
     });
   }
   async function drag(from, to, cancel = false) {
@@ -83,6 +84,8 @@ try {
     await mouse("mouseReleased", to);
     await pause();
   }
+  // Preserve the original default-top geometry cases before testing host heading.
+  await click("#heading");
   const initial = await read();
   assert.equal(initial.length, 1);
   // AABB corner is outside the actual rotated rectangle and must not move it.
@@ -259,6 +262,252 @@ try {
   await pause();
   results.push(
     "wheel zoom changes the viewport and preserves committed geometry",
+  );
+  // Host policy is enabled explicitly; every interaction still uses built
+  // supervision/editing geometry and the real session pointer route.
+  await click("#reset");
+  await click("#heading");
+  const hostBaseline = await read();
+  const hostRectangle = getOrientedRectangleGeometry(
+    hostBaseline[0].orientedBox,
+  );
+  const center = { x: hostRectangle.x, y: hostRectangle.y };
+  await mouse("mousePressed", screen(center), 1);
+  await mouse("mouseReleased", screen(center));
+  await pause();
+  const frontHandles = (detection) =>
+    getAnnotationHandles(detection, scale, {
+      rotationHandle: { edgeIndex: 1 },
+    });
+  const frontRotate = frontHandles(hostBaseline[0]).find(
+    (handle) => handle.id === "obb-rotate",
+  );
+  assert.ok(Math.abs(frontRotate.radius * scale - 4) < 1e-8);
+  const expectedFront = {
+    x:
+      (hostBaseline[0].orientedBox.points[1].x +
+        hostBaseline[0].orientedBox.points[2].x) /
+      2,
+    y:
+      (hostBaseline[0].orientedBox.points[1].y +
+        hostBaseline[0].orientedBox.points[2].y) /
+      2,
+  };
+  assert.ok(
+    Math.hypot(
+      frontRotate.stemFrom.x - expectedFront.x,
+      frontRotate.stemFrom.y - expectedFront.y,
+    ) < 1e-8,
+  );
+  const delta = 0.21;
+  const vector = {
+    x: frontRotate.point.x - center.x,
+    y: frontRotate.point.y - center.y,
+  };
+  const rawTarget = {
+    x: center.x + vector.x * Math.cos(delta) - vector.y * Math.sin(delta),
+    y: center.y + vector.x * Math.sin(delta) + vector.y * Math.cos(delta),
+  };
+  const key = (type, name, modifiers = 0) =>
+    cdp.send("Input.dispatchKeyEvent", {
+      type,
+      key: name,
+      code: name,
+      modifiers,
+      windowsVirtualKeyCode: {
+        Shift: 16,
+        Escape: 27,
+        Enter: 13,
+        ArrowRight: 39,
+      }[name],
+    });
+  const angleReadout = () =>
+    cdp.evaluate('Number(document.querySelector("#angle").value)');
+  await mouse("mouseMoved", screen(frontRotate.point));
+  await mouse("mousePressed", screen(frontRotate.point), 1);
+  await mouse("mouseMoved", screen(rawTarget), 1);
+  await pause();
+  const rawAngle = await angleReadout();
+  const snappedAngle = Math.round(rawAngle / 15) * 15;
+  assert.ok(Math.abs(rawAngle - snappedAngle) > 1);
+  await key("keyDown", "Shift", 8);
+  await pause();
+  assert.ok(Math.abs((await angleReadout()) - snappedAngle) < 0.01);
+  assert.deepEqual(await read(), hostBaseline);
+  await key("keyUp", "Shift");
+  await pause();
+  assert.ok(Math.abs((await angleReadout()) - rawAngle) < 0.01);
+  await key("keyDown", "Shift", 8);
+  await mouse("mouseReleased", screen(rawTarget), 0, 1, 8);
+  await key("keyUp", "Shift");
+  await pause();
+  const snapped = await read();
+  assert.ok(
+    Math.abs(
+      (getOrientedRectangleGeometry(snapped[0].orientedBox).rotation * 180) /
+        Math.PI -
+        snappedAngle,
+    ) < 0.01,
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  results.push(
+    "configured compact front-edge rotation handle and stationary Shift press/release snapping with single undo",
+  );
+
+  const footprint = (points) =>
+    [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  const originalPoints = hostBaseline[0].orientedBox.points;
+  const topMidpoint = {
+    x: (originalPoints[0].x + originalPoints[1].x) / 2,
+    y: (originalPoints[0].y + originalPoints[1].y) / 2,
+  };
+  // A double-click on the midpoint handle retains resize ownership.
+  await mouse("mousePressed", screen(topMidpoint), 1);
+  await mouse("mouseReleased", screen(topMidpoint));
+  await mouse("mousePressed", screen(topMidpoint), 1, 2);
+  await mouse("mouseReleased", screen(topMidpoint), 0, 2);
+  await pause();
+  assert.deepEqual(await read(), hostBaseline);
+  const topEdgePoint = {
+    x:
+      originalPoints[0].x * 0.7 +
+      originalPoints[1].x * 0.3 +
+      Math.sin(hostRectangle.rotation) / scale,
+    y:
+      originalPoints[0].y * 0.7 +
+      originalPoints[1].y * 0.3 -
+      Math.cos(hostRectangle.rotation) / scale,
+  };
+  await mouse("mousePressed", screen(topEdgePoint), 1);
+  await mouse("mouseReleased", screen(topEdgePoint));
+  assert.equal(
+    await cdp.evaluate('document.querySelector("#angle").disabled'),
+    false,
+    "the edge miss band must preserve selection",
+  );
+  await mouse("mousePressed", screen(topEdgePoint), 1, 2);
+  await mouse("mouseReleased", screen(topEdgePoint), 0, 2);
+  await pause();
+  const refronted = await read();
+  assert.notDeepEqual(refronted, hostBaseline);
+  assert.deepEqual(
+    footprint(refronted[0].orientedBox.points),
+    footprint(originalPoints),
+  );
+  const controlPoints = (detection) =>
+    footprint(
+      frontHandles(detection)
+        .filter((handle) => handle.id !== "obb-rotate")
+        .map((handle) => handle.point),
+    );
+  const beforeHandlePoints = controlPoints(hostBaseline[0]);
+  controlPoints(refronted[0]).forEach((point, index) => {
+    assert.ok(
+      Math.hypot(
+        point.x - beforeHandlePoints[index].x,
+        point.y - beforeHandlePoints[index].y,
+      ) < 1e-8,
+    );
+  });
+  const refrontRotate = frontHandles(refronted[0]).find(
+    (handle) => handle.id === "obb-rotate",
+  );
+  assert.ok(
+    Math.hypot(
+      refrontRotate.stemFrom.x - topMidpoint.x,
+      refrontRotate.stemFrom.y - topMidpoint.y,
+    ) < 1e-8,
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  await click("#reverse-front");
+  const reversed = await read();
+  assert.deepEqual(
+    footprint(reversed[0].orientedBox.points),
+    footprint(originalPoints),
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  results.push(
+    "double-click edge miss band preserves selection; midpoint handle keeps resize ownership; front/reverse preserve footprint and resize handles with one-step undo",
+  );
+
+  const enterAngle = async (value) => {
+    await cdp.evaluate(
+      'document.querySelector("#angle").focus(); document.querySelector("#angle").select()',
+    );
+    await cdp.send("Input.insertText", { text: String(value) });
+    await pause();
+  };
+  await enterAngle(12.5);
+  assert.deepEqual(await read(), hostBaseline);
+  assert.equal(await angleReadout(), 12.5);
+  await key("keyDown", "Escape");
+  await key("keyUp", "Escape");
+  await pause();
+  assert.deepEqual(await read(), hostBaseline);
+  assert.ok(
+    Math.abs(
+      (await angleReadout()) - (hostRectangle.rotation * 180) / Math.PI,
+    ) < 0.01,
+  );
+  await enterAngle(12.5);
+  await key("keyDown", "Enter");
+  await key("keyUp", "Enter");
+  await pause();
+  const numeric = await read();
+  assert.ok(
+    Math.abs(
+      (getOrientedRectangleGeometry(numeric[0].orientedBox).rotation * 180) /
+        Math.PI -
+        12.5,
+    ) < 0.001,
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  results.push(
+    "numeric angle preview, Escape cancellation, precise Enter commit and single undo",
+  );
+
+  await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
+  await key("keyDown", "ArrowRight");
+  await key("keyDown", "ArrowRight");
+  await pause();
+  assert.deepEqual(await read(), hostBaseline);
+  await key("keyUp", "ArrowRight");
+  await pause();
+  const keyboard = await read();
+  assert.ok(
+    Math.abs(
+      getOrientedRectangleGeometry(keyboard[0].orientedBox).rotation -
+        hostRectangle.rotation -
+        (2 * Math.PI) / 180,
+    ) < 1e-8,
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
+  await key("keyDown", "ArrowRight", 8);
+  await key("keyUp", "ArrowRight", 8);
+  await pause();
+  assert.ok(
+    Math.abs(
+      getOrientedRectangleGeometry((await read())[0].orientedBox).rotation -
+        hostRectangle.rotation -
+        (15 * Math.PI) / 180,
+    ) < 1e-8,
+  );
+  await click("#undo");
+  await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
+  await key("keyDown", "ArrowRight");
+  await key("keyDown", "Escape");
+  await key("keyUp", "Escape");
+  await key("keyUp", "ArrowRight");
+  await pause();
+  assert.deepEqual(await read(), hostBaseline);
+  results.push(
+    "focused keyboard rotation: repeated 1-degree preview commits once, Shift steps 15 degrees, Escape cancels",
   );
   await mkdir(artifactDirectory, { recursive: true });
   const screenshot = await cdp.send("Page.captureScreenshot", {

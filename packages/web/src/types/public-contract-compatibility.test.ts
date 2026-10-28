@@ -6,6 +6,7 @@ import {
   createAnnotationEditingEngine,
   type DraftUndoAnnotationEditingEngine,
   type BuiltInAnnotationEditingEngine,
+  type AnnotationEditingEngine,
 } from "../editing";
 
 /**
@@ -40,7 +41,22 @@ const legacyMediaStreamOptions: MediaStreamRendererSourceOptions = {
   timestampOrigin: "media",
 };
 
+type LegacyEditingEngine = Omit<
+  AnnotationEditingEngine,
+  "getHandles" | "setModifiers"
+>;
+const legacyEditingEngineStaysAssignable: (
+  engine: LegacyEditingEngine,
+) => AnnotationEditingEngine = (engine) => engine;
+
 describe("browser public contract compatibility", () => {
+  it("keeps engines without handle and modifier capabilities assignable", () => {
+    expect(typeof legacyEditingEngineStaysAssignable).toBe("function");
+    const builtIn: BuiltInAnnotationEditingEngine =
+      createAnnotationEditingEngine();
+    expect(builtIn.getHandles({})).toEqual([]);
+    builtIn.setModifiers({ shiftKey: true });
+  });
   it("exposes the built-in draft Undo capability through the editing entrypoint", () => {
     const engine: DraftUndoAnnotationEditingEngine =
       createAnnotationEditingEngine();
