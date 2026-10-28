@@ -15,6 +15,7 @@ import { CdpSession, openTarget, closeTarget } from "./demo-eval/cdp.mjs";
 const url =
   process.argv[2] ?? "http://127.0.0.1:5191/examples/vanilla/oriented-box.html";
 const chrome = process.argv[3] ?? "http://127.0.0.1:9336";
+const artifactDirectory = process.argv[4] ?? "artifacts";
 const target = await openTarget(chrome, url);
 const cdp = await CdpSession.attach(target.webSocketDebuggerUrl);
 const pause = () => new Promise((resolve) => setTimeout(resolve, 80));
@@ -156,6 +157,87 @@ try {
   await click("#undo");
   assert.equal((await read()).length, 1);
   results.push("native OBB-only creation and single-step creation undo");
+  // Create an edge-touching rectangle through ordinary pointer input. The
+  // picture initially fills the host vertically, so its outward control is
+  // outside the host. Zooming out must expose it without moving the geometry.
+  await click("#draw");
+  await drag(screen({ x: 240, y: 40 }), screen({ x: 160, y: -4 }));
+  const edgeCreated = await read();
+  assert.equal(edgeCreated.length, 2);
+  const edge = edgeCreated[1];
+  const edgeRect = getOrientedRectangleGeometry(edge.orientedBox);
+  assert.ok(Math.abs(edgeRect.y - edgeRect.height / 2) < 0.01);
+  const host = await cdp.evaluate(`(() => {
+    const viewer = document.querySelector("#viewer");
+    const rect = viewer.getBoundingClientRect();
+    return { x: rect.x + viewer.clientLeft, y: rect.y + viewer.clientTop,
+      width: viewer.clientWidth, height: viewer.clientHeight };
+  })()`);
+  assert.ok(Math.abs(viewport.y - host.y) < 1);
+  const initialEdgeRotate = getAnnotationHandles(edge, scale).find(
+    (handle) => handle.id === "obb-rotate",
+  );
+  assert.ok(screen(initialEdgeRotate.point).y < host.y);
+  await cdp.send("Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    x: host.x + host.width / 2,
+    y: host.y + host.height / 2,
+    deltaX: 0,
+    deltaY: 350,
+  });
+  await pause();
+  assert.deepEqual(await read(), edgeCreated);
+  const edgeScale = await cdp.evaluate(
+    'parseFloat(document.querySelector("#zoom").textContent)',
+  );
+  const edgeScreen = (point) => ({
+    x: host.x + host.width / 2 + (point.x - 400) * edgeScale,
+    y: host.y + host.height / 2 + (point.y - 250) * edgeScale,
+  });
+  const edgeRotate = getAnnotationHandles(edge, edgeScale).find(
+    (handle) => handle.id === "obb-rotate",
+  );
+  const edgeTarget = edgeScreen(edgeRotate.point);
+  assert.ok(edgeTarget.y - (edgeRotate.hitSize * edgeScale) / 2 > host.y);
+  assert.ok(edgeTarget.x > host.x && edgeTarget.x < host.x + host.width);
+  const canvasAtTarget = await cdp.evaluate(`(() => {
+    const target = ${JSON.stringify(edgeTarget)};
+    const canvas = document.querySelector("canvas");
+    const rect = canvas.getBoundingClientRect();
+    return target.x >= rect.left && target.x <= rect.right &&
+      target.y >= rect.top && target.y <= rect.bottom &&
+      document.elementFromPoint(target.x, target.y) === canvas;
+  })()`);
+  assert.ok(
+    canvasAtTarget,
+    "the exposed public rotation target is inside the real canvas hit area",
+  );
+  await mkdir(artifactDirectory, { recursive: true });
+  const edgeScreenshot = await cdp.send("Page.captureScreenshot", {
+    format: "png",
+  });
+  await writeFile(
+    `${artifactDirectory}/oriented-box-edge-control.png`,
+    Buffer.from(edgeScreenshot.data, "base64"),
+  );
+  const radius = edgeRect.y - edgeRotate.point.y;
+  await drag(edgeTarget, edgeScreen({ x: edgeRect.x + radius, y: edgeRect.y }));
+  const edgeRotated = await read();
+  const edgeRotatedRect = getOrientedRectangleGeometry(
+    edgeRotated[1].orientedBox,
+  );
+  assert.ok(
+    Math.abs(edgeRotatedRect.rotation) > 0.1,
+    "actual pointer drag rotates the edge-touching rectangle",
+  );
+  results.push(
+    "edge-touching rotation control is reachable after viewport zoom-out with unchanged geometry",
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), edgeCreated);
+  await click("#undo");
+  assert.deepEqual(await read(), resized);
+  await click("#reset");
   // The rendering route must remain functional under wheel zoom.
   const beforeZoom = await cdp.evaluate(
     'parseFloat(document.querySelector("#zoom").textContent)',
@@ -178,18 +260,30 @@ try {
   results.push(
     "wheel zoom changes the viewport and preserves committed geometry",
   );
-  await mkdir("artifacts", { recursive: true });
+  await mkdir(artifactDirectory, { recursive: true });
   const screenshot = await cdp.send("Page.captureScreenshot", {
     format: "png",
   });
   await writeFile(
-    "artifacts/oriented-box-editing.png",
+    `${artifactDirectory}/oriented-box-editing.png`,
     Buffer.from(screenshot.data, "base64"),
   );
   await writeFile(
-    "artifacts/oriented-box-editing-browser.json",
+    `${artifactDirectory}/oriented-box-editing-browser.json`,
     JSON.stringify(
-      { url, results, initial, rotated, resized, created },
+      {
+        url,
+        results,
+        initial,
+        rotated,
+        resized,
+        created,
+        edgeCreated,
+        edgeRotated,
+        edgeTarget,
+        host,
+        edgeScale,
+      },
       null,
       2,
     ),

@@ -5,10 +5,13 @@ import {
   AnnotationGeometryKind,
   BaseBoxStyle,
   BaseKeypointStyle,
+  BaseOrientedBoxStyle,
   BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
   createAnnotationEditingEngine,
+  createOrientedBoxGeometry,
+  getAnnotationHandles,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
@@ -19,6 +22,7 @@ import {
 import {
   createRenderer,
   domMock,
+  flushPixiTicker,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -44,6 +48,84 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it("includes edge-touching rotation handles in the picture crop and hit area", async () => {
+    resetMocks();
+    const subject = {
+      id: "edge-box",
+      orientedBox: createOrientedBoxGeometry(
+        { x: 200, y: 20, width: 80, height: 40 },
+        0,
+      ),
+    } satisfies Detection;
+    const engine = createAnnotationEditingEngine();
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: domMock.appendChild,
+        clientWidth: 640,
+        clientHeight: 480,
+      },
+      editingEngine: engine,
+      orientedBoxStyle: new BaseOrientedBoxStyle(),
+      detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+    });
+    await renderer.refresh();
+    expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(640, 360, 1);
+    expect(
+      renderer.setSelectedDetection({ detectionId: subject.id }),
+    ).not.toBeNull();
+    const hitDisplay = pixiMock.containerInstances.find((display) =>
+      display.on.mock.calls.some(([name]) => name === "pointerdown"),
+    )!;
+    for (const scale of [0.5, 0.25]) {
+      renderer.setViewportTransform({ scale, x: 0, y: 60 });
+      flushPixiTicker(0);
+      const rotate = getAnnotationHandles(subject, scale).find(
+        (handle) => handle.id === "obb-rotate",
+      )!;
+      expect(rotate.point).toEqual({ x: 200, y: -24 / scale });
+      const hitArea = hitDisplay.hitArea as {
+        contains(x: number, y: number): boolean;
+      };
+      expect(hitArea.contains(rotate.point.x, rotate.point.y)).toBe(true);
+      const canvas = pixiMock.canvasInstances[0]!;
+      const top = Number.parseFloat(canvas.style.top!);
+      const mediaTop = (480 - 720 * 0.5) / 2;
+      // The public handle's full hit radius fits above the image, inside the
+      // canvas. Zoom does not change the control's CSS distance from the edge.
+      expect(top).toBe(Math.floor(mediaTop - 34));
+      expect(
+        pixiMock.graphicsInstances.some((graphics) =>
+          graphics.circle.mock.calls.some(
+            ([x, y]) => x === rotate.point.x && y === rotate.point.y,
+          ),
+        ),
+      ).toBe(true);
+      sendInteractionPointer("pointerdown", 7, rotate.point);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Rotating);
+      sendInteractionPointer("globalpointermove", 7, { x: 240, y: -20 });
+      const preview = engine.getState().preview!;
+      const previewRotate = getAnnotationHandles(preview, scale).find(
+        (handle) => handle.id === "obb-rotate",
+      )!;
+      expect(
+        (
+          hitDisplay.hitArea as { contains(x: number, y: number): boolean }
+        ).contains(previewRotate.point.x, previewRotate.point.y),
+      ).toBe(true);
+      engine.cancel();
+      flushPixiTicker(0);
+    }
+    renderer.setSelectedDetection(null);
+    expect(
+      (
+        hitDisplay.hitArea as { contains(x: number, y: number): boolean }
+      ).contains(200, -24),
+    ).toBe(false);
+    expect(pixiMock.canvasInstances[0]!.style.top).toBe("60px");
+    expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(320, 180, 1);
+    renderer.destroy();
+  });
+
   it.each(["pointercancel", "lostpointercapture"])(
     "retains routed polygon vertices after native %s and accepts the next contact",
     async (eventType) => {

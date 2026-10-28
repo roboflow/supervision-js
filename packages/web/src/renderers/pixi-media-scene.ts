@@ -92,7 +92,10 @@ import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
 } from "./pixi-region-layer";
-import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
+import {
+  createPixiAnnotationOverlayLayer,
+  type PixiAnnotationHandleBounds,
+} from "./pixi-annotation-overlay-layer";
 import {
   AnnotationGestureStateKind,
   MediaInteractionMode,
@@ -717,6 +720,7 @@ export async function createPixiMediaScene(
   let readPresentedSurface = () => stagingCanvas;
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
   let presentationBox = { height: 0, left: 0, top: 0, width: 0 };
+  let annotationHandleBounds: PixiAnnotationHandleBounds | undefined;
   /**
    * Read only when the observer says the box moved. The fit is recomputed on
    * every presented sample, and reading the element there would put a forced
@@ -977,7 +981,8 @@ export async function createPixiMediaScene(
    * container, leaving the margin to the backdrop.
    *
    * The box follows the picture under pan and zoom rather than growing to the
-   * container, so the margin keeps its exemption at every viewport transform.
+   * container. Selected editing handles extend it only as far as their visible
+   * and hittable extent requires; the remaining margin keeps its exemption.
    */
   const syncPresentationBox = () => {
     const { height: containerHeight, width: containerWidth } = containerSize;
@@ -987,15 +992,39 @@ export async function createPixiMediaScene(
     const pictureScale = baseFit ? baseFit.scale * transform.scale : 0;
     const span = baseFit
       ? {
-          left: Math.max(0, Math.floor(baseFit.x + transform.x)),
-          top: Math.max(0, Math.floor(baseFit.y + transform.y)),
+          left: Math.max(
+            0,
+            Math.floor(
+              baseFit.x +
+                transform.x +
+                Math.min(0, annotationHandleBounds?.left ?? 0) * pictureScale,
+            ),
+          ),
+          top: Math.max(
+            0,
+            Math.floor(
+              baseFit.y +
+                transform.y +
+                Math.min(0, annotationHandleBounds?.top ?? 0) * pictureScale,
+            ),
+          ),
           right: Math.min(
             containerWidth,
-            Math.ceil(baseFit.x + transform.x + mediaWidth * pictureScale),
+            Math.ceil(
+              baseFit.x +
+                transform.x +
+                Math.max(mediaWidth, annotationHandleBounds?.right ?? 0) *
+                  pictureScale,
+            ),
           ),
           bottom: Math.min(
             containerHeight,
-            Math.ceil(baseFit.y + transform.y + mediaHeight * pictureScale),
+            Math.ceil(
+              baseFit.y +
+                transform.y +
+                Math.max(mediaHeight, annotationHandleBounds?.bottom ?? 0) *
+                  pictureScale,
+            ),
           ),
         }
       : { left: 0, top: 0, right: containerWidth, bottom: containerHeight };
@@ -2762,7 +2791,7 @@ export async function createPixiMediaScene(
       drawnPreviewOverlayContent =
         describePreviewOverlayContent(previewOverlay);
     }
-    annotationOverlayLayer.draw({
+    const handleBounds = annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,
       mediaHeight,
@@ -2776,6 +2805,16 @@ export async function createPixiMediaScene(
       viewportScale,
       visibility: currentVisibility,
     });
+    if (
+      handleBounds?.left !== annotationHandleBounds?.left ||
+      handleBounds?.top !== annotationHandleBounds?.top ||
+      handleBounds?.right !== annotationHandleBounds?.right ||
+      handleBounds?.bottom !== annotationHandleBounds?.bottom
+    ) {
+      annotationHandleBounds = handleBounds;
+      interactionLayer?.setHandleBounds(handleBounds);
+      applyViewportTransform();
+    }
     const editingBox = annotationOverlayLayer.getRenderedEditingBox();
     const creationPreview =
       editingState?.kind === AnnotationGestureStateKind.Creating

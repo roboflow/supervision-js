@@ -29,6 +29,13 @@ import {
 } from "./pixi-path";
 import { drawPixiKeypointInstruction } from "./pixi-vector-layer";
 
+export interface PixiAnnotationHandleBounds {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
 export interface PixiAnnotationOverlayLayer {
   attachGraphics(graphics: PixiGraphics): void;
   setStyle(style: AnnotationOverlayStyle | null | undefined): void;
@@ -45,7 +52,7 @@ export interface PixiAnnotationOverlayLayer {
     visibility?: AnnotationVisibility;
     previewOverlay?: PreviewOverlayData | null;
     now: number;
-  }): void;
+  }): PixiAnnotationHandleBounds | undefined;
 }
 
 export interface PixiRenderedEditingBox {
@@ -97,10 +104,16 @@ export function createPixiAnnotationOverlayLayer(
         style,
         keypointStyle,
       );
-      drawSelectionHandles(graphics, context, style, editingEngine);
+      const handleBounds = drawSelectionHandles(
+        graphics,
+        context,
+        style,
+        editingEngine,
+      );
       drawMarquee(graphics, context.marquee, style);
       drawGuides(graphics, editingEngine, context, style);
       drawLoading(graphics, context, style);
+      return handleBounds;
     },
   };
 }
@@ -397,7 +410,8 @@ function drawSelectionHandles(
   context: Parameters<PixiAnnotationOverlayLayer["draw"]>[0],
   style: ResolvedAnnotationOverlayStyle,
   engine: AnnotationEditingEngine | undefined,
-) {
+): PixiAnnotationHandleBounds | undefined {
+  let bounds: PixiAnnotationHandleBounds | undefined;
   const selected = new Set(context.selectedDetectionIds);
   for (const [detectionIndex, detection] of (
     context.frame?.detections ?? []
@@ -439,6 +453,13 @@ function drawSelectionHandles(
             ? style.selectionHandle.keypointAlpha
             : 1;
       if (alpha <= 0) continue;
+      const radius = Math.max(handle.radius, handle.hitSize / 2);
+      bounds = {
+        left: Math.min(bounds?.left ?? Infinity, handle.point.x - radius),
+        top: Math.min(bounds?.top ?? Infinity, handle.point.y - radius),
+        right: Math.max(bounds?.right ?? -Infinity, handle.point.x + radius),
+        bottom: Math.max(bounds?.bottom ?? -Infinity, handle.point.y + radius),
+      };
       if (handle.stemFrom) {
         drawPixiPath(
           graphics,
@@ -458,6 +479,7 @@ function drawSelectionHandles(
       );
     }
   }
+  return bounds;
 }
 
 function drawMarquee(

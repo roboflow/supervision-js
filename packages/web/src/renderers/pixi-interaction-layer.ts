@@ -90,6 +90,16 @@ export interface PixiInteractionLayer {
     readonly width: number;
     readonly height: number;
   }): PixiInteractionContainer;
+  setHandleBounds(
+    bounds:
+      | {
+          readonly left: number;
+          readonly top: number;
+          readonly right: number;
+          readonly bottom: number;
+        }
+      | undefined,
+  ): void;
   drawFrame(mediaTime: number): void;
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
@@ -176,6 +186,18 @@ export function createPixiInteractionLayer(options: {
       container.on("pointerupoutside", handlePointerUp);
 
       return container;
+    },
+
+    setHandleBounds(bounds) {
+      if (!container || !displayDimensions) return;
+      const left = Math.min(0, bounds?.left ?? 0);
+      const top = Math.min(0, bounds?.top ?? 0);
+      container.hitArea = new options.Rectangle(
+        left,
+        top,
+        Math.max(displayDimensions.width, bounds?.right ?? 0) - left,
+        Math.max(displayDimensions.height, bounds?.bottom ?? 0) - top,
+      );
     },
 
     drawFrame(mediaTime) {
