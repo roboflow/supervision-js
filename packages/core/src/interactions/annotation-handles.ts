@@ -135,26 +135,21 @@ export function applyAnnotationHandleDrag(
       const dy = point.y - rectangle.y;
       const px = dx * cos + dy * sin;
       const py = -dx * sin + dy * cos;
-      const id = handle.id.slice(4);
-      let left = -rectangle.width / 2;
-      let right = rectangle.width / 2;
-      let top = -rectangle.height / 2;
-      let bottom = rectangle.height / 2;
-      // Crossing clamps at a positive extent, preserving ordered local axes.
-      if (id.includes("w")) left = Math.min(px, right - 1);
-      if (id.includes("e")) right = Math.max(px, left + 1);
-      if (id.includes("n")) top = Math.min(py, bottom - 1);
-      if (id.includes("s")) bottom = Math.max(py, top + 1);
-      const cx = (left + right) / 2;
-      const cy = (top + bottom) / 2;
+      const local = resizeRect(
+        { x: 0, y: 0, width: rectangle.width, height: rectangle.height },
+        handle.id.slice(4),
+        { x: px, y: py },
+        undefined,
+        1,
+      );
       return {
         ...detection,
         orientedBox: createOrientedBoxGeometry(
           {
-            x: rectangle.x + cx * cos - cy * sin,
-            y: rectangle.y + cx * sin + cy * cos,
-            width: right - left,
-            height: bottom - top,
+            x: rectangle.x + local.x * cos - local.y * sin,
+            y: rectangle.y + local.x * sin + local.y * cos,
+            width: local.width,
+            height: local.height,
           },
           rectangle.rotation,
         ),
@@ -370,6 +365,7 @@ function resizeRect(
   handle: string,
   point: Point,
   mediaDimensions?: Pick<Rect, "width" | "height">,
+  minimumSize = 5,
 ): Rect {
   let left = rect.x - rect.width / 2;
   let right = rect.x + rect.width / 2;
@@ -382,13 +378,13 @@ function resizeRect(
     bottom = Math.max(0, Math.min(bottom, mediaDimensions.height));
   }
   if (handle.includes("w"))
-    left = resizeEdge(point.x, right, -1, mediaDimensions?.width);
+    left = resizeEdge(point.x, right, -1, mediaDimensions?.width, minimumSize);
   if (handle.includes("e"))
-    right = resizeEdge(point.x, left, 1, mediaDimensions?.width);
+    right = resizeEdge(point.x, left, 1, mediaDimensions?.width, minimumSize);
   if (handle.includes("n"))
-    top = resizeEdge(point.y, bottom, -1, mediaDimensions?.height);
+    top = resizeEdge(point.y, bottom, -1, mediaDimensions?.height, minimumSize);
   if (handle.includes("s"))
-    bottom = resizeEdge(point.y, top, 1, mediaDimensions?.height);
+    bottom = resizeEdge(point.y, top, 1, mediaDimensions?.height, minimumSize);
   return {
     x: (left + right) / 2,
     y: (top + bottom) / 2,
@@ -402,9 +398,9 @@ function resizeEdge(
   anchor: number,
   initialDirection: -1 | 1,
   extent?: number,
+  minimum = 5,
 ) {
   let direction = point === anchor ? initialDirection : point < anchor ? -1 : 1;
-  let minimum = 5;
   if (extent !== undefined) {
     const available = direction === 1 ? extent - anchor : anchor;
     const opposite = direction === 1 ? anchor : extent - anchor;

@@ -48,15 +48,15 @@ type FrontPress = {
   readonly edge: number;
   readonly point: { x: number; y: number };
   readonly original: readonly Detection[];
+  readonly pointerId: number | undefined;
+  readonly drawing: boolean;
   moved: boolean;
 };
 let frontPress: FrontPress | null = null;
-let completedFrontPress: FrontPress | null = null;
 function frontEdge(point: { x: number; y: number }) {
   const detection = selected();
   if (
     !heading.checked ||
-    engine.hasCreationTool() ||
     detection?.locked ||
     !detection?.orientedBox ||
     !rectangle(detection)
@@ -139,8 +139,10 @@ function commit(detection: Detection, previous: Detection | null) {
   detections = previous
     ? detections.map((item) => (item.id === previous.id ? detection : item))
     : [...detections, detection];
-  if (!previous) nextId += 1;
-  engine.setCreationTool(null);
+  if (!previous) {
+    nextId += 1;
+    engine.setCreationTool(null);
+  }
   void render(detection.id);
 }
 function finishHostPreview(cancel = false) {
@@ -220,7 +222,7 @@ function headingOverlay(): PreviewOverlayData | null {
 }
 const engine = createAnnotationEditingEngine({
   viewportScale: () => session?.renderer.getViewportTransform().scale ?? 1,
-  rotationHandle: () => ({ edgeIndex: heading.checked ? 1 : 0 }),
+  rotationHandle: { edgeIndex: 0, offset: 32 },
   resolveRotation: (value, { input }) =>
     resolveAngle(value, Boolean(input.shiftKey)),
   onCommit: commit,
@@ -300,7 +302,7 @@ async function start() {
       previewOverlay: headingOverlay,
       interaction: {
         onPointerPress({ input, pick, selectedHandle }) {
-          frontPress = completedFrontPress = null;
+          frontPress = null;
           if (!plainPrimary(input)) return "continue";
           const edge = frontEdge(input.point);
           if (!edge || (pick && pick.detection.id !== edge.detection.id))
@@ -324,10 +326,14 @@ async function start() {
             ...edge,
             point: input.point,
             original: detections,
+            pointerId: input.pointerId,
+            drawing: engine.hasCreationTool(),
             moved: false,
           };
           // Preserve the selected outline when the press falls just outside it.
-          return selectedHandle || pick ? "continue" : "handled";
+          return selectedHandle || (pick && !engine.hasCreationTool())
+            ? "continue"
+            : "handled";
         },
         onSelect(pick) {
           selectedId = pick?.detection.id;
@@ -361,7 +367,7 @@ viewer.addEventListener(
 
 // A front choice is a completed click, never a replacement drag engine.
 viewer.addEventListener("pointermove", (event) => {
-  if (!frontPress) return;
+  if (!frontPress || event.pointerId !== frontPress.pointerId) return;
   const point = mediaPoint(event);
   if (
     Math.hypot(point.x - frontPress.point.x, point.y - frontPress.point.y) *
@@ -375,41 +381,50 @@ viewer.addEventListener("pointerup", (event) => {
   frontPress = null;
   if (
     !press ||
+    event.pointerId !== press.pointerId ||
+    !plainPrimary(event) ||
     press.moved ||
     press.original !== detections ||
+    press.drawing !== engine.hasCreationTool() ||
     engine.getState().preview
   )
     return;
-  const edge = frontEdge(mediaPoint(event));
+  const point = mediaPoint(event);
   if (
-    edge &&
-    edge.detection.id === press.detection.id &&
-    edge.edge === press.edge
+    Math.hypot(point.x - press.point.x, point.y - press.point.y) *
+      session.renderer.getViewportTransform().scale >
+    4
   )
-    completedFrontPress = press;
-});
-viewer.addEventListener("pointercancel", () => {
-  frontPress = completedFrontPress = null;
-});
-viewer.addEventListener("dblclick", (event) => {
-  const press = completedFrontPress;
-  completedFrontPress = null;
-  if (!press || !plainPrimary(event) || press.original !== detections) return;
-  const edge = frontEdge(mediaPoint(event));
+    return;
+  const edge = frontEdge(point);
   if (
     !edge ||
     edge.detection.id !== press.detection.id ||
     edge.edge !== press.edge
   )
     return;
-  engine.cancel();
-  chooseFront(edge.edge);
+  // Let the renderer finish the unchanged midpoint press before committing front.
+  queueMicrotask(() => {
+    if (
+      press.original !== detections ||
+      press.drawing !== engine.hasCreationTool()
+    )
+      return;
+    chooseFront(edge.edge);
+  });
+});
+viewer.addEventListener("pointercancel", () => {
+  frontPress = null;
+});
+window.addEventListener("blur", () => {
+  frontPress = null;
 });
 
 function button(id: string, action: () => void) {
   document
     .querySelector<HTMLButtonElement>(`#${id}`)!
     .addEventListener("click", () => {
+      frontPress = null;
       finishHostPreview();
       action();
     });
@@ -455,6 +470,7 @@ button("reset", () => {
 button("next-front", () => chooseFront(2));
 button("reverse-front", () => chooseFront(3));
 heading.addEventListener("change", () => {
+  frontPress = null;
   finishHostPreview();
   updateControls();
   void session.refresh();
@@ -501,7 +517,7 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     event.preventDefault();
     keyboardCancelled = rotationKeyHeld;
-    frontPress = completedFrontPress = null;
+    frontPress = null;
     finishHostPreview(true);
     engine.cancel();
     updateControls(true);

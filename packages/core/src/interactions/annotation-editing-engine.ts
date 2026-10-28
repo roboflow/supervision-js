@@ -433,15 +433,25 @@ export function createAnnotationEditingEngine(
       width: right - left,
       height: bottom - top,
     };
+    if (activeTool!.geometry !== AnnotationGeometryKind.OrientedBox)
+      return activeTool!.createDetection(rect);
+    const corners = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: left, y: bottom },
+    ];
+    // Keep the footprint axis-aligned while local +x follows the drag's dominant direction.
+    const first =
+      rect.width >= rect.height
+        ? current.x < start.x
+          ? 2
+          : 0
+        : current.y < start.y
+          ? 3
+          : 1;
     return activeTool!.createDetection(
-      activeTool!.geometry === AnnotationGeometryKind.OrientedBox
-        ? [
-            { x: left, y: top },
-            { x: right, y: top },
-            { x: right, y: bottom },
-            { x: left, y: bottom },
-          ]
-        : rect,
+      corners.map((_, index) => corners[(first + index) % 4]!),
     );
   }
 

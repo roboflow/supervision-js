@@ -20,6 +20,10 @@ const target = await openTarget(chrome, url);
 const cdp = await CdpSession.attach(target.webSocketDebuggerUrl);
 const pause = () => new Promise((resolve) => setTimeout(resolve, 80));
 const results = [];
+const handles = (detection, scale) =>
+  getAnnotationHandles(detection, scale, {
+    rotationHandle: { edgeIndex: 0, offset: 32 },
+  });
 try {
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 1200,
@@ -96,9 +100,7 @@ try {
   await mouse("mousePressed", screen({ x: 390, y: 240 }), 1);
   await mouse("mouseReleased", screen({ x: 390, y: 240 }));
   await pause();
-  const rotate = getAnnotationHandles(initial[0], scale).find(
-    (h) => h.id === "obb-rotate",
-  );
+  const rotate = handles(initial[0], scale).find((h) => h.id === "obb-rotate");
   const from = rotate.point;
   const to = { x: 390 - (from.y - 240), y: 240 + from.x - 390 };
   await drag(screen(from), screen(to));
@@ -116,16 +118,14 @@ try {
   // Cancellation must leave committed data untouched.
   await mouse("mousePressed", screen({ x: 390, y: 240 }), 1);
   await mouse("mouseReleased", screen({ x: 390, y: 240 }));
-  const activeRotate = getAnnotationHandles(rotated[0], scale).find(
+  const activeRotate = handles(rotated[0], scale).find(
     (h) => h.id === "obb-rotate",
   );
   await drag(screen(activeRotate.point), screen({ x: 480, y: 260 }), true);
   assert.deepEqual(await read(), rotated);
   results.push("Escape cancels a live rotation");
   // Touch drags a corner along its rotated local axes.
-  const corner = getAnnotationHandles(rotated[0], scale).find(
-    (h) => h.id === "obb-se",
-  );
+  const corner = handles(rotated[0], scale).find((h) => h.id === "obb-se");
   const tuple = getOrientedRectangleGeometry(rotated[0].orientedBox);
   const movedCorner = {
     x: corner.point.x + 30 * Math.cos(tuple.rotation),
@@ -150,6 +150,95 @@ try {
     ) < 1.5,
   );
   results.push("touch local-axis corner resize");
+  for (const id of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+    const grabbed = handles(resized[0], scale).find(
+      (handle) => handle.id === `obb-${id}`,
+    );
+    const original = getOrientedRectangleGeometry(resized[0].orientedBox);
+    const sx = id.includes("w") ? -1 : id.includes("e") ? 1 : 0;
+    const sy = id.includes("n") ? -1 : id.includes("s") ? 1 : 0;
+    const local = {
+      x: -sx * original.width * 1.5,
+      y: -sy * original.height * 1.5,
+    };
+    const end = {
+      x:
+        original.x +
+        local.x * Math.cos(original.rotation) -
+        local.y * Math.sin(original.rotation),
+      y:
+        original.y +
+        local.x * Math.sin(original.rotation) +
+        local.y * Math.cos(original.rotation),
+    };
+    await drag(screen(grabbed.point), screen(end));
+    const crossed = getOrientedRectangleGeometry((await read())[0].orientedBox);
+    assert.ok(
+      Math.abs(crossed.rotation - original.rotation) < 1e-8,
+      `${id} crossing preserves ordered axes`,
+    );
+    assert.ok(
+      Math.abs(crossed.width - original.width) < 0.1 &&
+        Math.abs(crossed.height - original.height) < 0.1,
+    );
+    const expected = {
+      x:
+        original.x -
+        sx * original.width * Math.cos(original.rotation) +
+        sy * original.height * Math.sin(original.rotation),
+      y:
+        original.y -
+        sx * original.width * Math.sin(original.rotation) -
+        sy * original.height * Math.cos(original.rotation),
+    };
+    assert.ok(
+      Math.hypot(crossed.x - expected.x, crossed.y - expected.y) < 0.1,
+      `${id} crosses its original fixed anchor`,
+    );
+    await click("#undo");
+    assert.deepEqual(await read(), resized);
+    if (id === "se") {
+      await drag(screen(grabbed.point), screen(end), true);
+      assert.deepEqual(await read(), resized);
+    }
+  }
+  results.push(
+    "all eight rotated resize handles cross their opposite anchor, preserve axes, undo once and cancel cleanly",
+  );
+  for (const [delta, expectedAngle] of [
+    [{ x: 100, y: 40 }, 0],
+    [{ x: -100, y: 40 }, Math.PI],
+    [{ x: 100, y: -40 }, 0],
+    [{ x: -100, y: -40 }, Math.PI],
+    [{ x: 40, y: 100 }, Math.PI / 2],
+    [{ x: -40, y: 100 }, Math.PI / 2],
+    [{ x: 40, y: -100 }, -Math.PI / 2],
+    [{ x: -40, y: -100 }, -Math.PI / 2],
+  ]) {
+    await click("#draw");
+    await drag(
+      screen({ x: 620, y: 250 }),
+      screen({ x: 620 + delta.x, y: 250 + delta.y }),
+    );
+    const drawn = await read();
+    assert.equal(drawn.length, 2);
+    const ordered = getOrientedRectangleGeometry(drawn[1].orientedBox);
+    assert.ok(
+      Math.abs(Math.cos(ordered.rotation) - Math.cos(expectedAngle)) < 1e-8,
+    );
+    assert.ok(
+      Math.abs(Math.sin(ordered.rotation) - Math.sin(expectedAngle)) < 1e-8,
+    );
+    assert.ok(
+      Math.abs(ordered.width - 100) < 0.1 &&
+        Math.abs(ordered.height - 40) < 0.1,
+    );
+    await click("#undo");
+    assert.deepEqual(await read(), resized);
+  }
+  results.push(
+    "four-quadrant creation follows both dominant axes with one-step undo",
+  );
   // Fresh OBB-only drawing uses the same normal session route.
   await click("#draw");
   await drag(screen({ x: 620, y: 340 }), screen({ x: 740, y: 420 }));
@@ -164,7 +253,7 @@ try {
   // picture initially fills the host vertically, so its outward control is
   // outside the host. Zooming out must expose it without moving the geometry.
   await click("#draw");
-  await drag(screen({ x: 240, y: 40 }), screen({ x: 160, y: -4 }));
+  await drag(screen({ x: 240, y: 40 }), screen({ x: 320, y: -4 }));
   const edgeCreated = await read();
   assert.equal(edgeCreated.length, 2);
   const edge = edgeCreated[1];
@@ -177,7 +266,7 @@ try {
       width: viewer.clientWidth, height: viewer.clientHeight };
   })()`);
   assert.ok(Math.abs(viewport.y - host.y) < 1);
-  const initialEdgeRotate = getAnnotationHandles(edge, scale).find(
+  const initialEdgeRotate = handles(edge, scale).find(
     (handle) => handle.id === "obb-rotate",
   );
   assert.ok(screen(initialEdgeRotate.point).y < host.y);
@@ -197,7 +286,7 @@ try {
     x: host.x + host.width / 2 + (point.x - 400) * edgeScale,
     y: host.y + host.height / 2 + (point.y - 250) * edgeScale,
   });
-  const edgeRotate = getAnnotationHandles(edge, edgeScale).find(
+  const edgeRotate = handles(edge, edgeScale).find(
     (handle) => handle.id === "obb-rotate",
   );
   const edgeTarget = edgeScreen(edgeRotate.point);
@@ -275,22 +364,19 @@ try {
   await mouse("mousePressed", screen(center), 1);
   await mouse("mouseReleased", screen(center));
   await pause();
-  const frontHandles = (detection) =>
-    getAnnotationHandles(detection, scale, {
-      rotationHandle: { edgeIndex: 1 },
-    });
+  const frontHandles = (detection) => handles(detection, scale);
   const frontRotate = frontHandles(hostBaseline[0]).find(
     (handle) => handle.id === "obb-rotate",
   );
   assert.ok(Math.abs(frontRotate.radius * scale - 4) < 1e-8);
   const expectedFront = {
     x:
-      (hostBaseline[0].orientedBox.points[1].x +
-        hostBaseline[0].orientedBox.points[2].x) /
+      (hostBaseline[0].orientedBox.points[0].x +
+        hostBaseline[0].orientedBox.points[1].x) /
       2,
     y:
-      (hostBaseline[0].orientedBox.points[1].y +
-        hostBaseline[0].orientedBox.points[2].y) /
+      (hostBaseline[0].orientedBox.points[0].y +
+        hostBaseline[0].orientedBox.points[1].y) /
       2,
   };
   assert.ok(
@@ -353,7 +439,7 @@ try {
   await click("#undo");
   assert.deepEqual(await read(), hostBaseline);
   results.push(
-    "configured compact front-edge rotation handle and stationary Shift press/release snapping with single undo",
+    "configured compact top-edge rotation handle and stationary Shift press/release snapping with single undo",
   );
 
   const footprint = (points) =>
@@ -363,11 +449,9 @@ try {
     x: (originalPoints[0].x + originalPoints[1].x) / 2,
     y: (originalPoints[0].y + originalPoints[1].y) / 2,
   };
-  // Midpoint handles accept a completed double-click while normal drags resize.
+  // One completed midpoint click chooses front; normal drags keep resize ownership.
   await mouse("mousePressed", screen(topMidpoint), 1);
   await mouse("mouseReleased", screen(topMidpoint));
-  await mouse("mousePressed", screen(topMidpoint), 1, 2);
-  await mouse("mouseReleased", screen(topMidpoint), 0, 2);
   await pause();
   const midpointFront = await read();
   assert.notDeepEqual(midpointFront, hostBaseline);
@@ -391,11 +475,9 @@ try {
   assert.ok(Math.abs(midpointResize.rotation - hostRectangle.rotation) < 1e-8);
   await click("#undo");
   assert.deepEqual(await read(), hostBaseline);
-  // A corner keeps its ordinary handle ownership on a double-click.
+  // A corner keeps its ordinary handle ownership on a click.
   await mouse("mousePressed", screen(originalPoints[0]), 1);
   await mouse("mouseReleased", screen(originalPoints[0]));
-  await mouse("mousePressed", screen(originalPoints[0]), 1, 2);
-  await mouse("mouseReleased", screen(originalPoints[0]), 0, 2);
   await pause();
   assert.deepEqual(await read(), hostBaseline);
   const topEdgePoint = {
@@ -415,8 +497,6 @@ try {
     false,
     "the edge miss band must preserve selection",
   );
-  await mouse("mousePressed", screen(topEdgePoint), 1, 2);
-  await mouse("mouseReleased", screen(topEdgePoint), 0, 2);
   await pause();
   const refronted = await read();
   assert.notDeepEqual(refronted, hostBaseline);
@@ -444,8 +524,14 @@ try {
   );
   assert.ok(
     Math.hypot(
-      refrontRotate.stemFrom.x - topMidpoint.x,
-      refrontRotate.stemFrom.y - topMidpoint.y,
+      refrontRotate.stemFrom.x -
+        (refronted[0].orientedBox.points[0].x +
+          refronted[0].orientedBox.points[1].x) /
+          2,
+      refrontRotate.stemFrom.y -
+        (refronted[0].orientedBox.points[0].y +
+          refronted[0].orientedBox.points[1].y) /
+          2,
     ) < 1e-8,
   );
   await click("#undo");
@@ -459,7 +545,157 @@ try {
   await click("#undo");
   assert.deepEqual(await read(), hostBaseline);
   results.push(
-    "double-click midpoint chooses front once; same handle drag resizes; corners retain ownership; edge miss band and front/reverse preserve selection/footprint with single undo",
+    "single-click midpoint chooses front once; same handle drag resizes; corners retain ownership; edge miss band and front/reverse preserve selection/footprint with single undo",
+  );
+
+  for (const tool of ["#select", "#draw"]) {
+    await click(tool);
+    // Two screen pixels of jitter remain a click and produce one front action.
+    await mouse("mousePressed", screen(topMidpoint), 1);
+    await mouse(
+      "mouseMoved",
+      { x: screen(topMidpoint).x + 2, y: screen(topMidpoint).y },
+      1,
+    );
+    await mouse("mouseReleased", screen(topMidpoint));
+    await pause();
+    const chosen = await read();
+    assert.notDeepEqual(
+      chosen,
+      hostBaseline,
+      `${tool} midpoint click sets front`,
+    );
+    assert.equal(chosen.length, 1, "front click must not create a rectangle");
+    assert.deepEqual(
+      footprint(chosen[0].orientedBox.points),
+      footprint(originalPoints),
+    );
+    await mouse("mousePressed", screen(topMidpoint), 1);
+    await mouse("mouseReleased", screen(topMidpoint));
+    await pause();
+    assert.deepEqual(
+      await read(),
+      chosen,
+      "clicking the existing front adds no history action",
+    );
+    await click("#undo");
+    assert.deepEqual(await read(), hostBaseline);
+    await click(tool);
+    await mouse("mousePressed", screen(topEdgePoint), 1);
+    await mouse("mouseReleased", screen(topEdgePoint));
+    await pause();
+    assert.notDeepEqual(
+      await read(),
+      hostBaseline,
+      `${tool} edge click sets front`,
+    );
+    await click("#undo");
+    assert.deepEqual(await read(), hostBaseline);
+    await click(tool);
+    await drag(
+      screen(topMidpoint),
+      screen({
+        x: topMidpoint.x + Math.sin(hostRectangle.rotation) * 20,
+        y: topMidpoint.y - Math.cos(hostRectangle.rotation) * 20,
+      }),
+    );
+    const grown = await read();
+    const grownGeometry = getOrientedRectangleGeometry(grown[0].orientedBox);
+    assert.equal(
+      grown.length,
+      1,
+      `${tool} midpoint drag must resize the existing box`,
+    );
+    assert.ok(Math.abs(grownGeometry.height - hostRectangle.height - 20) < 0.1);
+    assert.ok(Math.abs(grownGeometry.rotation - hostRectangle.rotation) < 1e-8);
+    await click("#undo");
+    assert.deepEqual(await read(), hostBaseline);
+    await click(tool);
+    await mouse("mousePressed", screen(topMidpoint), 1);
+    await key("keyDown", "Escape");
+    await key("keyUp", "Escape");
+    await mouse("mouseReleased", screen(topMidpoint));
+    await pause();
+    assert.deepEqual(
+      await read(),
+      hostBaseline,
+      `${tool} Escape cancels a front press`,
+    );
+    // An out-and-back excursion must not be mistaken for a completed click.
+    await mouse("mousePressed", screen(topMidpoint), 1);
+    await mouse(
+      "mouseMoved",
+      { x: screen(topMidpoint).x + 6, y: screen(topMidpoint).y },
+      1,
+    );
+    await mouse("mouseMoved", screen(topMidpoint), 1);
+    await mouse("mouseReleased", screen(topMidpoint));
+    await pause();
+    const returned = await read();
+    const returnedGeometry = getOrientedRectangleGeometry(
+      returned[0].orientedBox,
+    );
+    assert.ok(
+      Math.abs(returnedGeometry.rotation - hostRectangle.rotation) < 1e-8,
+      "returning SDK resize must not change front",
+    );
+    assert.ok(Math.abs(returnedGeometry.width - hostRectangle.width) < 0.001);
+    assert.ok(Math.abs(returnedGeometry.height - hostRectangle.height) < 0.001);
+    // Browser pointer coordinates can leave a subpixel resize after returning.
+    if (JSON.stringify(returned) !== JSON.stringify(hostBaseline)) {
+      await click("#undo");
+      assert.deepEqual(await read(), hostBaseline);
+    }
+  }
+  results.push(
+    "single-click edge and midpoint front choices work in Select and Draw; jitter/cancel preserve gesture ownership",
+  );
+  await click("#draw");
+  await drag(
+    screen(topEdgePoint),
+    screen({ x: topEdgePoint.x + 80, y: topEdgePoint.y - 80 }),
+  );
+  assert.deepEqual(
+    await read(),
+    hostBaseline,
+    "selected edge drag must not start OBB creation or choose front",
+  );
+  await drag(screen(center), screen({ x: center.x + 100, y: center.y + 40 }));
+  assert.equal(
+    (await read()).length,
+    2,
+    "selected body retains OBB drawing ownership",
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  await click("#select");
+  await click("#heading");
+  assert.deepEqual(
+    await read(),
+    hostBaseline,
+    "heading toggle must not change geometry",
+  );
+  assert.equal(
+    await cdp.evaluate('document.querySelector("#next-front").disabled'),
+    true,
+  );
+  await mouse("mousePressed", screen(topMidpoint), 1);
+  await mouse("mouseReleased", screen(topMidpoint));
+  await pause();
+  assert.deepEqual(
+    await read(),
+    hostBaseline,
+    "heading-disabled class has no semantic front click",
+  );
+  // The same actual pointer target rotates with heading disabled; no placement jump.
+  await drag(screen(frontRotate.point), screen(rawTarget));
+  assert.notDeepEqual(await read(), hostBaseline);
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  await click("#heading");
+  assert.deepEqual(await read(), hostBaseline);
+  results.push(
+    "OBB body draws; heading-disabled classes retain geometry, rotation target and resize controls without front actions",
   );
 
   const enterAngle = async (value) => {

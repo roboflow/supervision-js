@@ -87,7 +87,7 @@ export interface AnnotationRotationContext {
 
 export interface AnnotationCreationTool {
   readonly geometry: AnnotationGeometryKind;
-  /** OrientedBox drag creation supplies four ordered rectangle corners, without a shadow rect. */
+  /** OrientedBox drag creation supplies clockwise corners with local +x along the dominant drag direction. */
   createDetection(geometry: Rect | readonly Point[]): Detection;
   readonly minVertices?: number;
   readonly mode?: "drag" | "multiClick" | "freehand";

@@ -306,7 +306,7 @@ describe("native oriented rectangle editing", () => {
   );
 
   it.each([0, 0.4, Math.PI / 2, Math.PI, 5.5])(
-    "resizes in local axes, fixes the opposite corner and clamps crossings at %s",
+    "resizes in local axes and fixes the opposite corner at %s",
     (rotation) => {
       const original = detection(rotation);
       const corner = handle(original, "obb-se");
@@ -324,15 +324,131 @@ describe("native oriented rectangle editing", () => {
       expect(next.orientedBox!.points[0]!.y).toBeCloseTo(
         original.orientedBox!.points[0]!.y,
       );
-      const crossed = applyAnnotationHandleDrag(original, corner, {
-        x: rectangle.x - 1000 * cos + 1000 * sin,
-        y: rectangle.y - 1000 * sin - 1000 * cos,
-      });
-      expect(geometry(crossed).width).toBeCloseTo(1);
-      expect(geometry(crossed).height).toBeCloseTo(1);
-      expect(Math.cos(geometry(crossed).rotation)).toBeCloseTo(cos);
-      expect(Math.sin(geometry(crossed).rotation)).toBeCloseTo(sin);
       expect(next.rect).toBeUndefined();
+    },
+  );
+
+  it.each(["nw", "n", "ne", "e", "se", "s", "sw", "w"])(
+    "crosses and returns through the original opposite edges with %s",
+    (id) => {
+      for (const rotation of [0, 0.4, Math.PI / 2, Math.PI, 5.5, Math.PI * 2]) {
+        for (const size of [
+          { width: 80, height: 40 },
+          { width: 30, height: 80 },
+          { width: 40, height: 40 },
+        ]) {
+          const original: Detection = {
+            id: "crossing",
+            metadata: { owner: "host" },
+            orientedBox: createOrientedBoxGeometry(
+              { ...rectangle, ...size },
+              rotation,
+            ),
+          };
+          const corner = handle(original, `obb-${id}`);
+          const cos = Math.cos(rotation),
+            sin = Math.sin(rotation);
+          const project = (x: number, y: number) => ({
+            x: rectangle.x + x * cos - y * sin,
+            y: rectangle.y + x * sin + y * cos,
+          });
+          const sx = id.includes("w") ? -1 : id.includes("e") ? 1 : 0;
+          const sy = id.includes("n") ? -1 : id.includes("s") ? 1 : 0;
+          const onCommit = vi.fn();
+          const engine = createAnnotationEditingEngine({ onCommit });
+          engine.beginHandleDrag(original, corner, input(corner.point));
+          let end = corner.point;
+          let preview: Detection | null = null;
+          // Cross each local axis separately, both together, and return.
+          const path = [
+            [0.5, 0.5],
+            [-3, 0.5],
+            [0.5, -3],
+            [-3, -3],
+            [2, 2],
+            [-2, -2],
+          ];
+          for (const [step, [factorX, factorY]] of path.entries()) {
+            const x = ((sx * size.width) / 2) * factorX!;
+            const y = ((sy * size.height) / 2) * factorY!;
+            end = project(x, y);
+            engine.pointerMove(input(end, (step + 1) * 50));
+            preview = engine.getState().preview!;
+            const next = geometry(preview);
+            const expected = project(
+              sx ? (x - (sx * size.width) / 2) / 2 : 0,
+              sy ? (y - (sy * size.height) / 2) / 2 : 0,
+            );
+            expect(next.x).toBeCloseTo(expected.x);
+            expect(next.y).toBeCloseTo(expected.y);
+            expect(next.width).toBeCloseTo(
+              sx ? Math.abs(x + (sx * size.width) / 2) : size.width,
+            );
+            expect(next.height).toBeCloseTo(
+              sy ? Math.abs(y + (sy * size.height) / 2) : size.height,
+            );
+            // A crossing changes the occupied bounds, never the ordered axes/front.
+            expect(Math.cos(next.rotation)).toBeCloseTo(cos);
+            expect(Math.sin(next.rotation)).toBeCloseTo(sin);
+            expect(preview.metadata).toBe(original.metadata);
+            expect(onCommit).not.toHaveBeenCalled();
+          }
+          engine.pointerUp(input(end, 400));
+          expect(onCommit).toHaveBeenCalledExactlyOnceWith(preview, original);
+          expect(original.orientedBox).toEqual(
+            createOrientedBoxGeometry({ ...rectangle, ...size }, rotation),
+          );
+          expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+        }
+      }
+    },
+  );
+
+  it.each([-0.1, 0, 0.1])(
+    "retains a positive minimum on either side of a crossed anchor at %s",
+    (offset) => {
+      const original = detection();
+      const corner = handle(original, "obb-se");
+      const next = geometry(
+        applyAnnotationHandleDrag(original, corner, {
+          x: 160 + offset,
+          y: 130 + offset,
+        }),
+      );
+      expect(next.width).toBeCloseTo(1);
+      expect(next.height).toBeCloseTo(1);
+      expect(next.x).toBeCloseTo(160 + (offset < 0 ? -0.5 : 0.5));
+      expect(next.y).toBeCloseTo(130 + (offset < 0 ? -0.5 : 0.5));
+      expect(next.rotation).toBe(0);
+    },
+  );
+
+  it.each(["Escape", "pointerCancel", "toolChange"])(
+    "cancels a crossed resize without a history entry on %s",
+    (cancellation) => {
+      const original = detection(0.4);
+      const corner = handle(original, "obb-se");
+      const onCommit = vi.fn();
+      const onCancel = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit, onCancel });
+      engine.beginHandleDrag(original, corner, input(corner.point));
+      const end = {
+        x: rectangle.x - 100 * Math.cos(0.4),
+        y: rectangle.y - 100 * Math.sin(0.4),
+      };
+      engine.pointerMove(input(end, 100));
+      expect(geometry(engine.getState().preview!).width).toBeCloseTo(60);
+      if (cancellation === "Escape") engine.keyDown("Escape");
+      else if (cancellation === "pointerCancel") engine.pointerCancel(1);
+      else
+        engine.setCreationTool({
+          geometry: AnnotationGeometryKind.Box,
+          createDetection: () => ({}),
+        });
+      engine.pointerUp(input(end, 300));
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(onCancel).toHaveBeenCalledTimes(1);
+      expect(engine.getState().preview).toBeNull();
     },
   );
 
@@ -417,6 +533,61 @@ describe("native oriented rectangle editing", () => {
     },
   );
 
+  it.each([
+    [{ x: 80, y: 30 }, 0],
+    [{ x: 80, y: -30 }, 0],
+    [{ x: -80, y: 30 }, Math.PI],
+    [{ x: -80, y: -30 }, Math.PI],
+    [{ x: 30, y: 80 }, Math.PI / 2],
+    [{ x: -30, y: 80 }, Math.PI / 2],
+    [{ x: 30, y: -80 }, -Math.PI / 2],
+    [{ x: -30, y: -80 }, -Math.PI / 2],
+    [{ x: 40, y: 40 }, 0],
+    [{ x: -40, y: -40 }, Math.PI],
+  ] as const)(
+    "orders new local axes along the dominant drag %j",
+    (delta, rotation) => {
+      const onCommit = vi.fn();
+      const shouldCommit = vi.fn(() => true);
+      const engine = createAnnotationEditingEngine({ onCommit });
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.OrientedBox,
+        shouldCommit,
+        createDetection: (points) => ({
+          orientedBox: { points: points as OrientedBoxGeometry["points"] },
+        }),
+      });
+      const start = { x: 200, y: 150 };
+      const end = { x: start.x + delta.x, y: start.y + delta.y };
+      engine.pointerDown(input(start));
+      engine.pointerMove(input(end, 100));
+      const preview = engine.getState().preview!;
+      const next = geometry(preview);
+      expect(next.x).toBeCloseTo((start.x + end.x) / 2);
+      expect(next.y).toBeCloseTo((start.y + end.y) / 2);
+      expect(next.width).toBeCloseTo(
+        Math.max(Math.abs(delta.x), Math.abs(delta.y)),
+      );
+      expect(next.height).toBeCloseTo(
+        Math.min(Math.abs(delta.x), Math.abs(delta.y)),
+      );
+      expect(Math.cos(next.rotation)).toBeCloseTo(Math.cos(rotation));
+      expect(Math.sin(next.rotation)).toBeCloseTo(Math.sin(rotation));
+      // The footprint remains the same axis-aligned drag rectangle.
+      expect(
+        preview.orientedBox!.points.map((p) => p.x).sort((a, b) => a - b),
+      ).toEqual([start.x, start.x, end.x, end.x].sort((a, b) => a - b));
+      expect(
+        preview.orientedBox!.points.map((p) => p.y).sort((a, b) => a - b),
+      ).toEqual([start.y, start.y, end.y, end.y].sort((a, b) => a - b));
+      engine.pointerUp(input(end, 500));
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(preview, null);
+      expect(shouldCommit).toHaveBeenCalledExactlyOnceWith(
+        preview.orientedBox!.points,
+      );
+    },
+  );
+
   it("creates an OBB-only detection in ordered media-bounded corners and validates those same corners", () => {
     const onCommit = vi.fn();
     const shouldCommit = vi.fn(() => true);
@@ -439,10 +610,10 @@ describe("native oriented rectangle editing", () => {
     const committed = onCommit.mock.calls[0]![0] as Detection;
     expect(committed.rect).toBeUndefined();
     expect(committed.orientedBox!.points).toEqual([
-      { x: 0, y: 10 },
-      { x: 80, y: 10 },
       { x: 80, y: 90 },
       { x: 0, y: 90 },
+      { x: 0, y: 10 },
+      { x: 80, y: 10 },
     ]);
     expect(shouldCommit).toHaveBeenCalledExactlyOnceWith(
       committed.orientedBox!.points,

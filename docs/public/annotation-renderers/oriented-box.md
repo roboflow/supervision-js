@@ -107,7 +107,10 @@ engine.setCreationTool({
 
 Pass the caller-owned engine as `renderer.editingEngine` to a media session.
 Drag creation supplies four clockwise local corners to `createDetection` and
-`shouldCommit`. It needs no accompanying `rect`. The selected rectangle has
+`shouldCommit`. The footprint is axis-aligned, with local +x following the
+dominant drag direction: right, left, down or up. Vertical drags exchange
+the footprint's width and height in the ordered local geometry; square drags
+use the horizontal direction. It needs no accompanying `rect`. The selected rectangle has
 eight local-axis resize controls and a compact rotation control on a short
 stem. Handle rendering and hit testing share `engine.getHandles()`: the
 rotation glyph has a 4 CSS-pixel radius and a separate circular 20 CSS-pixel
@@ -115,10 +118,12 @@ hit diameter; by default, its center sits 24 CSS pixels outside the first edge. 
 constant while zooming.
 
 Rotation uses the center and the initial press angle, preserving pointer grab
-offset. Resizing fixes the opposite edge or corner and clamps at a positive
-one-pixel extent on crossing. Neither operation swaps width and height or
-reorders corners, including squares and half/full turns. The returned angle
-may wrap at pi; the physical local axes and corner identities are preserved.
+offset. Resizing fixes the opposite edge or corner and continues through it when the
+pointer crosses, retaining a positive one-pixel minimum extent. Rotation and
+resizing preserve the ordered local axes, including squares and half/full
+turns. Crossing changes which corner or edge follows the pointer without
+turning the rectangle or swapping its local width and height. The returned
+angle may wrap at pi.
 
 Creation is bounded by supplied media dimensions. Rotation and local-axis
 resize may extend beyond the image and never clip or refit a rectangle; hosts

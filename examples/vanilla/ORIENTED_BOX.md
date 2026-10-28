@@ -9,23 +9,30 @@ or model service are required. A host-owned array and snapshot history receive
 one committed detection per edit.
 
 - Draw rectangle creates four ordered corners without an accompanying `rect`.
+  Local +x follows the dominant drag direction: right, left, down or up; the
+  footprint stays axis-aligned. Vertical drags swap the ordered side lengths.
 - Drag the compact external control to rotate. Hold Shift to snap to 15°;
   pressing or releasing Shift updates the preview even while the pointer is still.
-- Corner and edge handles resize in the rectangle's local axes.
+- Corner and edge handles resize in the rectangle's local axes, continuing
+  through the opposite edge or corner and back while preserving the ordered
+  axes and a positive one-pixel minimum extent.
 - Enter an angle in degrees to preview it. Enter or leaving the field saves it;
   Escape restores the committed angle.
 - Focus **Rotate with arrow keys**, then use Left/Right for 1° steps or hold
   Shift for 15° steps. Repeated key presses commit once on release. Escape
   cancels the preview. Canvas handles themselves are not keyboard focus targets.
-- **Heading (demo convention)** treats local +x as the front, shows a small
-  triangle inside that edge, and positions the rotation control outside it.
-  Double-click an edge or its midpoint handle to choose another front.
-  Dragging that same midpoint handle still resizes; corner and rotation handles
-  keep their normal behavior.
+- **Heading (demo convention)** treats local +x as the front and shows a small
+  triangle inside that edge. Click an edge or its midpoint handle to choose
+  another front, with either Select or Draw rectangle active. Dragging that
+  same midpoint handle still resizes; corner and rotation handles keep their
+  normal behavior. In Draw rectangle mode, body and empty-canvas presses draw
+  a new rectangle; a selected front edge consumes the click.
   **Next front** and **Reverse front** provide button alternatives. Choosing a
   front reindexes the existing corners, preserving the footprint and resize
-  handle positions; it is one undoable edit. Turning heading off restores the
-  default top-edge rotation control without changing geometry.
+  handle positions; it is one undoable edit. Turning heading off removes front
+  controls and the marker while retaining rotated geometry and all resize and
+  rotation controls. The rotation control always sits 32 CSS pixels outside
+  the ordered local top edge; changing heading leaves its position unchanged.
 - Escape cancels the current pointer or angle edit. Undo and Redo operate on
   completed edits; each drag or host angle edit creates one history entry.
 - Scroll to zoom. Reset view restores the full image.
@@ -59,8 +66,8 @@ node tools/oriented-box-editing-eval.mjs
 The script accepts the example URL and Chrome debug URL as optional positional
 arguments. It writes browser evidence to the ignored `artifacts/` directory.
 
-The browser harness retains the original seven pointer scenarios and adds four
-host-policy scenarios. It imports the built editing entrypoint for expected
-handle geometry and exercises the example's actual canvas, native double-click
+The browser harness imports the built editing entrypoint for expected handle
+geometry and exercises the example's actual canvas, single-click front choices
+in both tools, crossing resize, creation direction, heading-policy changes
 and focused form controls. It does not claim keyboard access to individual
 canvas resize handles.
