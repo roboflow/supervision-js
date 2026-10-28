@@ -68,6 +68,7 @@ type PixiInteractionPointerEvent = {
   readonly shiftKey?: boolean;
   readonly pointerId?: number;
   readonly button?: number;
+  readonly buttons?: number;
   readonly detail?: number;
   readonly timeStamp?: number;
 };
@@ -107,7 +108,7 @@ export interface PixiInteractionLayer {
   getState(): PixiInteractionLayerState;
   cycleSelection(direction?: 1 | -1): DetectionPickResult | null;
   pointerCancel(pointerId: number): void;
-  pointerCaptureLost(pointerId: number): void;
+  pointerCaptureLost(pointerId: number, buttons?: number): void;
   pointerUpFallback(pointerId: number): void;
   destroy(): void;
 }
@@ -157,6 +158,7 @@ export function createPixiInteractionLayer(options: {
     kind: "editing" | "marquee";
     input: AnnotationPointerInput;
   } | null = null;
+  let captureReleased = false;
   let activeFrame: DetectionFrame | undefined;
   let isDestroyed = false;
   const unsubscribeEditing = options.editingEngine?.subscribe((state) => {
@@ -281,9 +283,20 @@ export function createPixiInteractionLayer(options: {
     },
 
     pointerCancel,
-    pointerCaptureLost(pointerId) {
-      if (defaultPress && !handledPresses.has(pointerId))
+    pointerCaptureLost(pointerId, buttons = 1) {
+      if (
+        !defaultPress ||
+        !samePointer(defaultPress.input, { pointerId }) ||
+        handledPresses.has(pointerId)
+      )
+        return;
+      if (buttons === 0) {
+        // Chrome may deliver pointerup in a later task. Keep the release pending
+        // rather than racing it with a timer that rolls the edit back.
+        captureReleased = true;
+      } else {
         pointerCancel(pointerId);
+      }
     },
     pointerUpFallback: deferPressRetirement,
     destroy() {
@@ -299,6 +312,7 @@ export function createPixiInteractionLayer(options: {
 
   function handlePointerMove(event: PixiInteractionPointerEvent) {
     if (isOtherPressPointer(event)) return;
+    if (retireReleasedPress(event)) return;
     if (!canHandleInteraction()) {
       setHoveredPick(null);
       return;
@@ -326,6 +340,7 @@ export function createPixiInteractionLayer(options: {
 
   function handleGlobalPointerMove(event: PixiInteractionPointerEvent) {
     if (isOtherPressPointer(event)) return;
+    if (retireReleasedPress(event)) return;
     if (defaultPress?.kind === "marquee") {
       if (!canHandleInteraction() || !marqueeStart) return;
       pointerPoint = getPoint(event);
@@ -394,6 +409,7 @@ export function createPixiInteractionLayer(options: {
   }
 
   function handlePointerDown(event: PixiInteractionPointerEvent) {
+    if (captureReleased) pointerCancel(defaultPress?.input.pointerId);
     handledPresses.delete(event.pointerId);
     if (
       !canHandleInteraction() ||
@@ -499,6 +515,7 @@ export function createPixiInteractionLayer(options: {
     if (isOtherPressPointer(event) || isOtherEditingPointer(event)) return;
     const press = defaultPress;
     defaultPress = null;
+    captureReleased = false;
     const completedRect = press?.kind === "marquee" ? marqueeRect : null;
     if (press?.kind === "marquee") {
       marqueeStart = null;
@@ -577,11 +594,24 @@ export function createPixiInteractionLayer(options: {
     }, 0);
   }
 
+  function retireReleasedPress(event: PixiInteractionPointerEvent): boolean {
+    if (
+      !captureReleased ||
+      event.buttons !== 0 ||
+      !defaultPress ||
+      !samePointer(defaultPress.input, event)
+    )
+      return false;
+    pointerCancel(event.pointerId);
+    return true;
+  }
+
   function pointerCancel(pointerId?: number) {
     handledPresses.delete(pointerId);
     const press = defaultPress;
     if (press && !samePointer(press.input, { pointerId })) return;
     if (press) defaultPress = null;
+    captureReleased = false;
     const tap = suppressedTap;
     if (press && tap && samePointer(tap, { pointerId })) suppressedTap = null;
     if (press?.kind === "marquee") {
@@ -625,6 +655,7 @@ export function createPixiInteractionLayer(options: {
   function retirePress(press: NonNullable<typeof defaultPress>) {
     if (defaultPress !== press) return;
     defaultPress = null;
+    captureReleased = false;
     releasePress(press);
   }
 

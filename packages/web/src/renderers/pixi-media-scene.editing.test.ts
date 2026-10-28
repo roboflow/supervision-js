@@ -280,7 +280,7 @@ describe("editing gestures in the Pixi media scene", () => {
     },
   );
 
-  it("commits when released capture is lost before pointerup", async () => {
+  it("commits when pointerup arrives in a later task after released capture", async () => {
     resetMocks();
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });
@@ -298,7 +298,8 @@ describe("editing gestures in the Pixi media scene", () => {
     sendInteractionPointer("globalpointermove", 7, { x: 60, y: 80 });
     lost({ pointerId: 7, buttons: 0 } as PointerEvent);
     expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 7));
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
     sendInteractionPointer("pointerup", 7, { x: 60, y: 80 });
     expect(onCommit).toHaveBeenCalledExactlyOnceWith(
       { rect: { x: 35, y: 50, width: 50, height: 60 } },
@@ -308,7 +309,7 @@ describe("editing gestures in the Pixi media scene", () => {
   });
 
   it.each(["creating", "moving"])(
-    "retires an abandoned %s gesture when released capture is lost without pointerup",
+    "replaces an abandoned %s gesture on the next press after released capture",
     async (kind) => {
       resetMocks();
       const onCommit = vi.fn();
@@ -336,7 +337,7 @@ describe("editing gestures in the Pixi media scene", () => {
       lost({ pointerId: 7, buttons: 0 } as PointerEvent);
       expect(engine.getState().kind).toBe(kind);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(engine.getState().kind).toBe(kind);
       expect(onCommit).not.toHaveBeenCalled();
       sendInteractionPointer("pointerdown", 8, { x: 100, y: 90 });
       sendInteractionPointer("globalpointermove", 8, { x: 110, y: 100 });
