@@ -285,6 +285,40 @@ describe("pixi interaction layer", () => {
     expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
   });
 
+  it("keeps a released drag selected when pointerup arrives in a later task outside its old box", async () => {
+    const h = createPressHarness(() => "continue");
+    h.send("pointerdown", 40, 40, { pointerId: 7 });
+    h.send("pointermove", 180, 140, { pointerId: 7 });
+    h.layer.pointerCaptureLost(7, 0);
+    await new Promise<void>((resolve) => setTimeout(resolve, 7));
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Moving);
+    h.send("pointerup", 200, 160, { pointerId: 7 });
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { id: "a", rect: { x: 200, y: 160, width: 40, height: 40 } },
+      expect.objectContaining({ id: "a" }),
+    );
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
+  });
+
+  it.each([7, 8])(
+    "accepts pointer %s after released capture without pointerup",
+    async (pointerId) => {
+      const h = createPressHarness(() => "continue");
+      h.send("pointerdown", 40, 40, { pointerId: 7 });
+      h.send("pointermove", 210, 180, { pointerId: 7 });
+      h.layer.pointerCaptureLost(7, 0);
+      await new Promise<void>((resolve) => setTimeout(resolve, 7));
+      h.send("pointerdown", 40, 40, { pointerId });
+      h.send("pointermove", 60, 60, { pointerId });
+      h.send("pointerup", 60, 60, { pointerId });
+      expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+        { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+        expect.objectContaining({ id: "a" }),
+      );
+      expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
+    },
+  );
+
   it("retires a consumed native up without cancelling a fresh same-id press", async () => {
     const h = createDefaultPressHarness();
     h.engine.setCreationTool({
