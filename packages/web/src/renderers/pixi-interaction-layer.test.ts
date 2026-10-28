@@ -319,6 +319,42 @@ describe("pixi interaction layer", () => {
     },
   );
 
+  it.each([
+    { kind: "editing", x: 100, y: 100 },
+    { kind: "editing", x: 300, y: 250 },
+    { kind: "marquee", x: 100, y: 100 },
+    { kind: "marquee", x: 300, y: 250 },
+  ])(
+    "retires a released $kind before a buttonless move to ($x, $y)",
+    ({ kind, x, y }) => {
+      const h = createPressHarness(() => "continue");
+      h.send(
+        "pointerdown",
+        kind === "editing" ? 40 : 230,
+        kind === "editing" ? 40 : 190,
+        { pointerId: 7 },
+      );
+      h.send("pointermove", 180, 140, { pointerId: 7 });
+      h.layer.pointerCaptureLost(7, 0);
+      const preview = h.engine.getState().preview;
+      const marquee = h.layer.getState().marqueeRect;
+      h.send("pointermove", x, y, { pointerId: 8, buttons: 0 });
+      expect(h.engine.getState().preview).toEqual(preview);
+      expect(h.layer.getState().marqueeRect).toEqual(marquee);
+      h.send("pointermove", x, y, { pointerId: 7, buttons: 0 });
+      expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(h.layer.getState().marqueeRect).toBeNull();
+      expect(h.onCommit).not.toHaveBeenCalled();
+      h.send("pointerdown", 40, 40, { pointerId: 8 });
+      h.send("pointermove", 60, 60, { pointerId: 8 });
+      h.send("pointerup", 60, 60, { pointerId: 8 });
+      expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+        { id: "a", rect: { x: 60, y: 60, width: 40, height: 40 } },
+        expect.objectContaining({ id: "a" }),
+      );
+    },
+  );
+
   it("retires a consumed native up without cancelling a fresh same-id press", async () => {
     const h = createDefaultPressHarness();
     h.engine.setCreationTool({
@@ -2892,6 +2928,7 @@ function createPressHarness(
       options: {
         pointerId?: number;
         button?: number;
+        buttons?: number;
         shiftKey?: boolean;
         altKey?: boolean;
         ctrlKey?: boolean;
@@ -2903,6 +2940,7 @@ function createPressHarness(
       event.pointerType = "mouse";
       event.pointerId = options.pointerId ?? 7;
       event.button = options.button ?? 0;
+      event.buttons = options.buttons ?? (type === "pointerup" ? 0 : 1);
       event.shiftKey = options.shiftKey ?? false;
       event.altKey = options.altKey ?? false;
       event.ctrlKey = options.ctrlKey ?? false;

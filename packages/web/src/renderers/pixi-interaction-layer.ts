@@ -68,6 +68,7 @@ type PixiInteractionPointerEvent = {
   readonly shiftKey?: boolean;
   readonly pointerId?: number;
   readonly button?: number;
+  readonly buttons?: number;
   readonly detail?: number;
   readonly timeStamp?: number;
 };
@@ -289,6 +290,7 @@ export function createPixiInteractionLayer(options: {
 
   function handlePointerMove(event: PixiInteractionPointerEvent) {
     if (isOtherPressPointer(event)) return;
+    if (retireReleasedPress(event)) return;
     if (!canHandleInteraction()) {
       setHoveredPick(null);
       return;
@@ -316,6 +318,7 @@ export function createPixiInteractionLayer(options: {
 
   function handleGlobalPointerMove(event: PixiInteractionPointerEvent) {
     if (isOtherPressPointer(event)) return;
+    if (retireReleasedPress(event)) return;
     if (defaultPress?.kind === "marquee") {
       if (!canHandleInteraction() || !marqueeStart) return;
       pointerPoint = getPoint(event);
@@ -569,6 +572,18 @@ export function createPixiInteractionLayer(options: {
       )
         pointerCancel(pointerId);
     }, 0);
+  }
+
+  function retireReleasedPress(event: PixiInteractionPointerEvent): boolean {
+    if (
+      !captureReleased ||
+      event.buttons !== 0 ||
+      !defaultPress ||
+      !samePointer(defaultPress.input, event)
+    )
+      return false;
+    pointerCancel(event.pointerId);
+    return true;
   }
 
   function pointerCancel(pointerId?: number) {
