@@ -288,7 +288,7 @@ export function createPixiVectorLayer(options: {
     const { keypoints, polygon, polyline, shapes } = detection;
 
     for (const shape of shapes ?? []) {
-      drawShapeInstruction(graphics, shape, viewportScale);
+      drawPixiShapeInstruction(graphics, shape, viewportScale);
     }
 
     if (polygon) {
@@ -387,7 +387,7 @@ export function drawPixiKeypointInstruction(
   }
 }
 
-function drawShapeInstruction(
+export function drawPixiShapeInstruction(
   graphics: PixiGraphics,
   instruction: ShapeDrawInstruction,
   viewportScale: number,

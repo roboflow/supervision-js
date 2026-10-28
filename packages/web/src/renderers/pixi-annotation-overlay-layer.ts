@@ -20,6 +20,7 @@ import {
   type Point,
   type PreviewOverlayData,
   type Rect,
+  type ShapeStyle,
 } from "supervision-js-core";
 import type { Graphics as PixiGraphics } from "pixi.js";
 import {
@@ -27,7 +28,10 @@ import {
   resolvePixiStroke,
   resolveScreenLength,
 } from "./pixi-path";
-import { drawPixiKeypointInstruction } from "./pixi-vector-layer";
+import {
+  drawPixiKeypointInstruction,
+  drawPixiShapeInstruction,
+} from "./pixi-vector-layer";
 
 export interface PixiAnnotationHandleBounds {
   readonly left: number;
@@ -40,6 +44,7 @@ export interface PixiAnnotationOverlayLayer {
   attachGraphics(graphics: PixiGraphics): void;
   setStyle(style: AnnotationOverlayStyle | null | undefined): void;
   setKeypointStyle(style: KeypointStyle | null | undefined): void;
+  setShapeStyle(style: ShapeStyle | null | undefined): void;
   getRenderedEditingBox(): PixiRenderedEditingBox | undefined;
   draw(context: {
     frame: DetectionFrame | undefined;
@@ -64,6 +69,7 @@ export function createPixiAnnotationOverlayLayer(
   editingEngine?: AnnotationEditingEngine,
   initialStyle?: AnnotationOverlayStyle | null,
   initialKeypointStyle?: KeypointStyle | null,
+  initialShapeStyle?: ShapeStyle | null,
 ): PixiAnnotationOverlayLayer {
   let graphics: PixiGraphics | undefined;
   let renderedEditingBox: PixiRenderedEditingBox | undefined;
@@ -72,6 +78,7 @@ export function createPixiAnnotationOverlayLayer(
     initialKeypointStyle === undefined
       ? new BaseKeypointStyle()
       : initialKeypointStyle;
+  let shapeStyle = initialShapeStyle ?? null;
 
   return {
     attachGraphics(next) {
@@ -82,6 +89,9 @@ export function createPixiAnnotationOverlayLayer(
     },
     setKeypointStyle(next) {
       if (next !== undefined) keypointStyle = next;
+    },
+    setShapeStyle(next) {
+      if (next !== undefined) shapeStyle = next;
     },
     getRenderedEditingBox() {
       return renderedEditingBox;
@@ -99,10 +109,10 @@ export function createPixiAnnotationOverlayLayer(
       renderedEditingBox = drawEditingPreview(
         graphics,
         editingEngine,
-        context.frame,
-        context.viewportScale,
+        context,
         style,
         keypointStyle,
+        shapeStyle,
       );
       const handleBounds = drawSelectionHandles(
         graphics,
@@ -121,14 +131,61 @@ export function createPixiAnnotationOverlayLayer(
 function drawEditingPreview(
   graphics: PixiGraphics,
   engine: AnnotationEditingEngine | undefined,
-  frame: DetectionFrame | undefined,
-  viewportScale: number,
+  context: Parameters<PixiAnnotationOverlayLayer["draw"]>[0],
   style: ResolvedAnnotationOverlayStyle,
   keypointStyle: KeypointStyle | null,
+  shapeStyle: ShapeStyle | null,
 ): PixiRenderedEditingBox | undefined {
   const state = engine?.getState();
   const detection = state?.preview;
   if (!detection) return;
+  const { frame, viewportScale } = context;
+  const sourceIndex =
+    state.activeDetectionId === null
+      ? -1
+      : (frame?.detections.findIndex(
+          ({ id }) => id === state.activeDetectionId,
+        ) ?? -1);
+  const detectionIndex =
+    sourceIndex < 0 ? (frame?.detections.length ?? 0) : sourceIndex;
+  const previewFrame: DetectionFrame = {
+    ...frame,
+    detections:
+      sourceIndex < 0
+        ? [...(frame?.detections ?? []), detection]
+        : frame!.detections.map((source, index) =>
+            index === sourceIndex ? detection : source,
+          ),
+    mediaTime: frame?.mediaTime ?? 0,
+  };
+  const previewVisibility = resolveAnnotationStyleState(
+    detection,
+    context.visibility,
+  );
+  const previewContext: AnnotationStyleContext = {
+    detectionIndex,
+    frame: previewFrame,
+    mediaTime: previewFrame.mediaTime,
+    selected: true,
+    viewportScale,
+    ...previewVisibility,
+    isCreating:
+      state.kind === AnnotationGestureStateKind.Creating ||
+      previewVisibility.isCreating,
+  };
+  if (previewContext.hidden) return;
+  // Mask previews retain their source layers (the brush owns their pixels),
+  // so their decorations must stay there rather than be drawn a second time.
+  const replacesSource =
+    !detection.mask &&
+    state.activeDetectionId !== null &&
+    (state.kind === AnnotationGestureStateKind.Moving ||
+      state.kind === AnnotationGestureStateKind.Resizing ||
+      state.kind === AnnotationGestureStateKind.Rotating);
+  const shapes =
+    state.kind === AnnotationGestureStateKind.Creating || replacesSource
+      ? shapeStyle?.resolve(detection, previewContext)
+      : undefined;
   let renderedBox: PixiRenderedEditingBox | undefined;
   const styleContext: AnnotationEditingPreviewStyleContext = {
     gestureKind: state.kind,
@@ -194,6 +251,8 @@ function drawEditingPreview(
       renderedBox = { detection, rect: detection.rect };
     }
   }
+  for (const instruction of shapes ?? [])
+    drawPixiShapeInstruction(graphics, instruction, viewportScale);
   if (detection.polygon) {
     if (state.kind === AnnotationGestureStateKind.Creating) {
       drawCreatingPolygon(
@@ -244,18 +303,7 @@ function drawEditingPreview(
       viewportScale,
     );
   if (detection.keypoints && keypointStyle) {
-    const previewFrame: DetectionFrame = {
-      detections: [detection],
-      frameIndex: frame?.frameIndex,
-      mediaTime: frame?.mediaTime ?? 0,
-    };
-    const instruction = keypointStyle.resolve(detection, {
-      detectionIndex: 0,
-      frame: previewFrame,
-      mediaTime: previewFrame.mediaTime,
-      selected: true,
-      viewportScale,
-    });
+    const instruction = keypointStyle.resolve(detection, previewContext);
     if (instruction)
       drawPixiKeypointInstruction(graphics, instruction, viewportScale);
   }

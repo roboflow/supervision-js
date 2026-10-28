@@ -4,17 +4,22 @@ import {
   AnnotationGestureStateKind,
   AnnotationGeometryKind,
   BaseBoxStyle,
+  BaseBoxCornerStyle,
   BaseKeypointStyle,
+  BaseMarkerStyle,
   BaseOrientedBoxStyle,
+  BasePercentageBarStyle,
   BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
   createAnnotationEditingEngine,
   createOrientedBoxGeometry,
   getOrientedRectangleGeometry,
+  MarkerSizeSpace,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
+  type EllipseStyle,
   type Point,
   type Rect,
 } from "supervision-js-core";
@@ -628,6 +633,9 @@ describe("editing gestures in the Pixi media scene", () => {
         shape: BoxShape.Rect,
         stroke: { alpha: 1, color: 0x00ff66, width: 2 },
       }),
+      markerStyle: new BaseMarkerStyle({
+        fill: { alpha: 1, color: 0x123456 },
+      }),
       detectionFrames: [{ detections: [SUBJECT], frameIndex: 0, mediaTime: 0 }],
       editingEngine: editing.engine,
     });
@@ -653,9 +661,227 @@ describe("editing gestures in the Pixi media scene", () => {
       },
     });
     expect(box!.visible).toBe(true);
+    flushPixiTicker(0);
+    const markerDisplays = pixiMock.graphicsInstances.filter((graphics) =>
+      graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+    );
+    expect(markerDisplays).toHaveLength(1);
+    expect(markerDisplays[0]!.visible).toBe(true);
 
     renderer.destroy();
   });
+
+  it.each([
+    ["box", SUBJECT],
+    ["OBB and rect", OBB_SUBJECT],
+    [
+      "skeleton",
+      {
+        ...SUBJECT,
+        keypoints: {
+          points: [
+            { x: 100, y: 90 },
+            { x: 110, y: 90 },
+          ],
+          edges: [[0, 1]],
+        },
+      },
+    ],
+  ] satisfies [string, Detection][])(
+    "keeps composed decorations on a live %s preview without drawing the OBB twice",
+    async (_label, subject) => {
+      resetMocks();
+      const editing = createEditingEngineHarness();
+      const markerStyle = new BaseMarkerStyle({
+        fill: { alpha: 1, color: 0x123456 },
+        size: 10,
+        sizeSpace: MarkerSizeSpace.Media,
+        stroke: null,
+      });
+      const ellipseStyle: EllipseStyle = {
+        resolve: (detection, context) =>
+          detection.rect && !context.hidden
+            ? {
+                center: detection.rect,
+                radiusX: 4,
+                radiusY: 3,
+                fill: { alpha: 1, color: 0x234567 },
+              }
+            : undefined,
+      };
+      const renderer = await createRenderer(false, false, {
+        detectionFrames: [
+          { detections: [subject], frameIndex: 0, mediaTime: 0 },
+        ],
+        editingEngine: editing.engine,
+        labelStyle: null,
+        markerStyle,
+        ellipseStyle,
+        boxCornerStyle: new BaseBoxCornerStyle({
+          stroke: { color: 0x56789a, width: 2 },
+        }),
+        percentageBarStyle: new BasePercentageBarStyle({
+          value: 0.5,
+          fill: { alpha: 1, color: 0x345678 },
+        }),
+        orientedBoxStyle: new BaseOrientedBoxStyle({
+          fill: { alpha: 1, color: 0x6789ab },
+        }),
+        keypointStyle: new BaseKeypointStyle({
+          markerFill: { alpha: 1, color: 0x789abc },
+        }),
+      });
+      await renderer.refresh();
+      const source = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+      );
+      expect(source).toBeDefined();
+      const preview: Detection = {
+        ...subject,
+        rect: { ...subject.rect!, x: 140, y: 60 },
+        ...(subject.orientedBox
+          ? {
+              orientedBox: createOrientedBoxGeometry(
+                { x: 140, y: 60, width: 40, height: 20 },
+                Math.PI / 4,
+              ),
+            }
+          : {}),
+      };
+      editing.emitState({
+        ...movingState(),
+        activeDetectionId: subject.id!,
+        preview,
+      });
+      flushPixiTicker(0);
+
+      expect(source!.visible).toBe(false);
+      const overlay = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.circle.mock.calls.some(
+          ([x, y, radius]) => x === 140 && y === 60 && radius === 5,
+        ),
+      );
+      expect(overlay).toBeDefined();
+      for (const color of [0x123456, 0x234567, 0x345678]) {
+        expect(overlay!.fill).toHaveBeenCalledWith(
+          expect.objectContaining({ color }),
+        );
+      }
+      expect(overlay!.stroke).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x56789a }),
+      );
+      expect(overlay!.fill).not.toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x6789ab }),
+      );
+      if (subject.keypoints) {
+        expect(overlay!.fill).toHaveBeenCalledWith(
+          expect.objectContaining({ color: 0x789abc }),
+        );
+      }
+      if (preview.orientedBox) {
+        expect(overlay!.poly).toHaveBeenCalledWith(
+          preview.orientedBox.points.flatMap(({ x, y }) => [x, y]),
+          true,
+        );
+      }
+
+      overlay!.fill.mockClear();
+      renderer.setPresentation({ markerStyle: null });
+      flushPixiTicker(1);
+      expect(overlay!.fill).not.toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x123456 }),
+      );
+      expect(overlay!.fill).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x234567 }),
+      );
+      renderer.setPresentation({
+        markerStyle: new BaseMarkerStyle({
+          fill: { alpha: 1, color: 0xabcdef },
+          stroke: null,
+        }),
+      });
+      flushPixiTicker(2);
+      expect(overlay!.fill).toHaveBeenCalledWith({ alpha: 1, color: 0xabcdef });
+
+      overlay!.fill.mockClear();
+      editing.emitState(idleState());
+      flushPixiTicker(3);
+      expect(source!.visible).toBe(true);
+      expect(overlay!.fill).not.toHaveBeenCalled();
+      renderer.destroy();
+    },
+  );
+
+  it.each(["commit", "cancel"] as const)(
+    "removes the rotating marker preview and restores its source after %s",
+    async (finish) => {
+      resetMocks();
+      const subject: Detection = {
+        className: OBB_SUBJECT.className,
+        id: OBB_SUBJECT.id,
+        orientedBox: OBB_SUBJECT.orientedBox,
+      };
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const renderer = await createRenderer(false, false, {
+        detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+        editingEngine: engine,
+        markerStyle: new BaseMarkerStyle({
+          center: (detection) => detection.orientedBox?.points[0],
+          fill: { alpha: 1, color: 0x123456 },
+          size: 10,
+          sizeSpace: MarkerSizeSpace.Media,
+          stroke: null,
+        }),
+      });
+      await renderer.refresh();
+      const source = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+      )!;
+      const handle = engine
+        .getHandles(subject)
+        .find(({ id }) => id === "obb-rotate")!;
+      engine.beginHandleDrag(subject, handle, {
+        point: handle.point,
+        pointerId: 7,
+        timestamp: 0,
+      });
+      const input = { point: { x: 160, y: 100 }, pointerId: 7, timestamp: 100 };
+      engine.pointerMove(input);
+      flushPixiTicker(0);
+      const corner = engine.getState().preview!.orientedBox!.points[0];
+      expect(corner).not.toEqual(subject.orientedBox!.points[0]);
+      const overlay = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.circle.mock.calls.some(
+          ([x, y, radius]) => x === corner.x && y === corner.y && radius === 5,
+        ),
+      )!;
+      expect(overlay).toBeDefined();
+      expect(source.visible).toBe(false);
+
+      overlay.fill.mockClear();
+      renderer.setPresentation({
+        visibility: { hiddenDetectionIds: [subject.id!] },
+      });
+      flushPixiTicker(1);
+      expect(overlay.fill).not.toHaveBeenCalled();
+      renderer.setPresentation({ visibility: {} });
+      flushPixiTicker(2);
+      expect(overlay.fill).toHaveBeenCalledWith({ alpha: 1, color: 0x123456 });
+
+      overlay.circle.mockClear();
+      overlay.fill.mockClear();
+      if (finish === "commit") engine.pointerUp(input);
+      else engine.cancel();
+      flushPixiTicker(3);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onCommit).toHaveBeenCalledTimes(finish === "commit" ? 1 : 0);
+      expect(source.visible).toBe(true);
+      expect(overlay.circle).not.toHaveBeenCalled();
+      expect(overlay.fill).not.toHaveBeenCalled();
+      renderer.destroy();
+    },
+  );
 
   it("keeps an oriented box visible as a rotated quadrilateral while dragging, then restores normal rendering when the gesture ends", async () => {
     resetMocks();

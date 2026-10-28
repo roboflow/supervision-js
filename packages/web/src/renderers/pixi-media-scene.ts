@@ -576,6 +576,9 @@ export async function createPixiMediaScene(
     options.editingEngine,
     options.annotationOverlayStyle,
     options.keypointStyle,
+    // Editable OBB geometry uses AnnotationOverlayStyle; its decorations
+    // reuse the configured shape renderers against the live detection.
+    resolveVectorShapeStyle(null),
   );
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
   let maskLayer = initialMaskPreparationStyle
@@ -1837,6 +1840,7 @@ export async function createPixiMediaScene(
           currentPercentageBarStyle = presentation.percentageBarStyle;
         }
         vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
+        annotationOverlayLayer.setShapeStyle(resolveVectorShapeStyle(null));
       }
 
       currentRegionRenderers =
@@ -2476,12 +2480,14 @@ export async function createPixiMediaScene(
    * box-corner, and oriented-box renderer kinds all lower to shape
    * instructions, so they are composed onto whatever style the caller passed.
    */
-  function resolveVectorShapeStyle(): ShapeStyle | null {
+  function resolveVectorShapeStyle(
+    orientedBoxStyle: OrientedBoxStyle | null = currentOrientedBoxStyle,
+  ): ShapeStyle | null {
     const kindShapeStyle = resolveAnnotationShapeStyle({
       boxCornerStyle: currentBoxCornerStyle,
       ellipseStyle: currentEllipseStyle,
       markerStyle: currentMarkerStyle,
-      orientedBoxStyle: currentOrientedBoxStyle,
+      orientedBoxStyle,
       percentageBarStyle: currentPercentageBarStyle,
     });
     const baseShapeStyle = options.shapeStyle ?? null;

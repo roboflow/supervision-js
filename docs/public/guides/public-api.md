@@ -379,6 +379,13 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
 
+Configured marker, ellipse, box-corner, and percentage-bar styles also render
+against the live editing preview, so their decorations follow creation, move,
+resize, and rotation gestures. Their style context preserves the detection's
+frame position and visibility; `isCreating` identifies a creation preview.
+`AnnotationOverlayStyle` controls the editable geometry and handles, including
+the oriented-box outline and fill.
+
 With an editing engine, retained boxes, polygons, polylines, keypoints, and
 shape decorations share detection order: higher `Detection.zIndex` is in front;
 missing values use the detection's frame index, and equal values follow frame

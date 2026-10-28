@@ -49,3 +49,8 @@ session.setPresentation({
 use `MarkerSizeSpace.Media` for media-relative geometry. The marker style
 accepts the same renderer-neutral fill, stroke, rotation, and resolver patterns
 as the rest of the presentation API.
+
+During creation, move, resize, or rotation, the same marker style resolves
+against the live preview detection. Its geometry and class styling follow the
+gesture without a separate host preview. `context.isCreating` distinguishes a
+creation preview when it needs a different treatment from committed annotations.
