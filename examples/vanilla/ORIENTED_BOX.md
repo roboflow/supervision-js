@@ -19,7 +19,9 @@ one committed detection per edit.
   cancels the preview. Canvas handles themselves are not keyboard focus targets.
 - **Heading (demo convention)** treats local +x as the front, shows a small
   triangle inside that edge, and positions the rotation control outside it.
-  Double-click an edge away from its resize handles to choose another front.
+  Double-click an edge or its midpoint handle to choose another front.
+  Dragging that same midpoint handle still resizes; corner and rotation handles
+  keep their normal behavior.
   **Next front** and **Reverse front** provide button alternatives. Choosing a
   front reindexes the existing corners, preserving the footprint and resize
   handle positions; it is one undoable edit. Turning heading off restores the

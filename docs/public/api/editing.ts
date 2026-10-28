@@ -70,6 +70,7 @@ export {
   type DetectionId,
   type DetectionMaskCompressionCodec,
   type BuiltInAnnotationEditingEngine,
+  type ConfiguredAnnotationEditingEngine,
   type DraftUndoAnnotationEditingEngine,
   type EditableAnnotationFrameSession,
   type EditableDetection,

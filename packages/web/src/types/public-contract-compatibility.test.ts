@@ -6,6 +6,7 @@ import {
   createAnnotationEditingEngine,
   type DraftUndoAnnotationEditingEngine,
   type BuiltInAnnotationEditingEngine,
+  type ConfiguredAnnotationEditingEngine,
   type AnnotationEditingEngine,
 } from "../editing";
 
@@ -49,13 +50,31 @@ const legacyEditingEngineStaysAssignable: (
   engine: LegacyEditingEngine,
 ) => AnnotationEditingEngine = (engine) => engine;
 
+/** The published built-in shape before configured handle and modifier capabilities. */
+type LegacyBuiltInEditingEngine = Omit<
+  BuiltInAnnotationEditingEngine,
+  "getHandles" | "setModifiers"
+>;
+const legacyBuiltInEditingEngineStaysAssignable: (
+  engine: LegacyBuiltInEditingEngine,
+) => BuiltInAnnotationEditingEngine = (engine) => engine;
+
+/** Factory results guarantee both capabilities without narrowing at the call site. */
+const factoryGuaranteesEditingConfiguration: (
+  engine: ReturnType<typeof createAnnotationEditingEngine>,
+) => Required<Pick<AnnotationEditingEngine, "getHandles" | "setModifiers">> = (
+  engine,
+) => engine;
+
 describe("browser public contract compatibility", () => {
   it("keeps engines without handle and modifier capabilities assignable", () => {
     expect(typeof legacyEditingEngineStaysAssignable).toBe("function");
-    const builtIn: BuiltInAnnotationEditingEngine =
+    expect(typeof legacyBuiltInEditingEngineStaysAssignable).toBe("function");
+    expect(typeof factoryGuaranteesEditingConfiguration).toBe("function");
+    const configured: ConfiguredAnnotationEditingEngine =
       createAnnotationEditingEngine();
-    expect(builtIn.getHandles({})).toEqual([]);
-    builtIn.setModifiers({ shiftKey: true });
+    expect(configured.getHandles({})).toEqual([]);
+    configured.setModifiers({ shiftKey: true });
   });
   it("exposes the built-in draft Undo capability through the editing entrypoint", () => {
     const engine: DraftUndoAnnotationEditingEngine =

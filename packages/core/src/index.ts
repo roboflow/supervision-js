@@ -307,6 +307,7 @@ export {
   type AnnotationOverlayStyle,
   type AnnotationPointerInput,
   type BuiltInAnnotationEditingEngine,
+  type ConfiguredAnnotationEditingEngine,
   type DraftUndoAnnotationEditingEngine,
   type PreviewOverlayData,
   type PreviewOverlayPoint,

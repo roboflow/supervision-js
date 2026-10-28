@@ -62,6 +62,7 @@ export type {
   AnnotationPointerInput,
   OrientedRectangleGeometry,
   BuiltInAnnotationEditingEngine,
+  ConfiguredAnnotationEditingEngine,
   DraftUndoAnnotationEditingEngine,
   DetectionId,
   EditableDetection,

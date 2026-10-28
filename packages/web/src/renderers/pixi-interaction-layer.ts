@@ -449,7 +449,7 @@ export function createPixiInteractionLayer(options: {
       if (
         options.interaction.multiSelect &&
         event.shiftKey &&
-        !handle &&
+        handle?.kind !== AnnotationHandleKind.Rotate &&
         pick &&
         !options.editingEngine.hasCreationTool() &&
         options.editingEngine.getState().kind ===

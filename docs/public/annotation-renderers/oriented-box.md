@@ -173,9 +173,11 @@ controls yourself. The scale is CSS pixels per media pixel; omit it to use the
 engine's `viewportScale` callback (or `1`). The pure helper remains backward
 compatible and accepts the same placement configuration as a third argument:
 `getAnnotationHandles(detection, viewportScale, { rotationHandle })`.
-`getHandles` and `setModifiers` are optional capabilities on custom
-`AnnotationEditingEngine` implementations and guaranteed by the built-in
-factory; adapters fall back to the default pure helper for older engines.
+`getHandles` and `setModifiers` remain optional on the published
+`AnnotationEditingEngine` and `BuiltInAnnotationEditingEngine` interfaces.
+The factory returns the narrower `ConfiguredAnnotationEditingEngine`, which
+guarantees both methods. Adapters fall back to the default pure helper for
+older engines.
 
 Run the self-contained [vanilla editing example](../../../examples/vanilla/oriented-box.html)
 with `npm run example:vanilla:dev` and open

@@ -9,6 +9,7 @@ import {
 } from "supervision";
 import {
   AnnotationGeometryKind,
+  AnnotationHandleKind,
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
   createOrientedBoxGeometry,
@@ -41,6 +42,7 @@ let session: MediaSession;
 let selectedId: string | number | undefined = "rectangle-0";
 let hostPreview: Detection | null = null;
 let keyboardCancelled = false;
+let rotationKeyHeld = false;
 type FrontPress = {
   readonly detection: Detection;
   readonly edge: number;
@@ -147,6 +149,7 @@ function finishHostPreview(cancel = false) {
   hostPreview = null;
   if (cancel) void render();
   else commit(preview, selected() ?? null);
+  status.textContent = engine.getState().kind;
   updateControls(true);
 }
 function previewAngle(value: number) {
@@ -298,10 +301,25 @@ async function start() {
       interaction: {
         onPointerPress({ input, pick, selectedHandle }) {
           frontPress = completedFrontPress = null;
-          if (!plainPrimary(input) || selectedHandle) return "continue";
+          if (!plainPrimary(input)) return "continue";
           const edge = frontEdge(input.point);
           if (!edge || (pick && pick.detection.id !== edge.detection.id))
             return "continue";
+          if (selectedHandle) {
+            const points = edge.detection.orientedBox!.points;
+            const from = points[edge.edge]!;
+            const to = points[(edge.edge + 1) % 4]!;
+            const handle = selectedHandle.handle;
+            if (
+              handle.kind !== AnnotationHandleKind.Resize ||
+              selectedHandle.pick.detection.id !== edge.detection.id ||
+              Math.hypot(
+                handle.point.x - (from.x + to.x) / 2,
+                handle.point.y - (from.y + to.y) / 2,
+              ) > 1e-6
+            )
+              return "continue";
+          }
           frontPress = {
             ...edge,
             point: input.point,
@@ -309,7 +327,7 @@ async function start() {
             moved: false,
           };
           // Preserve the selected outline when the press falls just outside it.
-          return pick ? "continue" : "handled";
+          return selectedHandle || pick ? "continue" : "handled";
         },
         onSelect(pick) {
           selectedId = pick?.detection.id;
@@ -355,7 +373,13 @@ viewer.addEventListener("pointermove", (event) => {
 viewer.addEventListener("pointerup", (event) => {
   const press = frontPress;
   frontPress = null;
-  if (!press || press.moved || press.original !== detections) return;
+  if (
+    !press ||
+    press.moved ||
+    press.original !== detections ||
+    engine.getState().preview
+  )
+    return;
   const edge = frontEdge(mediaPoint(event));
   if (
     edge &&
@@ -446,11 +470,13 @@ angle.addEventListener("keydown", (event) => {
   }
 });
 rotateKeys.addEventListener("focus", () => {
+  rotationKeyHeld = false;
   keyboardCancelled = false;
 });
 rotateKeys.addEventListener("keydown", (event) => {
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
   event.preventDefault();
+  rotationKeyHeld = true;
   if (keyboardCancelled) return;
   const geometry = rectangle(hostPreview ?? selected());
   if (!geometry) return;
@@ -462,17 +488,20 @@ rotateKeys.addEventListener("keydown", (event) => {
 rotateKeys.addEventListener("keyup", (event) => {
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
   event.preventDefault();
+  rotationKeyHeld = false;
   keyboardCancelled = false;
   finishHostPreview();
 });
 rotateKeys.addEventListener("blur", () => {
+  rotationKeyHeld = false;
   keyboardCancelled = false;
   finishHostPreview();
 });
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     event.preventDefault();
-    keyboardCancelled = true;
+    keyboardCancelled = rotationKeyHeld;
+    frontPress = completedFrontPress = null;
     finishHostPreview(true);
     engine.cancel();
     updateControls(true);

@@ -109,6 +109,51 @@ describe("pixi interaction layer", () => {
     layer.destroy();
   });
 
+  it.each(["box", "keypoint"] as const)(
+    "keeps Shift selection toggling when a selected small %s body overlaps a handle",
+    (geometry) => {
+      const original = {
+        id: "small",
+        rect: { x: 50, y: 50, width: 10, height: 10 },
+        ...(geometry === "keypoint"
+          ? { keypoints: { points: [{ x: 50, y: 50 }], edges: [] } }
+          : {}),
+      };
+      const editingEngine = createAnnotationEditingEngine();
+      const beginHandleDrag = vi.spyOn(editingEngine, "beginHandleDrag");
+      const layer = createPixiInteractionLayer({
+        Container: FakeContainer as never,
+        Rectangle: FakeRectangle as never,
+        canInteract: () => true,
+        detectionTimeline: createTimeline({ ...frame, detections: [original] }),
+        editingEngine,
+        interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+      });
+      const display = layer.createDisplay({
+        width: 100,
+        height: 100,
+      }) as FakeContainer;
+      layer.drawFrame(frame.mediaTime);
+      layer.setSelectedDetection({ detectionId: original.id });
+      // A 10 CSS-pixel box center is inside its 16 CSS-pixel resize hit areas.
+      const press = createPointerEvent(display, 50, 50, {
+        button: 0,
+        shiftKey: true,
+        pointerId: 1,
+      });
+      display.emit("pointerdown", press);
+      expect(layer.getState().selectedPicks).toEqual([]);
+      display.emit("pointerup", press);
+      display.emit("pointertap", press);
+      expect(layer.getState().selectedPicks).toEqual([]);
+      expect(editingEngine.getState().kind).toBe(
+        AnnotationGestureStateKind.Idle,
+      );
+      expect(beginHandleDrag).not.toHaveBeenCalled();
+      layer.destroy();
+    },
+  );
+
   it("releases browser capture when the host interrupts the engine directly", () => {
     const h = createDefaultPressHarness();
     h.engine.setCreationTool({

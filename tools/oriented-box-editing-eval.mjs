@@ -308,12 +308,13 @@ try {
     x: center.x + vector.x * Math.cos(delta) - vector.y * Math.sin(delta),
     y: center.y + vector.x * Math.sin(delta) + vector.y * Math.cos(delta),
   };
-  const key = (type, name, modifiers = 0) =>
+  const key = (type, name, modifiers = 0, autoRepeat = false) =>
     cdp.send("Input.dispatchKeyEvent", {
       type,
       key: name,
       code: name,
       modifiers,
+      autoRepeat,
       windowsVirtualKeyCode: {
         Shift: 16,
         Escape: 27,
@@ -362,11 +363,39 @@ try {
     x: (originalPoints[0].x + originalPoints[1].x) / 2,
     y: (originalPoints[0].y + originalPoints[1].y) / 2,
   };
-  // A double-click on the midpoint handle retains resize ownership.
+  // Midpoint handles accept a completed double-click while normal drags resize.
   await mouse("mousePressed", screen(topMidpoint), 1);
   await mouse("mouseReleased", screen(topMidpoint));
   await mouse("mousePressed", screen(topMidpoint), 1, 2);
   await mouse("mouseReleased", screen(topMidpoint), 0, 2);
+  await pause();
+  const midpointFront = await read();
+  assert.notDeepEqual(midpointFront, hostBaseline);
+  assert.deepEqual(
+    footprint(midpointFront[0].orientedBox.points),
+    footprint(originalPoints),
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  await drag(
+    screen(topMidpoint),
+    screen({
+      x: topMidpoint.x + Math.sin(hostRectangle.rotation) * 20,
+      y: topMidpoint.y - Math.cos(hostRectangle.rotation) * 20,
+    }),
+  );
+  const midpointResize = getOrientedRectangleGeometry(
+    (await read())[0].orientedBox,
+  );
+  assert.ok(Math.abs(midpointResize.height - hostRectangle.height - 20) < 0.1);
+  assert.ok(Math.abs(midpointResize.rotation - hostRectangle.rotation) < 1e-8);
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  // A corner keeps its ordinary handle ownership on a double-click.
+  await mouse("mousePressed", screen(originalPoints[0]), 1);
+  await mouse("mouseReleased", screen(originalPoints[0]));
+  await mouse("mousePressed", screen(originalPoints[0]), 1, 2);
+  await mouse("mouseReleased", screen(originalPoints[0]), 0, 2);
   await pause();
   assert.deepEqual(await read(), hostBaseline);
   const topEdgePoint = {
@@ -430,7 +459,7 @@ try {
   await click("#undo");
   assert.deepEqual(await read(), hostBaseline);
   results.push(
-    "double-click edge miss band preserves selection; midpoint handle keeps resize ownership; front/reverse preserve footprint and resize handles with one-step undo",
+    "double-click midpoint chooses front once; same handle drag resizes; corners retain ownership; edge miss band and front/reverse preserve selection/footprint with single undo",
   );
 
   const enterAngle = async (value) => {
@@ -446,6 +475,11 @@ try {
   await key("keyDown", "Escape");
   await key("keyUp", "Escape");
   await pause();
+  assert.equal(
+    await cdp.evaluate('document.querySelector("#status").textContent'),
+    "idle",
+    "cancelled numeric preview must clear its preview status",
+  );
   assert.deepEqual(await read(), hostBaseline);
   assert.ok(
     Math.abs(
@@ -457,6 +491,11 @@ try {
   await key("keyUp", "Enter");
   await pause();
   const numeric = await read();
+  assert.equal(
+    await cdp.evaluate('document.querySelector("#status").textContent'),
+    "idle",
+    "committed numeric angle must clear the preview status",
+  );
   assert.ok(
     Math.abs(
       (getOrientedRectangleGeometry(numeric[0].orientedBox).rotation * 180) /
@@ -471,6 +510,22 @@ try {
   );
 
   await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
+  await key("keyDown", "Escape");
+  await key("keyUp", "Escape");
+  await key("keyDown", "ArrowRight");
+  await key("keyUp", "ArrowRight");
+  await pause();
+  assert.ok(
+    Math.abs(
+      getOrientedRectangleGeometry((await read())[0].orientedBox).rotation -
+        hostRectangle.rotation -
+        Math.PI / 180,
+    ) < 1e-8,
+    "idle Escape must not consume the next fresh arrow press",
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
+  await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
   await key("keyDown", "ArrowRight");
   await key("keyDown", "ArrowRight");
   await pause();
@@ -478,6 +533,11 @@ try {
   await key("keyUp", "ArrowRight");
   await pause();
   const keyboard = await read();
+  assert.equal(
+    await cdp.evaluate('document.querySelector("#status").textContent'),
+    "idle",
+    "committed keyboard angle must clear the preview status",
+  );
   assert.ok(
     Math.abs(
       getOrientedRectangleGeometry(keyboard[0].orientedBox).rotation -
@@ -503,11 +563,32 @@ try {
   await key("keyDown", "ArrowRight");
   await key("keyDown", "Escape");
   await key("keyUp", "Escape");
+  await key("keyDown", "ArrowRight", 0, true);
+  await pause();
+  assert.deepEqual(await read(), hostBaseline);
+  assert.ok(
+    Math.abs(
+      (await angleReadout()) - (hostRectangle.rotation * 180) / Math.PI,
+    ) < 0.01,
+    "a held repeat must not restart a cancelled preview before keyup",
+  );
   await key("keyUp", "ArrowRight");
   await pause();
   assert.deepEqual(await read(), hostBaseline);
+  await key("keyDown", "ArrowRight");
+  await key("keyUp", "ArrowRight");
+  await pause();
+  assert.ok(
+    Math.abs(
+      getOrientedRectangleGeometry((await read())[0].orientedBox).rotation -
+        hostRectangle.rotation -
+        Math.PI / 180,
+    ) < 1e-8,
+  );
+  await click("#undo");
+  assert.deepEqual(await read(), hostBaseline);
   results.push(
-    "focused keyboard rotation: repeated 1-degree preview commits once, Shift steps 15 degrees, Escape cancels",
+    "focused keyboard rotation: idle Escape preserves fresh arrow, held-repeat Escape stays cancelled until release, 1/15-degree edits undo once",
   );
   await mkdir(artifactDirectory, { recursive: true });
   const screenshot = await cdp.send("Page.captureScreenshot", {

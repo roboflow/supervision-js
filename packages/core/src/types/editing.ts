@@ -176,6 +176,10 @@ export interface DraftUndoAnnotationEditingEngine extends AnnotationEditingEngin
 
 export interface BuiltInAnnotationEditingEngine extends DraftUndoAnnotationEditingEngine {
   pointerCancel(pointerId?: number): void;
+}
+
+/** Factory engine with configured handle placement and live modifier updates. */
+export interface ConfiguredAnnotationEditingEngine extends BuiltInAnnotationEditingEngine {
   getHandles(
     detection: Detection,
     viewportScale?: number,

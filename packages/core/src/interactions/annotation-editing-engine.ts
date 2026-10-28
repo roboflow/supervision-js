@@ -7,7 +7,7 @@ import {
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
   type AnnotationPointerInput,
-  type BuiltInAnnotationEditingEngine,
+  type ConfiguredAnnotationEditingEngine,
 } from "#types/editing";
 import {
   createOrientedBoxGeometry,
@@ -63,7 +63,7 @@ type ActiveGesture =
 
 export function createAnnotationEditingEngine(
   options: AnnotationEditingEngineOptions = {},
-): BuiltInAnnotationEditingEngine {
+): ConfiguredAnnotationEditingEngine {
   let tool: AnnotationCreationTool | null = null;
   let gesture: ActiveGesture | null = null;
   let state: AnnotationEditingState = idleState();

@@ -453,9 +453,12 @@ committed history only when `engine.getState().kind` is
 first if needed. Escape, tool changes, and media changes still cancel through
 `engine.cancel()`; draft vertices never enter persisted history.
 
-`createAnnotationEditingEngine()` returns a `BuiltInAnnotationEditingEngine`
-that guarantees `undoCreation()` and `pointerCancel()`. Both methods are optional
-on the broader `AnnotationEditingEngine` interface; existing custom engines and
+`createAnnotationEditingEngine()` returns a `ConfiguredAnnotationEditingEngine`
+that guarantees `undoCreation()`, `pointerCancel()`, `getHandles()` and
+`setModifiers()`. It extends the published `BuiltInAnnotationEditingEngine`,
+which continues to guarantee draft Undo and contact cancellation; handle and
+modifier capabilities remain optional on that interface and the broader
+`AnnotationEditingEngine`. Existing custom engines and
 `DraftUndoAnnotationEditingEngine` implementations remain compatible.
 
 A native `pointercancel` or unexpected loss of pointer capture ends the active
@@ -511,8 +514,9 @@ The generated API reference has a separate Editing module for this entrypoint.
 Native oriented-rectangle creation, rotation and local-axis resize are available
 from `supervision/editing`. `resolveRotation` constrains each rotation candidate
 with the current pointer modifiers; `rotationHandle` configures its ordered edge
-and CSS-pixel offset. Built-in engines expose `getHandles()` and `setModifiers()`
-for direct-input hosts; both remain optional on custom engines. See [Oriented Box](../annotation-renderers/oriented-box.md)
+and CSS-pixel offset. Factory results expose `getHandles()` and `setModifiers()`
+for direct-input hosts; both remain optional on previously published engine
+interfaces. See [Oriented Box](../annotation-renderers/oriented-box.md)
 for ordered corner helpers, gesture semantics and a standalone example. General
 quadrilaterals remain renderable, pickable and movable.
 
