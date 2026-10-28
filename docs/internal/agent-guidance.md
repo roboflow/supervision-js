@@ -179,6 +179,7 @@ Run from the repository root:
 - `npm run package:tarball`
 - `npm run package:tarball:smoke`
 - `npm run package:publish:dry-run`
+- `npm run release:version -- <version | patch | minor>`
 
 `package:tarball` builds the core and browser packages and writes one portable
 `artifacts/supervision-<version>.tgz` with the internal core bundled inside.
@@ -186,8 +187,9 @@ Run from the repository root:
 the repository; it needs the registry and is not part of `npm run verify`. See
 [`tarball-packaging.md`](tarball-packaging.md).
 
-The manual npm workflow publishes that generated tarball after environment
-approval; it never publishes `packages/web` directly. See
+The npm workflow opens the release pull request for a requested version and
+publishes the generated tarball once that version reaches `main`; it never
+publishes `packages/web` directly. See
 [`npm-release.md`](npm-release.md) before running or modifying it.
 
 `eval:demo` measures the running demo over the Chrome DevTools Protocol:
