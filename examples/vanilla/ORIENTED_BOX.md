@@ -32,7 +32,8 @@ one committed detection per edit.
   handle positions; it is one undoable edit. Turning heading off removes front
   controls and the marker while retaining rotated geometry and all resize and
   rotation controls. The rotation control always sits 32 CSS pixels outside
-  the ordered local top edge; changing heading leaves its position unchanged.
+  the local +x front edge; changing heading leaves its position unchanged. The
+  stem starts 20 CSS pixels out from the edge to leave room for host decorations.
 - Escape cancels the current pointer or angle edit. Undo and Redo operate on
   completed edits; each drag or host angle edit creates one history entry.
 - Scroll to zoom. Reset view restores the full image.

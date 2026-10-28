@@ -222,7 +222,7 @@ function headingOverlay(): PreviewOverlayData | null {
 }
 const engine = createAnnotationEditingEngine({
   viewportScale: () => session?.renderer.getViewportTransform().scale ?? 1,
-  rotationHandle: { edgeIndex: 0, offset: 32 },
+  rotationHandle: { edgeIndex: 1, offset: 32, stemOffset: 20 },
   resolveRotation: (value, { input }) =>
     resolveAngle(value, Boolean(input.shiftKey)),
   onCommit: commit,

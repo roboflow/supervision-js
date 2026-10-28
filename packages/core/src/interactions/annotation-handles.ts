@@ -477,6 +477,12 @@ function getOrientedBoxHandles(
       "Rotation handle offset must be finite and nonnegative",
     );
   }
+  const stemOffset = (placement.stemOffset ?? 0) / scale;
+  if (!Number.isFinite(stemOffset) || stemOffset < 0 || stemOffset > offset) {
+    throw new RangeError(
+      "Rotation handle stem offset must be finite and between 0 and offset",
+    );
+  }
   const normals: readonly Point[] = [
     { x: 0, y: -1 },
     { x: 1, y: 0 },
@@ -488,7 +494,10 @@ function getOrientedBoxHandles(
     x: (normal.x * rectangle.width) / 2,
     y: (normal.y * rectangle.height) / 2,
   };
-  const stemFrom = project(local);
+  const stemFrom = project({
+    x: local.x + normal.x * stemOffset,
+    y: local.y + normal.y * stemOffset,
+  });
   return [
     ...handles,
     {

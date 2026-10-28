@@ -38,7 +38,7 @@ export interface AnnotationHandleDefinition {
   readonly edgeIndex?: number;
   readonly radius: number;
   readonly hitSize: number;
-  /** Media-space stem drawn from the rectangle edge to a rotation control. */
+  /** Media-space start of the stem drawn toward a rotation control. */
   readonly stemFrom?: Point;
 }
 
@@ -68,6 +68,8 @@ export interface AnnotationRotationHandleOptions {
   readonly edgeIndex?: 0 | 1 | 2 | 3;
   /** Outward distance from the edge in CSS pixels; defaults to 24. */
   readonly offset?: number;
+  /** Outward stem start distance in CSS pixels; defaults to 0 and must not exceed offset. */
+  readonly stemOffset?: number;
 }
 
 export interface AnnotationHandleOptions {

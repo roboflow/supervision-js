@@ -36,44 +36,77 @@ describe("native oriented rectangle editing", () => {
   it.each([0.25, 1, 4])(
     "places configured handles on ordered edges at scale %s",
     (scale) => {
-      const original = detection(Math.PI / 3);
-      const tuple = geometry(original);
-      for (const edgeIndex of [0, 1, 2, 3] as const) {
-        const rotationHandle = { edgeIndex, offset: 37 };
-        const engine = createAnnotationEditingEngine({
-          rotationHandle: () => rotationHandle,
-        });
-        const configured = engine.getHandles(original, scale);
-        expect(configured).toEqual(
-          getAnnotationHandles(original, scale, { rotationHandle }),
-        );
-        const rotate = configured.find((h) => h.id === "obb-rotate")!;
-        const a = original.orientedBox!.points[edgeIndex]!;
-        const b = original.orientedBox!.points[(edgeIndex + 1) % 4]!;
-        expect(rotate.stemFrom!.x).toBeCloseTo((a.x + b.x) / 2);
-        expect(rotate.stemFrom!.y).toBeCloseTo((a.y + b.y) / 2);
-        expect(
-          Math.hypot(
-            rotate.point.x - rotate.stemFrom!.x,
-            rotate.point.y - rotate.stemFrom!.y,
-          ) * scale,
-        ).toBeCloseTo(37);
-        expect(
-          Math.hypot(rotate.point.x - tuple.x, rotate.point.y - tuple.y),
-        ).toBeGreaterThan(
-          Math.hypot(
-            rotate.stemFrom!.x - tuple.x,
-            rotate.stemFrom!.y - tuple.y,
-          ),
-        );
-        expect(configured.filter((h) => h.id !== "obb-rotate")).toEqual(
-          getAnnotationHandles(original, scale).filter(
-            (h) => h.id !== "obb-rotate",
-          ),
-        );
+      for (const rotation of [0, Math.PI / 3, Math.PI / 2, Math.PI]) {
+        const original = detection(rotation);
+        const tuple = geometry(original);
+        for (const edgeIndex of [0, 1, 2, 3] as const) {
+          const baseline = getAnnotationHandles(original, scale, {
+            rotationHandle: { edgeIndex, offset: 37 },
+          });
+          const baselineRotate = baseline.find((h) => h.id === "obb-rotate")!;
+          expect(
+            Math.hypot(
+              baselineRotate.point.x - tuple.x,
+              baselineRotate.point.y - tuple.y,
+            ),
+          ).toBeGreaterThan(
+            Math.hypot(
+              baselineRotate.stemFrom!.x - tuple.x,
+              baselineRotate.stemFrom!.y - tuple.y,
+            ),
+          );
+          for (const stemOffset of [0, 20, 37]) {
+            const rotationHandle = { edgeIndex, offset: 37, stemOffset };
+            const engine = createAnnotationEditingEngine({
+              rotationHandle: () => rotationHandle,
+            });
+            const configured = engine.getHandles(original, scale);
+            expect(configured).toEqual(
+              getAnnotationHandles(original, scale, { rotationHandle }),
+            );
+            const rotate = configured.find((h) => h.id === "obb-rotate")!;
+            const a = original.orientedBox!.points[edgeIndex]!;
+            const b = original.orientedBox!.points[(edgeIndex + 1) % 4]!;
+            const edgeMidpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+            const ratio = stemOffset / rotationHandle.offset;
+            expect(rotate.stemFrom!.x).toBeCloseTo(
+              edgeMidpoint.x + (rotate.point.x - edgeMidpoint.x) * ratio,
+            );
+            expect(rotate.stemFrom!.y).toBeCloseTo(
+              edgeMidpoint.y + (rotate.point.y - edgeMidpoint.y) * ratio,
+            );
+            expect(
+              Math.hypot(
+                rotate.point.x - rotate.stemFrom!.x,
+                rotate.point.y - rotate.stemFrom!.y,
+              ) * scale,
+            ).toBeCloseTo(37 - stemOffset);
+            expect(rotate).toEqual({
+              ...baselineRotate,
+              stemFrom: rotate.stemFrom,
+            });
+            expect(pickAnnotationHandle(configured, rotate.point)).toBe(rotate);
+            expect(configured.filter((h) => h.id !== "obb-rotate")).toEqual(
+              baseline.filter((h) => h.id !== "obb-rotate"),
+            );
+            if (stemOffset === 0) expect(configured).toEqual(baseline);
+          }
+        }
       }
     },
   );
+
+  it.each([
+    { stemOffset: -1 },
+    { stemOffset: NaN },
+    { stemOffset: Infinity },
+    { stemOffset: 25 },
+    { offset: 37, stemOffset: 38 },
+  ])("rejects invalid stem placement %j", (rotationHandle) => {
+    expect(() =>
+      getAnnotationHandles(detection(), 1, { rotationHandle }),
+    ).toThrow(RangeError);
+  });
 
   it("resolves every preview and commit from original geometry and latest modifiers", () => {
     const original = {

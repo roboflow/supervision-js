@@ -144,7 +144,7 @@ const engine = createAnnotationEditingEngine({
     return input.shiftKey ? Math.round(radians / step) * step : radians;
   },
   // Ordered edges: 0 top, 1 right, 2 bottom, 3 left.
-  rotationHandle: { edgeIndex: 1, offset: 32 },
+  rotationHandle: { edgeIndex: 1, offset: 32, stemOffset: 20 },
   onCommit(detection, previous) {
     // Persist the result and record the previous detection for undo.
   },
@@ -160,10 +160,13 @@ geometry helper's `[-PI, PI]` convention and preserves the original center,
 ordered width/height, corner identities, id and metadata. The resolver applies
 only to rotation; it does not constrain movement, resizing or creation.
 
-`rotationHandle` can also be `(detection) => ({ edgeIndex, offset })` for
+`rotationHandle` can also be `(detection) => ({ edgeIndex, offset, stemOffset })` for
 annotation-specific placement. The default is edge `0` with a `24` CSS-pixel
 outward offset; offset must be finite and nonnegative. Placement changes only
 the control and its stem. It does not change corner ordering or infer a heading.
+`stemOffset` starts the visible stem that many CSS pixels outward from the edge,
+leaving space for a host's marker without moving the control or its hit area.
+It defaults to `0` and must be finite, nonnegative, and no greater than `offset`.
 
 The browser renderer routes modifier press and release events during rotation,
 so Shift snapping updates immediately while the pointer is stationary. Hosts

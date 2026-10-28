@@ -16,13 +16,13 @@ const url =
   process.argv[2] ?? "http://127.0.0.1:5191/examples/vanilla/oriented-box.html";
 const chrome = process.argv[3] ?? "http://127.0.0.1:9336";
 const artifactDirectory = process.argv[4] ?? "artifacts";
-const target = await openTarget(chrome, url);
+const target = await openTarget(chrome, "about:blank");
 const cdp = await CdpSession.attach(target.webSocketDebuggerUrl);
 const pause = () => new Promise((resolve) => setTimeout(resolve, 80));
 const results = [];
 const handles = (detection, scale) =>
   getAnnotationHandles(detection, scale, {
-    rotationHandle: { edgeIndex: 0, offset: 32 },
+    rotationHandle: { edgeIndex: 1, offset: 32, stemOffset: 20 },
   });
 try {
   await cdp.send("Emulation.setDeviceMetricsOverride", {
@@ -31,6 +31,9 @@ try {
     deviceScaleFactor: 1,
     mobile: false,
   });
+  // Install touch capability before the renderer chooses its native event route.
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  await cdp.send("Page.navigate", { url });
   for (let count = 0; count < 150; count++) {
     if (
       await cdp.evaluate(
@@ -88,7 +91,7 @@ try {
     await mouse("mouseReleased", to);
     await pause();
   }
-  // Preserve the original default-top geometry cases before testing host heading.
+  // Exercise the configured geometry before enabling the host heading convention.
   await click("#heading");
   const initial = await read();
   assert.equal(initial.length, 1);
@@ -148,6 +151,7 @@ try {
         tuple.width -
         30,
     ) < 1.5,
+    `Touch resize width ${getOrientedRectangleGeometry(resized[0].orientedBox).width}; expected ${tuple.width + 30}; before ${JSON.stringify(tuple)}; corner ${JSON.stringify(corner.point)}; target ${JSON.stringify(movedCorner)}`,
   );
   results.push("touch local-axis corner resize");
   for (const id of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
@@ -250,15 +254,15 @@ try {
   assert.equal((await read()).length, 1);
   results.push("native OBB-only creation and single-step creation undo");
   // Create an edge-touching rectangle through ordinary pointer input. The
-  // picture initially fills the host vertically, so its outward control is
-  // outside the host. Zooming out must expose it without moving the geometry.
+  // outward front control initially lies outside the host. Zooming out must
+  // expose it without moving the geometry.
   await click("#draw");
-  await drag(screen({ x: 240, y: 40 }), screen({ x: 320, y: -4 }));
+  await drag(screen({ x: 720, y: 40 }), screen({ x: 804, y: 80 }));
   const edgeCreated = await read();
   assert.equal(edgeCreated.length, 2);
   const edge = edgeCreated[1];
   const edgeRect = getOrientedRectangleGeometry(edge.orientedBox);
-  assert.ok(Math.abs(edgeRect.y - edgeRect.height / 2) < 0.01);
+  assert.ok(Math.abs(edgeRect.x + edgeRect.width / 2 - 800) < 0.01);
   const host = await cdp.evaluate(`(() => {
     const viewer = document.querySelector("#viewer");
     const rect = viewer.getBoundingClientRect();
@@ -269,7 +273,7 @@ try {
   const initialEdgeRotate = handles(edge, scale).find(
     (handle) => handle.id === "obb-rotate",
   );
-  assert.ok(screen(initialEdgeRotate.point).y < host.y);
+  assert.ok(screen(initialEdgeRotate.point).x > host.x + host.width);
   await cdp.send("Input.dispatchMouseEvent", {
     type: "mouseWheel",
     x: host.x + host.width / 2,
@@ -290,7 +294,9 @@ try {
     (handle) => handle.id === "obb-rotate",
   );
   const edgeTarget = edgeScreen(edgeRotate.point);
-  assert.ok(edgeTarget.y - (edgeRotate.hitSize * edgeScale) / 2 > host.y);
+  assert.ok(
+    edgeTarget.x + (edgeRotate.hitSize * edgeScale) / 2 < host.x + host.width,
+  );
   assert.ok(edgeTarget.x > host.x && edgeTarget.x < host.x + host.width);
   const canvasAtTarget = await cdp.evaluate(`(() => {
     const target = ${JSON.stringify(edgeTarget)};
@@ -312,8 +318,23 @@ try {
     `${artifactDirectory}/oriented-box-edge-control.png`,
     Buffer.from(edgeScreenshot.data, "base64"),
   );
-  const radius = edgeRect.y - edgeRotate.point.y;
-  await drag(edgeTarget, edgeScreen({ x: edgeRect.x + radius, y: edgeRect.y }));
+  const edgeVector = {
+    x: edgeRotate.point.x - edgeRect.x,
+    y: edgeRotate.point.y - edgeRect.y,
+  };
+  await drag(
+    edgeTarget,
+    edgeScreen({
+      x:
+        edgeRect.x +
+        edgeVector.x * Math.cos(0.3) -
+        edgeVector.y * Math.sin(0.3),
+      y:
+        edgeRect.y +
+        edgeVector.x * Math.sin(0.3) +
+        edgeVector.y * Math.cos(0.3),
+    }),
+  );
   const edgeRotated = await read();
   const edgeRotatedRect = getOrientedRectangleGeometry(
     edgeRotated[1].orientedBox,
@@ -371,18 +392,22 @@ try {
   assert.ok(Math.abs(frontRotate.radius * scale - 4) < 1e-8);
   const expectedFront = {
     x:
-      (hostBaseline[0].orientedBox.points[0].x +
-        hostBaseline[0].orientedBox.points[1].x) /
+      (hostBaseline[0].orientedBox.points[1].x +
+        hostBaseline[0].orientedBox.points[2].x) /
       2,
     y:
-      (hostBaseline[0].orientedBox.points[0].y +
-        hostBaseline[0].orientedBox.points[1].y) /
+      (hostBaseline[0].orientedBox.points[1].y +
+        hostBaseline[0].orientedBox.points[2].y) /
       2,
   };
   assert.ok(
     Math.hypot(
-      frontRotate.stemFrom.x - expectedFront.x,
-      frontRotate.stemFrom.y - expectedFront.y,
+      frontRotate.stemFrom.x -
+        expectedFront.x -
+        (20 * Math.cos(hostRectangle.rotation)) / scale,
+      frontRotate.stemFrom.y -
+        expectedFront.y -
+        (20 * Math.sin(hostRectangle.rotation)) / scale,
     ) < 1e-8,
   );
   const delta = 0.21;
@@ -439,7 +464,7 @@ try {
   await click("#undo");
   assert.deepEqual(await read(), hostBaseline);
   results.push(
-    "configured compact top-edge rotation handle and stationary Shift press/release snapping with single undo",
+    "configured compact front-edge rotation handle with a clear stem gap and stationary Shift press/release snapping with single undo",
   );
 
   const footprint = (points) =>
@@ -522,16 +547,27 @@ try {
   const refrontRotate = frontHandles(refronted[0]).find(
     (handle) => handle.id === "obb-rotate",
   );
+  const refrontRectangle = getOrientedRectangleGeometry(
+    refronted[0].orientedBox,
+  );
+  const refrontMidpoint = {
+    x:
+      (refronted[0].orientedBox.points[1].x +
+        refronted[0].orientedBox.points[2].x) /
+      2,
+    y:
+      (refronted[0].orientedBox.points[1].y +
+        refronted[0].orientedBox.points[2].y) /
+      2,
+  };
   assert.ok(
     Math.hypot(
       refrontRotate.stemFrom.x -
-        (refronted[0].orientedBox.points[0].x +
-          refronted[0].orientedBox.points[1].x) /
-          2,
+        refrontMidpoint.x -
+        (20 * Math.cos(refrontRectangle.rotation)) / scale,
       refrontRotate.stemFrom.y -
-        (refronted[0].orientedBox.points[0].y +
-          refronted[0].orientedBox.points[1].y) /
-          2,
+        refrontMidpoint.y -
+        (20 * Math.sin(refrontRectangle.rotation)) / scale,
     ) < 1e-8,
   );
   await click("#undo");
