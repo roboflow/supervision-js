@@ -350,7 +350,13 @@ export function createAnnotationEditingEngine(
       gesture.lastTimestamp !== null &&
       (input.detail !== undefined
         ? input.detail >= 2
-        : input.timestamp - gesture.lastTimestamp < CLICK_CANCEL_MS);
+        : input.timestamp - gesture.lastTimestamp < CLICK_CANCEL_MS &&
+          Math.hypot(
+            input.point.x - gesture.points[gesture.points.length - 1]!.x,
+            input.point.y - gesture.points[gesture.points.length - 1]!.y,
+          ) *
+            scale() <=
+            CLOSE_ZONE_SCREEN_PX);
     if (
       gesture.points.length >= minimum &&
       ((tool.geometry === AnnotationGeometryKind.Polygon &&

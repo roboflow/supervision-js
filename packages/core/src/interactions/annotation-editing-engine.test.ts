@@ -21,6 +21,58 @@ import {
 } from "../index";
 
 describe("annotation editing engine", () => {
+  it("keeps fast distant vertices and closes on a nearby double click without native detail", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polygon,
+      createDetection: (points) => ({ polygon: { points: points as Point[] } }),
+    });
+    const points = [
+      { x: 10, y: 10 },
+      { x: 70, y: 10 },
+      { x: 70, y: 70 },
+      { x: 20, y: 80 },
+    ];
+    points.forEach((point, index) => {
+      engine.pointerDown({ point, timestamp: index * 65 });
+      engine.pointerUp({ point, timestamp: index * 65 + 1 });
+    });
+    expect(onCommit).not.toHaveBeenCalled();
+    engine.pointerDown({ point: { x: 21, y: 80 }, timestamp: 260 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { polygon: { points } },
+      null,
+    );
+  });
+
+  it("measures the double-click fallback in screen pixels at the current zoom", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      viewportScale: () => 2,
+    });
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polyline,
+      createDetection: (points) => ({ polygon: { points: points as Point[] } }),
+    });
+    const points = [
+      { x: 10, y: 10 },
+      { x: 70, y: 10 },
+      { x: 77, y: 10 },
+    ];
+    points.forEach((point, index) => {
+      engine.pointerDown({ point, timestamp: index * 65 });
+      engine.pointerUp({ point, timestamp: index * 65 + 1 });
+    });
+    expect(onCommit).not.toHaveBeenCalled();
+    engine.pointerDown({ point: { x: 82, y: 10 }, timestamp: 195 });
+    expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+      { polygon: { points } },
+      null,
+    );
+  });
+
   it.each([
     AnnotationGeometryKind.Polygon,
     AnnotationGeometryKind.Polyline,
