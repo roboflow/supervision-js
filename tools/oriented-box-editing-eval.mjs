@@ -64,7 +64,7 @@ try {
     await cdp.send("Input.dispatchMouseEvent", {
       type,
       ...p,
-      button: type === "mouseMoved" ? "none" : "left",
+      button: type === "mouseMoved" && buttons === 0 ? "none" : "left",
       buttons,
       clickCount: type === "mouseMoved" ? 0 : clickCount,
       modifiers,
