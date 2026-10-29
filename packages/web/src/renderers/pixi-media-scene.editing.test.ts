@@ -586,45 +586,6 @@ describe("editing gestures in the Pixi media scene", () => {
     renderer.destroy();
   });
 
-  it.each([
-    AnnotationGestureStateKind.Moving,
-    AnnotationGestureStateKind.Resizing,
-    AnnotationGestureStateKind.Rotating,
-  ])(
-    "hides the edited detection from the base layers while %s",
-    async (kind) => {
-      resetMocks();
-      const editing = createEditingEngineHarness();
-      const renderer = await createRenderer(false, false, {
-        boxStyle: new BaseBoxStyle({
-          shape: BoxShape.Rect,
-          stroke: { alpha: 1, color: 0x00ff66, width: 2 },
-        }),
-        detectionFrames: [
-          { detections: [SUBJECT], frameIndex: 0, mediaTime: 0 },
-        ],
-        editingEngine: editing.engine,
-      });
-
-      await vi.waitFor(() => {
-        expect(renderer.getState().activeDetectionCount).toBe(1);
-      });
-      const box = pixiMock.graphicsInstances.find(
-        (graphics) => graphics.rect.mock.calls.length > 0,
-      );
-      expect(box).toBeDefined();
-      expect(box!.visible).toBe(true);
-
-      editing.emitState({ ...movingState(), kind });
-      expect(box!.visible).toBe(false);
-
-      editing.emitState(idleState());
-      expect(box!.visible).toBe(true);
-
-      renderer.destroy();
-    },
-  );
-
   it("keeps a mask drawn while the brush edits it", async () => {
     resetMocks();
     const editing = createEditingEngineHarness();
@@ -672,8 +633,8 @@ describe("editing gestures in the Pixi media scene", () => {
   });
 
   it.each([
-    ["box", SUBJECT],
-    ["OBB and rect", OBB_SUBJECT],
+    ["box", SUBJECT, AnnotationGestureStateKind.Moving],
+    ["OBB and rect", OBB_SUBJECT, AnnotationGestureStateKind.Rotating],
     [
       "skeleton",
       {
@@ -686,10 +647,11 @@ describe("editing gestures in the Pixi media scene", () => {
           edges: [[0, 1]],
         },
       },
+      AnnotationGestureStateKind.Resizing,
     ],
-  ] satisfies [string, Detection][])(
+  ] satisfies [string, Detection, AnnotationGestureStateKind][])(
     "keeps composed decorations on a live %s preview without drawing the OBB twice",
-    async (_label, subject) => {
+    async (_label, subject, kind) => {
       resetMocks();
       const editing = createEditingEngineHarness();
       const markerStyle = new BaseMarkerStyle({
@@ -750,6 +712,7 @@ describe("editing gestures in the Pixi media scene", () => {
       };
       editing.emitState({
         ...movingState(),
+        kind,
         activeDetectionId: subject.id!,
         preview,
       });

@@ -486,10 +486,7 @@ export function createAnnotationEditingEngine(
       throw new RangeError("resolveRotation must return finite radians");
     return {
       ...active.detection,
-      orientedBox: createOrientedBoxGeometry(
-        initial,
-        Math.atan2(Math.sin(rotation), Math.cos(rotation)),
-      ),
+      orientedBox: createOrientedBoxGeometry(initial, rotation),
     };
   }
 

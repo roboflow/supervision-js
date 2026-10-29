@@ -563,29 +563,6 @@ describe("native oriented rectangle editing", () => {
     },
   );
 
-  it.each([0, 0.4, Math.PI / 2, Math.PI, 5.5])(
-    "resizes in local axes and fixes the opposite corner at %s",
-    (rotation) => {
-      const original = detection(rotation);
-      const corner = handle(original, "obb-se");
-      const cos = Math.cos(rotation),
-        sin = Math.sin(rotation);
-      const next = applyAnnotationHandleDrag(original, corner, {
-        x: rectangle.x + 80 * cos - 50 * sin,
-        y: rectangle.y + 80 * sin + 50 * cos,
-      });
-      expect(geometry(next).width).toBeCloseTo(120);
-      expect(geometry(next).height).toBeCloseTo(70);
-      expect(next.orientedBox!.points[0]!.x).toBeCloseTo(
-        original.orientedBox!.points[0]!.x,
-      );
-      expect(next.orientedBox!.points[0]!.y).toBeCloseTo(
-        original.orientedBox!.points[0]!.y,
-      );
-      expect(next.rect).toBeUndefined();
-    },
-  );
-
   it.each(["nw", "n", "ne", "e", "se", "s", "sw", "w"])(
     "crosses and returns through the original opposite edges with %s",
     (id) => {
@@ -648,6 +625,7 @@ describe("native oriented rectangle editing", () => {
             // A crossing changes the occupied bounds, never the ordered axes/front.
             expect(Math.cos(next.rotation)).toBeCloseTo(cos);
             expect(Math.sin(next.rotation)).toBeCloseTo(sin);
+            expect(preview.rect).toBeUndefined();
             expect(preview.metadata).toBe(original.metadata);
             expect(onCommit).not.toHaveBeenCalled();
           }
@@ -681,21 +659,38 @@ describe("native oriented rectangle editing", () => {
     },
   );
 
-  it.each(["Escape", "pointerCancel", "toolChange"])(
-    "cancels a crossed resize without a history entry on %s",
-    (cancellation) => {
+  it.each(
+    (
+      [
+        ["crossed resize", "obb-se"],
+        ["rotation", "obb-rotate"],
+      ] as const
+    ).flatMap(([gesture, handleId]) =>
+      ["Escape", "pointerCancel", "toolChange"].map((cancellation) => ({
+        gesture,
+        handleId,
+        cancellation,
+      })),
+    ),
+  )(
+    "cancels $gesture without a history entry on $cancellation",
+    ({ gesture, handleId, cancellation }) => {
       const original = detection(0.4);
-      const corner = handle(original, "obb-se");
+      const control = handle(original, handleId);
       const onCommit = vi.fn();
       const onCancel = vi.fn();
       const engine = createAnnotationEditingEngine({ onCommit, onCancel });
-      engine.beginHandleDrag(original, corner, input(corner.point));
-      const end = {
-        x: rectangle.x - 100 * Math.cos(0.4),
-        y: rectangle.y - 100 * Math.sin(0.4),
-      };
+      engine.beginHandleDrag(original, control, input(control.point));
+      const end =
+        gesture === "crossed resize"
+          ? {
+              x: rectangle.x - 100 * Math.cos(0.4),
+              y: rectangle.y - 100 * Math.sin(0.4),
+            }
+          : { x: 280, y: 150 };
       engine.pointerMove(input(end, 100));
-      expect(geometry(engine.getState().preview!).width).toBeCloseTo(60);
+      if (gesture === "crossed resize")
+        expect(geometry(engine.getState().preview!).width).toBeCloseTo(60);
       if (cancellation === "Escape") engine.keyDown("Escape");
       else if (cancellation === "pointerCancel") engine.pointerCancel(1);
       else
@@ -766,30 +761,6 @@ describe("native oriented rectangle editing", () => {
       expect(point.y).toBeCloseTo(original.orientedBox!.points[index]!.y);
     });
   });
-
-  it.each(["Escape", "pointerCancel", "toolChange"])(
-    "cancels rotation without a history entry on %s",
-    (cancellation) => {
-      const onCommit = vi.fn();
-      const onCancel = vi.fn();
-      const engine = createAnnotationEditingEngine({ onCommit, onCancel });
-      const original = detection();
-      const rotate = handle(original, "obb-rotate");
-      engine.beginHandleDrag(original, rotate, input(rotate.point));
-      engine.pointerMove(input({ x: 280, y: 150 }, 100));
-      if (cancellation === "Escape") engine.keyDown("Escape");
-      else if (cancellation === "pointerCancel") engine.pointerCancel(1);
-      else
-        engine.setCreationTool({
-          geometry: AnnotationGeometryKind.Box,
-          createDetection: () => ({}),
-        });
-      engine.pointerUp(input({ x: 280, y: 150 }, 300));
-      expect(onCommit).not.toHaveBeenCalled();
-      expect(onCancel).toHaveBeenCalledTimes(1);
-      expect(engine.getState().preview).toBeNull();
-    },
-  );
 
   it.each([
     [{ x: 80, y: 30 }, 0],

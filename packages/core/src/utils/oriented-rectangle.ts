@@ -61,8 +61,6 @@ export function getOrientedRectangleGeometry(
     if (
       !Number.isFinite(length) ||
       length === 0 ||
-      !Number.isFinite(nextLength) ||
-      nextLength === 0 ||
       (edge.x / length) * (next.y / nextLength) -
         (edge.y / length) * (next.x / nextLength) <=
         0
