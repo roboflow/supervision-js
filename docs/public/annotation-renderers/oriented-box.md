@@ -70,12 +70,26 @@ polygons use; it does not introduce a second rasterization path. The renderer
 only controls presentation. An editable session can select and move the whole
 detection, translating its OBB vertices along with its other geometry. OBB
 creation, rotation and local-axis resizing are available through the editing
-entrypoint for OBB-only rectangles. General quadrilaterals retain whole-shape
-movement without rectangle handles. If the detection also has an editable
+entrypoint for OBB-only rectangles, including rounding noise within the
+recognition precision described below. Quadrilaterals outside that precision
+retain whole-shape movement without rectangle handles. If the detection also has an editable
 `rect`, its existing resize handles change only that independent rectangle.
 Both geometries remain visible in the editing preview.
 
 ## Edit oriented rectangles
+
+`getOrientedRectangleGeometry()` recovers a rectangle from convex, clockwise
+corners, including coordinates rounded to 0.1 media pixels. It uses the closest
+rectangle with the supplied corner correspondence, preserving local width,
+height, and front direction without sorting the axes. The total squared corner
+error must stay within 0.02 media pixels squared, the error budget for rounding
+eight coordinates to 0.1 pixels, plus floating-point roundoff. More distorted
+quadrilaterals return `null` and retain whole-shape movement.
+
+Recognition leaves the input untouched. Rendering, picking, and whole-shape
+movement use the original corners; an actual resize or rotation replaces the
+subpixel rounding noise with exact rectangle corners. Selecting or clicking a
+handle alone does not change the geometry.
 
 ```ts
 import {
@@ -90,7 +104,7 @@ const box = createOrientedBoxGeometry(
   Math.PI / 4, // clockwise radians in image coordinates
 );
 const rectangle = getOrientedRectangleGeometry(box);
-// { x, y, width, height, rotation }, or null for a non-rectangle.
+// { x, y, width, height, rotation }, or null outside rectangle precision.
 
 const engine = createAnnotationEditingEngine({
   onCommit(detection, previous) {

@@ -636,8 +636,9 @@ generic `./react` entry usable without the optional Worklets peer.
 The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
 
-See [Migrating to 0.2](migrating-to-0.2.md) for source changes required by the
-release, including interaction presentation options.
+See [Migrating to 0.3](migrating-to-0.3.md) for the new editing enum members
+and [Migrating to 0.2](migrating-to-0.2.md) for earlier playback and interaction
+presentation changes.
 
 1. one media item maps to one session;
 2. detections are semantic input;

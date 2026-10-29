@@ -2,6 +2,7 @@
 title: Quickstart
 children:
   - ./guides/application-integration.md
+  - ./guides/migrating-to-0.3.md
   - ./guides/migrating-to-0.2.md
   - ./recipes/static-detections.md
   - ./recipes/streaming-detections.md
@@ -15,6 +16,8 @@ the static or streaming source recipe that matches your application.
 
 - [Application integration](./guides/application-integration.md) — install,
   mount, and own a session lifecycle.
+- [Migrating to 0.3](./guides/migrating-to-0.3.md) — update exhaustive editing
+  state, geometry, and handle consumers.
 - [Migrating to 0.2](./guides/migrating-to-0.2.md) — update imports and
   interaction highlight configuration.
 - [Static detections](./recipes/static-detections.md) — render a known sequence

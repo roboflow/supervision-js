@@ -48,7 +48,8 @@ The triangle uses the session's public `previewOverlay` callback. The heading
 convention, front choice, keyboard controls and undo history belong to this
 example host; the library assigns no class or direction semantics.
 
-General quadrilaterals can render and move but do not receive rectangle
+Rectangle recognition tolerates coordinates rounded to 0.1 media pixels.
+Quadrilaterals outside that precision can render and move but do not receive rectangle
 controls. A detection with both an independent `rect` and `orientedBox` retains
 its existing axis-aligned rectangle handles. The library assigns no class or
 direction semantics to the ordered local axes.

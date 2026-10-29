@@ -4,16 +4,19 @@ import {
   AnnotationGestureStateKind,
   AnnotationHandleKind,
   applyAnnotationHandleDrag,
+  BaseOrientedBoxStyle,
   createAnnotationEditingEngine,
   createOrientedBoxGeometry,
   getAnnotationHandles,
   getOrientedRectangleGeometry,
   pickAnnotationHandle,
+  pickDetectionAtPoint,
   type AnnotationCreationTool,
   type AnnotationRotationContext,
   type Detection,
   type OrientedBoxGeometry,
   type Point,
+  type Rect,
 } from "../index";
 
 const rectangle = { x: 200, y: 150, width: 80, height: 40 };
@@ -30,6 +33,25 @@ const handle = (d: Detection, id: string) =>
   getAnnotationHandles(d).find((h) => h.id === id)!;
 const geometry = (d: Detection) =>
   getOrientedRectangleGeometry(d.orientedBox!)!;
+const roundedBox = (
+  rect: Rect,
+  rotation: number,
+  decimals: number,
+): OrientedBoxGeometry => {
+  const { points } = createOrientedBoxGeometry(rect, rotation);
+  const round = (point: Point): Point => ({
+    x: Number(point.x.toFixed(decimals)),
+    y: Number(point.y.toFixed(decimals)),
+  });
+  return {
+    points: [
+      round(points[0]),
+      round(points[1]),
+      round(points[2]),
+      round(points[3]),
+    ],
+  };
+};
 
 // Hosts receive one immutable previous/next pair per completed edit for their undo history.
 describe("native oriented rectangle editing", () => {
@@ -251,21 +273,179 @@ describe("native oriented rectangle editing", () => {
     Math.PI * 2,
     -Math.PI * 2,
   ])("preserves ordered axes across round trips at %s", (rotation) => {
-    const box = createOrientedBoxGeometry(
-      { ...rectangle, width: 40 },
-      rotation,
-    );
-    const tuple = getOrientedRectangleGeometry(box)!;
-    expect(tuple.width).toBeCloseTo(40);
-    expect(tuple.height).toBeCloseTo(40);
-    const again = createOrientedBoxGeometry(tuple, tuple.rotation);
-    again.points.forEach((p, i) => {
-      expect(p.x).toBeCloseTo(box.points[i]!.x);
-      expect(p.y).toBeCloseTo(box.points[i]!.y);
-    });
+    for (const size of [
+      { width: 40, height: 80 },
+      { width: 80, height: 40 },
+      { width: 40, height: 40 },
+    ]) {
+      const box = createOrientedBoxGeometry(
+        { ...rectangle, ...size },
+        rotation,
+      );
+      const tuple = getOrientedRectangleGeometry(box)!;
+      expect(tuple.width).toBeCloseTo(size.width);
+      expect(tuple.height).toBeCloseTo(size.height);
+      expect(Math.cos(tuple.rotation)).toBeCloseTo(Math.cos(rotation));
+      expect(Math.sin(tuple.rotation)).toBeCloseTo(Math.sin(rotation));
+      const again = createOrientedBoxGeometry(tuple, tuple.rotation);
+      again.points.forEach((p, i) => {
+        expect(p.x).toBeCloseTo(box.points[i]!.x);
+        expect(p.y).toBeCloseTo(box.points[i]!.y);
+      });
+    }
   });
 
-  it("rejects degenerate, reversed, skewed and nonfinite quads without fitting", () => {
+  it.each([
+    [40, 20, 22, 1],
+    [40, 20, 22, 2],
+    [40, 20, 22, 4],
+    [40, 40, 133, 1],
+    [800, 300, 5, 3],
+    [1, 1000, 22, 1],
+    [1000, 1, 22, 1],
+    [0.2, 10000, 133, 1],
+    [10000, 0.2, -133, 1],
+  ])(
+    "recovers rounded %s × %s rectangles at %s degrees and %s decimals",
+    (width, height, degrees, decimals) => {
+      const rotation = (degrees * Math.PI) / 180;
+      for (const center of [
+        { x: 200, y: 150 },
+        { x: 123.456, y: -234.567 },
+        { x: 1000000.123, y: 2000000.456 },
+      ]) {
+        const box = roundedBox(
+          { ...center, width, height },
+          rotation,
+          decimals,
+        );
+        const tuple = getOrientedRectangleGeometry(box);
+        expect(tuple).not.toBeNull();
+        const again = createOrientedBoxGeometry(tuple!, tuple!.rotation);
+        const squaredError = box.points.reduce(
+          (sum, p, i) =>
+            sum +
+            (p.x - again.points[i]!.x) ** 2 +
+            (p.y - again.points[i]!.y) ** 2,
+          0,
+        );
+        expect(squaredError).toBeLessThanOrEqual(0.02 + 1e-8);
+        expect(Math.cos(tuple!.rotation - rotation)).toBeGreaterThan(0.99);
+        expect(getAnnotationHandles({ orientedBox: box })).toHaveLength(9);
+      }
+    },
+  );
+
+  it("recovers independently rounded corners across aspect ratios and centers", () => {
+    for (const width of [0.2, 1, 5, 40]) {
+      for (const height of [1, 20, 1000, 1000000]) {
+        for (const degrees of [0.1, 22, 89.99, 133]) {
+          const box = roundedBox(
+            { x: 123.456, y: -234.567, width, height },
+            (degrees * Math.PI) / 180,
+            1,
+          );
+          expect(
+            getOrientedRectangleGeometry(box),
+            JSON.stringify({ width, height, degrees }),
+          ).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it("keeps raw rounded geometry for rendering, picking, translation and handle clicks", () => {
+    const original: Detection = {
+      id: "rounded",
+      orientedBox: roundedBox(rectangle, (22 * Math.PI) / 180, 1),
+    };
+    const previous: Detection = JSON.parse(JSON.stringify(original));
+    const frame = { mediaTime: 0, detections: [original] };
+    expect(
+      new BaseOrientedBoxStyle().resolve(original, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0,
+      })?.points,
+    ).toBe(original.orientedBox!.points);
+    const pick = pickDetectionAtPoint(frame, {
+      x: rectangle.x,
+      y: rectangle.y,
+    })!;
+    expect(pick.detection).toBe(original);
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const rotate = handle(original, "obb-rotate");
+    engine.beginHandleDrag(original, rotate, input(rotate.point));
+    engine.pointerUp(input(rotate.point, 200));
+    expect(onCommit).not.toHaveBeenCalled();
+    engine.pointerDown(input(pick.point), pick);
+    engine.pointerMove(
+      input({ x: pick.point.x + 10, y: pick.point.y + 20 }, 300),
+    );
+    engine.pointerUp(
+      input({ x: pick.point.x + 10, y: pick.point.y + 20 }, 400),
+    );
+    const moved = onCommit.mock.calls[0]![0] as Detection;
+    moved.orientedBox!.points.forEach((p, i) => {
+      expect(p).toEqual({
+        x: original.orientedBox!.points[i]!.x + 10,
+        y: original.orientedBox!.points[i]!.y + 20,
+      });
+    });
+    expect(original).toEqual(previous);
+  });
+
+  it("keeps exact tiny, large and translated rectangles finite", () => {
+    for (const rect of [
+      { x: 0, y: 0, width: 1e-12, height: 2e-12 },
+      { x: 0, y: 0, width: 1e150, height: 2e150 },
+      { x: 1e12, y: -1e12, width: 40, height: 20 },
+      { x: 0, y: 0, width: 1000, height: 1e-8 },
+    ]) {
+      const tuple = getOrientedRectangleGeometry(
+        createOrientedBoxGeometry(rect, 0.6),
+      )!;
+      expect(tuple).not.toBeNull();
+      expect(tuple.width / rect.width).toBeCloseTo(1);
+      expect(tuple.height / rect.height).toBeCloseTo(1);
+      expect(Math.cos(tuple.rotation - 0.6)).toBeCloseTo(1);
+    }
+  });
+
+  it("normalizes rounded corners only when resizing or rotating", () => {
+    const original: Detection = {
+      orientedBox: roundedBox(rectangle, (22 * Math.PI) / 180, 1),
+    };
+    const previous: Detection = JSON.parse(JSON.stringify(original));
+    const initial = geometry(original);
+    const east = handle(original, "obb-e");
+    const resized = applyAnnotationHandleDrag(original, east, {
+      x: east.point.x + 10 * Math.cos(initial.rotation),
+      y: east.point.y + 10 * Math.sin(initial.rotation),
+    });
+    expect(geometry(resized).width).toBeCloseTo(initial.width + 10);
+    expect(geometry(resized).height).toBeCloseTo(initial.height);
+    const rotate = handle(original, "obb-rotate");
+    const rotated = applyAnnotationHandleDrag(original, rotate, {
+      x: initial.x - (rotate.point.y - initial.y),
+      y: initial.y + (rotate.point.x - initial.x),
+    });
+    expect(Math.sin(geometry(rotated).rotation - initial.rotation)).toBeCloseTo(
+      1,
+    );
+    for (const edited of [resized, rotated]) {
+      const tuple = geometry(edited);
+      const again = createOrientedBoxGeometry(tuple, tuple.rotation);
+      again.points.forEach((point, index) => {
+        expect(point.x).toBeCloseTo(edited.orientedBox!.points[index]!.x, 10);
+        expect(point.y).toBeCloseTo(edited.orientedBox!.points[index]!.y, 10);
+      });
+    }
+    expect(original).toEqual(previous);
+  });
+
+  it("rejects degenerate, reversed, skewed and nonfinite quads", () => {
     const quad: OrientedBoxGeometry = {
       points: [
         { x: 0, y: 0 },
@@ -298,7 +478,52 @@ describe("native oriented rectangle editing", () => {
       RangeError,
     );
     expect(getAnnotationHandles({ ...detection(), locked: true })).toEqual([]);
+    expect(
+      getOrientedRectangleGeometry({
+        points: quad.points.slice(0, 3),
+      } as unknown as OrientedBoxGeometry),
+    ).toBeNull();
   });
+
+  it.each([
+    [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 99.8, y: 20 },
+      { x: 0.2, y: 20 },
+    ],
+    [
+      { x: 0, y: 0 },
+      { x: 1000000, y: 0 },
+      { x: 1000001, y: 1000000 },
+      { x: 1, y: 1000000 },
+    ],
+    [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 1e-8 },
+      { x: 1, y: 1e-8 },
+    ],
+    [
+      { x: 0, y: 0 },
+      { x: 0.1, y: 0 },
+      { x: 0.01, y: 0.01 },
+      { x: 0, y: 0.1 },
+    ],
+    [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+      { x: 3, y: 0 },
+    ],
+  ] satisfies OrientedBoxGeometry["points"][])(
+    "rejects distortion beyond coordinate precision or nonconvex geometry: %j",
+    (...points) => {
+      const box = { points };
+      expect(getOrientedRectangleGeometry(box)).toBeNull();
+      expect(getAnnotationHandles({ orientedBox: box })).toEqual([]);
+    },
+  );
 
   it.each([0.2, 1, 5])(
     "keeps the visible and circular rotation hit geometry separate at scale %s",

@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   AnnotationEditingEngine,
   DetectionFrame,
+  Detection,
 } from "supervision-js-core";
 import {
   AnnotationGeometryKind,
+  AnnotationGestureStateKind,
   createAnnotationEditingEngine,
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
   DetectionPickTarget,
   encodeBinaryMask,
 } from "supervision-js-core";
@@ -201,4 +205,244 @@ describe("React Native annotation gesture adapter", () => {
       },
     );
   });
+
+  it.each([
+    {
+      canvasWidth: 200,
+      canvasHeight: 200,
+      mediaWidth: 200,
+      mediaHeight: 100,
+      fit: "contain" as const,
+    },
+    {
+      canvasWidth: 100,
+      canvasHeight: 100,
+      mediaWidth: 200,
+      mediaHeight: 100,
+      fit: "contain" as const,
+    },
+    {
+      canvasWidth: 200,
+      canvasHeight: 200,
+      mediaWidth: 200,
+      mediaHeight: 100,
+      fit: "cover" as const,
+    },
+  ])(
+    "rotates a selected handle beyond media using layout $fit at $canvasWidth px",
+    (dimensions) => {
+      const original = {
+        id: "obb",
+        orientedBox: createOrientedBoxGeometry(
+          { x: 100, y: 10, width: 40, height: 20 },
+          0,
+        ),
+      };
+      const layout = resolveReactNativeFrameLayout(dimensions);
+      const onCommit = vi.fn();
+      const capturePointer = vi.fn();
+      const releasePointer = vi.fn();
+      const onPick = vi.fn();
+      const resolveRotation = vi.fn((angle: number) => angle);
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        capturePointer,
+        releasePointer,
+        resolveRotation,
+      });
+      const adapter = createReactNativeAnnotationGestureAdapter({
+        editingEngine: engine,
+        getFrame: () => ({ mediaTime: 0, detections: [original] }),
+        getLayout: () => layout,
+        getSelectedDetection: () => original,
+        onPick,
+      });
+      const handle = engine
+        .getHandles(original, layout.scale)
+        .find(({ id }) => id === "obb-rotate")!;
+      const start = layout.mapPoint(handle.point);
+      expect(layout.mapCanvasPoint(start)).toBeNull();
+      if (dimensions.canvasWidth === 200 && dimensions.fit === "contain") {
+        expect(start).toEqual({ x: 100, y: 26 });
+      }
+      expect(
+        adapter.pointerDown({ ...start, timestamp: 1, pointerId: 7 }),
+      ).toBeNull();
+      expect(engine.getState()).toMatchObject({
+        kind: AnnotationGestureStateKind.Rotating,
+        activeHandleId: "obb-rotate",
+        pointerId: 7,
+      });
+      expect(onPick).toHaveBeenCalledWith(null);
+      expect(capturePointer).toHaveBeenCalledWith(7);
+      const end = layout.mapPoint({ x: 100 - (handle.point.y - 10), y: 10 });
+      adapter.pointerMove({ ...end, timestamp: 2, pointerId: 8 });
+      expect(engine.getState().preview).toBeNull();
+      adapter.pointerMove({
+        ...end,
+        timestamp: 3,
+        pointerId: 7,
+        shiftKey: true,
+      });
+      expect(resolveRotation).toHaveBeenLastCalledWith(
+        expect.any(Number),
+        expect.objectContaining({
+          input: expect.objectContaining({ shiftKey: true }),
+        }),
+      );
+      adapter.pointerUp({
+        ...end,
+        timestamp: 300,
+        pointerId: 7,
+        shiftKey: true,
+      });
+      expect(onCommit).toHaveBeenCalledOnce();
+      expect(
+        getOrientedRectangleGeometry(onCommit.mock.calls[0]![0].orientedBox)
+          ?.rotation,
+      ).toBeCloseTo(Math.PI / 2);
+      expect(releasePointer).toHaveBeenCalledWith(7);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    },
+  );
+
+  it("uses configured front-side rotation placement after a panned layout", () => {
+    const original = {
+      id: "obb",
+      orientedBox: createOrientedBoxGeometry(
+        { x: 100, y: 90, width: 40, height: 20 },
+        0,
+      ),
+    };
+    const base = resolveReactNativeFrameLayout({
+      canvasWidth: 200,
+      canvasHeight: 200,
+      mediaWidth: 200,
+      mediaHeight: 100,
+    });
+    const offset = { x: 10, y: -15 };
+    const layout = {
+      ...base,
+      mediaRect: {
+        ...base.mediaRect,
+        x: base.mediaRect.x + offset.x,
+        y: base.mediaRect.y + offset.y,
+      },
+      mapPoint: (point: { x: number; y: number }) => {
+        const mapped = base.mapPoint(point);
+        return { x: mapped.x + offset.x, y: mapped.y + offset.y };
+      },
+      mapCanvasPoint: (point: { x: number; y: number }) =>
+        base.mapCanvasPoint({ x: point.x - offset.x, y: point.y - offset.y }),
+    };
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      rotationHandle: { edgeIndex: 2, offset: 37, stemOffset: 12 },
+    });
+    const adapter = createReactNativeAnnotationGestureAdapter({
+      editingEngine: engine,
+      getFrame: () => ({ mediaTime: 0, detections: [original] }),
+      getLayout: () => layout,
+      getSelectedDetection: () => original,
+    });
+    const handle = engine
+      .getHandles(original, layout.scale)
+      .find(({ id }) => id === "obb-rotate")!;
+    const start = layout.mapPoint(handle.point);
+    expect(start).toEqual({ x: 110, y: 172 });
+    expect(layout.mapCanvasPoint(start)).toBeNull();
+    adapter.pointerDown({ ...start, timestamp: 1, pointerId: 7 });
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Rotating);
+    adapter.pointerMove({ x: 80, y: 160, timestamp: 2, pointerId: 7 });
+    adapter.pointerCancel?.(8);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Rotating);
+    adapter.pointerCancel?.(7);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it.each<Detection>([
+    { id: "box", rect: { x: 100, y: 10, width: 40, height: 20 } },
+    {
+      id: "polygon",
+      polygon: {
+        points: [
+          { x: 80, y: 0 },
+          { x: 120, y: 0 },
+          { x: 100, y: 20 },
+        ],
+      },
+    },
+  ])(
+    "accepts the outside half of a selected $id handle hit area",
+    (original) => {
+      const layout = resolveReactNativeFrameLayout({
+        canvasWidth: 200,
+        canvasHeight: 200,
+        mediaWidth: 200,
+        mediaHeight: 100,
+      });
+      const engine = createAnnotationEditingEngine();
+      const adapter = createReactNativeAnnotationGestureAdapter({
+        editingEngine: engine,
+        getFrame: () => ({ mediaTime: 0, detections: [original] }),
+        getLayout: () => layout,
+        getSelectedDetection: () => original,
+      });
+      adapter.pointerDown({ x: 80, y: 46, timestamp: 1, pointerId: 7 });
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Resizing);
+      expect(engine.getState().activeDetectionId).toBe(original.id);
+    },
+  );
+
+  it.each([false, true])(
+    "rejects letterbox background without a reachable handle (locked: %s)",
+    (locked) => {
+      const original = {
+        id: "obb",
+        locked,
+        orientedBox: createOrientedBoxGeometry(
+          { x: 100, y: 10, width: 40, height: 20 },
+          0,
+        ),
+      };
+      const layout = resolveReactNativeFrameLayout({
+        canvasWidth: 200,
+        canvasHeight: 200,
+        mediaWidth: 200,
+        mediaHeight: 100,
+      });
+      const onPick = vi.fn();
+      const onCommit = vi.fn();
+      const capturePointer = vi.fn();
+      const engine = createAnnotationEditingEngine({
+        onCommit,
+        capturePointer,
+      });
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Box,
+        createDetection: (rect) => ({ rect: rect as never }),
+      });
+      const adapter = createReactNativeAnnotationGestureAdapter({
+        editingEngine: engine,
+        getFrame: () => ({ mediaTime: 0, detections: [original] }),
+        getLayout: () => layout,
+        getSelectedDetection: () => original,
+        onPick,
+      });
+      adapter.pointerDown({
+        x: locked ? 100 : 160,
+        y: 26,
+        timestamp: 1,
+        pointerId: 7,
+      });
+      adapter.pointerMove({ x: 150, y: 80, timestamp: 2, pointerId: 7 });
+      adapter.pointerUp({ x: 150, y: 80, timestamp: 300, pointerId: 7 });
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onPick).not.toHaveBeenCalled();
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(capturePointer).not.toHaveBeenCalled();
+    },
+  );
 });

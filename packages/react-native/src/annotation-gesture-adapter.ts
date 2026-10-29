@@ -51,8 +51,10 @@ export function createReactNativeAnnotationGestureAdapter(options: {
   return {
     pointerDown(input) {
       const layout = options.getLayout();
-      const point = layout.mapCanvasPoint(input);
-      if (!point) return null;
+      const mediaPoint = layout.mapCanvasPoint(input);
+      // Selected handles may extend into the letterbox. Only their hit test
+      // uses unbounded coordinates; background picks and creation stay bounded.
+      const point = mediaPoint ?? mapCanvasPointUnbounded(layout, input);
 
       const frame = options.getFrame();
       const selected = options.getSelectedDetection?.();
@@ -63,14 +65,17 @@ export function createReactNativeAnnotationGestureAdapter(options: {
             point,
           )
         : undefined;
-      const pick = pickDetectionAtPoint(frame, point, {
-        ...options.pickOptions,
-        maskMediaDimensions: options.pickOptions?.maskMediaDimensions ?? {
-          height: layout.mediaRect.height / layout.scale,
-          width: layout.mediaRect.width / layout.scale,
-        },
-        viewportScale: options.pickOptions?.viewportScale ?? layout.scale,
-      });
+      if (!mediaPoint && !handle) return null;
+      const pick = mediaPoint
+        ? pickDetectionAtPoint(frame, mediaPoint, {
+            ...options.pickOptions,
+            maskMediaDimensions: options.pickOptions?.maskMediaDimensions ?? {
+              height: layout.mediaRect.height / layout.scale,
+              width: layout.mediaRect.width / layout.scale,
+            },
+            viewportScale: options.pickOptions?.viewportScale ?? layout.scale,
+          })
+        : null;
 
       options.onPick?.(pick);
       if (
