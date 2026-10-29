@@ -1006,9 +1006,9 @@ export async function createPixiMediaScene(
    * rate, so the canvas is sized to the picture and positioned inside the
    * container, leaving the margin to the backdrop.
    *
-   * The box follows the picture under pan and zoom rather than growing to the
-   * container. Selected editing handles extend it only as far as their visible
-   * and hittable extent requires; the remaining margin keeps its exemption.
+   * Editable selection uses a stable host-sized backing surface so moving its
+   * handles never reallocates the canvas. The same picture-and-handle crop
+   * clips that surface; ordinary viewing retains the picture-sized canvas.
    */
   const syncPresentationBox = () => {
     const { height: containerHeight, width: containerWidth } = containerSize;
@@ -1061,23 +1061,43 @@ export async function createPixiMediaScene(
       height: Math.max(1, span.bottom - span.top),
     };
 
+    presentationBox = {
+      ...next,
+      width:
+        Math.round(next.width * presentationResolution) /
+        presentationResolution,
+      height:
+        Math.round(next.height * presentationResolution) /
+        presentationResolution,
+    };
+    const stableEditingSurface = Boolean(
+      options.editingEngine && annotationHandleBounds,
+    );
+    // Retain the cropped canvas origin so fractional DPR keeps its raster phase.
+    const canvasBox = stableEditingSurface
+      ? { ...next, width: containerWidth, height: containerHeight }
+      : next;
+    const pixelWidth = Math.round(canvasBox.width * presentationResolution);
+    const pixelHeight = Math.round(canvasBox.height * presentationResolution);
+    rendererCanvas.style.left = `${canvasBox.left}px`;
+    rendererCanvas.style.top = `${canvasBox.top}px`;
+    rendererCanvas.style.clipPath = stableEditingSurface
+      ? `inset(0px ${pixelWidth / presentationResolution - presentationBox.width}px ${pixelHeight / presentationResolution - presentationBox.height}px 0px)`
+      : "";
     if (
-      next.left === presentationBox.left &&
-      next.top === presentationBox.top &&
-      next.width === presentationBox.width &&
-      next.height === presentationBox.height &&
-      presentationResolution === appliedResolution
+      pixelWidth !== rendererCanvas.width ||
+      pixelHeight !== rendererCanvas.height ||
+      presentationResolution !== appliedResolution
     ) {
-      return presentationBox;
+      appliedResolution = presentationResolution;
+      app.renderer.resize(
+        canvasBox.width,
+        canvasBox.height,
+        presentationResolution,
+      );
+      syncAnnotationAntialiasResolution();
     }
-
-    presentationBox = next;
-    appliedResolution = presentationResolution;
-    rendererCanvas.style.left = `${next.left}px`;
-    rendererCanvas.style.top = `${next.top}px`;
-    app.renderer.resize(next.width, next.height, presentationResolution);
-    syncAnnotationAntialiasResolution();
-    return presentationBox;
+    return canvasBox;
   };
 
   const syncAnnotationAntialiasResolution = () => {
@@ -1152,12 +1172,13 @@ export async function createPixiMediaScene(
   };
 
   function resolveViewportBounds() {
-    if (!mediaScene || viewportScale <= 0) return undefined;
+    if (!mediaScene || !baseFit || viewportScale <= 0) return undefined;
+    const transform = viewport.getTransform();
     return {
-      x: -mediaScene.x / viewportScale,
-      y: -mediaScene.y / viewportScale,
-      width: app.renderer.screen.width / viewportScale,
-      height: app.renderer.screen.height / viewportScale,
+      x: (presentationBox.left - baseFit.x - transform.x) / viewportScale,
+      y: (presentationBox.top - baseFit.y - transform.y) / viewportScale,
+      width: presentationBox.width / viewportScale,
+      height: presentationBox.height / viewportScale,
     };
   }
 
@@ -1186,6 +1207,7 @@ export async function createPixiMediaScene(
       );
       syncPresentationBox();
       updateMediaSceneFit();
+      syncAnnotationAntialiasResolution();
       syncDisplaySizing();
       drawInteractionPresentationLayer(currentMediaTime);
       renderOnChange();
@@ -3575,7 +3597,7 @@ function describePreviewOverlayContent(
 function createSceneBackdrop(backgroundColor: number | undefined) {
   const backdrop = document.createElement("div");
   backdrop.style.height = "100%";
-  backdrop.style.overflow = "hidden";
+  backdrop.style.overflow = "clip";
   backdrop.style.position = "relative";
   backdrop.style.width = "100%";
   applyBackdropColor(backdrop, backgroundColor);

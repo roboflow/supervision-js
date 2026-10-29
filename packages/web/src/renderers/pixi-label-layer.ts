@@ -382,7 +382,7 @@ export function createPixiLabelLayer({
 
     updateEditingBox(id, renderedBox, preview) {
       const activeKey = `id:${String(id)}`;
-      let layoutChanged = false;
+      let captureContentsChanged = false;
       for (const [key, entry] of entriesByDetectionKey) {
         const bounds = boundsByDetectionKey.get(key);
         const instruction = entry.instruction;
@@ -428,7 +428,7 @@ export function createPixiLabelLayer({
               ...resolveContextState?.(preview),
             })
           : undefined;
-        layoutChanged = true;
+        captureContentsChanged = true;
         if (hasPreview && !previewInstruction) {
           entry.background.visible = false;
           entry.label.visible = false;
@@ -447,7 +447,7 @@ export function createPixiLabelLayer({
           ),
         );
       }
-      if (layoutChanged) syncBackgroundCaptures();
+      if (captureContentsChanged) syncBackgroundCaptures();
     },
 
     setLabelStyle(nextLabelStyle) {

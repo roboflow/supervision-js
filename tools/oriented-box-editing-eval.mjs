@@ -52,9 +52,12 @@ try {
     );
     await pause();
   };
-  const viewport = await cdp.evaluate(
-    'document.querySelector("canvas").getBoundingClientRect().toJSON()',
-  );
+  const viewport = await cdp.evaluate(`(() => {
+    const viewer = document.querySelector("#viewer");
+    const rect = viewer.getBoundingClientRect();
+    return { x: rect.x + viewer.clientLeft, y: rect.y + viewer.clientTop,
+      width: viewer.clientWidth, height: viewer.clientHeight };
+  })()`);
   const scale = Math.min(viewport.width / 800, viewport.height / 500);
   const screen = (p) => ({
     x: viewport.x + viewport.width / 2 + (p.x - 400) * scale,
@@ -274,13 +277,7 @@ try {
   const edge = edgeCreated[1];
   const edgeRect = getOrientedRectangleGeometry(edge.orientedBox);
   assert.ok(Math.abs(edgeRect.x + edgeRect.width / 2 - 800) < 0.01);
-  const host = await cdp.evaluate(`(() => {
-    const viewer = document.querySelector("#viewer");
-    const rect = viewer.getBoundingClientRect();
-    return { x: rect.x + viewer.clientLeft, y: rect.y + viewer.clientTop,
-      width: viewer.clientWidth, height: viewer.clientHeight };
-  })()`);
-  assert.ok(Math.abs(viewport.y - host.y) < 1);
+  const host = viewport;
   const initialEdgeRotate = handles(edge, scale).find(
     (handle) => handle.id === "obb-rotate",
   );
@@ -320,6 +317,40 @@ try {
   assert.ok(
     canvasAtTarget,
     "the exposed public rotation target is inside the real canvas hit area",
+  );
+  // Tabbing from host controls must not scroll the clipped renderer surface.
+  await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
+  const beforeCanvasFocus = await cdp.evaluate(`({
+    canvas: document.querySelector("canvas").getBoundingClientRect().toJSON(),
+    zoom: document.querySelector("#zoom").textContent,
+    selected: !document.querySelector("#angle").disabled
+  })`);
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Tab",
+    code: "Tab",
+    windowsVirtualKeyCode: 9,
+  });
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Tab",
+    code: "Tab",
+    windowsVirtualKeyCode: 9,
+  });
+  await pause();
+  assert.equal(await cdp.evaluate("document.activeElement.tagName"), "CANVAS");
+  assert.deepEqual(
+    await cdp.evaluate(`({
+      canvas: document.querySelector("canvas").getBoundingClientRect().toJSON(),
+      zoom: document.querySelector("#zoom").textContent,
+      selected: !document.querySelector("#angle").disabled
+    })`),
+    beforeCanvasFocus,
+    "native canvas focus must preserve its position, zoom and selection",
+  );
+  assert.deepEqual(await read(), edgeCreated);
+  results.push(
+    "native keyboard focus preserves the zoomed selection and canvas position",
   );
   await mkdir(artifactDirectory, { recursive: true });
   const edgeScreenshot = await cdp.send("Page.captureScreenshot", {

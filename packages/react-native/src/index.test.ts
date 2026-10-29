@@ -375,9 +375,13 @@ describe("pickReactNativeDetectionAtPoint", () => {
 });
 
 describe("resolveReactNativeLabelLayout", () => {
-  it.each([undefined, true, false])(
-    "positions a top label in canvas space with explicit topCornersOnly:%s and no layout callback",
-    (topCornersOnly) => {
+  it.each([
+    { name: "omitted", topCornersOnly: undefined },
+    { name: "true", topCornersOnly: true },
+    { name: "false", topCornersOnly: false },
+  ])(
+    "positions a top label in canvas space with topCornersOnly $name and no layout callback",
+    ({ topCornersOnly }) => {
       const layout = resolveReactNativeFrameLayout({
         canvasHeight: 500,
         canvasWidth: 1000,

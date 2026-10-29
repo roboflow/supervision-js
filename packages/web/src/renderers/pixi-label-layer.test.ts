@@ -794,7 +794,8 @@ describe("pixi label layer", () => {
         },
       },
     });
-    layer.createContainer();
+    const container = layer.createContainer() as FakeContainer;
+    layer.setBackgroundAntialiasFilter({ padding: 2 } as Filter);
     layer.drawFrame(1);
     const preview = {
       ...firstFrame.detections[0]!,
@@ -814,8 +815,14 @@ describe("pixi label layer", () => {
     layer.updateEditingBox("player-1", hiddenPreview.rect, hiddenPreview);
     expect(layer.getDetectionLabelBounds("player-1")).toBeNull();
     expect(layer.pickDetectionAtPoint({ x: 181, y: 153 }, 1)).toBeNull();
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(0);
     layer.updateEditingBox("player-1", preview.rect, preview);
     expect(layer.getDetectionLabelBounds("player-1")?.x).toBe(180);
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(1);
     layer.updateEditingBox("player-1", undefined);
     expect(layer.getDetectionLabelBounds("player-1")).toEqual({
       x: 10,
@@ -825,9 +832,9 @@ describe("pixi label layer", () => {
     });
   });
 
-  it("updates a neighboring label's bounds and picking on later previews in the same gesture", () => {
+  it("updates a neighboring label's bounds, picking, and captures on later previews in the same gesture", () => {
     const style = createStableLabelStyle();
-    let obstacleRight = 20;
+    let obstacleRight = -10;
     const frame: DetectionFrame = {
       ...firstFrame,
       detections: [
@@ -842,18 +849,25 @@ describe("pixi label layer", () => {
       detectionTimeline: createTimeline([frame]),
       labelStyle: {
         resolve(detection, context) {
+          const instruction = style.resolve(detection, context)!;
+          if (detection.id !== "neighbor") return instruction;
           return {
-            ...style.resolve(detection, context)!,
-            layout: (bounds) => ({
-              x: detection.id === "neighbor" ? obstacleRight + 20 : bounds.x,
-              y: bounds.y,
-            }),
+            ...instruction,
+            layout: (bounds) => ({ x: obstacleRight + 20, y: bounds.y }),
           };
         },
       },
     });
-    layer.createContainer();
+    const container = layer.createContainer() as FakeContainer;
+    layer.setBackgroundAntialiasFilter({ padding: 2 } as Filter);
     layer.drawFrame(1);
+    const backgrounds = container.children
+      .filter((child) => child instanceof FakeContainer)
+      .map((group) => (group as FakeContainer).children[0]);
+    expect(backgrounds).toHaveLength(2);
+    const texts = container.children.filter(
+      (child) => child instanceof FakeText,
+    );
     const preview = {
       ...frame.detections[0]!,
       rect: { x: 200, y: 200, width: 40, height: 60 },
@@ -862,6 +876,13 @@ describe("pixi label layer", () => {
     layer.updateEditingBox("player-1", preview.rect, preview);
     const previousBounds = layer.getDetectionLabelBounds("neighbor");
     expect(previousBounds).toEqual({ x: 240, y: 12, width: 34, height: 18 });
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(1);
+    expect((container.children[0] as FakeContainer).children).toEqual(
+      backgrounds,
+    );
+    expect(container.children.slice(1)).toEqual(texts);
     expect(
       layer.pickDetectionAtPoint({ x: 241, y: 13 }, 1)?.detectionIndex,
     ).toBe(1);
@@ -883,6 +904,16 @@ describe("pixi label layer", () => {
     ).toBe(1);
     expect(layer.pickDetectionAtPoint({ x: 241, y: 13 }, 1)).toBeNull();
     expect(previousBounds).toEqual({ x: 240, y: 12, width: 34, height: 18 });
+
+    obstacleRight = -10;
+    layer.updateEditingBox("player-1", laterPreview.rect, laterPreview);
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(2);
+    for (const text of texts as FakeText[]) {
+      expect(text.textAssignments).toBe(1);
+      expect(text.styleAssignments).toBe(1);
+    }
   });
 
   it("rejects a non-finite layout position", () => {
