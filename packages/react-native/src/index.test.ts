@@ -375,39 +375,44 @@ describe("pickReactNativeDetectionAtPoint", () => {
 });
 
 describe("resolveReactNativeLabelLayout", () => {
-  it("positions a top label in canvas space while anchoring to media geometry", () => {
-    const layout = resolveReactNativeFrameLayout({
-      canvasHeight: 500,
-      canvasWidth: 1000,
-      mediaHeight: 500,
-      mediaWidth: 1000,
-    });
+  it.each([undefined, true, false])(
+    "positions a top label in canvas space with explicit topCornersOnly:%s and no layout callback",
+    (topCornersOnly) => {
+      const layout = resolveReactNativeFrameLayout({
+        canvasHeight: 500,
+        canvasWidth: 1000,
+        mediaHeight: 500,
+        mediaWidth: 1000,
+      });
 
-    const label = resolveReactNativeLabelLayout({
-      instruction: {
-        background: {
-          alpha: 0.8,
-          color: 0x111827,
-          paddingX: 6,
-          paddingY: 3,
+      const label = resolveReactNativeLabelLayout({
+        instruction: {
+          background: {
+            alpha: 0.8,
+            color: 0x111827,
+            paddingX: 6,
+            paddingY: 3,
+            ...(topCornersOnly === undefined ? {} : { topCornersOnly }),
+          },
+          offsetY: 4,
+          placement: LabelPlacement.Top,
+          rect: { height: 100, width: 80, x: 140, y: 100 },
+          text: "horse 92%",
         },
-        offsetY: 4,
-        placement: LabelPlacement.Top,
-        rect: { height: 100, width: 80, x: 140, y: 100 },
-        text: "horse 92%",
-      },
-      layout,
-      textSize: { height: 10, width: 40 },
-    });
+        layout,
+        textSize: { height: 10, width: 40 },
+      });
 
-    expect(label.backgroundRect).toEqual({
-      height: 16,
-      width: 52,
-      x: 100,
-      y: 30,
-    });
-    expect(label.textPoint).toEqual({ x: 106, y: 33 });
-  });
+      expect(label.backgroundRect).toEqual({
+        height: 16,
+        width: 52,
+        x: 100,
+        y: 30,
+      });
+      expect(label.textPoint).toEqual({ x: 106, y: 33 });
+      expect(label.topCornersOnly).toBe(topCornersOnly);
+    },
+  );
 
   it("maps media offsets through scale before placing a bottom label", () => {
     const layout = resolveReactNativeFrameLayout({

@@ -777,7 +777,7 @@ describe("pixi label layer", () => {
     expect(text.styleAssignments).toBe(1);
   });
 
-  it("uses current resize geometry for layout and restores the committed anchor on cancel", () => {
+  it("uses current resize geometry for layout and restores the committed anchor when preview geometry clears", () => {
     const style = createStableLabelStyle();
     const layer = createPixiLabelLayer({
       Container: FakeContainer as never,
@@ -823,6 +823,66 @@ describe("pixi label layer", () => {
       width: 34,
       height: 18,
     });
+  });
+
+  it("updates a neighboring label's bounds and picking on later previews in the same gesture", () => {
+    const style = createStableLabelStyle();
+    let obstacleRight = 20;
+    const frame: DetectionFrame = {
+      ...firstFrame,
+      detections: [
+        firstFrame.detections[0]!,
+        { id: "neighbor", rect: { x: 115, y: 40, width: 10, height: 20 } },
+      ],
+    };
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([frame]),
+      labelStyle: {
+        resolve(detection, context) {
+          return {
+            ...style.resolve(detection, context)!,
+            layout: (bounds) => ({
+              x: detection.id === "neighbor" ? obstacleRight + 20 : bounds.x,
+              y: bounds.y,
+            }),
+          };
+        },
+      },
+    });
+    layer.createContainer();
+    layer.drawFrame(1);
+    const preview = {
+      ...frame.detections[0]!,
+      rect: { x: 200, y: 200, width: 40, height: 60 },
+    };
+    obstacleRight = 220;
+    layer.updateEditingBox("player-1", preview.rect, preview);
+    const previousBounds = layer.getDetectionLabelBounds("neighbor");
+    expect(previousBounds).toEqual({ x: 240, y: 12, width: 34, height: 18 });
+    expect(
+      layer.pickDetectionAtPoint({ x: 241, y: 13 }, 1)?.detectionIndex,
+    ).toBe(1);
+
+    const laterPreview = {
+      ...preview,
+      rect: { ...preview.rect, x: 300, width: 60 },
+    };
+    obstacleRight = 330;
+    layer.updateEditingBox("player-1", laterPreview.rect, laterPreview);
+    expect(layer.getDetectionLabelBounds("neighbor")).toEqual({
+      x: 350,
+      y: 12,
+      width: 34,
+      height: 18,
+    });
+    expect(
+      layer.pickDetectionAtPoint({ x: 351, y: 13 }, 1)?.detectionIndex,
+    ).toBe(1);
+    expect(layer.pickDetectionAtPoint({ x: 241, y: 13 }, 1)).toBeNull();
+    expect(previousBounds).toEqual({ x: 240, y: 12, width: 34, height: 18 });
   });
 
   it("rejects a non-finite layout position", () => {

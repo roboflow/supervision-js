@@ -51,8 +51,9 @@ media pixels; return finite `{ x, y }` coordinates to translate the label while
 preserving its measured size. The translated rectangle drives both drawing and
 reported label bounds on web, including picking. Return
 `background: { topCornersOnly: false }` to round all corners at a detached
-position, or `true` to round only the top pair. React Native retains its default
-all-corner rounding when the flag is omitted.
+position, or `true` to round only the top pair. React Native honors
+`background.topCornersOnly` on the instruction even without a layout callback,
+and retains its default all-corner rounding when the flag is omitted.
 
 The callback runs again for changed text, styles, scale, and editing geometry.
 Use the supplied measured rectangle rather than previously reported bounds;

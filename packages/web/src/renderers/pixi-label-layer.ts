@@ -45,10 +45,10 @@ interface PixiLabelEntry {
 
 interface LabelHitRect {
   readonly detectionIndex: number;
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 type LabelCaptureBounds = Pick<LabelHitRect, "height" | "width" | "x" | "y">;
@@ -289,11 +289,12 @@ export function createPixiLabelLayer({
   };
 
   const updateBounds = (key: string, rect: LabelCaptureBounds) => {
-    const previous = boundsByDetectionKey.get(key);
-    if (!previous) return;
-    const next = { ...rect, detectionIndex: previous.detectionIndex };
-    boundsByDetectionKey.set(key, next);
-    hitRects = hitRects.map((hit) => (hit === previous ? next : hit));
+    const bounds = boundsByDetectionKey.get(key);
+    if (!bounds) return;
+    bounds.x = rect.x;
+    bounds.y = rect.y;
+    bounds.width = rect.width;
+    bounds.height = rect.height;
   };
 
   return {
@@ -381,6 +382,7 @@ export function createPixiLabelLayer({
 
     updateEditingBox(id, renderedBox, preview) {
       const activeKey = `id:${String(id)}`;
+      let layoutChanged = false;
       for (const [key, entry] of entriesByDetectionKey) {
         const bounds = boundsByDetectionKey.get(key);
         const instruction = entry.instruction;
@@ -426,6 +428,7 @@ export function createPixiLabelLayer({
               ...resolveContextState?.(preview),
             })
           : undefined;
+        layoutChanged = true;
         if (hasPreview && !previewInstruction) {
           entry.background.visible = false;
           entry.label.visible = false;
@@ -444,7 +447,7 @@ export function createPixiLabelLayer({
           ),
         );
       }
-      syncBackgroundCaptures();
+      if (layoutChanged) syncBackgroundCaptures();
     },
 
     setLabelStyle(nextLabelStyle) {
