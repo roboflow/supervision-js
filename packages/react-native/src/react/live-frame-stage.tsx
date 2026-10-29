@@ -1,3 +1,4 @@
+import { LabelBackground } from "./label-background";
 import {
   Canvas,
   Circle,
@@ -132,6 +133,7 @@ export interface ReactNativeLiveStageLabel {
   readonly backgroundRect: ReactNativeLiveStageRect;
   readonly baselineY: number;
   readonly cornerRadius: number;
+  readonly topCornersOnly?: boolean;
   readonly font: ReturnType<typeof matchFont>;
   readonly key: string;
   readonly text: string;
@@ -346,13 +348,11 @@ export function ReactNativeLiveFrameStage(
         {props.labels.map((label) => (
           <Fragment key={label.key}>
             {label.backgroundColor ? (
-              <RoundedRect
+              <LabelBackground
                 color={label.backgroundColor}
-                height={label.backgroundRect.height}
-                r={label.cornerRadius}
-                width={label.backgroundRect.width}
-                x={label.backgroundRect.x}
-                y={label.backgroundRect.y}
+                rect={label.backgroundRect}
+                cornerRadius={label.cornerRadius}
+                topCornersOnly={label.topCornersOnly}
               />
             ) : null}
             <SkiaText
@@ -734,6 +734,7 @@ function createLabels(
       backgroundRect: labelLayout.backgroundRect,
       baselineY: labelLayout.textPoint.y - metrics.ascent,
       cornerRadius: labelLayout.cornerRadius,
+      topCornersOnly: labelLayout.topCornersOnly,
       font,
       key: `${label.text}:${index}`,
       text: label.text,

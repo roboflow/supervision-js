@@ -523,6 +523,7 @@ export interface ReactNativeLabelLayoutOptions {
 export interface ReactNativeLabelLayout {
   readonly backgroundRect: TopLeftRect;
   readonly cornerRadius: number;
+  readonly topCornersOnly?: boolean;
   readonly textPoint: ReactNativePoint;
 }
 
@@ -766,17 +767,37 @@ export function resolveReactNativeLabelLayout(
     width,
   });
 
+  const adjusted = instruction.layout?.(
+    {
+      x: (position.x - layout.mediaRect.x) / layout.scale,
+      y: (position.y - layout.mediaRect.y) / layout.scale,
+      width: width / layout.scale,
+      height: height / layout.scale,
+    },
+    layout.scale,
+  );
+  if (
+    instruction.layout &&
+    (!adjusted || !Number.isFinite(adjusted.x) || !Number.isFinite(adjusted.y))
+  ) {
+    throw new RangeError("Label layout must return finite coordinates.");
+  }
+  const point = adjusted ? layout.mapPoint(adjusted) : position;
+
+  const topCornersOnly =
+    adjusted?.background?.topCornersOnly ?? background?.topCornersOnly;
   return {
     backgroundRect: {
       height,
       width,
-      x: position.x,
-      y: position.y,
+      x: point.x,
+      y: point.y,
     },
     cornerRadius: background?.cornerRadius ?? 0,
+    ...(topCornersOnly === undefined ? {} : { topCornersOnly }),
     textPoint: {
-      x: position.x + paddingX,
-      y: position.y + paddingY,
+      x: point.x + paddingX,
+      y: point.y + paddingY,
     },
   };
 }

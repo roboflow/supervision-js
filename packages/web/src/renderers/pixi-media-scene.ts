@@ -2866,6 +2866,10 @@ export async function createPixiMediaScene(
         editingBox?.detection.id === editingState.activeDetectionId
           ? editingBox.rect
           : undefined,
+        editingState.kind === AnnotationGestureStateKind.Resizing ||
+          editingState.kind === AnnotationGestureStateKind.Rotating
+          ? editingState.preview
+          : undefined,
       );
     }
   }

@@ -33,10 +33,9 @@ interface PixiLabelEntry {
   backgroundKey: string | null;
   backgroundWidth: number;
   labelAlpha: number | null;
-  backgroundBaseX: number;
-  backgroundBaseY: number;
-  labelBaseX: number;
-  labelBaseY: number;
+  translationX: number;
+  translationY: number;
+  renderedBox: Rect | undefined;
   text: string | null;
   textStyleKey: string | null;
   textHeight: number;
@@ -52,16 +51,7 @@ interface LabelHitRect {
   readonly height: number;
 }
 
-interface LabelLayoutRect {
-  readonly baseX: number;
-  readonly baseY: number;
-  readonly height: number;
-  readonly width: number;
-  readonly x: number;
-  readonly y: number;
-}
-
-type LabelCaptureBounds = Pick<LabelLayoutRect, "height" | "width" | "x" | "y">;
+type LabelCaptureBounds = Pick<LabelHitRect, "height" | "width" | "x" | "y">;
 
 export interface PixiLabelLayerOptions {
   readonly Container: new () => PixiContainer;
@@ -85,7 +75,11 @@ export interface PixiLabelLayer {
     viewportScale?: number,
     renderedBox?: Rect,
   ): void;
-  updateEditingBox(id: string | number, renderedBox: Rect | undefined): void;
+  updateEditingBox(
+    id: string | number,
+    renderedBox: Rect | undefined,
+    preview?: Detection | null,
+  ): void;
   setLabelStyle(labelStyle: LabelStyle | null): void;
   setBackgroundAntialiasFilter(filter: PixiFilter | null): void;
   translateDetection(id: string | number, x: number, y: number): boolean;
@@ -129,7 +123,7 @@ export function createPixiLabelLayer({
   let backgroundsGrouped = false;
   const backgroundGroups: PixiContainer[] = [];
   const entriesByDetectionKey = new Map<string, PixiLabelEntry>();
-  const boundsByDetectionKey = new Map<string, LabelLayoutRect>();
+  const boundsByDetectionKey = new Map<string, LabelHitRect>();
 
   const clearLayout = () => {
     hitRects = [];
@@ -150,13 +144,12 @@ export function createPixiLabelLayer({
       background: new Graphics(),
       backgroundHeight: 0,
       backgroundKey: null,
-      backgroundBaseX: 0,
-      backgroundBaseY: 0,
+      translationX: 0,
+      translationY: 0,
+      renderedBox: undefined,
       backgroundWidth: 0,
       label: new Text({ text: "", style: {} }),
       labelAlpha: null,
-      labelBaseX: 0,
-      labelBaseY: 0,
       text: null,
       textStyleKey: null,
       textHeight: 0,
@@ -286,16 +279,21 @@ export function createPixiLabelLayer({
       );
       const key = detectionKey(detection, detectionIndex);
       entriesByDetectionKey.set(key, entry);
-      boundsByDetectionKey.set(key, {
-        baseX: hitRect.x,
-        baseY: hitRect.y,
-        ...hitRect,
-      });
-      hitRects.push({ ...hitRect, detectionIndex });
+      const bounds = { ...hitRect, detectionIndex };
+      boundsByDetectionKey.set(key, bounds);
+      hitRects.push(bounds);
       drawnCount += 1;
     }
 
     hideEntriesFrom(drawnCount);
+  };
+
+  const updateBounds = (key: string, rect: LabelCaptureBounds) => {
+    const previous = boundsByDetectionKey.get(key);
+    if (!previous) return;
+    const next = { ...rect, detectionIndex: previous.detectionIndex };
+    boundsByDetectionKey.set(key, next);
+    hitRects = hitRects.map((hit) => (hit === previous ? next : hit));
   };
 
   return {
@@ -381,31 +379,72 @@ export function createPixiLabelLayer({
       syncBackgroundCaptures();
     },
 
-    updateEditingBox(id, renderedBox) {
-      const key = `id:${String(id)}`;
-      const entry = entriesByDetectionKey.get(key);
-      const bounds = boundsByDetectionKey.get(key);
-      const instruction = entry?.instruction;
-      if (!entry || !bounds || !instruction?.background) return;
-      const corners = resolveRoundedCorners(
-        instruction.background,
-        instruction.placement ?? LabelPlacement.Top,
-        bounds,
-        renderedBox,
-        lastViewportScale,
-      );
-      drawBackground(
-        entry,
-        instruction.background,
-        bounds.baseX,
-        bounds.baseY,
-        bounds.width,
-        bounds.height,
-        lastViewportScale,
-        corners,
-      );
-      entry.background.x = bounds.x;
-      entry.background.y = bounds.y;
+    updateEditingBox(id, renderedBox, preview) {
+      const activeKey = `id:${String(id)}`;
+      for (const [key, entry] of entriesByDetectionKey) {
+        const bounds = boundsByDetectionKey.get(key);
+        const instruction = entry.instruction;
+        if (
+          !bounds ||
+          !instruction ||
+          (key !== activeKey && !instruction.layout)
+        )
+          continue;
+        const active = key === activeKey;
+        if (active) entry.renderedBox = renderedBox;
+        if (!instruction.layout) {
+          if (instruction.background) {
+            drawBackground(
+              entry,
+              instruction.background,
+              bounds.x,
+              bounds.y,
+              bounds.width,
+              bounds.height,
+              lastViewportScale,
+              resolveRoundedCorners(
+                instruction.background,
+                instruction.placement ?? LabelPlacement.Top,
+                bounds,
+                renderedBox,
+                lastViewportScale,
+              ),
+            );
+          }
+          continue;
+        }
+        // A layout callback can depend on any current editing geometry. Resolve
+        // the active preview without replacing the committed move anchor.
+        const frame = lastFrame;
+        const hasPreview = active && preview && frame;
+        const previewInstruction = hasPreview
+          ? currentLabelStyle?.resolve(preview, {
+              detectionIndex: bounds.detectionIndex,
+              frame,
+              mediaTime: frame.mediaTime,
+              viewportScale: lastViewportScale,
+              ...resolveContextState?.(preview),
+            })
+          : undefined;
+        if (hasPreview && !previewInstruction) {
+          entry.background.visible = false;
+          entry.label.visible = false;
+          continue;
+        }
+        updateBounds(
+          key,
+          drawInstruction(
+            entry,
+            previewInstruction ?? instruction,
+            lastViewportScale,
+            entry.renderedBox,
+            previewInstruction ? 0 : entry.translationX,
+            previewInstruction ? 0 : entry.translationY,
+            false,
+          ),
+        );
+      }
+      syncBackgroundCaptures();
     },
 
     setLabelStyle(nextLabelStyle) {
@@ -424,17 +463,40 @@ export function createPixiLabelLayer({
       const key = `id:${String(id)}`;
       const entry = entriesByDetectionKey.get(key);
       if (!entry) return false;
-      entry.background.x = entry.backgroundBaseX + x;
-      entry.background.y = entry.backgroundBaseY + y;
-      entry.label.x = entry.labelBaseX + x;
-      entry.label.y = entry.labelBaseY + y;
-      const bounds = boundsByDetectionKey.get(key);
-      if (bounds) {
-        boundsByDetectionKey.set(key, {
-          ...bounds,
-          x: bounds.baseX + x,
-          y: bounds.baseY + y,
-        });
+      entry.translationX = x;
+      entry.translationY = y;
+      if (entry.instruction?.layout) {
+        updateBounds(
+          key,
+          drawInstruction(
+            entry,
+            entry.instruction,
+            lastViewportScale,
+            entry.renderedBox,
+            x,
+            y,
+            false,
+          ),
+        );
+      } else if (entry.instruction) {
+        const bounds = boundsByDetectionKey.get(key);
+        if (bounds) {
+          const anchor = resolveLabelPosition(
+            entry.instruction,
+            bounds.width,
+            bounds.height,
+          );
+          const next = { ...bounds, x: anchor.x + x, y: anchor.y + y };
+          entry.background.x = next.x;
+          entry.background.y = next.y;
+          entry.label.x =
+            next.x +
+            (entry.instruction.background?.paddingX ?? 0) / lastViewportScale;
+          entry.label.y =
+            next.y +
+            (entry.instruction.background?.paddingY ?? 0) / lastViewportScale;
+          updateBounds(key, next);
+        }
       }
       syncBackgroundCaptures();
       return true;
@@ -442,7 +504,11 @@ export function createPixiLabelLayer({
 
     getDetectionLabelBounds(id) {
       const bounds = boundsByDetectionKey.get(`id:${String(id)}`);
-      if (!bounds) return null;
+      if (
+        !bounds ||
+        !entriesByDetectionKey.get(`id:${String(id)}`)?.label.visible
+      )
+        return null;
       return {
         height: bounds.height,
         width: bounds.width,
@@ -454,15 +520,19 @@ export function createPixiLabelLayer({
     pickDetectionAtPoint(point, mediaTime) {
       const frame = detectionTimeline.selectFrame(mediaTime);
       if (!frame) return null;
-      const hit = [...hitRects]
-        .reverse()
-        .find(
-          (rect) =>
-            point.x >= rect.x &&
-            point.x <= rect.x + rect.width &&
-            point.y >= rect.y &&
-            point.y <= rect.y + rect.height,
+      const hit = [...hitRects].reverse().find((rect) => {
+        const detection = frame.detections[rect.detectionIndex];
+        return (
+          detection &&
+          entriesByDetectionKey.get(
+            detectionKey(detection, rect.detectionIndex),
+          )?.label.visible &&
+          point.x >= rect.x &&
+          point.x <= rect.x + rect.width &&
+          point.y >= rect.y &&
+          point.y <= rect.y + rect.height
         );
+      });
       const detection =
         hit === undefined ? undefined : frame.detections[hit.detectionIndex];
       return hit && detection
@@ -499,8 +569,16 @@ function drawInstruction(
   instruction: LabelDrawInstruction,
   viewportScale: number,
   renderedBox?: Rect,
+  translationX = 0,
+  translationY = 0,
+  retainInstruction = true,
 ) {
-  entry.instruction = instruction;
+  if (retainInstruction) {
+    entry.instruction = instruction;
+    entry.translationX = 0;
+    entry.translationY = 0;
+    entry.renderedBox = renderedBox;
+  }
   const textStyle = resolveTextStyle(instruction.textStyle, viewportScale);
   const textStyleKey = createTextStyleKey(textStyle);
   const textAlpha = instruction.textStyle?.alpha ?? 1;
@@ -522,19 +600,37 @@ function drawInstruction(
     entry.labelAlpha = textAlpha;
   }
 
-  const background = instruction.background;
+  let background = instruction.background;
   const paddingX = (background?.paddingX ?? 0) / viewportScale;
   const paddingY = (background?.paddingY ?? 0) / viewportScale;
   entry.textWidth = entry.label.width;
   entry.textHeight = entry.label.height;
   const width = entry.textWidth + paddingX * 2;
   const height = entry.textHeight + paddingY * 2;
-  const { x, y } = resolveLabelPosition(instruction, width, height);
+  const anchor = resolveLabelPosition(instruction, width, height);
+  const measured = {
+    x: anchor.x + translationX,
+    y: anchor.y + translationY,
+    width,
+    height,
+  };
+  const adjusted = instruction.layout?.(measured, viewportScale);
+  const { x, y } = adjusted ?? measured;
+  if (
+    instruction.layout &&
+    (!adjusted || !Number.isFinite(x) || !Number.isFinite(y))
+  ) {
+    throw new RangeError("Label layout must return finite coordinates.");
+  }
+  if (background && adjusted?.background?.topCornersOnly !== undefined) {
+    background = {
+      ...background,
+      topCornersOnly: adjusted.background.topCornersOnly,
+    };
+  }
 
   entry.label.x = x + paddingX;
   entry.label.y = y + paddingY;
-  entry.labelBaseX = entry.label.x;
-  entry.labelBaseY = entry.label.y;
 
   if (!background) {
     entry.background.visible = false;
@@ -676,8 +772,6 @@ function drawBackground(
   graphics.visible = true;
   graphics.x = x;
   graphics.y = y;
-  entry.backgroundBaseX = x;
-  entry.backgroundBaseY = y;
 
   if (
     entry.backgroundKey === backgroundKey &&

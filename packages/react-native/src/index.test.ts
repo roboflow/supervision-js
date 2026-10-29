@@ -40,7 +40,7 @@ import type {
   IdMaskBuildArtifact,
   IdMaskBuildOptions,
 } from "./specs/IdMaskBuilder.nitro";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("resolveReactNativeFramePresentation", () => {
   it("uses renderer descriptors to select native frame layers", () => {
@@ -442,6 +442,75 @@ describe("resolveReactNativeLabelLayout", () => {
       y: 79,
     });
     expect(label.textPoint).toEqual({ x: 59, y: 81 });
+  });
+
+  it.each([1, 0.5])(
+    "lays out measured media bounds with letterboxing at scale %s",
+    (scale) => {
+      const layout = resolveReactNativeFrameLayout({
+        canvasHeight: 600 * scale,
+        canvasWidth: 1000 * scale,
+        mediaHeight: 500,
+        mediaWidth: 1000,
+      });
+      const adjust = vi.fn((bounds: { x: number; y: number }) => ({
+        x: bounds.x + 20,
+        y: bounds.y + 10,
+        background: { topCornersOnly: true },
+      }));
+      const label = resolveReactNativeLabelLayout({
+        instruction: {
+          background: {
+            alpha: 1,
+            color: 0,
+            paddingX: 4,
+            paddingY: 2,
+            topCornersOnly: false,
+          },
+          placement: LabelPlacement.Bottom,
+          rect: { x: 140, y: 100, width: 80, height: 100 },
+          text: "measured",
+          layout: adjust,
+        },
+        layout,
+        textSize: { width: 40, height: 10 },
+      });
+      expect(adjust).toHaveBeenCalledWith(
+        { x: 100, y: 150, width: 48 / scale, height: 14 / scale },
+        scale,
+      );
+      expect(label.backgroundRect).toEqual({
+        x: 120 * scale,
+        y: 210 * scale,
+        width: 48,
+        height: 14,
+      });
+      expect(label.textPoint).toEqual({
+        x: 120 * scale + 4,
+        y: 210 * scale + 2,
+      });
+      expect(label.topCornersOnly).toBe(true);
+    },
+  );
+
+  it("rejects non-finite media layout coordinates", () => {
+    const layout = resolveReactNativeFrameLayout({
+      canvasHeight: 100,
+      canvasWidth: 100,
+      mediaHeight: 100,
+      mediaWidth: 100,
+    });
+    expect(() =>
+      resolveReactNativeLabelLayout({
+        instruction: {
+          rect: { x: 20, y: 20, width: 10, height: 10 },
+          text: "x",
+          layout: () => ({ x: 0, y: Infinity }),
+        },
+        layout,
+        textSize: { width: 10, height: 10 },
+      }),
+    ).toThrow(RangeError);
   });
 });
 
