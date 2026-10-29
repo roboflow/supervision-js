@@ -412,6 +412,8 @@ export function createPixiInteractionLayer(options: {
   function handlePointerDown(event: PixiInteractionPointerEvent) {
     if (captureReleased) pointerCancel(defaultPress?.input.pointerId);
     handledPresses.delete(event.pointerId);
+    if (suppressedTap && samePointer(suppressedTap, event))
+      suppressedTap = null;
     if (
       !canHandleInteraction() ||
       isOtherPressPointer(event) ||

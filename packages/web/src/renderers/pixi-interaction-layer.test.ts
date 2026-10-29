@@ -179,12 +179,18 @@ describe("pixi interaction layer", () => {
     },
   );
 
-  it("ignores outside handle presses from a preview overlay without an editing engine", () => {
+  it("keeps rejected preview-overlay presses from swallowing the next selection", () => {
     const selected = {
       id: "selected",
       rect: { x: 100, y: 10, width: 40, height: 20 },
     };
-    const overlayFrame = { mediaTime: 0, detections: [selected] };
+    const overlayFrame = {
+      mediaTime: 0,
+      detections: [
+        selected,
+        { id: "other", rect: { x: 20, y: 10, width: 40, height: 20 } },
+      ],
+    };
     const capturePointer = vi.fn();
     const onMarqueeChange = vi.fn();
     const onSelectionChange = vi.fn();
@@ -208,11 +214,11 @@ describe("pixi interaction layer", () => {
       height: 100,
     }) as Container;
     const boundary = new EventBoundary(display);
-    const send = (type: string, x: number, y: number) => {
+    const send = (type: string, x: number, y: number, pointerId = 7) => {
       const event = new FederatedPointerEvent(boundary);
       event.type = type;
       event.pointerType = "mouse";
-      event.pointerId = 7;
+      event.pointerId = pointerId;
       event.button = 0;
       event.buttons = type === "pointerup" ? 0 : 1;
       event.global.set(x, y);
@@ -254,6 +260,23 @@ describe("pixi interaction layer", () => {
     expect(onMarqueeChange).not.toHaveBeenCalled();
     expect(onSelectionChange).not.toHaveBeenCalled();
     expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+
+    send("pointerdown", 100, -2);
+    layer.pointerCancel(8);
+    send("pointerdown", 100, 10, 8);
+    send("pointerup", 100, 10, 8);
+    send("pointerup", 20, 10);
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+
+    for (const canceled of [true, false]) {
+      layer.setSelectedDetection({ detectionId: selected.id });
+      send("pointerdown", 100, -2);
+      if (canceled) layer.pointerCancel(7);
+      send("pointerdown", 20, 10);
+      send("pointerup", 20, 10);
+      expect(layer.getState().selectedPick?.detection.id).toBe("other");
+    }
     layer.destroy();
     graphics.destroy();
   });
