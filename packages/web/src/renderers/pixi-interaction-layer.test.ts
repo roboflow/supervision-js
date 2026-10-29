@@ -300,6 +300,26 @@ describe("pixi interaction layer", () => {
     expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
   });
 
+  it("keeps the capture-release transition move pending for delayed pointerup", () => {
+    const h = createPressHarness(() => "continue");
+    h.send("pointerdown", 40, 40, { pointerId: 7 });
+    h.send("pointermove", 180, 140, { pointerId: 7 });
+    h.layer.pointerCaptureLost(7, 0, 100);
+    h.send("pointermove", 200, 160, {
+      pointerId: 7,
+      buttons: 0,
+      nativeTimeStamp: 100,
+    });
+    expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Moving);
+    expect(h.onCommit).not.toHaveBeenCalled();
+    h.send("pointerup", 200, 160, { pointerId: 7 });
+    expect(h.onCommit).toHaveBeenCalledExactlyOnceWith(
+      { id: "a", rect: { x: 200, y: 160, width: 40, height: 40 } },
+      expect.objectContaining({ id: "a" }),
+    );
+    expect(h.layer.getState().selectedPick?.detection.id).toBe("a");
+  });
+
   it.each([7, 8])(
     "accepts pointer %s after released capture without pointerup",
     async (pointerId) => {
@@ -335,13 +355,17 @@ describe("pixi interaction layer", () => {
         { pointerId: 7 },
       );
       h.send("pointermove", 180, 140, { pointerId: 7 });
-      h.layer.pointerCaptureLost(7, 0);
+      h.layer.pointerCaptureLost(7, 0, 100);
       const preview = h.engine.getState().preview;
       const marquee = h.layer.getState().marqueeRect;
       h.send("pointermove", x, y, { pointerId: 8, buttons: 0 });
       expect(h.engine.getState().preview).toEqual(preview);
       expect(h.layer.getState().marqueeRect).toEqual(marquee);
-      h.send("pointermove", x, y, { pointerId: 7, buttons: 0 });
+      h.send("pointermove", x, y, {
+        pointerId: 7,
+        buttons: 0,
+        nativeTimeStamp: 101,
+      });
       expect(h.engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
       expect(h.layer.getState().marqueeRect).toBeNull();
       expect(h.onCommit).not.toHaveBeenCalled();
@@ -2929,6 +2953,7 @@ function createPressHarness(
         pointerId?: number;
         button?: number;
         buttons?: number;
+        nativeTimeStamp?: number;
         shiftKey?: boolean;
         altKey?: boolean;
         ctrlKey?: boolean;
@@ -2946,6 +2971,11 @@ function createPressHarness(
       event.ctrlKey = options.ctrlKey ?? false;
       event.metaKey = options.metaKey ?? false;
       event.timeStamp = 500;
+      if (options.nativeTimeStamp !== undefined) {
+        Object.defineProperty(event, "nativeEvent", {
+          value: { timeStamp: options.nativeTimeStamp },
+        });
+      }
       event.global.set(x, y);
       boundary.mapEvent(event);
     },

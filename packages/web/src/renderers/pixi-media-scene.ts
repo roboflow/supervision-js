@@ -880,7 +880,11 @@ export async function createPixiMediaScene(
     interactionLayer?.pointerCancel(event.pointerId);
   };
   const handlePointerCaptureLost = (event: PointerEvent) => {
-    interactionLayer?.pointerCaptureLost(event.pointerId, event.buttons);
+    interactionLayer?.pointerCaptureLost(
+      event.pointerId,
+      event.buttons,
+      event.timeStamp,
+    );
   };
   const handlePointerUp = (event: PointerEvent) => {
     interactionLayer?.pointerUpFallback(event.pointerId);
