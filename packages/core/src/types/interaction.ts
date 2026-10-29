@@ -103,6 +103,8 @@ export interface MediaInteractionOptions extends Omit<
    * presses and repeated hits. Return "handled" to skip those defaults and the
    * press's subsequent tap, or "continue" to keep them. Hosts own any ongoing
    * gesture and should let its release or cancellation reach the renderer.
+   * The browser may report coordinates outside media; there, "continue" permits
+   * only selected-handle editing with an editing engine.
    * Returning "continue" must leave selection and editing state unchanged:
    * defaults use the snapshot resolved before this callback. Return "handled"
    * when the host changes that state.

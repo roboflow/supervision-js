@@ -6,6 +6,7 @@ import {
   Container,
   EventBoundary,
   FederatedPointerEvent,
+  Graphics,
   Rectangle,
 } from "pixi.js";
 
@@ -126,6 +127,10 @@ describe("pixi interaction layer", () => {
       send("pointerdown", 20, -2);
       send("pointerup", 20, -2);
       expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+      // Pixi also taps when a rejected outside press releases over a detection.
+      send("pointerdown", 20, -2);
+      send("pointerup", 20, 5);
+      expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
       send("pointerdown", 20, -2);
       send("pointermove", 180, 80);
       expect(layer.getState().marqueeRect).toBeNull();
@@ -173,6 +178,126 @@ describe("pixi interaction layer", () => {
       layer.destroy();
     },
   );
+
+  it("ignores outside handle presses from a preview overlay without an editing engine", () => {
+    const selected = {
+      id: "selected",
+      rect: { x: 100, y: 10, width: 40, height: 20 },
+    };
+    const overlayFrame = { mediaTime: 0, detections: [selected] };
+    const capturePointer = vi.fn();
+    const onMarqueeChange = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onPointerPress = vi.fn(() => "continue" as const);
+    const layer = createPixiInteractionLayer({
+      Container,
+      Rectangle,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(overlayFrame),
+      capturePointer,
+      interaction: {
+        mode: MediaInteractionMode.Always,
+        multiSelect: true,
+        onPointerPress,
+        onMarqueeChange,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      width: 200,
+      height: 100,
+    }) as Container;
+    const boundary = new EventBoundary(display);
+    const send = (type: string, x: number, y: number) => {
+      const event = new FederatedPointerEvent(boundary);
+      event.type = type;
+      event.pointerType = "mouse";
+      event.pointerId = 7;
+      event.button = 0;
+      event.buttons = type === "pointerup" ? 0 : 1;
+      event.global.set(x, y);
+      boundary.mapEvent(event);
+    };
+    const graphics = new Graphics();
+    const overlay = createPixiAnnotationOverlayLayer();
+    overlay.attachGraphics(graphics);
+    layer.drawFrame(0);
+    layer.setSelectedDetection({ detectionId: selected.id });
+    onSelectionChange.mockClear();
+    layer.setHandleBounds(
+      overlay.draw({
+        frame: overlayFrame,
+        selectedDetectionIds: [selected.id],
+        pointer: null,
+        marquee: null,
+        viewportScale: 1,
+        mediaWidth: 200,
+        mediaHeight: 100,
+        previewOverlay: { points: [{ x: 20, y: 20, positive: true }] },
+        now: 0,
+      }),
+    );
+    send("pointerdown", 100, -2);
+    expect(onPointerPress).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ point: { x: 100, y: -2 } }),
+        pick: null,
+        selectedHandle: expect.objectContaining({
+          handle: expect.objectContaining({ id: "n" }),
+        }),
+      }),
+    );
+    send("pointermove", 180, 80);
+    expect(layer.getState().marqueeRect).toBeNull();
+    send("pointerup", 180, 80);
+    expect(capturePointer).not.toHaveBeenCalled();
+    expect(onMarqueeChange).not.toHaveBeenCalled();
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+    layer.destroy();
+    graphics.destroy();
+  });
+
+  it("keeps selection when an empty media press releases in the expanded letterbox", () => {
+    const editingEngine = createAnnotationEditingEngine();
+    const onSelectionChange = vi.fn();
+    const layer = createPixiInteractionLayer({
+      Container,
+      Rectangle,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      editingEngine,
+      interaction: { mode: MediaInteractionMode.Always, onSelectionChange },
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 80,
+    }) as Container;
+    const boundary = new EventBoundary(display);
+    const onTap = vi.fn();
+    display.on("pointertap", onTap);
+    const send = (type: string, x: number, y: number) => {
+      const event = new FederatedPointerEvent(boundary);
+      event.type = type;
+      event.pointerType = "mouse";
+      event.pointerId = 7;
+      event.button = 0;
+      event.buttons = type === "pointerup" ? 0 : 1;
+      event.global.set(x, y);
+      boundary.mapEvent(event);
+    };
+    layer.drawFrame(frame.mediaTime);
+    layer.setSelectedDetection({ detectionId: "player-1" });
+    layer.setHandleBounds({ left: 0, top: -8, right: 120, bottom: 80 });
+    onSelectionChange.mockClear();
+    send("pointerdown", 100, 50);
+    expect(editingEngine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    send("pointerup", 100, -2);
+    expect(onTap).toHaveBeenCalledOnce();
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(layer.getState().selectedPick?.detection.id).toBe("player-1");
+    layer.destroy();
+  });
 
   it("gives a configured selected rotation handle priority over Shift body selection", () => {
     const original = {

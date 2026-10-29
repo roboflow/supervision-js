@@ -425,7 +425,9 @@ Return `"continue"` to keep the renderer's normal behavior, or `"handled"`
 to skip its selection, editing, marquee, and subsequent tap handling for that
 press. The host owns movement, completion, and cancellation of its gesture;
 let release and cancellation events continue to the renderer so it can retire
-its tap suppression. Return `"continue"` only while preserving selection and
+its tap suppression. The browser may report coordinates outside media; there,
+`"continue"` permits only selected-handle editing with an editing engine.
+Return `"continue"` only while preserving selection and
 editing state: the default route uses the snapshot resolved before the callback.
 Return `"handled"` when the host changes that state. Without this callback,
 the renderer retains its default selection and editing routing. Modifier keys

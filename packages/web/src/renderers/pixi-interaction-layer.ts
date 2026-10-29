@@ -441,7 +441,7 @@ export function createPixiInteractionLayer(options: {
 
     // The expanded hit surface exposes selected controls, not new background.
     // Hosts still receive the press before the default media boundary applies.
-    if (!handle && !isMediaPoint(point)) {
+    if ((!handle || !options.editingEngine) && !isMediaPoint(point)) {
       suppressedTap = input;
       return;
     }
