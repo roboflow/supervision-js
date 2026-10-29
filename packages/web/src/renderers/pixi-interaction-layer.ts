@@ -71,6 +71,7 @@ type PixiInteractionPointerEvent = {
   readonly buttons?: number;
   readonly detail?: number;
   readonly timeStamp?: number;
+  readonly nativeEvent?: { readonly timeStamp: number } | Touch;
 };
 
 export interface PixiInteractionLayerState {
@@ -108,7 +109,11 @@ export interface PixiInteractionLayer {
   getState(): PixiInteractionLayerState;
   cycleSelection(direction?: 1 | -1): DetectionPickResult | null;
   pointerCancel(pointerId: number): void;
-  pointerCaptureLost(pointerId: number, buttons?: number): void;
+  pointerCaptureLost(
+    pointerId: number,
+    buttons?: number,
+    timeStamp?: number,
+  ): void;
   pointerUpFallback(pointerId: number): void;
   destroy(): void;
 }
@@ -159,6 +164,7 @@ export function createPixiInteractionLayer(options: {
     input: AnnotationPointerInput;
   } | null = null;
   let captureReleased = false;
+  let captureReleaseTime = -Infinity;
   let activeFrame: DetectionFrame | undefined;
   let isDestroyed = false;
   const unsubscribeEditing = options.editingEngine?.subscribe((state) => {
@@ -283,7 +289,7 @@ export function createPixiInteractionLayer(options: {
     },
 
     pointerCancel,
-    pointerCaptureLost(pointerId, buttons = 1) {
+    pointerCaptureLost(pointerId, buttons = 1, timeStamp) {
       if (
         !defaultPress ||
         !samePointer(defaultPress.input, { pointerId }) ||
@@ -294,6 +300,7 @@ export function createPixiInteractionLayer(options: {
         // Chrome may deliver pointerup in a later task. Keep the release pending
         // rather than racing it with a timer that rolls the edit back.
         captureReleased = true;
+        captureReleaseTime = timeStamp ?? -Infinity;
       } else {
         pointerCancel(pointerId);
       }
@@ -612,6 +619,15 @@ export function createPixiInteractionLayer(options: {
       !samePointer(defaultPress.input, event)
     )
       return false;
+    // Chrome can lose capture while processing a buttonless native move,
+    // before dispatching pointerup. Pixi's own timestamp is processing time,
+    // so compare the native event that caused that capture transition.
+    const nativeEvent = event.nativeEvent;
+    const timeStamp =
+      nativeEvent && "timeStamp" in nativeEvent
+        ? nativeEvent.timeStamp
+        : event.timeStamp;
+    if (timeStamp !== undefined && timeStamp <= captureReleaseTime) return true;
     pointerCancel(event.pointerId);
     return true;
   }

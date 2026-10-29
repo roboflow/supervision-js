@@ -549,8 +549,15 @@ describe("editing gestures in the Pixi media scene", () => {
     )![1] as (event: PointerEvent) => void;
     sendInteractionPointer("pointerdown", 7, { x: 10, y: 20 });
     sendInteractionPointer("globalpointermove", 7, { x: 60, y: 80 });
-    lost({ pointerId: 7, buttons: 0 } as PointerEvent);
+    lost({ pointerId: 7, buttons: 0, timeStamp: 100 } as PointerEvent);
+    sendInteractionPointer("globalpointermove", 7, { x: 90, y: 100 }, 100, 0);
     expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
+    expect(engine.getState().preview?.rect).toEqual({
+      x: 35,
+      y: 50,
+      width: 50,
+      height: 60,
+    });
     await new Promise<void>((resolve) => setTimeout(resolve, 7));
     expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Creating);
     sendInteractionPointer("pointerup", 7, { x: 60, y: 80 });
@@ -1211,12 +1218,19 @@ function sendInteractionPointer(
   pointerId: number,
   point: Point,
   timeStamp = 0,
+  buttons?: number,
 ) {
   const handler = pixiMock.containerInstances
     .flatMap((container) => container.on.mock.calls)
     .find(([type]) => type === eventType)?.[1];
   expect(handler).toBeTypeOf("function");
-  handler({ button: 0, getLocalPosition: () => point, pointerId, timeStamp });
+  handler({
+    button: 0,
+    buttons,
+    getLocalPosition: () => point,
+    pointerId,
+    timeStamp,
+  });
 }
 
 function visibleFillColors(): number[] {
