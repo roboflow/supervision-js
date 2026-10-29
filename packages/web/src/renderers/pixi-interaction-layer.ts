@@ -92,6 +92,16 @@ export interface PixiInteractionLayer {
     readonly width: number;
     readonly height: number;
   }): PixiInteractionContainer;
+  setHandleBounds(
+    bounds:
+      | {
+          readonly left: number;
+          readonly top: number;
+          readonly right: number;
+          readonly bottom: number;
+        }
+      | undefined,
+  ): void;
   drawFrame(mediaTime: number): void;
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
@@ -184,6 +194,18 @@ export function createPixiInteractionLayer(options: {
       container.on("pointerupoutside", handlePointerUp);
 
       return container;
+    },
+
+    setHandleBounds(bounds) {
+      if (!container || !displayDimensions) return;
+      const left = Math.min(0, bounds?.left ?? 0);
+      const top = Math.min(0, bounds?.top ?? 0);
+      container.hitArea = new options.Rectangle(
+        left,
+        top,
+        Math.max(displayDimensions.width, bounds?.right ?? 0) - left,
+        Math.max(displayDimensions.height, bounds?.bottom ?? 0) - top,
+      );
     },
 
     drawFrame(mediaTime) {
@@ -385,6 +407,7 @@ export function createPixiInteractionLayer(options: {
       return;
     }
 
+    if (!isMediaPoint(getPoint(event))) return;
     const pick = pickFromPointerEvent(event);
     if (options.interaction.multiSelect && event.shiftKey) {
       toggleSelectedPick(pick);
@@ -396,6 +419,8 @@ export function createPixiInteractionLayer(options: {
   function handlePointerDown(event: PixiInteractionPointerEvent) {
     if (captureReleased) pointerCancel(defaultPress?.input.pointerId);
     handledPresses.delete(event.pointerId);
+    if (suppressedTap && samePointer(suppressedTap, event))
+      suppressedTap = null;
     if (
       !canHandleInteraction() ||
       isOtherPressPointer(event) ||
@@ -408,10 +433,7 @@ export function createPixiInteractionLayer(options: {
     const pick = pickFromPointerEvent(event);
     const selected = selectedPick?.detection;
     const handle = selected
-      ? pickAnnotationHandle(
-          getAnnotationHandles(selected, options.getViewportScale?.() ?? 1),
-          point,
-        )
+      ? pickAnnotationHandle(getHandles(selected), point)
       : undefined;
 
     if (
@@ -423,6 +445,13 @@ export function createPixiInteractionLayer(options: {
       }) === "handled"
     ) {
       handledPresses.set(event.pointerId, input);
+      return;
+    }
+
+    // The expanded hit surface exposes selected controls, not new background.
+    // Hosts still receive the press before the default media boundary applies.
+    if ((!handle || !options.editingEngine) && !isMediaPoint(point)) {
+      suppressedTap = input;
       return;
     }
 
@@ -453,6 +482,7 @@ export function createPixiInteractionLayer(options: {
       if (
         options.interaction.multiSelect &&
         event.shiftKey &&
+        handle?.kind !== AnnotationHandleKind.Rotate &&
         pick &&
         !options.editingEngine.hasCreationTool() &&
         options.editingEngine.getState().kind ===
@@ -675,12 +705,23 @@ export function createPixiInteractionLayer(options: {
     );
   }
 
+  function isMediaPoint(point: DetectionPickPoint) {
+    return (
+      displayDimensions !== undefined &&
+      point.x >= 0 &&
+      point.y >= 0 &&
+      point.x <= displayDimensions.width &&
+      point.y <= displayDimensions.height
+    );
+  }
+
   function pickFromPointerEvent(event: PixiInteractionPointerEvent) {
     if (!container) {
       return null;
     }
 
     const point = getPoint(event);
+    if (!isMediaPoint(point)) return null;
     const pickPoint = { x: point.x, y: point.y };
 
     const labelPick = options.pickLabelDetectionAtPoint?.(
@@ -949,15 +990,17 @@ export function createPixiInteractionLayer(options: {
     };
   }
 
+  function getHandles(detection: Detection) {
+    const scale = options.getViewportScale?.() ?? 1;
+    return (
+      options.editingEngine?.getHandles?.(detection, scale) ??
+      getAnnotationHandles(detection, scale)
+    );
+  }
+
   function selectedHandleAt(point: DetectionPickPoint | null) {
     if (!point || !selectedPick) return undefined;
-    return pickAnnotationHandle(
-      getAnnotationHandles(
-        selectedPick.detection,
-        options.getViewportScale?.() ?? 1,
-      ),
-      point,
-    );
+    return pickAnnotationHandle(getHandles(selectedPick.detection), point);
   }
 
   function updateCursor(point: DetectionPickPoint) {
@@ -968,14 +1011,14 @@ export function createPixiInteractionLayer(options: {
       return;
     }
     if (
-      editingState?.kind === AnnotationGestureStateKind.Resizing &&
+      (editingState?.kind === AnnotationGestureStateKind.Resizing ||
+        editingState?.kind === AnnotationGestureStateKind.Rotating) &&
       selectedPick
     ) {
       // Keep the grabbed handle's cursor for the whole drag.
-      const active = getAnnotationHandles(
-        selectedPick.detection,
-        options.getViewportScale?.() ?? 1,
-      ).find((handle) => handle.id === editingState.activeHandleId);
+      const active = getHandles(selectedPick.detection).find(
+        (handle) => handle.id === editingState.activeHandleId,
+      );
       if (active) {
         container.cursor = active.cursor;
         return;

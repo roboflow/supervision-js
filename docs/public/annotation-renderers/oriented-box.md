@@ -57,10 +57,10 @@ reinterprets an axis-aligned `rect` as rotatable. A detection may carry both a
 when a host wants an axis-aligned box and a separately computed rotated
 minimum-area box for the same object.
 
-Nothing in `supervision-js` computes an oriented box from a mask or a plain
-`rect`. A producer that only has one of those, such as an oriented-object
-detector that emits four corner coordinates directly, supplies
-`detection.orientedBox` itself. Frame validation requires exactly four points
+`createOrientedBoxGeometry()` from `supervision/editing` constructs ordered
+rectangle corners from a center-based `Rect` and a clockwise angle in radians.
+It does not fit a rectangle to a mask, polygon or arbitrary quadrilateral.
+Detectors that emit corners can supply `detection.orientedBox` directly. Frame validation requires exactly four points
 with finite coordinates. Producers must supply a convex quadrilateral in
 clockwise perimeter order. `BaseOrientedBoxStyle` also skips zero-area geometry;
 it does not repair invalid vertex ordering.
@@ -69,9 +69,142 @@ The renderer reuses the existing closed-path fill and stroke drawing that
 polygons use; it does not introduce a second rasterization path. The renderer
 only controls presentation. An editable session can select and move the whole
 detection, translating its OBB vertices along with its other geometry. OBB
-rotation and individual vertex editing are not supported. If the detection
-also has an editable `rect`, its resize handles change only that rectangle,
-not the independent OBB. Both geometries remain visible in the editing preview.
+creation, rotation and local-axis resizing are available through the editing
+entrypoint for OBB-only rectangles, including rounding noise within the
+recognition precision described below. Quadrilaterals outside that precision
+retain whole-shape movement without rectangle handles. If the detection also has an editable
+`rect`, its existing resize handles change only that independent rectangle.
+Both geometries remain visible in the editing preview.
+
+## Edit oriented rectangles
+
+`getOrientedRectangleGeometry()` recovers a rectangle from convex, clockwise
+corners, including coordinates rounded to 0.1 media pixels. It uses the closest
+rectangle with the supplied corner correspondence, preserving local width,
+height, and front direction without sorting the axes. The total squared corner
+error must stay within 0.02 media pixels squared, the error budget for rounding
+eight coordinates to 0.1 pixels, plus floating-point roundoff. More distorted
+quadrilaterals return `null` and retain whole-shape movement.
+
+Recognition leaves the input untouched. Rendering, picking, and whole-shape
+movement use the original corners; an actual resize or rotation replaces the
+subpixel rounding noise with exact rectangle corners. Selecting or clicking a
+handle alone does not change the geometry.
+
+```ts
+import {
+  AnnotationGeometryKind,
+  createAnnotationEditingEngine,
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+} from "supervision/editing";
+
+const box = createOrientedBoxGeometry(
+  { x: 200, y: 120, width: 80, height: 40 }, // x/y are the center
+  Math.PI / 4, // clockwise radians in image coordinates
+);
+const rectangle = getOrientedRectangleGeometry(box);
+// { x, y, width, height, rotation }, or null outside rectangle precision.
+
+const engine = createAnnotationEditingEngine({
+  onCommit(detection, previous) {
+    // Persist one previous/next pair in the host undo history.
+  },
+});
+engine.setCreationTool({
+  geometry: AnnotationGeometryKind.OrientedBox,
+  createDetection(points) {
+    return { orientedBox: { points: points as typeof box.points } };
+  },
+});
+```
+
+Pass the caller-owned engine as `renderer.editingEngine` to a media session.
+Drag creation supplies four clockwise local corners to `createDetection` and
+`shouldCommit`. The footprint is axis-aligned, with local +x following the
+dominant drag direction: right, left, down or up. Vertical drags exchange
+the footprint's width and height in the ordered local geometry; square drags
+use the horizontal direction. It needs no accompanying `rect`. The selected rectangle has
+eight local-axis resize controls and a compact rotation control on a short
+stem. Handle rendering and hit testing share `engine.getHandles()`: the
+rotation glyph has a 4 CSS-pixel radius and a separate circular 20 CSS-pixel
+hit diameter; by default, its center sits 24 CSS pixels outside the first edge. Sizes stay
+constant while zooming.
+
+Rotation uses the center and the initial press angle, preserving pointer grab
+offset. Resizing fixes the opposite edge or corner and continues through it when the
+pointer crosses, retaining a positive one-pixel minimum extent. Rotation and
+resizing preserve the ordered local axes, including squares and half/full
+turns. Crossing changes which corner or edge follows the pointer without
+turning the rectangle or swapping its local width and height. The returned
+angle may wrap at pi.
+
+Creation is bounded by supplied media dimensions. Rotation and local-axis
+resize may extend beyond the image and never clip or refit a rectangle; hosts
+choose their own admission policy. Escape, tool changes and pointer
+interruption discard continuous edits. A completed edit emits one `onCommit`,
+with its original detection for host-owned undo. Rotation reports
+`AnnotationGestureStateKind.Rotating`.
+
+### Configure rotation constraints and handle placement
+
+Rotation is free by default. Hosts can constrain the candidate angle with
+`resolveRotation`, for example to snap to 15-degree increments while Shift is held:
+
+```ts
+const step = Math.PI / 12;
+const engine = createAnnotationEditingEngine({
+  resolveRotation(radians, { detection, initialRotation, input }) {
+    return input.shiftKey ? Math.round(radians / step) * step : radians;
+  },
+  // Ordered edges: 0 top, 1 right, 2 bottom, 3 left.
+  rotationHandle: { edgeIndex: 1, offset: 32, stemOffset: 20 },
+  onCommit(detection, previous) {
+    // Persist the result and record the previous detection for undo.
+  },
+});
+```
+
+The resolver receives an absolute clockwise angle in radians, the original
+detection, its initial rotation, and the latest pointer input with modifiers.
+Each preview and commit is resolved once from the original geometry and raw
+pointer position; previous constrained previews never accumulate into the next
+candidate. Return finite radians. The engine normalizes the result to the
+geometry helper's `[-PI, PI]` convention and preserves the original center,
+ordered width/height, corner identities, id and metadata. The resolver applies
+only to rotation; it does not constrain movement, resizing or creation.
+
+`rotationHandle` can also be `(detection) => ({ edgeIndex, offset, stemOffset })` for
+annotation-specific placement. The default is edge `0` with a `24` CSS-pixel
+outward offset; offset must be finite and nonnegative. Placement changes only
+the control and its stem. It does not change corner ordering or infer a heading.
+`stemOffset` starts the visible stem that many CSS pixels outward from the edge,
+leaving space for a host's marker without moving the control or its hit area.
+It defaults to `0` and must be finite, nonnegative, and no greater than `offset`.
+
+The browser renderer routes modifier press and release events during rotation,
+so Shift snapping updates immediately while the pointer is stationary. Hosts
+routing input directly can call `engine.setModifiers({ shiftKey: true })` and
+`engine.setModifiers({})` on release. Omitted modifier keys are released. This
+updates only an active rotation that has already crossed the drag threshold;
+it neither starts movement nor commits. The final `pointerUp(input)` modifier
+snapshot is authoritative. Window blur interrupts the active contact.
+
+Use `engine.getHandles(detection, viewportScale)` when drawing or picking
+controls yourself. The scale is CSS pixels per media pixel; omit it to use the
+engine's `viewportScale` callback (or `1`). The pure helper remains backward
+compatible and accepts the same placement configuration as a third argument:
+`getAnnotationHandles(detection, viewportScale, { rotationHandle })`.
+`getHandles` and `setModifiers` remain optional on the published
+`AnnotationEditingEngine` and `BuiltInAnnotationEditingEngine` interfaces.
+The factory returns the narrower `ConfiguredAnnotationEditingEngine`, which
+guarantees both methods. Adapters fall back to the default pure helper for
+older engines.
+
+Run the self-contained [vanilla editing example](../../../examples/vanilla/oriented-box.html)
+with `npm run example:vanilla:dev` and open
+`/examples/vanilla/oriented-box.html`. It demonstrates creation, rotation,
+resize, zoom, cancellation and undo/redo using the public package.
 
 The playground's basketball fixture pairs its real SAM3-derived basketball
 detections with a hand-authored oriented box: a fixed rotation of the

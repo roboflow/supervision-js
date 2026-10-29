@@ -1,0 +1,86 @@
+:root {
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+  color: #e4edf4;
+  background: #0c151e;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 1000px;
+  padding: 24px;
+  margin: auto;
+}
+h1 {
+  font-size: 24px;
+  margin: 0;
+}
+p {
+  color: #b3c4d1;
+  max-width: 760px;
+}
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+button,
+input[type="number"] {
+  color: #e4edf4;
+  background: #203548;
+  border: 1px solid #476078;
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #71e3bb;
+  outline-offset: 2px;
+}
+#viewer {
+  height: min(60vh, 600px);
+  min-height: 280px;
+  border: 1px solid #476078;
+  overflow: hidden;
+}
+output {
+  display: block;
+  margin: 12px 0;
+}
+pre {
+  overflow: auto;
+  font-size: 12px;
+}
+
+.properties {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.properties label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+input[type="number"] {
+  width: 80px;
+  padding: 7px;
+}
+input[type="checkbox"] {
+  accent-color: #71e3bb;
+}
+button:disabled,
+input:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.instructions {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 10px 0 16px;
+}

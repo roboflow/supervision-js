@@ -379,6 +379,13 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
 
+Configured marker, ellipse, box-corner, and percentage-bar styles also render
+against the live editing preview, so their decorations follow creation, move,
+resize, and rotation gestures. Their style context preserves the detection's
+frame position and visibility; `isCreating` identifies a creation preview.
+`AnnotationOverlayStyle` controls the editable geometry and handles, including
+the oriented-box outline and fill.
+
 With an editing engine, retained boxes, polygons, polylines, keypoints, and
 shape decorations share detection order: higher `Detection.zIndex` is in front;
 missing values use the detection's frame index, and equal values follow frame
@@ -418,7 +425,9 @@ Return `"continue"` to keep the renderer's normal behavior, or `"handled"`
 to skip its selection, editing, marquee, and subsequent tap handling for that
 press. The host owns movement, completion, and cancellation of its gesture;
 let release and cancellation events continue to the renderer so it can retire
-its tap suppression. Return `"continue"` only while preserving selection and
+its tap suppression. The browser may report coordinates outside media; there,
+`"continue"` permits only selected-handle editing with an editing engine.
+Return `"continue"` only while preserving selection and
 editing state: the default route uses the snapshot resolved before the callback.
 Return `"handled"` when the host changes that state. Without this callback,
 the renderer retains its default selection and editing routing. Modifier keys
@@ -453,9 +462,12 @@ committed history only when `engine.getState().kind` is
 first if needed. Escape, tool changes, and media changes still cancel through
 `engine.cancel()`; draft vertices never enter persisted history.
 
-`createAnnotationEditingEngine()` returns a `BuiltInAnnotationEditingEngine`
-that guarantees `undoCreation()` and `pointerCancel()`. Both methods are optional
-on the broader `AnnotationEditingEngine` interface; existing custom engines and
+`createAnnotationEditingEngine()` returns a `ConfiguredAnnotationEditingEngine`
+that guarantees `undoCreation()`, `pointerCancel()`, `getHandles()` and
+`setModifiers()`. It extends the published `BuiltInAnnotationEditingEngine`,
+which continues to guarantee draft Undo and contact cancellation; handle and
+modifier capabilities remain optional on that interface and the broader
+`AnnotationEditingEngine`. Existing custom engines and
 `DraftUndoAnnotationEditingEngine` implementations remain compatible.
 
 A native `pointercancel` or unexpected loss of pointer capture ends the active
@@ -507,6 +519,15 @@ not call it, so hosts can clear selection on an empty drawing click without
 interpreting every cancellation as a click.
 
 The generated API reference has a separate Editing module for this entrypoint.
+
+Native oriented-rectangle creation, rotation and local-axis resize are available
+from `supervision/editing`. `resolveRotation` constrains each rotation candidate
+with the current pointer modifiers; `rotationHandle` configures its ordered edge
+and CSS-pixel offset. Factory results expose `getHandles()` and `setModifiers()`
+for direct-input hosts; both remain optional on previously published engine
+interfaces. See [Oriented Box](../annotation-renderers/oriented-box.md)
+for ordered corner helpers, gesture semantics and a standalone example. General
+quadrilaterals remain renderable, pickable and movable.
 
 `Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
 and `height` are its extent. `TopLeftRect` is only for explicit canvas/layout
@@ -617,8 +638,9 @@ generic `./react` entry usable without the optional Worklets peer.
 The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
 
-See [Migrating to 0.2](migrating-to-0.2.md) for source changes required by the
-release, including interaction presentation options.
+See [Migrating to 0.3](migrating-to-0.3.md) for the new editing enum members
+and [Migrating to 0.2](migrating-to-0.2.md) for earlier playback and interaction
+presentation changes.
 
 1. one media item maps to one session;
 2. detections are semantic input;

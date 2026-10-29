@@ -44,5 +44,20 @@ the label restore all four rounded corners. Set `background.topCornersOnly` to
 `true` to always round only the top pair, or `false` to always round all four,
 and choose the radius with `background.cornerRadius`.
 
+A custom `LabelStyle` can return an optional `layout(bounds, viewportScale)`
+callback on its draw instruction. Web and React Native call it after measuring
+text and padding and applying placement. `bounds` is a readonly rectangle in
+media pixels; return finite `{ x, y }` coordinates to translate the label while
+preserving its measured size. The translated rectangle drives both drawing and
+reported label bounds on web, including picking. Return
+`background: { topCornersOnly: false }` to round all corners at a detached
+position, or `true` to round only the top pair. React Native honors
+`background.topCornersOnly` on the instruction even without a layout callback,
+and retains its default all-corner rounding when the flag is omitted.
+
+The callback runs again for changed text, styles, scale, and editing geometry.
+Use the supplied measured rectangle rather than previously reported bounds;
+those describe the previous rendered position.
+
 See [Interactive Picking](../recipes/interactive-picking.md) for hover-only
 labels and selection-aware presentation.

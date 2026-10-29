@@ -40,7 +40,7 @@ import type {
   IdMaskBuildArtifact,
   IdMaskBuildOptions,
 } from "./specs/IdMaskBuilder.nitro";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("resolveReactNativeFramePresentation", () => {
   it("uses renderer descriptors to select native frame layers", () => {
@@ -375,39 +375,48 @@ describe("pickReactNativeDetectionAtPoint", () => {
 });
 
 describe("resolveReactNativeLabelLayout", () => {
-  it("positions a top label in canvas space while anchoring to media geometry", () => {
-    const layout = resolveReactNativeFrameLayout({
-      canvasHeight: 500,
-      canvasWidth: 1000,
-      mediaHeight: 500,
-      mediaWidth: 1000,
-    });
+  it.each([
+    { name: "omitted", topCornersOnly: undefined },
+    { name: "true", topCornersOnly: true },
+    { name: "false", topCornersOnly: false },
+  ])(
+    "positions a top label in canvas space with topCornersOnly $name and no layout callback",
+    ({ topCornersOnly }) => {
+      const layout = resolveReactNativeFrameLayout({
+        canvasHeight: 500,
+        canvasWidth: 1000,
+        mediaHeight: 500,
+        mediaWidth: 1000,
+      });
 
-    const label = resolveReactNativeLabelLayout({
-      instruction: {
-        background: {
-          alpha: 0.8,
-          color: 0x111827,
-          paddingX: 6,
-          paddingY: 3,
+      const label = resolveReactNativeLabelLayout({
+        instruction: {
+          background: {
+            alpha: 0.8,
+            color: 0x111827,
+            paddingX: 6,
+            paddingY: 3,
+            ...(topCornersOnly === undefined ? {} : { topCornersOnly }),
+          },
+          offsetY: 4,
+          placement: LabelPlacement.Top,
+          rect: { height: 100, width: 80, x: 140, y: 100 },
+          text: "horse 92%",
         },
-        offsetY: 4,
-        placement: LabelPlacement.Top,
-        rect: { height: 100, width: 80, x: 140, y: 100 },
-        text: "horse 92%",
-      },
-      layout,
-      textSize: { height: 10, width: 40 },
-    });
+        layout,
+        textSize: { height: 10, width: 40 },
+      });
 
-    expect(label.backgroundRect).toEqual({
-      height: 16,
-      width: 52,
-      x: 100,
-      y: 30,
-    });
-    expect(label.textPoint).toEqual({ x: 106, y: 33 });
-  });
+      expect(label.backgroundRect).toEqual({
+        height: 16,
+        width: 52,
+        x: 100,
+        y: 30,
+      });
+      expect(label.textPoint).toEqual({ x: 106, y: 33 });
+      expect(label.topCornersOnly).toBe(topCornersOnly);
+    },
+  );
 
   it("maps media offsets through scale before placing a bottom label", () => {
     const layout = resolveReactNativeFrameLayout({
@@ -442,6 +451,75 @@ describe("resolveReactNativeLabelLayout", () => {
       y: 79,
     });
     expect(label.textPoint).toEqual({ x: 59, y: 81 });
+  });
+
+  it.each([1, 0.5])(
+    "lays out measured media bounds with letterboxing at scale %s",
+    (scale) => {
+      const layout = resolveReactNativeFrameLayout({
+        canvasHeight: 600 * scale,
+        canvasWidth: 1000 * scale,
+        mediaHeight: 500,
+        mediaWidth: 1000,
+      });
+      const adjust = vi.fn((bounds: { x: number; y: number }) => ({
+        x: bounds.x + 20,
+        y: bounds.y + 10,
+        background: { topCornersOnly: true },
+      }));
+      const label = resolveReactNativeLabelLayout({
+        instruction: {
+          background: {
+            alpha: 1,
+            color: 0,
+            paddingX: 4,
+            paddingY: 2,
+            topCornersOnly: false,
+          },
+          placement: LabelPlacement.Bottom,
+          rect: { x: 140, y: 100, width: 80, height: 100 },
+          text: "measured",
+          layout: adjust,
+        },
+        layout,
+        textSize: { width: 40, height: 10 },
+      });
+      expect(adjust).toHaveBeenCalledWith(
+        { x: 100, y: 150, width: 48 / scale, height: 14 / scale },
+        scale,
+      );
+      expect(label.backgroundRect).toEqual({
+        x: 120 * scale,
+        y: 210 * scale,
+        width: 48,
+        height: 14,
+      });
+      expect(label.textPoint).toEqual({
+        x: 120 * scale + 4,
+        y: 210 * scale + 2,
+      });
+      expect(label.topCornersOnly).toBe(true);
+    },
+  );
+
+  it("rejects non-finite media layout coordinates", () => {
+    const layout = resolveReactNativeFrameLayout({
+      canvasHeight: 100,
+      canvasWidth: 100,
+      mediaHeight: 100,
+      mediaWidth: 100,
+    });
+    expect(() =>
+      resolveReactNativeLabelLayout({
+        instruction: {
+          rect: { x: 20, y: 20, width: 10, height: 10 },
+          text: "x",
+          layout: () => ({ x: 0, y: Infinity }),
+        },
+        layout,
+        textSize: { width: 10, height: 10 },
+      }),
+    ).toThrow(RangeError);
   });
 });
 

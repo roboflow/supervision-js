@@ -300,9 +300,14 @@ export {
   type AnnotationEditingPreviewStyleContext,
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
+  type AnnotationHandleOptions,
+  type AnnotationModifierKeys,
+  type AnnotationRotationContext,
+  type AnnotationRotationHandleOptions,
   type AnnotationOverlayStyle,
   type AnnotationPointerInput,
   type BuiltInAnnotationEditingEngine,
+  type ConfiguredAnnotationEditingEngine,
   type DraftUndoAnnotationEditingEngine,
   type PreviewOverlayData,
   type PreviewOverlayPoint,
@@ -552,3 +557,9 @@ export type {
   DetectionStylePredicate,
   DetectionStyleValue,
 } from "#types/style";
+
+export {
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+  type OrientedRectangleGeometry,
+} from "#utils/oriented-rectangle";

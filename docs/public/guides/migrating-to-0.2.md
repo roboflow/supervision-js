@@ -6,11 +6,9 @@ summary: Update playback gates, playback feedback, and interaction highlights fr
 
 # Migrating to 0.2
 
-Upgrade to `0.2.17` with:
-
-```sh
-npm install supervision@0.2.17
-```
+Apply these playback and interaction changes when upgrading from `0.1.7`.
+For the current release and its additional editing changes, also follow
+[Migrating to 0.3](migrating-to-0.3.md).
 
 The engine remains a subpath of `supervision`; do not add a separate engine or
 core package dependency.

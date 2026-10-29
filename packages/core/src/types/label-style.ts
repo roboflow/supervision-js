@@ -1,4 +1,4 @@
-import type { Detection, Rect } from "#types/detections";
+import type { Detection, Rect, TopLeftRect } from "#types/detections";
 import type { AnnotationStyleContext } from "#types/style";
 
 export enum LabelPlacement {
@@ -62,6 +62,22 @@ export interface LabelDrawInstruction {
   readonly offsetX?: number;
   readonly offsetY?: number;
   readonly placement?: LabelPlacement;
+  /**
+   * Translate the measured, padded label after default placement. Bounds and
+   * returned x/y use media pixels; viewportScale maps media to display pixels.
+   * Both web and native renderers use the returned position for text and
+   * background. Return finite coordinates; invalid positions throw RangeError.
+   * Dimensions remain measured by the renderer. The optional background flag
+   * overrides corner rounding for this layout only.
+   */
+  readonly layout?: (
+    bounds: Readonly<TopLeftRect>,
+    viewportScale: number,
+  ) => {
+    readonly x: number;
+    readonly y: number;
+    readonly background?: Pick<LabelBackgroundStyle, "topCornersOnly">;
+  };
 }
 
 /**

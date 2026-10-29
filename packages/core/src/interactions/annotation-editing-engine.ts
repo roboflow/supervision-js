@@ -1,18 +1,24 @@
 import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
+  AnnotationHandleKind,
   type AnnotationCreationTool,
   type AnnotationEditingEngineOptions,
   type AnnotationEditingState,
   type AnnotationHandleDefinition,
   type AnnotationPointerInput,
-  type BuiltInAnnotationEditingEngine,
+  type ConfiguredAnnotationEditingEngine,
 } from "#types/editing";
+import {
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+} from "#utils/oriented-rectangle";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
 import {
   applyAnnotationHandleDrag,
   deleteAnnotationVertex,
+  getAnnotationHandles,
   offsetDetection,
 } from "#interactions/annotation-handles";
 
@@ -57,7 +63,7 @@ type ActiveGesture =
 
 export function createAnnotationEditingEngine(
   options: AnnotationEditingEngineOptions = {},
-): BuiltInAnnotationEditingEngine {
+): ConfiguredAnnotationEditingEngine {
   let tool: AnnotationCreationTool | null = null;
   let gesture: ActiveGesture | null = null;
   let state: AnnotationEditingState = idleState();
@@ -68,6 +74,27 @@ export function createAnnotationEditingEngine(
 
   return {
     getState: () => state,
+    getHandles: (detection, viewportScale = scale()) =>
+      getAnnotationHandles(detection, viewportScale, options),
+    setModifiers(modifiers) {
+      if (
+        gesture?.kind !== "resize" ||
+        !gesture.moved ||
+        gesture.handle.kind !== AnnotationHandleKind.Rotate
+      )
+        return;
+      const active = (gesture = {
+        ...gesture,
+        current: {
+          ...gesture.current,
+          shiftKey: modifiers.shiftKey ?? false,
+          altKey: modifiers.altKey ?? false,
+          ctrlKey: modifiers.ctrlKey ?? false,
+          metaKey: modifiers.metaKey ?? false,
+        },
+      });
+      setPreview(resolveHandlePreview(active, active.current), active);
+    },
     setCreationTool(nextTool) {
       if (nextTool === tool) return;
       tool = nextTool;
@@ -114,17 +141,9 @@ export function createAnnotationEditingEngine(
           // until the pointer has travelled like a move gesture.
           const moved =
             gesture.moved || exceedsMoveThreshold(gesture.start, input);
-          gesture = { ...gesture, current: input, moved };
+          const active = (gesture = { ...gesture, current: input, moved });
           if (moved) {
-            setPreview(
-              applyAnnotationHandleDrag(
-                gesture.detection,
-                gesture.handle,
-                input.point,
-                input.mediaDimensions ?? gesture.start.mediaDimensions,
-              ),
-              gesture,
-            );
+            setPreview(resolveHandlePreview(active, input), active);
           }
           break;
         }
@@ -179,13 +198,21 @@ export function createAnnotationEditingEngine(
             input.point.x - active.start.point.x,
             input.point.y - active.start.point.y,
           ) * scale();
-        const rect = preview.rect;
+        const rect =
+          activeTool?.geometry === AnnotationGeometryKind.OrientedBox &&
+          preview.orientedBox
+            ? getOrientedRectangleGeometry(preview.orientedBox)
+            : preview.rect;
         if (
           !rect ||
           rect.width < 1 ||
           rect.height < 1 ||
           (duration < CLICK_CANCEL_MS && diagonal <= CLICK_CANCEL_DIAGONAL) ||
-          activeTool?.shouldCommit?.(rect) === false
+          activeTool?.shouldCommit?.(
+            activeTool.geometry === AnnotationGeometryKind.OrientedBox
+              ? preview.orientedBox!.points
+              : rect,
+          ) === false
         ) {
           if (state === next) rejectCreation(next, activeTool);
           return;
@@ -210,13 +237,8 @@ export function createAnnotationEditingEngine(
       const preview =
         active.kind === "move"
           ? resolveMovePreview(active, input).preview
-          : applyAnnotationHandleDrag(
-              active.detection,
-              active.handle,
-              input.point,
-              input.mediaDimensions ?? active.start.mediaDimensions,
-            );
-      commit(preview, active.detection, next);
+          : resolveHandlePreview(active, input);
+      if (state === next) commit(preview, active.detection, next);
     },
     pointerCancel(pointerId) {
       const press = activePress();
@@ -266,7 +288,10 @@ export function createAnnotationEditingEngine(
         {
           activeDetectionId: detection.id ?? null,
           activeHandleId: handle.id,
-          kind: AnnotationGestureStateKind.Resizing,
+          kind:
+            handle.kind === AnnotationHandleKind.Rotate
+              ? AnnotationGestureStateKind.Rotating
+              : AnnotationGestureStateKind.Resizing,
           pointerId: input.pointerId ?? null,
           preview: null,
         },
@@ -294,7 +319,8 @@ export function createAnnotationEditingEngine(
     if (!tool) return;
     const mode =
       tool.mode ??
-      (tool.geometry === AnnotationGeometryKind.Box
+      (tool.geometry === AnnotationGeometryKind.Box ||
+      tool.geometry === AnnotationGeometryKind.OrientedBox
         ? "drag"
         : tool.geometry === AnnotationGeometryKind.Mask
           ? "freehand"
@@ -413,7 +439,61 @@ export function createAnnotationEditingEngine(
       width: right - left,
       height: bottom - top,
     };
-    return activeTool!.createDetection(rect);
+    if (activeTool!.geometry !== AnnotationGeometryKind.OrientedBox)
+      return activeTool!.createDetection(rect);
+    const corners = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: left, y: bottom },
+    ];
+    // Keep the footprint axis-aligned while local +x follows the drag's dominant direction.
+    const first =
+      rect.width >= rect.height
+        ? current.x < start.x
+          ? 2
+          : 0
+        : current.y < start.y
+          ? 3
+          : 1;
+    return activeTool!.createDetection(
+      corners.map((_, index) => corners[(first + index) % 4]!),
+    );
+  }
+
+  function resolveHandlePreview(
+    active: Extract<ActiveGesture, { kind: "resize" }>,
+    input: AnnotationPointerInput,
+  ): Detection {
+    const preview = applyAnnotationHandleDrag(
+      active.detection,
+      active.handle,
+      input.point,
+      input.mediaDimensions ?? active.start.mediaDimensions,
+      active.start.point,
+    );
+    if (
+      active.handle.kind !== AnnotationHandleKind.Rotate ||
+      !options.resolveRotation
+    )
+      return preview;
+    const initial =
+      active.detection.orientedBox &&
+      getOrientedRectangleGeometry(active.detection.orientedBox);
+    const candidate =
+      preview.orientedBox && getOrientedRectangleGeometry(preview.orientedBox);
+    if (!initial || !candidate) return preview;
+    const rotation = options.resolveRotation(candidate.rotation, {
+      detection: active.detection,
+      initialRotation: initial.rotation,
+      input,
+    });
+    if (!Number.isFinite(rotation))
+      throw new RangeError("resolveRotation must return finite radians");
+    return {
+      ...active.detection,
+      orientedBox: createOrientedBoxGeometry(initial, rotation),
+    };
   }
 
   function resolveMovePreview(

@@ -4,14 +4,23 @@ import {
   AnnotationGestureStateKind,
   AnnotationGeometryKind,
   BaseBoxStyle,
+  BaseBoxCornerStyle,
   BaseKeypointStyle,
+  BaseMarkerStyle,
+  BaseOrientedBoxStyle,
+  BasePercentageBarStyle,
   BasePolygonStyle,
   BoxShape,
   DetectionMaskEncoding,
   createAnnotationEditingEngine,
+  createOrientedBoxGeometry,
+  getOrientedRectangleGeometry,
+  MarkerSizeSpace,
+  MediaInteractionMode,
   type AnnotationEditingEngine,
   type AnnotationEditingState,
   type Detection,
+  type EllipseStyle,
   type Point,
   type Rect,
 } from "supervision-js-core";
@@ -19,6 +28,7 @@ import {
 import {
   createRenderer,
   domMock,
+  flushPixiTicker,
   pixiMock,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -44,6 +54,400 @@ const OBB_SUBJECT: Detection = {
 };
 
 describe("editing gestures in the Pixi media scene", () => {
+  it("updates stationary rotation on modifier press/release and cleans up window ownership", async () => {
+    resetMocks();
+    const subject: Detection = {
+      id: "rotate",
+      orientedBox: createOrientedBoxGeometry({
+        x: 200,
+        y: 150,
+        width: 80,
+        height: 40,
+      }),
+    };
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      resolveRotation: (angle, { input }) =>
+        input.shiftKey
+          ? Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+          : angle,
+    });
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+      orientedBoxStyle: new BaseOrientedBoxStyle(),
+      detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+    });
+    await renderer.refresh();
+    renderer.setSelectedDetection({ detectionId: subject.id! });
+    renderer.setViewportTransform({ scale: 1, x: 0, y: 0 });
+    const rotate = engine
+      .getHandles(subject)
+      .find((h) => h.id === "obb-rotate")!;
+    sendInteractionPointer("pointerdown", 7, rotate.point);
+    sendInteractionPointer("globalpointermove", 7, { x: 230, y: 120 }, 100);
+    const raw = engine.getState().preview!;
+    const keydown = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "keydown",
+    )![1] as (event: unknown) => void;
+    const keyup = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "keyup",
+    )![1] as (event: unknown) => void;
+    const preventDefault = vi.fn();
+    keydown({ key: "Shift", shiftKey: true, preventDefault });
+    expect(
+      getOrientedRectangleGeometry(engine.getState().preview!.orientedBox!)!
+        .rotation,
+    ).toBeCloseTo(Math.PI / 4);
+    keyup({ key: "Shift", shiftKey: false, preventDefault });
+    expect(engine.getState().preview).toEqual(raw);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    const blur = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "blur",
+    )![1] as () => void;
+    blur();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(onCommit).not.toHaveBeenCalled();
+    renderer.destroy();
+    for (const name of ["keydown", "keyup", "blur"]) {
+      const listener = domMock.windowAddEventListener.mock.calls.find(
+        ([event]) => event === name,
+      )![1];
+      expect(domMock.windowRemoveEventListener).toHaveBeenCalledWith(
+        name,
+        listener,
+      );
+    }
+  });
+
+  it("keeps the editing canvas stable while edge handles rotate, pan and zoom within its visible crop", async () => {
+    resetMocks();
+    const subject = {
+      id: "edge-box",
+      orientedBox: createOrientedBoxGeometry(
+        { x: 200, y: 20, width: 80, height: 40 },
+        0,
+      ),
+    } satisfies Detection;
+    const engine = createAnnotationEditingEngine({
+      rotationHandle: { offset: 40 },
+    });
+    const initialWindow = window;
+    const initialResizeObserver = globalThis.ResizeObserver;
+    let resized = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resized = callback;
+        }
+        disconnect = vi.fn();
+        observe = vi.fn();
+      },
+    );
+    const container = {
+      appendChild: domMock.appendChild,
+      clientWidth: 640,
+      clientHeight: 480,
+    };
+    const renderer = await createRenderer(false, false, {
+      container,
+      editingEngine: engine,
+      orientedBoxStyle: new BaseOrientedBoxStyle(),
+      detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+    });
+    try {
+      await renderer.refresh();
+      expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(640, 360, 1);
+      expect(
+        renderer.setSelectedDetection({ detectionId: subject.id }),
+      ).not.toBeNull();
+      expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(640, 480, 1);
+      pixiMock.rendererResize.mockClear();
+      const canvas = pixiMock.canvasInstances[0]!;
+      const hitDisplay = pixiMock.containerInstances.find((display) =>
+        display.on.mock.calls.some(([name]) => name === "pointerdown"),
+      )!;
+      for (const scale of [0.5, 0.25]) {
+        renderer.setViewportTransform({ scale, x: 0, y: 60 });
+        flushPixiTicker(0);
+        const rotate = engine
+          .getHandles(subject, scale)
+          .find((handle) => handle.id === "obb-rotate")!;
+        expect(rotate.point).toEqual({ x: 200, y: -40 / scale });
+        const hitArea = hitDisplay.hitArea as {
+          contains(x: number, y: number): boolean;
+        };
+        expect(hitArea.contains(rotate.point.x, rotate.point.y)).toBe(true);
+        // The visible crop still reaches the handle's full hit area, while the
+        // backing dimensions stay host-sized and retain the old crop origin.
+        expect(canvas.style.left).toBe("0px");
+        expect(canvas.style.top).toBe("10px");
+        expect(canvas.style.clipPath).toBe(
+          scale === 0.5
+            ? "inset(0px 0px 70px 0px)"
+            : "inset(0px 320px 250px 0px)",
+        );
+        expect(
+          renderer.screenToMedia(renderer.mediaToScreen(rotate.point)),
+        ).toEqual(rotate.point);
+        expect(
+          pixiMock.graphicsInstances.some((graphics) =>
+            graphics.circle.mock.calls.some(
+              ([x, y]) => x === rotate.point.x && y === rotate.point.y,
+            ),
+          ),
+        ).toBe(true);
+        sendInteractionPointer("pointerdown", 7, rotate.point);
+        expect(engine.getState().kind).toBe(
+          AnnotationGestureStateKind.Rotating,
+        );
+        for (let step = 1; step <= 24; step += 1) {
+          const angle = (step * Math.PI) / 12;
+          sendInteractionPointer("globalpointermove", 7, {
+            x: 200 + Math.sin(angle) * 100,
+            y: 20 - Math.cos(angle) * 100,
+          });
+          const preview = engine.getState().preview!;
+          const previewRotate = engine
+            .getHandles(preview, scale)
+            .find((handle) => handle.id === "obb-rotate")!;
+          expect(
+            (
+              hitDisplay.hitArea as { contains(x: number, y: number): boolean }
+            ).contains(previewRotate.point.x, previewRotate.point.y),
+          ).toBe(true);
+        }
+        engine.cancel();
+        for (let step = 0; step < 8; step += 1) {
+          renderer.panViewportBy(5, -3);
+          renderer.zoomViewportAt({ x: 320, y: 240 }, 1.03);
+          flushPixiTicker(0);
+        }
+        flushPixiTicker(0);
+      }
+      expect(pixiMock.rendererResize).not.toHaveBeenCalled();
+      container.clientWidth = 800;
+      container.clientHeight = 600;
+      resized();
+      expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(800, 600, 1);
+      vi.stubGlobal("window", { ...window, devicePixelRatio: 2 });
+      renderer.setRenderQuality({ maxDevicePixelRatio: 2 });
+      expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(800, 600, 2);
+      container.clientWidth = 801;
+      container.clientHeight = 601;
+      resized();
+      renderer.setRenderQuality({ maxDevicePixelRatio: 1.25 });
+      expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(801, 601, 1.25);
+      expect(canvas).toHaveProperty("width", 1001);
+      expect(canvas).toHaveProperty("height", 751);
+      renderer.setViewportTransform({ scale: 0.25, x: 1, y: 61 });
+      flushPixiTicker(0);
+      expect(canvas.style).toMatchObject({ left: "1px", top: "11px" });
+      pixiMock.rendererResize.mockClear();
+      for (let step = 0; step < 8; step += 1) {
+        renderer.panViewportBy(5, -3);
+        renderer.zoomViewportAt({ x: 320, y: 240 }, 1.03);
+        flushPixiTicker(0);
+      }
+      expect(pixiMock.rendererResize).not.toHaveBeenCalled();
+      renderer.setRenderQuality({ maxDevicePixelRatio: 2 });
+      renderer.setViewportTransform({ scale: 0.25, x: 0, y: 60 });
+      flushPixiTicker(0);
+      renderer.setSelectedDetection(null);
+      expect(
+        (
+          hitDisplay.hitArea as { contains(x: number, y: number): boolean }
+        ).contains(200, -24),
+      ).toBe(false);
+      expect(canvas.style.top).toBe("60px");
+      expect(canvas.style.clipPath).toBe("");
+      expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(320, 180, 2);
+    } finally {
+      renderer.destroy();
+      vi.stubGlobal("window", initialWindow);
+      vi.stubGlobal("ResizeObserver", initialResizeObserver);
+    }
+  });
+
+  it.each(["external preview", "locked", "mask", "unsupported clip"])(
+    "retains the picture-sized canvas for %s selections",
+    async (kind) => {
+      resetMocks();
+      const createElement = domMock.createElement.getMockImplementation()!;
+      if (kind === "unsupported clip") {
+        domMock.createElement.mockImplementation((tag: string) => {
+          const element = createElement(tag);
+          if (tag === "div") {
+            let overflow = "";
+            Object.defineProperty(element.style, "overflow", {
+              get: () => overflow,
+              set: (value: string) => {
+                if (value !== "clip") overflow = value;
+              },
+            });
+          }
+          return element;
+        });
+      }
+      const subject: Detection = {
+        ...SUBJECT,
+        locked: kind === "locked",
+        ...(kind === "mask"
+          ? {
+              mask: {
+                counts: "0",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 1,
+                width: 1,
+              },
+            }
+          : {}),
+      };
+      const container = {
+        appendChild: domMock.appendChild,
+        clientWidth: 640,
+        clientHeight: 480,
+      };
+      const renderer = await createRenderer(false, false, {
+        container,
+        editingEngine:
+          kind === "external preview"
+            ? undefined
+            : createAnnotationEditingEngine(),
+        interaction: { mode: MediaInteractionMode.Always },
+        previewOverlay: () => ({ points: [{ x: 100, y: 90, positive: true }] }),
+        detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+      });
+      try {
+        await renderer.refresh();
+        if (kind === "unsupported clip") {
+          const backdrop = domMock.appendChild.mock.calls.find(
+            (_, index) =>
+              domMock.appendChild.mock.contexts[index] === container,
+          )![0];
+          expect(backdrop.style.overflow).toBe("hidden");
+        }
+        pixiMock.rendererResize.mockClear();
+        expect(
+          renderer.setSelectedDetection({ detectionId: subject.id! }),
+        ).not.toBeNull();
+        expect(pixiMock.rendererResize).not.toHaveBeenCalled();
+        expect(pixiMock.canvasInstances[0]!.style).toMatchObject({
+          clipPath: "",
+          left: "0px",
+          top: "60px",
+        });
+      } finally {
+        renderer.destroy();
+        domMock.createElement.mockImplementation(createElement);
+      }
+    },
+  );
+
+  it("retains the canvas keyboard target and theme outline across cropped focus and modality changes", async () => {
+    resetMocks();
+    const initialDocument = document;
+    const initialWindow = window;
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: domMock.appendChild,
+        clientWidth: 640,
+        clientHeight: 480,
+      },
+      editingEngine: createAnnotationEditingEngine(),
+      detectionFrames: [{ detections: [SUBJECT], mediaTime: 0 }],
+    });
+    try {
+      await renderer.refresh();
+      renderer.setSelectedDetection({ detectionId: SUBJECT.id! });
+      renderer.setViewportTransform({ scale: 0.25, x: 0, y: 60 });
+      const canvas = pixiMock.canvasInstances[0]!;
+      const matches = vi.fn(() => true);
+      Object.defineProperty(canvas, "matches", { value: matches });
+      const getComputedStyle = vi.fn(() => ({
+        outline: "rgb(27, 72, 90) dashed 3px",
+        outlineOffset: "2px",
+      }));
+      vi.stubGlobal("window", { ...window, getComputedStyle });
+      vi.stubGlobal("document", { ...document, activeElement: canvas });
+      const outline = domMock.createElement.mock.results.find(
+        ({ value }) => value.ariaHidden === "true",
+      )!.value;
+      const send = (type: string, event?: unknown) => {
+        const listeners =
+          type === "pointerdown"
+            ? domMock.windowAddEventListener
+            : pixiMock.canvasAddEventListener;
+        const listener = listeners.mock.calls.find(
+          ([name]) => name === type,
+        )![1] as (event?: unknown) => void;
+        listener(event);
+      };
+      send("focus");
+      expect(canvas.tabIndex).toBe(0);
+      expect(outline.tabIndex).toBeUndefined();
+      expect(outline.style).toMatchObject({
+        display: "block",
+        pointerEvents: "none",
+        left: "0px",
+        top: "60px",
+        width: "320px",
+        height: "180px",
+        outline: "rgb(27, 72, 90) dashed 3px",
+        outlineOffset: "2px",
+      });
+      renderer.panViewportBy(10, 5);
+      flushPixiTicker(0);
+      expect(outline.style).toMatchObject({ left: "10px", top: "65px" });
+      expect(getComputedStyle).toHaveBeenCalledOnce();
+      matches.mockReturnValue(false);
+      send("pointerdown");
+      await Promise.resolve();
+      expect(outline.style.display).toBe("none");
+      matches.mockReturnValue(true);
+      send("keydown", { key: "Escape" });
+      expect(outline.style.display).toBe("block");
+      const shadowHost = document.createElement("div");
+      vi.stubGlobal("document", { ...document, activeElement: shadowHost });
+      send("focus");
+      expect(outline.style.display).toBe("block");
+      matches.mockReturnValue(false);
+      vi.stubGlobal("document", { ...document, activeElement: null });
+      send("blur");
+      expect(outline.style.display).toBe("none");
+      matches.mockReturnValue(true);
+      vi.stubGlobal("document", { ...document, activeElement: canvas });
+      send("focus");
+      renderer.setSelectedDetection(null);
+      expect(outline.style.display).toBe("none");
+      expect(canvas.style.clipPath).toBe("");
+      expect(canvas.style.outline).toBeUndefined();
+    } finally {
+      renderer.destroy();
+      vi.stubGlobal("document", initialDocument);
+      vi.stubGlobal("window", initialWindow);
+    }
+    for (const type of ["focus", "blur"]) {
+      const listener = pixiMock.canvasAddEventListener.mock.calls.find(
+        ([name]) => name === type,
+      )![1];
+      expect(pixiMock.canvasRemoveEventListener).toHaveBeenCalledWith(
+        type,
+        listener,
+      );
+    }
+    const pointerDown = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "pointerdown",
+    )![1];
+    expect(domMock.windowRemoveEventListener).toHaveBeenCalledWith(
+      "pointerdown",
+      pointerDown,
+      true,
+    );
+  });
+
   it.each(["pointercancel", "lostpointercapture"])(
     "retains routed polygon vertices after native %s and accepts the next contact",
     async (eventType) => {
@@ -437,36 +841,6 @@ describe("editing gestures in the Pixi media scene", () => {
     renderer.destroy();
   });
 
-  it("hides the edited detection from the base layers while it is edited", async () => {
-    resetMocks();
-    const editing = createEditingEngineHarness();
-    const renderer = await createRenderer(false, false, {
-      boxStyle: new BaseBoxStyle({
-        shape: BoxShape.Rect,
-        stroke: { alpha: 1, color: 0x00ff66, width: 2 },
-      }),
-      detectionFrames: [{ detections: [SUBJECT], frameIndex: 0, mediaTime: 0 }],
-      editingEngine: editing.engine,
-    });
-
-    await vi.waitFor(() => {
-      expect(renderer.getState().activeDetectionCount).toBe(1);
-    });
-    const box = pixiMock.graphicsInstances.find(
-      (graphics) => graphics.rect.mock.calls.length > 0,
-    );
-    expect(box).toBeDefined();
-    expect(box!.visible).toBe(true);
-
-    editing.emitState(movingState());
-    expect(box!.visible).toBe(false);
-
-    editing.emitState(idleState());
-    expect(box!.visible).toBe(true);
-
-    renderer.destroy();
-  });
-
   it("keeps a mask drawn while the brush edits it", async () => {
     resetMocks();
     const editing = createEditingEngineHarness();
@@ -474,6 +848,9 @@ describe("editing gestures in the Pixi media scene", () => {
       boxStyle: new BaseBoxStyle({
         shape: BoxShape.Rect,
         stroke: { alpha: 1, color: 0x00ff66, width: 2 },
+      }),
+      markerStyle: new BaseMarkerStyle({
+        fill: { alpha: 1, color: 0x123456 },
       }),
       detectionFrames: [{ detections: [SUBJECT], frameIndex: 0, mediaTime: 0 }],
       editingEngine: editing.engine,
@@ -500,9 +877,229 @@ describe("editing gestures in the Pixi media scene", () => {
       },
     });
     expect(box!.visible).toBe(true);
+    flushPixiTicker(0);
+    const markerDisplays = pixiMock.graphicsInstances.filter((graphics) =>
+      graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+    );
+    expect(markerDisplays).toHaveLength(1);
+    expect(markerDisplays[0]!.visible).toBe(true);
 
     renderer.destroy();
   });
+
+  it.each([
+    ["box", SUBJECT, AnnotationGestureStateKind.Moving],
+    ["OBB and rect", OBB_SUBJECT, AnnotationGestureStateKind.Rotating],
+    [
+      "skeleton",
+      {
+        ...SUBJECT,
+        keypoints: {
+          points: [
+            { x: 100, y: 90 },
+            { x: 110, y: 90 },
+          ],
+          edges: [[0, 1]],
+        },
+      },
+      AnnotationGestureStateKind.Resizing,
+    ],
+  ] satisfies [string, Detection, AnnotationGestureStateKind][])(
+    "keeps composed decorations on a live %s preview without drawing the OBB twice",
+    async (_label, subject, kind) => {
+      resetMocks();
+      const editing = createEditingEngineHarness();
+      const markerStyle = new BaseMarkerStyle({
+        fill: { alpha: 1, color: 0x123456 },
+        size: 10,
+        sizeSpace: MarkerSizeSpace.Media,
+        stroke: null,
+      });
+      const ellipseStyle: EllipseStyle = {
+        resolve: (detection, context) =>
+          detection.rect && !context.hidden
+            ? {
+                center: detection.rect,
+                radiusX: 4,
+                radiusY: 3,
+                fill: { alpha: 1, color: 0x234567 },
+              }
+            : undefined,
+      };
+      const renderer = await createRenderer(false, false, {
+        detectionFrames: [
+          { detections: [subject], frameIndex: 0, mediaTime: 0 },
+        ],
+        editingEngine: editing.engine,
+        labelStyle: null,
+        markerStyle,
+        ellipseStyle,
+        boxCornerStyle: new BaseBoxCornerStyle({
+          stroke: { color: 0x56789a, width: 2 },
+        }),
+        percentageBarStyle: new BasePercentageBarStyle({
+          value: 0.5,
+          fill: { alpha: 1, color: 0x345678 },
+        }),
+        orientedBoxStyle: new BaseOrientedBoxStyle({
+          fill: { alpha: 1, color: 0x6789ab },
+        }),
+        keypointStyle: new BaseKeypointStyle({
+          markerFill: { alpha: 1, color: 0x789abc },
+        }),
+      });
+      await renderer.refresh();
+      const source = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+      );
+      expect(source).toBeDefined();
+      const preview: Detection = {
+        ...subject,
+        rect: { ...subject.rect!, x: 140, y: 60 },
+        ...(subject.orientedBox
+          ? {
+              orientedBox: createOrientedBoxGeometry(
+                { x: 140, y: 60, width: 40, height: 20 },
+                Math.PI / 4,
+              ),
+            }
+          : {}),
+      };
+      editing.emitState({
+        ...movingState(),
+        kind,
+        activeDetectionId: subject.id!,
+        preview,
+      });
+      flushPixiTicker(0);
+
+      expect(source!.visible).toBe(false);
+      const overlay = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.circle.mock.calls.some(
+          ([x, y, radius]) => x === 140 && y === 60 && radius === 5,
+        ),
+      );
+      expect(overlay).toBeDefined();
+      for (const color of [0x123456, 0x234567, 0x345678]) {
+        expect(overlay!.fill).toHaveBeenCalledWith(
+          expect.objectContaining({ color }),
+        );
+      }
+      expect(overlay!.stroke).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x56789a }),
+      );
+      expect(overlay!.fill).not.toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x6789ab }),
+      );
+      if (subject.keypoints) {
+        expect(overlay!.fill).toHaveBeenCalledWith(
+          expect.objectContaining({ color: 0x789abc }),
+        );
+      }
+      if (preview.orientedBox) {
+        expect(overlay!.poly).toHaveBeenCalledWith(
+          preview.orientedBox.points.flatMap(({ x, y }) => [x, y]),
+          true,
+        );
+      }
+
+      overlay!.fill.mockClear();
+      renderer.setPresentation({ markerStyle: null });
+      flushPixiTicker(1);
+      expect(overlay!.fill).not.toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x123456 }),
+      );
+      expect(overlay!.fill).toHaveBeenCalledWith(
+        expect.objectContaining({ color: 0x234567 }),
+      );
+      renderer.setPresentation({
+        markerStyle: new BaseMarkerStyle({
+          fill: { alpha: 1, color: 0xabcdef },
+          stroke: null,
+        }),
+      });
+      flushPixiTicker(2);
+      expect(overlay!.fill).toHaveBeenCalledWith({ alpha: 1, color: 0xabcdef });
+
+      overlay!.fill.mockClear();
+      editing.emitState(idleState());
+      flushPixiTicker(3);
+      expect(source!.visible).toBe(true);
+      expect(overlay!.fill).not.toHaveBeenCalled();
+      renderer.destroy();
+    },
+  );
+
+  it.each(["commit", "cancel"] as const)(
+    "removes the rotating marker preview and restores its source after %s",
+    async (finish) => {
+      resetMocks();
+      const subject: Detection = {
+        className: OBB_SUBJECT.className,
+        id: OBB_SUBJECT.id,
+        orientedBox: OBB_SUBJECT.orientedBox,
+      };
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const renderer = await createRenderer(false, false, {
+        detectionFrames: [{ detections: [subject], mediaTime: 0 }],
+        editingEngine: engine,
+        markerStyle: new BaseMarkerStyle({
+          center: (detection) => detection.orientedBox?.points[0],
+          fill: { alpha: 1, color: 0x123456 },
+          size: 10,
+          sizeSpace: MarkerSizeSpace.Media,
+          stroke: null,
+        }),
+      });
+      await renderer.refresh();
+      const source = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+      )!;
+      const handle = engine
+        .getHandles(subject)
+        .find(({ id }) => id === "obb-rotate")!;
+      engine.beginHandleDrag(subject, handle, {
+        point: handle.point,
+        pointerId: 7,
+        timestamp: 0,
+      });
+      const input = { point: { x: 160, y: 100 }, pointerId: 7, timestamp: 100 };
+      engine.pointerMove(input);
+      flushPixiTicker(0);
+      const corner = engine.getState().preview!.orientedBox!.points[0];
+      expect(corner).not.toEqual(subject.orientedBox!.points[0]);
+      const overlay = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.circle.mock.calls.some(
+          ([x, y, radius]) => x === corner.x && y === corner.y && radius === 5,
+        ),
+      )!;
+      expect(overlay).toBeDefined();
+      expect(source.visible).toBe(false);
+
+      overlay.fill.mockClear();
+      renderer.setPresentation({
+        visibility: { hiddenDetectionIds: [subject.id!] },
+      });
+      flushPixiTicker(1);
+      expect(overlay.fill).not.toHaveBeenCalled();
+      renderer.setPresentation({ visibility: {} });
+      flushPixiTicker(2);
+      expect(overlay.fill).toHaveBeenCalledWith({ alpha: 1, color: 0x123456 });
+
+      overlay.circle.mockClear();
+      overlay.fill.mockClear();
+      if (finish === "commit") engine.pointerUp(input);
+      else engine.cancel();
+      flushPixiTicker(3);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onCommit).toHaveBeenCalledTimes(finish === "commit" ? 1 : 0);
+      expect(source.visible).toBe(true);
+      expect(overlay.circle).not.toHaveBeenCalled();
+      expect(overlay.fill).not.toHaveBeenCalled();
+      renderer.destroy();
+    },
+  );
 
   it("keeps an oriented box visible as a rotated quadrilateral while dragging, then restores normal rendering when the gesture ends", async () => {
     resetMocks();

@@ -6,12 +6,18 @@ import {
   applyAnnotationHandleDrag,
   getAnnotationHandles,
   KeypointMarkerShape,
+  MarkerShape,
+  MarkerSizeSpace,
+  ShapeInstructionKind,
+  type Detection,
+  type ShapeStyle,
 } from "supervision-js-core";
 
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 
 function createGraphicsMock() {
   const graphics = {
+    beginPath: vi.fn(),
     arc: vi.fn(),
     circle: vi.fn(),
     clear: vi.fn(),
@@ -303,6 +309,107 @@ describe("Pixi annotation overlay presentation", () => {
       width: 1,
     });
   });
+
+  it.each([
+    [AnnotationGestureStateKind.Moving, 1],
+    [AnnotationGestureStateKind.Creating, 2],
+  ] as const)(
+    "resolves preview decorations with the frame position and visibility while %s",
+    (kind, detectionIndex) => {
+      const graphics = createGraphicsMock();
+      const detection: Detection = {
+        className: "person",
+        id: "person-1",
+        rect: { height: 20, width: 30, x: 40, y: 50 },
+      };
+      const other: Detection = { id: "other" };
+      const frame = {
+        detections: [other, detection],
+        frameIndex: 4,
+        mediaTime: 0.8,
+      };
+      const preview = {
+        ...detection,
+        id:
+          kind === AnnotationGestureStateKind.Creating ? "draft" : detection.id,
+        rect: { ...detection.rect!, x: 70, y: 80 },
+      };
+      const engine = {
+        getState: () => ({
+          activeDetectionId:
+            kind === AnnotationGestureStateKind.Creating ? null : detection.id,
+          kind,
+          preview,
+        }),
+        hasCreationTool: () => kind === AnnotationGestureStateKind.Creating,
+      };
+      const shapeStyle: ShapeStyle = {
+        resolve: vi.fn<ShapeStyle["resolve"]>((subject) => [
+          {
+            center: { x: subject.rect!.x, y: subject.rect!.y },
+            fill: { alpha: 1, color: 0x123456 },
+            kind: ShapeInstructionKind.Marker,
+            shape: MarkerShape.Circle,
+            size: 10,
+            sizeSpace: MarkerSizeSpace.Screen,
+          },
+        ]),
+      };
+      const layer = createPixiAnnotationOverlayLayer(
+        engine as never,
+        undefined,
+        undefined,
+        shapeStyle,
+      );
+      layer.attachGraphics(graphics as never);
+      const context = {
+        frame,
+        marquee: null,
+        mediaHeight: 100,
+        mediaWidth: 100,
+        now: 0,
+        pointer: null,
+        selectedDetectionIds: [],
+        viewportScale: 2,
+        visibility: {
+          ephemeralDetectionIds: [preview.id!],
+          loadingDetectionIds: [preview.id!],
+        },
+      };
+      layer.draw(context);
+
+      const previewFrame = {
+        ...frame,
+        detections:
+          kind === AnnotationGestureStateKind.Creating
+            ? [other, detection, preview]
+            : [other, preview],
+      };
+      expect(shapeStyle.resolve).toHaveBeenCalledWith(preview, {
+        detectionIndex,
+        ephemeral: true,
+        frame: previewFrame,
+        hidden: false,
+        isCreating: kind === AnnotationGestureStateKind.Creating,
+        loading: true,
+        mediaTime: 0.8,
+        selected: true,
+        viewportScale: 2,
+      });
+      expect(frame.detections).toEqual([other, detection]);
+      expect(graphics.circle).toHaveBeenCalledExactlyOnceWith(70, 80, 2.5);
+      expect(graphics.fill).toHaveBeenCalledWith({ alpha: 1, color: 0x123456 });
+
+      vi.mocked(shapeStyle.resolve).mockClear();
+      graphics.circle.mockClear();
+      layer.draw({
+        ...context,
+        visibility: { hiddenDetectionIds: [preview.id!] },
+      });
+      expect(shapeStyle.resolve).not.toHaveBeenCalled();
+      expect(graphics.circle).not.toHaveBeenCalled();
+    },
+  );
 
   it("renders polygon creation as an open path without ancillary bounds", () => {
     const graphics = createGraphicsMock();

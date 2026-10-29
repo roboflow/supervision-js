@@ -722,6 +722,218 @@ describe("pixi label layer", () => {
     expect(layer.pickDetectionAtPoint({ x: 100, y: 100 }, 1)).toBeNull();
   });
 
+  it("lays out measured labels once per absolute move and picks the drawn position", () => {
+    const style = createStableLabelStyle();
+    const layout = vi.fn((bounds: { x: number; y: number }) => ({
+      x: bounds.x + 50,
+      y: bounds.y + 30,
+      background: { topCornersOnly: true },
+    }));
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([firstFrame]),
+      labelStyle: {
+        resolve(detection, context) {
+          return { ...style.resolve(detection, context)!, layout };
+        },
+      },
+    });
+    const container = layer.createContainer() as FakeContainer;
+    layer.drawFrame(1);
+    expect(layout).toHaveBeenLastCalledWith(
+      { x: 10, y: 12, width: 34, height: 18 },
+      1,
+    );
+    const [background, text] = container.children as [FakeGraphics, FakeText];
+    expect(background).toMatchObject({ x: 60, y: 42 });
+    expect(text).toMatchObject({ x: 67, y: 46 });
+    expect(background.roundRect).not.toHaveBeenCalled();
+    expect(layer.pickDetectionAtPoint({ x: 61, y: 43 }, 1)?.target).toBe(
+      DetectionPickTarget.Label,
+    );
+    expect(layer.pickDetectionAtPoint({ x: 11, y: 13 }, 1)).toBeNull();
+
+    layer.translateDetection("player-1", 3, 4);
+    layer.translateDetection("player-1", 5, 8);
+    expect(layout).toHaveBeenLastCalledWith(
+      { x: 15, y: 20, width: 34, height: 18 },
+      1,
+    );
+    expect(layer.getDetectionLabelBounds("player-1")).toEqual({
+      x: 65,
+      y: 50,
+      width: 34,
+      height: 18,
+    });
+    expect(background).toMatchObject({ x: 65, y: 50 });
+    expect(text).toMatchObject({ x: 72, y: 54 });
+    expect(layer.pickDetectionAtPoint({ x: 66, y: 66 }, 1)?.target).toBe(
+      DetectionPickTarget.Label,
+    );
+    expect(layer.pickDetectionAtPoint({ x: 61, y: 43 }, 1)).toBeNull();
+    expect(text.textAssignments).toBe(1);
+    expect(text.styleAssignments).toBe(1);
+  });
+
+  it("uses current resize geometry for layout and restores the committed anchor when preview geometry clears", () => {
+    const style = createStableLabelStyle();
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([firstFrame]),
+      labelStyle: {
+        resolve(detection, context) {
+          if (detection.rect!.width > 100) return undefined;
+          return {
+            ...style.resolve(detection, context)!,
+            layout: (bounds) => bounds,
+          };
+        },
+      },
+    });
+    const container = layer.createContainer() as FakeContainer;
+    layer.setBackgroundAntialiasFilter({ padding: 2 } as Filter);
+    layer.drawFrame(1);
+    const preview = {
+      ...firstFrame.detections[0]!,
+      rect: { x: 200, y: 200, width: 40, height: 60 },
+    };
+    layer.updateEditingBox("player-1", preview.rect, preview);
+    expect(layer.getDetectionLabelBounds("player-1")).toEqual({
+      x: 180,
+      y: 152,
+      width: 34,
+      height: 18,
+    });
+    expect(layer.pickDetectionAtPoint({ x: 181, y: 153 }, 1)?.target).toBe(
+      DetectionPickTarget.Label,
+    );
+    const hiddenPreview = { ...preview, rect: { ...preview.rect, width: 200 } };
+    layer.updateEditingBox("player-1", hiddenPreview.rect, hiddenPreview);
+    expect(layer.getDetectionLabelBounds("player-1")).toBeNull();
+    expect(layer.pickDetectionAtPoint({ x: 181, y: 153 }, 1)).toBeNull();
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(0);
+    layer.updateEditingBox("player-1", preview.rect, preview);
+    expect(layer.getDetectionLabelBounds("player-1")?.x).toBe(180);
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(1);
+    layer.updateEditingBox("player-1", undefined);
+    expect(layer.getDetectionLabelBounds("player-1")).toEqual({
+      x: 10,
+      y: 12,
+      width: 34,
+      height: 18,
+    });
+  });
+
+  it("updates a neighboring label's bounds, picking, and captures on later previews in the same gesture", () => {
+    const style = createStableLabelStyle();
+    let obstacleRight = -10;
+    const frame: DetectionFrame = {
+      ...firstFrame,
+      detections: [
+        firstFrame.detections[0]!,
+        { id: "neighbor", rect: { x: 115, y: 40, width: 10, height: 20 } },
+      ],
+    };
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([frame]),
+      labelStyle: {
+        resolve(detection, context) {
+          const instruction = style.resolve(detection, context)!;
+          if (detection.id !== "neighbor") return instruction;
+          return {
+            ...instruction,
+            layout: (bounds) => ({ x: obstacleRight + 20, y: bounds.y }),
+          };
+        },
+      },
+    });
+    const container = layer.createContainer() as FakeContainer;
+    layer.setBackgroundAntialiasFilter({ padding: 2 } as Filter);
+    layer.drawFrame(1);
+    const backgrounds = container.children
+      .filter((child) => child instanceof FakeContainer)
+      .map((group) => (group as FakeContainer).children[0]);
+    expect(backgrounds).toHaveLength(2);
+    const texts = container.children.filter(
+      (child) => child instanceof FakeText,
+    );
+    const preview = {
+      ...frame.detections[0]!,
+      rect: { x: 200, y: 200, width: 40, height: 60 },
+    };
+    obstacleRight = 220;
+    layer.updateEditingBox("player-1", preview.rect, preview);
+    const previousBounds = layer.getDetectionLabelBounds("neighbor");
+    expect(previousBounds).toEqual({ x: 240, y: 12, width: 34, height: 18 });
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(1);
+    expect((container.children[0] as FakeContainer).children).toEqual(
+      backgrounds,
+    );
+    expect(container.children.slice(1)).toEqual(texts);
+    expect(
+      layer.pickDetectionAtPoint({ x: 241, y: 13 }, 1)?.detectionIndex,
+    ).toBe(1);
+
+    const laterPreview = {
+      ...preview,
+      rect: { ...preview.rect, x: 300, width: 60 },
+    };
+    obstacleRight = 330;
+    layer.updateEditingBox("player-1", laterPreview.rect, laterPreview);
+    expect(layer.getDetectionLabelBounds("neighbor")).toEqual({
+      x: 350,
+      y: 12,
+      width: 34,
+      height: 18,
+    });
+    expect(
+      layer.pickDetectionAtPoint({ x: 351, y: 13 }, 1)?.detectionIndex,
+    ).toBe(1);
+    expect(layer.pickDetectionAtPoint({ x: 241, y: 13 }, 1)).toBeNull();
+    expect(previousBounds).toEqual({ x: 240, y: 12, width: 34, height: 18 });
+
+    obstacleRight = -10;
+    layer.updateEditingBox("player-1", laterPreview.rect, laterPreview);
+    expect(
+      container.children.filter((child) => child instanceof FakeContainer),
+    ).toHaveLength(2);
+    for (const text of texts as FakeText[]) {
+      expect(text.textAssignments).toBe(1);
+      expect(text.styleAssignments).toBe(1);
+    }
+  });
+
+  it("rejects a non-finite layout position", () => {
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([firstFrame]),
+      labelStyle: {
+        resolve: () => ({
+          rect: { x: 0, y: 0, width: 1, height: 1 },
+          text: "x",
+          layout: () => ({ x: NaN, y: 0 }),
+        }),
+      },
+    });
+    layer.createContainer();
+    expect(() => layer.drawFrame(1)).toThrow(RangeError);
+  });
+
   it("reports the exact laid-out label bounds by detection id", () => {
     const layer = createPixiLabelLayer({
       Container: FakeContainer as never,

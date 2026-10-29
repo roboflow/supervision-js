@@ -92,7 +92,10 @@ import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
 } from "./pixi-region-layer";
-import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
+import {
+  createPixiAnnotationOverlayLayer,
+  type PixiAnnotationHandleBounds,
+} from "./pixi-annotation-overlay-layer";
 import {
   AnnotationGestureStateKind,
   MediaInteractionMode,
@@ -573,6 +576,9 @@ export async function createPixiMediaScene(
     options.editingEngine,
     options.annotationOverlayStyle,
     options.keypointStyle,
+    // Editable OBB geometry uses AnnotationOverlayStyle; its decorations
+    // reuse the configured shape renderers against the live detection.
+    resolveVectorShapeStyle(null),
   );
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
   let maskLayer = initialMaskPreparationStyle
@@ -637,6 +643,18 @@ export async function createPixiMediaScene(
   rendererCanvas.style.position = "absolute";
   const backdrop = createSceneBackdrop(options.backgroundColor);
   backdrop.appendChild(rendererCanvas);
+  // The bitmap crop clips its native outline too. This decoration preserves
+  // the visible ring while the canvas remains the keyboard target.
+  const focusOutline = options.editingEngine
+    ? document.createElement("div")
+    : undefined;
+  if (focusOutline) {
+    focusOutline.ariaHidden = "true";
+    focusOutline.style.display = "none";
+    focusOutline.style.pointerEvents = "none";
+    focusOutline.style.position = "absolute";
+    backdrop.appendChild(focusOutline);
+  }
   options.container.appendChild(backdrop);
 
   const stagingCanvas = document.createElement("canvas");
@@ -717,6 +735,23 @@ export async function createPixiMediaScene(
   let readPresentedSurface = () => stagingCanvas;
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
   let presentationBox = { height: 0, left: 0, top: 0, width: 0 };
+  let annotationHandleBounds: PixiAnnotationHandleBounds | undefined;
+  function syncFocusOutline() {
+    if (!focusOutline) return;
+    const visible = Boolean(
+      rendererCanvas.style.clipPath && rendererCanvas.matches(":focus-visible"),
+    );
+    focusOutline.style.display = visible ? "block" : "none";
+    if (!visible) return;
+    const style = window.getComputedStyle(rendererCanvas);
+    focusOutline.style.outline = style.outline;
+    focusOutline.style.outlineOffset = style.outlineOffset;
+  }
+  const handleFocusModalityChange = () => {
+    queueMicrotask(() => {
+      if (!isDestroyed) syncFocusOutline();
+    });
+  };
   /**
    * Read only when the observer says the box moved. The fit is recomputed on
    * every presented sample, and reading the element there would put a forced
@@ -818,7 +853,8 @@ export async function createPixiMediaScene(
     // no mask, so hiding it would blank the stroke as it is drawn.
     const nextEditingId =
       (state.kind === AnnotationGestureStateKind.Moving ||
-        state.kind === AnnotationGestureStateKind.Resizing) &&
+        state.kind === AnnotationGestureStateKind.Resizing ||
+        state.kind === AnnotationGestureStateKind.Rotating) &&
       state.activeDetectionId !== null &&
       state.preview &&
       !state.preview.mask
@@ -859,7 +895,35 @@ export async function createPixiMediaScene(
       });
     }
   });
+  const handleModifierChange = (event: KeyboardEvent) => {
+    if (!["Shift", "Alt", "Control", "Meta"].includes(event.key)) return;
+    // Window ownership keeps key release visible if focus leaves the canvas
+    // during a captured edit, without consuming the host's keyboard commands.
+    if (
+      options.editingEngine?.getState().kind !==
+      AnnotationGestureStateKind.Rotating
+    )
+      return;
+    options.editingEngine.setModifiers?.({
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+    });
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
+    renderOnChange();
+  };
+  const handleEditingBlur = () => {
+    const state = options.editingEngine?.getState();
+    if (state && state.kind !== AnnotationGestureStateKind.Idle) {
+      // Losing the window interrupts the contact just like native cancellation.
+      if (state.pointerId !== null)
+        interactionLayer?.pointerCancel(state.pointerId);
+      else options.editingEngine?.pointerCancel?.();
+    }
+  };
   const handleKeyDown = (event: KeyboardEvent) => {
+    syncFocusOutline();
     if (event.key === "Tab" && interactionLayer) {
       interactionLayer.cycleSelection(event.shiftKey ? -1 : 1);
       event.preventDefault();
@@ -901,8 +965,16 @@ export async function createPixiMediaScene(
     rendererCanvas.tabIndex = 0;
     rendererCanvas.addEventListener?.("keydown", handleKeyDown);
   }
+  if (focusOutline) {
+    rendererCanvas.addEventListener("focus", syncFocusOutline);
+    rendererCanvas.addEventListener("blur", syncFocusOutline);
+    window.addEventListener("pointerdown", handleFocusModalityChange, true);
+  }
   if (options.editingEngine) {
     rendererCanvas.addEventListener?.("contextmenu", handleContextMenu);
+    window.addEventListener("keydown", handleModifierChange);
+    window.addEventListener("keyup", handleModifierChange);
+    window.addEventListener("blur", handleEditingBlur);
   }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
@@ -972,8 +1044,9 @@ export async function createPixiMediaScene(
    * rate, so the canvas is sized to the picture and positioned inside the
    * container, leaving the margin to the backdrop.
    *
-   * The box follows the picture under pan and zoom rather than growing to the
-   * container, so the margin keeps its exemption at every viewport transform.
+   * Editable selection uses a stable host-sized backing surface so moving its
+   * handles never reallocates the canvas. The same picture-and-handle crop
+   * clips that surface; ordinary viewing retains the picture-sized canvas.
    */
   const syncPresentationBox = () => {
     const { height: containerHeight, width: containerWidth } = containerSize;
@@ -983,15 +1056,39 @@ export async function createPixiMediaScene(
     const pictureScale = baseFit ? baseFit.scale * transform.scale : 0;
     const span = baseFit
       ? {
-          left: Math.max(0, Math.floor(baseFit.x + transform.x)),
-          top: Math.max(0, Math.floor(baseFit.y + transform.y)),
+          left: Math.max(
+            0,
+            Math.floor(
+              baseFit.x +
+                transform.x +
+                Math.min(0, annotationHandleBounds?.left ?? 0) * pictureScale,
+            ),
+          ),
+          top: Math.max(
+            0,
+            Math.floor(
+              baseFit.y +
+                transform.y +
+                Math.min(0, annotationHandleBounds?.top ?? 0) * pictureScale,
+            ),
+          ),
           right: Math.min(
             containerWidth,
-            Math.ceil(baseFit.x + transform.x + mediaWidth * pictureScale),
+            Math.ceil(
+              baseFit.x +
+                transform.x +
+                Math.max(mediaWidth, annotationHandleBounds?.right ?? 0) *
+                  pictureScale,
+            ),
           ),
           bottom: Math.min(
             containerHeight,
-            Math.ceil(baseFit.y + transform.y + mediaHeight * pictureScale),
+            Math.ceil(
+              baseFit.y +
+                transform.y +
+                Math.max(mediaHeight, annotationHandleBounds?.bottom ?? 0) *
+                  pictureScale,
+            ),
           ),
         }
       : { left: 0, top: 0, right: containerWidth, bottom: containerHeight };
@@ -1002,23 +1099,53 @@ export async function createPixiMediaScene(
       height: Math.max(1, span.bottom - span.top),
     };
 
-    if (
-      next.left === presentationBox.left &&
-      next.top === presentationBox.top &&
-      next.width === presentationBox.width &&
-      next.height === presentationBox.height &&
-      presentationResolution === appliedResolution
-    ) {
-      return presentationBox;
+    presentationBox = {
+      ...next,
+      width:
+        Math.round(next.width * presentationResolution) /
+        presentationResolution,
+      height:
+        Math.round(next.height * presentationResolution) /
+        presentationResolution,
+    };
+    const stableEditingSurface = Boolean(
+      options.editingEngine &&
+      annotationHandleBounds &&
+      backdrop.style.overflow === "clip",
+    );
+    // Retain the cropped canvas origin so fractional DPR keeps its raster phase.
+    const canvasBox = stableEditingSurface
+      ? { ...next, width: containerWidth, height: containerHeight }
+      : next;
+    const pixelWidth = Math.round(canvasBox.width * presentationResolution);
+    const pixelHeight = Math.round(canvasBox.height * presentationResolution);
+    rendererCanvas.style.left = `${canvasBox.left}px`;
+    rendererCanvas.style.top = `${canvasBox.top}px`;
+    const wasClipped = Boolean(rendererCanvas.style.clipPath);
+    rendererCanvas.style.clipPath = stableEditingSurface
+      ? `inset(0px ${pixelWidth / presentationResolution - presentationBox.width}px ${pixelHeight / presentationResolution - presentationBox.height}px 0px)`
+      : "";
+    if (focusOutline) {
+      focusOutline.style.left = `${presentationBox.left}px`;
+      focusOutline.style.top = `${presentationBox.top}px`;
+      focusOutline.style.width = `${presentationBox.width}px`;
+      focusOutline.style.height = `${presentationBox.height}px`;
+      if (wasClipped !== stableEditingSurface) syncFocusOutline();
     }
-
-    presentationBox = next;
-    appliedResolution = presentationResolution;
-    rendererCanvas.style.left = `${next.left}px`;
-    rendererCanvas.style.top = `${next.top}px`;
-    app.renderer.resize(next.width, next.height, presentationResolution);
-    syncAnnotationAntialiasResolution();
-    return presentationBox;
+    if (
+      pixelWidth !== rendererCanvas.width ||
+      pixelHeight !== rendererCanvas.height ||
+      presentationResolution !== appliedResolution
+    ) {
+      appliedResolution = presentationResolution;
+      app.renderer.resize(
+        canvasBox.width,
+        canvasBox.height,
+        presentationResolution,
+      );
+      syncAnnotationAntialiasResolution();
+    }
+    return canvasBox;
   };
 
   const syncAnnotationAntialiasResolution = () => {
@@ -1093,12 +1220,13 @@ export async function createPixiMediaScene(
   };
 
   function resolveViewportBounds() {
-    if (!mediaScene || viewportScale <= 0) return undefined;
+    if (!mediaScene || !baseFit || viewportScale <= 0) return undefined;
+    const transform = viewport.getTransform();
     return {
-      x: -mediaScene.x / viewportScale,
-      y: -mediaScene.y / viewportScale,
-      width: app.renderer.screen.width / viewportScale,
-      height: app.renderer.screen.height / viewportScale,
+      x: (presentationBox.left - baseFit.x - transform.x) / viewportScale,
+      y: (presentationBox.top - baseFit.y - transform.y) / viewportScale,
+      width: presentationBox.width / viewportScale,
+      height: presentationBox.height / viewportScale,
     };
   }
 
@@ -1127,6 +1255,7 @@ export async function createPixiMediaScene(
       );
       syncPresentationBox();
       updateMediaSceneFit();
+      syncAnnotationAntialiasResolution();
       syncDisplaySizing();
       drawInteractionPresentationLayer(currentMediaTime);
       renderOnChange();
@@ -1781,6 +1910,7 @@ export async function createPixiMediaScene(
           currentPercentageBarStyle = presentation.percentageBarStyle;
         }
         vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
+        annotationOverlayLayer.setShapeStyle(resolveVectorShapeStyle(null));
       }
 
       currentRegionRenderers =
@@ -2000,8 +2130,20 @@ export async function createPixiMediaScene(
       if (interactionLayer || options.editingEngine) {
         rendererCanvas.removeEventListener?.("keydown", handleKeyDown);
       }
+      if (focusOutline) {
+        rendererCanvas.removeEventListener("focus", syncFocusOutline);
+        rendererCanvas.removeEventListener("blur", syncFocusOutline);
+        window.removeEventListener(
+          "pointerdown",
+          handleFocusModalityChange,
+          true,
+        );
+      }
       if (options.editingEngine) {
         rendererCanvas.removeEventListener?.("contextmenu", handleContextMenu);
+        window.removeEventListener("keydown", handleModifierChange);
+        window.removeEventListener("keyup", handleModifierChange);
+        window.removeEventListener("blur", handleEditingBlur);
       }
       app.destroy(
         { removeView: true },
@@ -2417,12 +2559,14 @@ export async function createPixiMediaScene(
    * box-corner, and oriented-box renderer kinds all lower to shape
    * instructions, so they are composed onto whatever style the caller passed.
    */
-  function resolveVectorShapeStyle(): ShapeStyle | null {
+  function resolveVectorShapeStyle(
+    orientedBoxStyle: OrientedBoxStyle | null = currentOrientedBoxStyle,
+  ): ShapeStyle | null {
     const kindShapeStyle = resolveAnnotationShapeStyle({
       boxCornerStyle: currentBoxCornerStyle,
       ellipseStyle: currentEllipseStyle,
       markerStyle: currentMarkerStyle,
-      orientedBoxStyle: currentOrientedBoxStyle,
+      orientedBoxStyle,
       percentageBarStyle: currentPercentageBarStyle,
     });
     const baseShapeStyle = options.shapeStyle ?? null;
@@ -2758,7 +2902,7 @@ export async function createPixiMediaScene(
       drawnPreviewOverlayContent =
         describePreviewOverlayContent(previewOverlay);
     }
-    annotationOverlayLayer.draw({
+    const handleBounds = annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,
       mediaHeight,
@@ -2772,6 +2916,16 @@ export async function createPixiMediaScene(
       viewportScale,
       visibility: currentVisibility,
     });
+    if (
+      handleBounds?.left !== annotationHandleBounds?.left ||
+      handleBounds?.top !== annotationHandleBounds?.top ||
+      handleBounds?.right !== annotationHandleBounds?.right ||
+      handleBounds?.bottom !== annotationHandleBounds?.bottom
+    ) {
+      annotationHandleBounds = handleBounds;
+      interactionLayer?.setHandleBounds(handleBounds);
+      applyViewportTransform();
+    }
     const editingBox = annotationOverlayLayer.getRenderedEditingBox();
     const creationPreview =
       editingState?.kind === AnnotationGestureStateKind.Creating
@@ -2790,6 +2944,10 @@ export async function createPixiMediaScene(
         editingState.activeDetectionId,
         editingBox?.detection.id === editingState.activeDetectionId
           ? editingBox.rect
+          : undefined,
+        editingState.kind === AnnotationGestureStateKind.Resizing ||
+          editingState.kind === AnnotationGestureStateKind.Rotating
+          ? editingState.preview
           : undefined,
       );
     }
@@ -3124,7 +3282,8 @@ export async function createPixiMediaScene(
 
     return state !== undefined &&
       (state.kind === AnnotationGestureStateKind.Moving ||
-        state.kind === AnnotationGestureStateKind.Resizing) &&
+        state.kind === AnnotationGestureStateKind.Resizing ||
+        state.kind === AnnotationGestureStateKind.Rotating) &&
       state.preview !== null &&
       detection.id !== undefined &&
       state.activeDetectionId === detection.id
@@ -3496,6 +3655,7 @@ function createSceneBackdrop(backgroundColor: number | undefined) {
   const backdrop = document.createElement("div");
   backdrop.style.height = "100%";
   backdrop.style.overflow = "hidden";
+  backdrop.style.overflow = "clip";
   backdrop.style.position = "relative";
   backdrop.style.width = "100%";
   applyBackdropColor(backdrop, backgroundColor);

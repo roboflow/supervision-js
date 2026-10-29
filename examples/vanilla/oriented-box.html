@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Oriented rectangle editing</title>
+  </head>
+  <body>
+    <main>
+      <h1>Oriented rectangle editing</h1>
+      <p>
+        Draw a rectangle, then select it to resize in its local axes or drag the
+        small rotation control. Hold Shift to snap rotation to 15°. Escape
+        cancels an edit. Scroll to zoom.
+      </p>
+      <nav>
+        <button id="select">Select</button
+        ><button id="draw">Draw rectangle</button><button id="undo">Undo</button
+        ><button id="redo">Redo</button><button id="reset">Reset view</button>
+      </nav>
+      <section class="properties" aria-label="Selected rectangle">
+        <label class="toggle"
+          ><input id="heading" type="checkbox" checked /> Heading (demo
+          convention)</label
+        >
+        <label
+          >Angle
+          <input
+            id="angle"
+            type="number"
+            step="0.1"
+            aria-describedby="angle-help"
+          />
+          °</label
+        >
+        <button id="rotate-keys" aria-describedby="angle-help">
+          Rotate with arrow keys
+        </button>
+        <button id="next-front">Next front</button>
+        <button id="reverse-front">Reverse front</button>
+      </section>
+      <p id="angle-help" class="instructions">
+        Enter an angle to preview; Enter or leaving the field saves it. Focus
+        Rotate with arrow keys, then use ← / → for 1° (Shift: 15°). Escape
+        cancels a preview. With heading enabled, click an edge or its midpoint
+        handle to make it the front in either tool. Drag the midpoint handle to
+        resize through the opposite edge. The triangle marks front; the rotation
+        control stays outside the front edge with a clear gap in its stem.
+        Turning heading off keeps rotated geometry.
+      </p>
+      <div id="viewer" aria-label="Rectangle editing canvas"></div>
+      <output id="status" aria-live="polite">Loading…</output>
+      <output id="zoom" aria-label="Zoom">1x</output>
+      <details>
+        <summary>Committed ordered geometry</summary>
+        <pre id="geometry"></pre>
+      </details>
+    </main>
+    <script type="module" src="/src/oriented-box.ts"></script>
+  </body>
+</html>

@@ -850,7 +850,7 @@ describe("push-presented Pixi scene", () => {
         before?.idMaskArtifact?.texture,
       );
       expect(onDisplayChange).not.toHaveBeenCalled();
-      expect(pixiMock.resize).toHaveBeenLastCalledWith(1280, 720, 2);
+      expect(pixiMock.resize).not.toHaveBeenCalled();
     } finally {
       scene.destroy();
       drawInteraction.mockRestore();
