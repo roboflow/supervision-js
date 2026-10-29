@@ -358,6 +358,13 @@ describe("pixi interaction layer", () => {
       h.layer.pointerCaptureLost(7, 0, 100);
       const preview = h.engine.getState().preview;
       const marquee = h.layer.getState().marqueeRect;
+      h.send("pointermove", x, y, {
+        pointerId: 7,
+        buttons: 0,
+        nativeTimeStamp: 100,
+      });
+      expect(h.engine.getState().preview).toEqual(preview);
+      expect(h.layer.getState().marqueeRect).toEqual(marquee);
       h.send("pointermove", x, y, { pointerId: 8, buttons: 0 });
       expect(h.engine.getState().preview).toEqual(preview);
       expect(h.layer.getState().marqueeRect).toEqual(marquee);
