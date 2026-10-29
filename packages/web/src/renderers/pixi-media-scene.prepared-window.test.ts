@@ -71,6 +71,7 @@ vi.mock("pixi.js", () => {
     canvas = {
       addEventListener: vi.fn(),
       height: 360,
+      matches: () => false,
       removeEventListener: vi.fn(),
       style: {},
       width: 640,

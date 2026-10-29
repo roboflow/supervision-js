@@ -643,6 +643,18 @@ export async function createPixiMediaScene(
   rendererCanvas.style.position = "absolute";
   const backdrop = createSceneBackdrop(options.backgroundColor);
   backdrop.appendChild(rendererCanvas);
+  // The bitmap crop clips its native outline too. This decoration preserves
+  // the visible ring while the canvas remains the keyboard target.
+  const focusOutline = options.editingEngine
+    ? document.createElement("div")
+    : undefined;
+  if (focusOutline) {
+    focusOutline.ariaHidden = "true";
+    focusOutline.style.display = "none";
+    focusOutline.style.pointerEvents = "none";
+    focusOutline.style.position = "absolute";
+    backdrop.appendChild(focusOutline);
+  }
   options.container.appendChild(backdrop);
 
   const stagingCanvas = document.createElement("canvas");
@@ -724,6 +736,22 @@ export async function createPixiMediaScene(
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
   let presentationBox = { height: 0, left: 0, top: 0, width: 0 };
   let annotationHandleBounds: PixiAnnotationHandleBounds | undefined;
+  function syncFocusOutline() {
+    if (!focusOutline) return;
+    const visible = Boolean(
+      rendererCanvas.style.clipPath && rendererCanvas.matches(":focus-visible"),
+    );
+    focusOutline.style.display = visible ? "block" : "none";
+    if (!visible) return;
+    const style = window.getComputedStyle(rendererCanvas);
+    focusOutline.style.outline = style.outline;
+    focusOutline.style.outlineOffset = style.outlineOffset;
+  }
+  const handleFocusModalityChange = () => {
+    queueMicrotask(() => {
+      if (!isDestroyed) syncFocusOutline();
+    });
+  };
   /**
    * Read only when the observer says the box moved. The fit is recomputed on
    * every presented sample, and reading the element there would put a forced
@@ -895,6 +923,7 @@ export async function createPixiMediaScene(
     }
   };
   const handleKeyDown = (event: KeyboardEvent) => {
+    syncFocusOutline();
     if (event.key === "Tab" && interactionLayer) {
       interactionLayer.cycleSelection(event.shiftKey ? -1 : 1);
       event.preventDefault();
@@ -931,6 +960,11 @@ export async function createPixiMediaScene(
   if (interactionLayer || options.editingEngine) {
     rendererCanvas.tabIndex = 0;
     rendererCanvas.addEventListener?.("keydown", handleKeyDown);
+  }
+  if (focusOutline) {
+    rendererCanvas.addEventListener("focus", syncFocusOutline);
+    rendererCanvas.addEventListener("blur", syncFocusOutline);
+    window.addEventListener("pointerdown", handleFocusModalityChange, true);
   }
   if (options.editingEngine) {
     rendererCanvas.addEventListener?.("contextmenu", handleContextMenu);
@@ -1071,7 +1105,9 @@ export async function createPixiMediaScene(
         presentationResolution,
     };
     const stableEditingSurface = Boolean(
-      options.editingEngine && annotationHandleBounds,
+      options.editingEngine &&
+      annotationHandleBounds &&
+      backdrop.style.overflow === "clip",
     );
     // Retain the cropped canvas origin so fractional DPR keeps its raster phase.
     const canvasBox = stableEditingSurface
@@ -1081,9 +1117,17 @@ export async function createPixiMediaScene(
     const pixelHeight = Math.round(canvasBox.height * presentationResolution);
     rendererCanvas.style.left = `${canvasBox.left}px`;
     rendererCanvas.style.top = `${canvasBox.top}px`;
+    const wasClipped = Boolean(rendererCanvas.style.clipPath);
     rendererCanvas.style.clipPath = stableEditingSurface
       ? `inset(0px ${pixelWidth / presentationResolution - presentationBox.width}px ${pixelHeight / presentationResolution - presentationBox.height}px 0px)`
       : "";
+    if (focusOutline) {
+      focusOutline.style.left = `${presentationBox.left}px`;
+      focusOutline.style.top = `${presentationBox.top}px`;
+      focusOutline.style.width = `${presentationBox.width}px`;
+      focusOutline.style.height = `${presentationBox.height}px`;
+      if (wasClipped !== stableEditingSurface) syncFocusOutline();
+    }
     if (
       pixelWidth !== rendererCanvas.width ||
       pixelHeight !== rendererCanvas.height ||
@@ -2081,6 +2125,15 @@ export async function createPixiMediaScene(
       }
       if (interactionLayer || options.editingEngine) {
         rendererCanvas.removeEventListener?.("keydown", handleKeyDown);
+      }
+      if (focusOutline) {
+        rendererCanvas.removeEventListener("focus", syncFocusOutline);
+        rendererCanvas.removeEventListener("blur", syncFocusOutline);
+        window.removeEventListener(
+          "pointerdown",
+          handleFocusModalityChange,
+          true,
+        );
       }
       if (options.editingEngine) {
         rendererCanvas.removeEventListener?.("contextmenu", handleContextMenu);
@@ -3597,6 +3650,7 @@ function describePreviewOverlayContent(
 function createSceneBackdrop(backgroundColor: number | undefined) {
   const backdrop = document.createElement("div");
   backdrop.style.height = "100%";
+  backdrop.style.overflow = "hidden";
   backdrop.style.overflow = "clip";
   backdrop.style.position = "relative";
   backdrop.style.width = "100%";

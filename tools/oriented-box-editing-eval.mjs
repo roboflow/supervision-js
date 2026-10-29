@@ -318,8 +318,14 @@ try {
     canvasAtTarget,
     "the exposed public rotation target is inside the real canvas hit area",
   );
-  // Tabbing from host controls must not scroll the clipped renderer surface.
-  await cdp.evaluate('document.querySelector("#rotate-keys").focus()');
+  // A host theme makes the actual keyboard-focus outline unambiguous in pixels.
+  await cdp.evaluate(`(() => {
+    const style = document.createElement("style");
+    style.id = "eval-canvas-focus-theme";
+    style.textContent = "canvas:focus-visible { outline: 3px solid rgb(255, 0, 128); outline-offset: 0; }";
+    document.head.appendChild(style);
+    document.querySelector("#rotate-keys").focus();
+  })()`);
   const beforeCanvasFocus = await cdp.evaluate(`({
     canvas: document.querySelector("canvas").getBoundingClientRect().toJSON(),
     zoom: document.querySelector("#zoom").textContent,
@@ -349,8 +355,43 @@ try {
     "native canvas focus must preserve its position, zoom and selection",
   );
   assert.deepEqual(await read(), edgeCreated);
+  const focusStrip = await cdp.send("Page.captureScreenshot", {
+    format: "png",
+    clip: {
+      x: host.x + host.width / 2 - 16,
+      y: edgeScreen({ x: 400, y: 500 }).y - 5,
+      width: 32,
+      height: 10,
+      scale: 1,
+    },
+  });
+  const focusPixels = await cdp.evaluate(`new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let visible = 0;
+      for (let index = 0; index < pixels.length; index += 4)
+        if (pixels[index] > 240 && pixels[index + 1] < 20 &&
+          pixels[index + 2] > 110 && pixels[index + 2] < 150) visible += 1;
+      resolve(visible);
+    };
+    image.onerror = reject;
+    image.src = "data:image/png;base64,${focusStrip.data}";
+  })`);
+  await cdp.evaluate(
+    'document.querySelector("#eval-canvas-focus-theme").remove()',
+  );
+  assert.ok(
+    focusPixels >= 32,
+    "keyboard focus must paint its outline along the visible image's bottom edge",
+  );
   results.push(
-    "native keyboard focus preserves the zoomed selection and canvas position",
+    "native keyboard focus preserves the zoomed selection, canvas position and visible outline",
   );
   await mkdir(artifactDirectory, { recursive: true });
   const edgeScreenshot = await cdp.send("Page.captureScreenshot", {

@@ -271,10 +271,26 @@ describe("editing gestures in the Pixi media scene", () => {
     }
   });
 
-  it.each(["external preview", "locked", "mask"])(
+  it.each(["external preview", "locked", "mask", "unsupported clip"])(
     "retains the picture-sized canvas for %s selections",
     async (kind) => {
       resetMocks();
+      const createElement = domMock.createElement.getMockImplementation()!;
+      if (kind === "unsupported clip") {
+        domMock.createElement.mockImplementation((tag: string) => {
+          const element = createElement(tag);
+          if (tag === "div") {
+            let overflow = "";
+            Object.defineProperty(element.style, "overflow", {
+              get: () => overflow,
+              set: (value: string) => {
+                if (value !== "clip") overflow = value;
+              },
+            });
+          }
+          return element;
+        });
+      }
       const subject: Detection = {
         ...SUBJECT,
         locked: kind === "locked",
@@ -305,6 +321,11 @@ describe("editing gestures in the Pixi media scene", () => {
       });
       try {
         await renderer.refresh();
+        if (kind === "unsupported clip") {
+          expect(domMock.appendChild.mock.lastCall?.[0].style.overflow).toBe(
+            "hidden",
+          );
+        }
         pixiMock.rendererResize.mockClear();
         expect(
           renderer.setSelectedDetection({ detectionId: subject.id! }),
@@ -317,9 +338,114 @@ describe("editing gestures in the Pixi media scene", () => {
         });
       } finally {
         renderer.destroy();
+        domMock.createElement.mockImplementation(createElement);
       }
     },
   );
+
+  it("retains the canvas keyboard target and theme outline across cropped focus and modality changes", async () => {
+    resetMocks();
+    const initialDocument = document;
+    const initialWindow = window;
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: domMock.appendChild,
+        clientWidth: 640,
+        clientHeight: 480,
+      },
+      editingEngine: createAnnotationEditingEngine(),
+      detectionFrames: [{ detections: [SUBJECT], mediaTime: 0 }],
+    });
+    try {
+      await renderer.refresh();
+      renderer.setSelectedDetection({ detectionId: SUBJECT.id! });
+      renderer.setViewportTransform({ scale: 0.25, x: 0, y: 60 });
+      const canvas = pixiMock.canvasInstances[0]!;
+      const matches = vi.fn(() => true);
+      Object.defineProperty(canvas, "matches", { value: matches });
+      const getComputedStyle = vi.fn(() => ({
+        outline: "rgb(27, 72, 90) dashed 3px",
+        outlineOffset: "2px",
+      }));
+      vi.stubGlobal("window", { ...window, getComputedStyle });
+      vi.stubGlobal("document", { ...document, activeElement: canvas });
+      const outline = domMock.createElement.mock.results.find(
+        ({ value }) => value.ariaHidden === "true",
+      )!.value;
+      const send = (type: string, event?: unknown) => {
+        const listeners =
+          type === "pointerdown"
+            ? domMock.windowAddEventListener
+            : pixiMock.canvasAddEventListener;
+        const listener = listeners.mock.calls.find(
+          ([name]) => name === type,
+        )![1] as (event?: unknown) => void;
+        listener(event);
+      };
+      send("focus");
+      expect(document.activeElement).toBe(canvas);
+      expect(canvas.tabIndex).toBe(0);
+      expect(outline.tabIndex).toBeUndefined();
+      expect(outline.style).toMatchObject({
+        display: "block",
+        pointerEvents: "none",
+        left: "0px",
+        top: "60px",
+        width: "320px",
+        height: "180px",
+        outline: "rgb(27, 72, 90) dashed 3px",
+        outlineOffset: "2px",
+      });
+      renderer.panViewportBy(10, 5);
+      flushPixiTicker(0);
+      expect(outline.style).toMatchObject({ left: "10px", top: "65px" });
+      expect(getComputedStyle).toHaveBeenCalledOnce();
+      matches.mockReturnValue(false);
+      send("pointerdown");
+      await Promise.resolve();
+      expect(outline.style.display).toBe("none");
+      matches.mockReturnValue(true);
+      send("keydown", { key: "Escape" });
+      expect(outline.style.display).toBe("block");
+      expect(document.activeElement).toBe(canvas);
+      const shadowHost = document.createElement("div");
+      vi.stubGlobal("document", { ...document, activeElement: shadowHost });
+      send("focus");
+      expect(outline.style.display).toBe("block");
+      matches.mockReturnValue(false);
+      vi.stubGlobal("document", { ...document, activeElement: null });
+      send("blur");
+      expect(outline.style.display).toBe("none");
+      matches.mockReturnValue(true);
+      vi.stubGlobal("document", { ...document, activeElement: canvas });
+      send("focus");
+      renderer.setSelectedDetection(null);
+      expect(outline.style.display).toBe("none");
+      expect(canvas.style.clipPath).toBe("");
+      expect(canvas.style.outline).toBeUndefined();
+    } finally {
+      renderer.destroy();
+      vi.stubGlobal("document", initialDocument);
+      vi.stubGlobal("window", initialWindow);
+    }
+    for (const type of ["focus", "blur"]) {
+      const listener = pixiMock.canvasAddEventListener.mock.calls.find(
+        ([name]) => name === type,
+      )![1];
+      expect(pixiMock.canvasRemoveEventListener).toHaveBeenCalledWith(
+        type,
+        listener,
+      );
+    }
+    const pointerDown = domMock.windowAddEventListener.mock.calls.find(
+      ([name]) => name === "pointerdown",
+    )![1];
+    expect(domMock.windowRemoveEventListener).toHaveBeenCalledWith(
+      "pointerdown",
+      pointerDown,
+      true,
+    );
+  });
 
   it.each(["pointercancel", "lostpointercapture"])(
     "retains routed polygon vertices after native %s and accepts the next contact",
