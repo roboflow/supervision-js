@@ -400,6 +400,7 @@ export function createPixiInteractionLayer(options: {
       return;
     }
 
+    if (!isMediaPoint(getPoint(event))) return;
     const pick = pickFromPointerEvent(event);
     if (options.interaction.multiSelect && event.shiftKey) {
       toggleSelectedPick(pick);
@@ -435,6 +436,13 @@ export function createPixiInteractionLayer(options: {
       }) === "handled"
     ) {
       handledPresses.set(event.pointerId, input);
+      return;
+    }
+
+    // The expanded hit surface exposes selected controls, not new background.
+    // Hosts still receive the press before the default media boundary applies.
+    if (!handle && !isMediaPoint(point)) {
+      suppressedTap = input;
       return;
     }
 
@@ -679,12 +687,23 @@ export function createPixiInteractionLayer(options: {
     );
   }
 
+  function isMediaPoint(point: DetectionPickPoint) {
+    return (
+      displayDimensions !== undefined &&
+      point.x >= 0 &&
+      point.y >= 0 &&
+      point.x <= displayDimensions.width &&
+      point.y <= displayDimensions.height
+    );
+  }
+
   function pickFromPointerEvent(event: PixiInteractionPointerEvent) {
     if (!container) {
       return null;
     }
 
     const point = getPoint(event);
+    if (!isMediaPoint(point)) return null;
     const pickPoint = { x: point.x, y: point.y };
 
     const labelPick = options.pickLabelDetectionAtPoint?.(

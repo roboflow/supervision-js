@@ -103,7 +103,7 @@ let rendering = Promise.resolve();
 
 const degrees = (radians: number) => (radians * 180) / Math.PI;
 const radians = (value: number) => (value * Math.PI) / 180;
-// This is host policy, shared by pointer and keyboard rotation.
+// Host policy snaps pointer rotation to absolute 15° increments.
 const resolveAngle = (value: number, snap: boolean) =>
   snap ? Math.round(value / radians(15)) * radians(15) : value;
 const selected = () => detections.find((item) => item.id === selectedId);

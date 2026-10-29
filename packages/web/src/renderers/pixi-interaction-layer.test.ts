@@ -56,6 +56,124 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it.each(["box", "OBB"] as const)(
+    "reserves the letterbox around a selected %s for handles and host overrides",
+    (geometry) => {
+      const selected = {
+        id: "selected",
+        ...(geometry === "box"
+          ? { rect: { x: 100, y: 10, width: 40, height: 20 } }
+          : {
+              orientedBox: createOrientedBoxGeometry({
+                x: 100,
+                y: 10,
+                width: 40,
+                height: 20,
+              }),
+            }),
+      };
+      const onCommit = vi.fn();
+      const onPointerPress = vi.fn((): "handled" | "continue" => "continue");
+      const onMarqueeChange = vi.fn();
+      const pickLabelDetectionAtPoint = vi.fn(() => null);
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const layer = createPixiInteractionLayer({
+        Container,
+        Rectangle,
+        canInteract: () => true,
+        detectionTimeline: createTimeline({
+          mediaTime: 0,
+          detections: [
+            selected,
+            { id: "other", rect: { x: 20, y: 10, width: 40, height: 20 } },
+          ],
+        }),
+        editingEngine: engine,
+        interaction: {
+          mode: MediaInteractionMode.Always,
+          multiSelect: true,
+          onPointerPress,
+          onMarqueeChange,
+        },
+        pickLabelDetectionAtPoint,
+      });
+      const display = layer.createDisplay({
+        width: 200,
+        height: 100,
+      }) as Container;
+      const boundary = new EventBoundary(display);
+      const send = (type: string, x: number, y: number) => {
+        const event = new FederatedPointerEvent(boundary);
+        event.type = type;
+        event.pointerType = "mouse";
+        event.pointerId = 7;
+        event.button = 0;
+        event.buttons = type === "pointerup" ? 0 : 1;
+        event.timeStamp = 500;
+        event.global.set(x, y);
+        boundary.mapEvent(event);
+      };
+      layer.drawFrame(0);
+      layer.setSelectedDetection({ detectionId: selected.id });
+      layer.setHandleBounds({ left: 0, top: -34, right: 200, bottom: 100 });
+      // The second box's four-pixel pick padding reaches this letterbox strip.
+      send("pointermove", 20, 2);
+      expect(layer.getState().hoveredPick?.detection.id).toBe("other");
+      pickLabelDetectionAtPoint.mockClear();
+      send("pointermove", 20, -2);
+      expect(layer.getState().hoveredPick).toBeNull();
+      expect(pickLabelDetectionAtPoint).not.toHaveBeenCalled();
+      send("pointerdown", 20, -2);
+      send("pointerup", 20, -2);
+      expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+      send("pointerdown", 20, -2);
+      send("pointermove", 180, 80);
+      expect(layer.getState().marqueeRect).toBeNull();
+      send("pointerup", 180, 80);
+      expect(onMarqueeChange).not.toHaveBeenCalled();
+      expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+
+      engine.setCreationTool({
+        geometry: AnnotationGeometryKind.Box,
+        createDetection: (rect) => ({ rect: rect as Rect }),
+      });
+      send("pointerdown", 20, -2);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      send("pointermove", 180, 80);
+      send("pointerup", 180, 80);
+      expect(onCommit).not.toHaveBeenCalled();
+      engine.setCreationTool(null);
+
+      onPointerPress.mockClear();
+      onPointerPress.mockReturnValue("handled");
+      send("pointerdown", 20, -2);
+      send("pointerup", 20, -2);
+      expect(onPointerPress).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ pick: null, selectedHandle: null }),
+      );
+      expect(layer.getState().selectedPick?.detection.id).toBe(selected.id);
+      onPointerPress.mockReturnValue("continue");
+
+      const handle = engine
+        .getHandles(selected)
+        .find(({ id }) =>
+          geometry === "box" ? id === "n" : id === "obb-rotate",
+        )!;
+      // Both controls accept presses outside media, then captured movement.
+      send("pointerdown", handle.point.x, handle.point.y - 2);
+      expect(engine.getState().kind).toBe(
+        geometry === "box"
+          ? AnnotationGestureStateKind.Resizing
+          : AnnotationGestureStateKind.Rotating,
+      );
+      send("pointermove", 150, -20);
+      send("pointerup", 150, -20);
+      expect(onCommit).toHaveBeenCalledOnce();
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      layer.destroy();
+    },
+  );
+
   it("gives a configured selected rotation handle priority over Shift body selection", () => {
     const original = {
       id: "obb",

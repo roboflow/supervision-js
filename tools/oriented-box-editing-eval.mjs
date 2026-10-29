@@ -17,7 +17,7 @@ const url =
 const chrome = process.argv[3] ?? "http://127.0.0.1:9336";
 const artifactDirectory = process.argv[4] ?? "artifacts";
 const target = await openTarget(chrome, "about:blank");
-const cdp = await CdpSession.attach(target.webSocketDebuggerUrl);
+let cdp;
 const pause = () => new Promise((resolve) => setTimeout(resolve, 80));
 const results = [];
 const handles = (detection, scale) =>
@@ -25,6 +25,7 @@ const handles = (detection, scale) =>
     rotationHandle: { edgeIndex: 1, offset: 32, stemOffset: 20 },
   });
 try {
+  cdp = await CdpSession.attach(target.webSocketDebuggerUrl);
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 1200,
     height: 1100,
@@ -69,7 +70,7 @@ try {
       modifiers,
     });
   }
-  async function drag(from, to, cancel = false) {
+  async function drag(from, to, cancelGesture) {
     await mouse("mouseMoved", from);
     await mouse("mousePressed", from, 1);
     for (let i = 1; i <= 8; i++)
@@ -81,13 +82,19 @@ try {
         },
         1,
       );
-    if (cancel)
+    if (cancelGesture) {
+      assert.equal(
+        await cdp.evaluate('document.querySelector("#status").textContent'),
+        cancelGesture,
+        `Escape must interrupt an active ${cancelGesture} gesture`,
+      );
       await cdp.send("Input.dispatchKeyEvent", {
         type: "keyDown",
         key: "Escape",
         code: "Escape",
         windowsVirtualKeyCode: 27,
       });
+    }
     await mouse("mouseReleased", to);
     await pause();
   }
@@ -124,7 +131,11 @@ try {
   const activeRotate = handles(rotated[0], scale).find(
     (h) => h.id === "obb-rotate",
   );
-  await drag(screen(activeRotate.point), screen({ x: 480, y: 260 }), true);
+  await drag(
+    screen(activeRotate.point),
+    screen({ x: 480, y: 260 }),
+    "rotating",
+  );
   assert.deepEqual(await read(), rotated);
   results.push("Escape cancels a live rotation");
   // Touch drags a corner along its rotated local axes.
@@ -202,7 +213,7 @@ try {
     await click("#undo");
     assert.deepEqual(await read(), resized);
     if (id === "se") {
-      await drag(screen(grabbed.point), screen(end), true);
+      await drag(screen(grabbed.point), screen(end), "resizing");
       assert.deepEqual(await read(), resized);
     }
   }
@@ -892,6 +903,6 @@ try {
   );
   console.log(JSON.stringify({ passed: results.length, results }, null, 2));
 } finally {
-  cdp.close();
+  cdp?.close();
   await closeTarget(chrome, target.id);
 }

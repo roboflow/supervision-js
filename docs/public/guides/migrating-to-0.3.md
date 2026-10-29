@@ -37,6 +37,17 @@ Deploy the consumer changes with its dependency upgrade. Applications pinned to
 an exact previous version keep that version until they explicitly upgrade;
 applications using a compatible `0.2.x` range must opt into `0.3.0`.
 
+## Existing oriented box editing
+
+Editable detections with only an `orientedBox` previously supported movement.
+Recognized oriented rectangles now automatically receive resize and rotation
+handles when selected. Detections with both `rect` and `orientedBox` retain their
+existing axis-aligned rectangle controls.
+
+To keep a chosen detection move-only, return `[]` for it from the engine's
+`getHandles` method, delegating to the original method for other detections.
+Setting `locked` disables all editing, including movement.
+
 ## Existing engine implementations
 
 The new `getHandles` and `setModifiers` methods remain optional on
