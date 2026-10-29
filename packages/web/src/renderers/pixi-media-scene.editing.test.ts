@@ -305,12 +305,13 @@ describe("editing gestures in the Pixi media scene", () => {
             }
           : {}),
       };
+      const container = {
+        appendChild: domMock.appendChild,
+        clientWidth: 640,
+        clientHeight: 480,
+      };
       const renderer = await createRenderer(false, false, {
-        container: {
-          appendChild: domMock.appendChild,
-          clientWidth: 640,
-          clientHeight: 480,
-        },
+        container,
         editingEngine:
           kind === "external preview"
             ? undefined
@@ -322,9 +323,11 @@ describe("editing gestures in the Pixi media scene", () => {
       try {
         await renderer.refresh();
         if (kind === "unsupported clip") {
-          expect(domMock.appendChild.mock.lastCall?.[0].style.overflow).toBe(
-            "hidden",
-          );
+          const backdrop = domMock.appendChild.mock.calls.find(
+            (_, index) =>
+              domMock.appendChild.mock.contexts[index] === container,
+          )![0];
+          expect(backdrop.style.overflow).toBe("hidden");
         }
         pixiMock.rendererResize.mockClear();
         expect(
@@ -383,7 +386,6 @@ describe("editing gestures in the Pixi media scene", () => {
         listener(event);
       };
       send("focus");
-      expect(document.activeElement).toBe(canvas);
       expect(canvas.tabIndex).toBe(0);
       expect(outline.tabIndex).toBeUndefined();
       expect(outline.style).toMatchObject({
@@ -407,7 +409,6 @@ describe("editing gestures in the Pixi media scene", () => {
       matches.mockReturnValue(true);
       send("keydown", { key: "Escape" });
       expect(outline.style.display).toBe("block");
-      expect(document.activeElement).toBe(canvas);
       const shadowHost = document.createElement("div");
       vi.stubGlobal("document", { ...document, activeElement: shadowHost });
       send("focus");

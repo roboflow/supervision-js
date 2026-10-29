@@ -383,9 +383,6 @@ try {
     image.onerror = reject;
     image.src = "data:image/png;base64,${focusStrip.data}";
   })`);
-  await cdp.evaluate(
-    'document.querySelector("#eval-canvas-focus-theme").remove()',
-  );
   assert.ok(
     focusPixels >= 32,
     "keyboard focus must paint its outline along the visible image's bottom edge",
@@ -400,6 +397,9 @@ try {
   await writeFile(
     `${artifactDirectory}/oriented-box-edge-control.png`,
     Buffer.from(edgeScreenshot.data, "base64"),
+  );
+  await cdp.evaluate(
+    'document.querySelector("#eval-canvas-focus-theme").remove()',
   );
   const edgeVector = {
     x: edgeRotate.point.x - edgeRect.x,
