@@ -11,8 +11,10 @@ enums. This is a source compatibility break for exhaustive consumers of those
 enums, even when the application never enables oriented box editing. The new
 minor version marks that break in the experimental `0.x` line.
 
+Upgrade to `0.3.1` with:
+
 ```sh
-npm install supervision@0.3.0
+npm install supervision@0.3.1
 ```
 
 ## Update exhaustive editing consumers
