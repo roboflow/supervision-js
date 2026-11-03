@@ -56,6 +56,7 @@ export function TimelineView({
   disabled,
   duration,
   frameTimeline = null,
+  lanes = true,
   onScrub,
   onSeek,
   processedRanges = [],
@@ -65,6 +66,12 @@ export function TimelineView({
   readonly disabled: boolean;
   readonly duration: number | null;
   readonly frameTimeline?: FrameTimelineData | null;
+  /**
+   * Whether the detection, preparation and residency lanes sit under the scrub
+   * strip. A player with nothing drawn over the picture has none of them to
+   * show, and keeps only the axis, the strip and the playhead.
+   */
+  readonly lanes?: boolean;
   readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => Promise<void> | void;
   readonly processedRanges?: readonly TimelineRange[];
@@ -455,7 +462,9 @@ export function TimelineView({
   }, "geometry");
 
   return (
-    <div className="timeline-view">
+    <div
+      className={lanes ? "timeline-view" : "timeline-view timeline-view--bare"}
+    >
       <div className="timeline-view__cluster" aria-hidden="true" />
       <div className="timeline-view__axis" aria-hidden="true">
         {axisTicks.length === 0 ? (
@@ -508,6 +517,49 @@ export function TimelineView({
         onPointerMove={handleInputPointerMove}
         onPointerUp={handleInputPointerUp}
       />
+      {lanes ? (
+        <TimelineLanes
+          bandRefs={bandRefs}
+          processedRanges={processedRanges}
+          processedRangeStyles={processedRangeStyles}
+          processingRanges={processingRanges}
+          processingRangeStyles={processingRangeStyles}
+          residencyRangeStyles={residencyRangeStyles}
+          sourceResidency={sourceResidency}
+        />
+      ) : null}
+      <span
+        aria-hidden="true"
+        className="timeline-view__playhead"
+        data-eval={DemoEvalHook.TimelinePlayhead}
+        ref={playheadRef}
+      >
+        <span className="timeline-view__marker timeline-view__marker--playhead" />
+        <span className="timeline-view__knob" />
+      </span>
+    </div>
+  );
+}
+
+function TimelineLanes({
+  bandRefs,
+  processedRanges,
+  processedRangeStyles,
+  processingRanges,
+  processingRangeStyles,
+  residencyRangeStyles,
+  sourceResidency,
+}: {
+  readonly bandRefs: TimelineBandRefs;
+  readonly processedRanges: readonly TimelineRange[];
+  readonly processedRangeStyles: readonly StyledTimelineRange[];
+  readonly processingRanges: readonly TimelineRange[];
+  readonly processingRangeStyles: readonly StyledTimelineRange[];
+  readonly residencyRangeStyles: readonly StyledTimelineRange[];
+  readonly sourceResidency: SourceResidencyDiagnostics | null;
+}) {
+  return (
+    <>
       {LIVE_LANES.map((lane, index) => (
         <Fragment key={lane.key}>
           <span
@@ -595,16 +647,7 @@ export function TimelineView({
           />
         ))}
       </div>
-      <span
-        aria-hidden="true"
-        className="timeline-view__playhead"
-        data-eval={DemoEvalHook.TimelinePlayhead}
-        ref={playheadRef}
-      >
-        <span className="timeline-view__marker timeline-view__marker--playhead" />
-        <span className="timeline-view__knob" />
-      </span>
-    </div>
+    </>
   );
 }
 

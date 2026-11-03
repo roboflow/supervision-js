@@ -1,7 +1,7 @@
 import { PLAYBACK_RATE } from "supervision/web-video-engine";
 
 /** The speeds the player offers, slowest first. */
-export const playbackRateLadder = [0.25, 0.5, 1, 2, 4, 8] as const;
+export const playbackRateLadder = [0.25, 0.5, 1, 2, 4, 8, 16] as const;
 
 export const defaultPlaybackRate = 1;
 

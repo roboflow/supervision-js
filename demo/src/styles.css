@@ -2840,6 +2840,35 @@ fieldset {
   cursor: not-allowed;
 }
 
+/* A bar that reports no annotations has no lanes to label, so the gutter
+ * closes and the strip takes their height: the whole timeline is scrub target.
+ * Two classes so the narrow-screen gutters below never reopen it. */
+.timeline-view.timeline-view--bare {
+  column-gap: 0;
+  grid-template-columns:
+    [gutter] 0
+    [track] minmax(0, 1fr)
+    [track-end];
+  grid-template-rows: 12px 32px;
+}
+
+.timeline-view--bare .timeline-view__cluster {
+  display: none;
+}
+
+.timeline-view--bare .timeline-view__strip {
+  height: 32px;
+}
+
+.timeline-view--bare .timeline-view__knob {
+  height: 32px;
+  top: 16px;
+}
+
+.control-bar__ledger.control-bar__ledger--bare {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 /* Too narrow to hold the lane labels at full width: the gutter tightens and the
  * keyboard hints go, rather than the panel growing a second and third line. The
  * lanes and their readings stay, because a hidden lane is an unreported state. */

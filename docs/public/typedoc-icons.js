@@ -225,7 +225,7 @@
       window.location.port === "5175";
 
     if (isStandaloneLocalDocs) {
-      return `http://127.0.0.1:5173/${deployedPath.includes("?") ? deployedPath.slice(deployedPath.indexOf("?")) : ""}`;
+      return `http://127.0.0.1:5173/${deployedPath.replace(/^demo\//, "")}`;
     }
 
     const base = document.documentElement.dataset.base ?? "./";
@@ -248,6 +248,7 @@
       window.location.href,
     ).href;
     const demoUrl = resolveDemoUrl("demo/");
+    const playerUrl = resolveDemoUrl("demo/player");
     const version = packageReleaseStatus
       ? `v${packageVersion} (${packageReleaseStatus})`
       : `v${packageVersion}`;
@@ -263,6 +264,7 @@
 
     links.innerHTML = `
       <a class="supervision-docs__nav-link" href="${demoUrl}">Demo</a>
+      <a class="supervision-docs__nav-link" href="${playerUrl}">Player</a>
       <a class="supervision-docs__nav-link supervision-docs__nav-link--active" href="${docsHome}">Docs</a>
       <a class="supervision-docs__nav-link supervision-docs__github" href="https://github.com/roboflow/supervision-js">GitHub</a>
     `;

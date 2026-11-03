@@ -14,6 +14,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: environment.VITE_DEMO_BASE_PATH || "/",
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.join(demoDir, "index.html"),
+          player: path.join(demoDir, "player.html"),
+        },
+      },
+    },
     plugins: [
       react(),
       roboflowSam3Plugin(),

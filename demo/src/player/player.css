@@ -1,0 +1,80 @@
+/* The player page is the workbench shell with its own inspector cards; only
+ * what the workbench has no equivalent for is styled here. */
+
+.demo-shell__mode a[aria-current="page"] {
+  background: var(--highlight);
+  border-color: transparent;
+  box-shadow: 0 7px 18px rgba(109, 40, 217, 0.24);
+  color: #ffffff;
+}
+
+/* The workbench inspector reserves a row for its tab strip; this one has a
+ * single group of cards and no strip. */
+.demo-shell__inspector.player-shell__inspector {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.player-shell__alert {
+  color: var(--danger);
+}
+
+.player-shell__viewport {
+  position: relative;
+}
+
+.player-shell__drop {
+  align-content: center;
+  backdrop-filter: blur(2px);
+  background: rgba(76, 29, 149, 0.42);
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 16px;
+  color: #ffffff;
+  display: grid;
+  gap: 0.35rem;
+  inset: 0;
+  justify-items: center;
+  pointer-events: none;
+  position: absolute;
+  z-index: 4;
+}
+
+.player-shell__drop strong {
+  font-size: 1.4rem;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+}
+
+.player-shell__drop span {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+/* Seven rungs in the segmented strip the inspector tabs use, wrapped to two
+ * rows so "0.25x" keeps its width. */
+.inspector-tabs.player-speed__presets {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.player-speed__presets button {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ladder already moves in big steps, and the browser's arrows sat on top
+ * of a two-digit speed. */
+.source-field input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.source-field input[type="number"]::-webkit-inner-spin-button,
+.source-field input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.player-speed__measured--short .readout__value {
+  color: var(--amber);
+}
