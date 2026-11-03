@@ -639,10 +639,16 @@ export class DecodeScheduler implements ScrubCursor {
   }
 
   /**
-   * The keyframe walk: each sync sample decoded on its own, the first after the
-   * later of the one handed out last and the playhead. Every one is a fresh
+   * The keyframe walk: it opens on the frame it was attached at, as the full
+   * walk does, then decodes sync samples only, each on its own, the first after
+   * the later of the one handed out last and the playhead. Every one is a fresh
    * anchor, so a decode costs the sync sample and whatever the decoder must be
    * fed past it to give it up, never the frames that depend on it.
+   *
+   * The opening frame is what a seek during playback waits on: the engine
+   * settles a seek on the paint of the frame it named, and a walk that opened
+   * on the next sync sample would never paint it. It costs the decode from the
+   * sync sample before it, which is what opening the full walk there costs.
    *
    * Probing half a frame past a position puts the probe inside the span that
    * position opens, so the keyframe just handed out, or one a float round trip
@@ -654,6 +660,12 @@ export class DecodeScheduler implements ScrubCursor {
     walk: KeyframeWalk,
   ): AsyncGenerator<DecodedFrame, void, unknown> {
     const halfFrameS = 0.5 / (this.trackInfo.nativeFps || FALLBACK_FPS);
+    const opening = await this.provider.getFrame(startS);
+    if (this.closed) {
+      if (opening?.kind === "sample") opening.sample.close();
+      return;
+    }
+    if (opening) yield opening;
     let handedOutS = startS;
     for (;;) {
       const fromS = Math.max(handedOutS, walk.playheadS()) + halfFrameS;

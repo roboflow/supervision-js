@@ -2195,6 +2195,26 @@ describe("ScrubController keyframe walk", () => {
     controller.dispose();
   });
 
+  it("paints the frame a re-anchored keyframe walk opens on before the sync samples after it", async () => {
+    const { cursor, clock, controller, painted } = setup();
+    clock.setRate(64);
+    clock.play(0);
+    // A seek during playback re-anchors the walk at its target.
+    clock.seek(41.3);
+    controller.beginPlay(41.3);
+    // The opening frame took long enough to decode that the clock is already
+    // past the next sync sample when both arrive in the same tick.
+    clock.setT(42.5);
+    cursor.emit(canvasFrameAt(41.3));
+    cursor.emit(canvasFrameAt(42));
+    await flushRaf();
+    clock.setT(43);
+    await flushRaf();
+
+    expect(painted).toEqual([41.3, 42]);
+    controller.dispose();
+  });
+
   it("leaves a cursor that cannot walk keyframes on the full walk at any rate", async () => {
     const { cursor, clock, controller } = setup(false);
 

@@ -1918,7 +1918,7 @@ describe("DecodeScheduler", () => {
       }
     }
 
-    it("decodes only the sync samples after its anchor, each on its own", async () => {
+    it("opens on its anchor's own frame, then decodes only sync samples", async () => {
       const { scheduler, sink } = setup({ keyframes: [0, 2, 4, 6, 8] });
       await scheduler.open();
       await scheduler.whenSettled();
@@ -1928,11 +1928,13 @@ describe("DecodeScheduler", () => {
       const streamsBefore = sink.canvasesCalls.length;
 
       scheduler.attachPlay(0.5, { playheadS: () => 0.5 });
-      await pullFrames(scheduler, frames, 4);
+      await pullFrames(scheduler, frames, 5);
       scheduler.detachPlay();
 
-      expect(frames.map((f) => f.timestampS)).toEqual([2, 4, 6, 8]);
-      expect(sink.getCanvasCalls).toEqual([2, 4, 6, 8]);
+      // The frame at the anchor is the one a seek during playback waits on.
+      expect(frames.map((f) => f.timestampS)).toEqual([0.5, 2, 4, 6, 8]);
+      expect(frames[0].quality).toBe("exact");
+      expect(sink.getCanvasCalls).toEqual([0.5, 2, 4, 6, 8]);
       // No frame-by-frame stream was opened to get there.
       expect(sink.canvasesCalls.length).toBe(streamsBefore);
       await scheduler.whenSettled();
@@ -1947,14 +1949,14 @@ describe("DecodeScheduler", () => {
       let playheadS = 0;
 
       scheduler.attachPlay(0, { playheadS: () => playheadS });
-      await pullFrames(scheduler, frames, 1);
+      await pullFrames(scheduler, frames, 2);
       // The clock ran on past 4 before the next pull: 4 would arrive late,
       // so the walk goes straight to the sync sample after the playhead.
       playheadS = 5;
-      await pullFrames(scheduler, frames, 2);
+      await pullFrames(scheduler, frames, 3);
       scheduler.detachPlay();
 
-      expect(frames.map((f) => f.timestampS)).toEqual([2, 6]);
+      expect(frames.map((f) => f.timestampS)).toEqual([0, 2, 6]);
       await scheduler.whenSettled();
     });
 
@@ -1973,8 +1975,8 @@ describe("DecodeScheduler", () => {
       }
       scheduler.detachPlay();
 
-      expect(frames.map((f) => f.timestampS)).toEqual([4]);
-      expect(sink.getCanvasCalls).toEqual([4]);
+      expect(frames.map((f) => f.timestampS)).toEqual([3, 4]);
+      expect(sink.getCanvasCalls).toEqual([3, 4]);
       await scheduler.whenSettled();
     });
 
