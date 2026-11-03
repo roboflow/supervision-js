@@ -2163,6 +2163,28 @@ describe("ScrubController keyframe walk", () => {
     controller.dispose();
   });
 
+  it("recovers from a 499ms delivery gap without latching a short rate", async () => {
+    const { cursor, clock, controller } = setup();
+    clock.setRate(8);
+    controller.beginPlay(0);
+    clock.play(0);
+    cursor.emit(canvasFrameAt(0));
+    await flushRaf();
+
+    clock.setT(0.499 * 8);
+    cursor.emit(canvasFrameAt(INTERVAL_S));
+    await flushRaf();
+    clock.setT(0.501 * 8);
+    cursor.emit(canvasFrameAt(2 * INTERVAL_S));
+    await flushRaf();
+    clock.setT(0.503 * 8);
+    cursor.emit(canvasFrameAt(clock.now()));
+    await flushRaf();
+
+    expect(cursor.walks).toEqual(["full"]);
+    controller.dispose();
+  });
+
   it("keeps the full walk under 2x however far behind it runs", async () => {
     const { cursor, clock, controller } = setup();
 
@@ -2194,6 +2216,39 @@ describe("ScrubController keyframe walk", () => {
     expect(controller.getRealtimeStats().droppedFramesTotal).toBe(0);
     controller.dispose();
   });
+
+  it.each([1, 3])(
+    "keeps long GOP keyframes on the clock with read-ahead %i",
+    async (readAhead) => {
+      const { cursor, clock, controller, painted } = setup();
+      cursor.track = { ...cursor.track, nativeFps: 60 };
+      cursor.playReadAhead = readAhead;
+      clock.setRate(32);
+      controller.beginPlay(0);
+      clock.play(0);
+      for (let frame = 0; frame < readAhead; frame++) {
+        cursor.emit(canvasFrameAt(frame * 20));
+      }
+      await flushRaf();
+
+      let nextFrame = readAhead * 20;
+      for (let tick = 1; tick <= 190; tick++) {
+        const t = tick * 0.32;
+        clock.setT(t);
+        if (controller.getRealtimeStats().playQueueDepth < readAhead) {
+          cursor.emit(canvasFrameAt(nextFrame));
+          nextFrame += 20;
+        }
+        expect(clock.now()).toBeCloseTo(t, 10);
+        await flushRaf();
+      }
+
+      expect(cursor.walks).toEqual(["keyframes"]);
+      expect(painted).toEqual([0, 20, 40, 60]);
+      expect(controller.getRealtimeStats().droppedFramesTotal).toBe(0);
+      controller.dispose();
+    },
+  );
 
   it("paints the frame a re-anchored keyframe walk opens on before the sync samples after it", async () => {
     const { cursor, clock, controller, painted } = setup();

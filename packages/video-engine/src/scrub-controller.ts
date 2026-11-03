@@ -208,6 +208,8 @@ export class ScrubController {
   /** Wall seconds every frame the full walk delivered has arrived further
    *  behind the clock than PLAYBACK.KEYFRAME_WALK_TRAIL_MS, without a break. */
   private fullWalkTrailingS = 0;
+  /** Clock reading of the previous late delivery, or null before the first. */
+  private fullWalkLastLateS: number | null = null;
   /** Media time of the frame the walk delivered last, or null since the walk
    *  was attached. */
   private lastDeliveredFrameS: number | null = null;
@@ -367,17 +369,21 @@ export class ScrubController {
       !this.paintedSincePlay ||
       rate < PLAYBACK.KEYFRAME_WALK_MIN_RATE
     ) {
+      this.fullWalkTrailingS = 0;
+      this.fullWalkLastLateS = null;
       return;
     }
     const trailMs = ((t - frame.timestampS) / rate) * 1000;
     if (trailMs <= PLAYBACK.KEYFRAME_WALK_TRAIL_MS) {
       this.fullWalkTrailingS = 0;
+      this.fullWalkLastLateS = null;
       return;
     }
-    const previousS = this.lastDeliveryS;
+    const previousS = this.fullWalkLastLateS;
     if (previousS !== null && t > previousS) {
       this.fullWalkTrailingS += (t - previousS) / rate;
     }
+    this.fullWalkLastLateS = t;
     if (this.fullWalkTrailingS * 1000 >= PLAYBACK.KEYFRAME_WALK_EVIDENCE_MS) {
       this.fullWalkShortRate = Math.min(this.fullWalkShortRate ?? rate, rate);
     }
@@ -387,6 +393,7 @@ export class ScrubController {
   private attachWalk(startS: number): void {
     this.keyframeWalk = this.wantsKeyframeWalk();
     this.fullWalkTrailingS = 0;
+    this.fullWalkLastLateS = null;
     this.lastDeliveredFrameS = null;
     this.keyframeSpanS = 0;
     this.deps.cursor.attachPlay(
@@ -627,8 +634,9 @@ export class ScrubController {
   private reanchorStarvedWalk(frame: ScrubFrame): void {
     const since = this.lastDeliveryS;
     if (since === null) return;
-    const wallMs =
-      ((this.deps.clock.now() - since) / this.deps.clock.rate) * 1000;
+    const now = this.deps.clock.now();
+    if (frame.timestampS > now) return;
+    const wallMs = ((now - since) / this.deps.clock.rate) * 1000;
     if (wallMs <= PLAYBACK.REANCHOR_STALL_MS) return;
     this.deps.clock.seek(frame.timestampS);
     this.lastTickS = null;
