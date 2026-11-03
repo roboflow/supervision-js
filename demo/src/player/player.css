@@ -49,10 +49,10 @@
   opacity: 0.85;
 }
 
-/* Seven rungs in the segmented strip the inspector tabs use, wrapped to two
+/* Nine rungs in the segmented strip the inspector tabs use, wrapped to two
  * rows so "0.25x" keeps its width. */
 .inspector-tabs.player-speed__presets {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .player-speed__presets button {
