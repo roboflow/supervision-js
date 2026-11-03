@@ -11,6 +11,7 @@ import type { FrameId } from "./frame-timeline";
 import { KeyframeIndex } from "./keyframe-index";
 import {
   earnsScreen,
+  type KeyframeWalk,
   type ScrubCursor,
   ScrubCursorState,
   type ScrubFrame,
@@ -236,6 +237,9 @@ export class DecodeScheduler implements ScrubCursor {
     ((error: WebVideoEngineError) => void) | null;
 
   private iterator: AsyncGenerator<DecodedFrame, void, unknown> | null = null;
+  /** The keyframe walk the play iterator was attached with, if any, so a
+   *  rebuild re-derives the same walk rather than a full one. */
+  private playKeyframeWalk: KeyframeWalk | null = null;
   private nextInFlight: Promise<void> = Promise.resolve();
   private nextPending = 0;
 
@@ -321,6 +325,9 @@ export class DecodeScheduler implements ScrubCursor {
   get playReadAhead(): number {
     return this.provider.playReadAhead;
   }
+  /** Every path this scheduler drives can probe sync samples and decode one
+   *  on its own. */
+  readonly walksKeyframes = true;
 
   get isIdle(): boolean {
     return (
@@ -609,7 +616,7 @@ export class DecodeScheduler implements ScrubCursor {
     this.mode = mode;
   }
 
-  attachPlay(startS: number): void {
+  attachPlay(startS: number, keyframeWalk?: KeyframeWalk): void {
     if (this.closed) return;
     this.enterMode(AccessMode.Playing);
     // Signal any running sweep to bail; the first pull awaits its teardown.
@@ -617,7 +624,10 @@ export class DecodeScheduler implements ScrubCursor {
     if (this.iterator) {
       void this.trackOutputRead(this.iterator.return());
     }
-    this.iterator = this.provider.frames(startS);
+    this.playKeyframeWalk = keyframeWalk ?? null;
+    this.iterator = keyframeWalk
+      ? this.keyframeFrames(startS, keyframeWalk)
+      : this.provider.frames(startS);
     // Reset the in-flight latch for the new session. An old-iterator pull may
     // still be settling; its finally is iterator-identity-aware (see next()),
     // so it will not decrement this fresh counter and drive it negative.
@@ -628,11 +638,40 @@ export class DecodeScheduler implements ScrubCursor {
     this.nextInFlight = Promise.resolve();
   }
 
+  /**
+   * The keyframe walk: each sync sample decoded on its own, the first after the
+   * later of the one handed out last and the playhead. Every one is a fresh
+   * anchor, so a decode costs the sync sample and whatever the decoder must be
+   * fed past it to give it up, never the frames that depend on it.
+   *
+   * Probing half a frame past a position puts the probe inside the span that
+   * position opens, so the keyframe just handed out, or one a float round trip
+   * lands a hair before, is never answered a second time. A walk that stops
+   * advancing ends rather than repeating itself.
+   */
+  private async *keyframeFrames(
+    startS: number,
+    walk: KeyframeWalk,
+  ): AsyncGenerator<DecodedFrame, void, unknown> {
+    const halfFrameS = 0.5 / (this.trackInfo.nativeFps || FALLBACK_FPS);
+    let handedOutS = startS;
+    for (;;) {
+      const fromS = Math.max(handedOutS, walk.playheadS()) + halfFrameS;
+      const keyS = await this.keyframeIndex.nextKeyframeAfter(fromS);
+      if (this.closed || keyS === null || keyS <= handedOutS) return;
+      const frame = await this.provider.getFrame(keyS);
+      if (!frame) return;
+      handedOutS = keyS;
+      yield frame;
+    }
+  }
+
   detachPlay(): void {
     if (this.iterator) {
       void this.trackOutputRead(this.iterator.return());
     }
     this.iterator = null;
+    this.playKeyframeWalk = null;
     // A pull in flight at detach never decrements, since its finally only
     // fires for the iterator it was issued against. Left stranded, the count
     // reports a pull that will never land and isIdle never reads true again.
@@ -1137,7 +1176,10 @@ export class DecodeScheduler implements ScrubCursor {
         const modeBefore = this.mode;
         this.iterator = null;
         if (resumePlay) {
-          this.attachPlay(this.currentPositionS());
+          this.attachPlay(
+            this.currentPositionS(),
+            this.playKeyframeWalk ?? undefined,
+          );
           this.mode = modeBefore;
         }
       } catch {

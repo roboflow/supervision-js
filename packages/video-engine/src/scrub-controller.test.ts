@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { MediaClock } from "./clock";
 import {
   ScrubCursorState,
+  type KeyframeWalk,
   type ScrubCursor,
   type ScrubFrame,
   type ScrubFrameListener,
@@ -2022,6 +2023,189 @@ describe("ScrubController adaptive present cadence", () => {
     expect(Math.min(...throughSeeks)).toBeGreaterThanOrEqual(
       Math.min(...settled) * 0.9,
     );
+  });
+});
+
+/** A cursor that can walk keyframes, recording which walk each attach asked
+ *  for. Frames come only from what a test emits. */
+class WalkRecordingCursor extends FakeCursor {
+  readonly walksKeyframes: boolean;
+  walks: ("full" | "keyframes")[] = [];
+  lastKeyframeWalk: KeyframeWalk | null = null;
+
+  constructor(walksKeyframes = true) {
+    super();
+    this.walksKeyframes = walksKeyframes;
+  }
+
+  attachPlay(startS: number, keyframeWalk?: KeyframeWalk): void {
+    super.attachPlay(startS);
+    this.walks.push(keyframeWalk ? "keyframes" : "full");
+    this.lastKeyframeWalk = keyframeWalk ?? null;
+  }
+}
+
+describe("ScrubController keyframe walk", () => {
+  const INTERVAL_S = 1 / 30;
+
+  function setup(walksKeyframes = true): {
+    cursor: WalkRecordingCursor;
+    clock: FakeClock;
+    controller: ScrubController;
+    painted: number[];
+  } {
+    const cursor = new WalkRecordingCursor(walksKeyframes);
+    cursor.track = { ...cursor.track, durationS: asSec(600) };
+    const clock = new FakeClock();
+    const painted: number[] = [];
+    const controller = new ScrubController({
+      cursor,
+      clock,
+      onPaint: (frame) => painted.push(frame.timestampS),
+      onEnded: () => undefined,
+      cacheSkipNearMs: 100,
+    });
+    controller.bindCanvas(makeCanvas());
+    return { cursor, clock, controller, painted };
+  }
+
+  /**
+   * Plays a full walk that delivers one source frame for every half media
+   * second the clock covers, which at 8x is a machine decoding 16 frames a
+   * wall second against the 240 the rate asks for.
+   */
+  async function trailAt(
+    rate: number,
+    cursor: WalkRecordingCursor,
+    clock: FakeClock,
+    controller: ScrubController,
+    steps: number,
+  ): Promise<void> {
+    clock.setRate(rate);
+    controller.beginPlay(0);
+    clock.play(0);
+    cursor.emit(canvasFrameAt(0));
+    await flushRaf();
+    for (let step = 1; step <= steps; step++) {
+      clock.setT(step * 0.5);
+      cursor.emit(canvasFrameAt(step * INTERVAL_S));
+      await flushRaf();
+    }
+  }
+
+  it("opens on keyframes at a rate no decoder follows frame by frame", () => {
+    const { cursor, clock, controller } = setup();
+    clock.setRate(64);
+    controller.beginPlay(0);
+    clock.play(0);
+
+    expect(cursor.walks).toEqual(["keyframes"]);
+    expect(controller.getRealtimeStats().keyframeWalk).toBe(true);
+    clock.setT(12);
+    expect(cursor.lastKeyframeWalk?.playheadS()).toBe(12);
+    controller.dispose();
+  });
+
+  it("tries the full walk first where a decoder might keep up", () => {
+    const { cursor, clock, controller } = setup();
+    // 32x of a 30fps source asks for exactly the demand ceiling, not past it.
+    clock.setRate(32);
+    controller.beginPlay(0);
+
+    expect(cursor.walks).toEqual(["full"]);
+    expect(controller.getRealtimeStats().keyframeWalk).toBe(false);
+    controller.dispose();
+  });
+
+  it("moves onto keyframes once the full walk keeps falling behind, and back off for a lower rate", async () => {
+    const { cursor, clock, controller } = setup();
+
+    await trailAt(8, cursor, clock, controller, 14);
+    expect(cursor.walks).toEqual(["full", "keyframes"]);
+    expect(cursor.attachStarts.at(-1)).toBeGreaterThan(5);
+
+    // 4x is under the rate the full walk was measured short at.
+    clock.setRate(4);
+    await flushRaf();
+    expect(cursor.walks.at(-1)).toBe("full");
+
+    // The measurement holds for the session: 8x again goes straight back.
+    clock.setRate(8);
+    await flushRaf();
+    expect(cursor.walks.at(-1)).toBe("keyframes");
+
+    // A session the user starts again measures again.
+    clock.pause();
+    controller.endPlay();
+    controller.beginPlay(clock.now());
+    clock.play();
+    expect(cursor.walks.at(-1)).toBe("full");
+    controller.dispose();
+  });
+
+  it("does not take a one-off lag for a walk that cannot keep up", async () => {
+    const { cursor, clock, controller } = setup();
+
+    // Two deliveries more than a quarter second behind the clock is far short
+    // of the half second of evidence the switch asks for, and then the walk
+    // is back on the clock.
+    await trailAt(8, cursor, clock, controller, 6);
+    clock.setT(3.5);
+    cursor.emit(canvasFrameAt(3.5));
+    await flushRaf();
+    for (let step = 1; step <= 8; step++) {
+      clock.setT(3.5 + step * 0.5);
+      cursor.emit(canvasFrameAt(3.5 + step * 0.5));
+      await flushRaf();
+    }
+
+    expect(cursor.walks).toEqual(["full"]);
+    controller.dispose();
+  });
+
+  it("keeps the full walk under 2x however far behind it runs", async () => {
+    const { cursor, clock, controller } = setup();
+
+    await trailAt(1.5, cursor, clock, controller, 20);
+
+    expect(cursor.walks).toEqual(["full"]);
+    controller.dispose();
+  });
+
+  it("holds sync samples as far ahead of the clock as they are apart", async () => {
+    const { cursor, clock, controller, painted } = setup();
+    clock.setRate(64);
+    controller.beginPlay(0);
+    clock.play(0);
+
+    cursor.emit(canvasFrameAt(0.93));
+    cursor.emit(canvasFrameAt(1.87));
+    cursor.emit(canvasFrameAt(2.8));
+    expect(controller.getRealtimeStats().playQueueDepth).toBe(3);
+
+    clock.setT(1);
+    await flushRaf();
+    clock.setT(2);
+    await flushRaf();
+    clock.setT(3);
+    await flushRaf();
+
+    expect(painted).toEqual([0.93, 1.87, 2.8]);
+    expect(controller.getRealtimeStats().droppedFramesTotal).toBe(0);
+    controller.dispose();
+  });
+
+  it("leaves a cursor that cannot walk keyframes on the full walk at any rate", async () => {
+    const { cursor, clock, controller } = setup(false);
+
+    clock.setRate(64);
+    controller.beginPlay(0);
+    clock.play(0);
+    await flushRaf();
+
+    expect(cursor.walks).toEqual(["full"]);
+    expect(controller.getRealtimeStats().keyframeWalk).toBe(false);
+    controller.dispose();
   });
 });
 

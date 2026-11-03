@@ -1363,6 +1363,7 @@ export class EngineCore {
       endedFired: false,
       droppedFrames: 0,
       droppedFramesTotal: 0,
+      keyframeWalk: false,
     };
     const nativeFps = this.cursor?.track.nativeFps ?? null;
 
