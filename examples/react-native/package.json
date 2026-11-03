@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@shopify/react-native-skia": "2.6.2",
-    "expo": "^57.0.18",
+    "expo": "^58.0.22",
     "expo-asset": "^57.0.15",
     "expo-build-properties": "^57.0.15",
     "expo-dev-client": "~57.0.16",
