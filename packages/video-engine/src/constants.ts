@@ -117,10 +117,14 @@ export const PLAYBACK = {
  * the presented one, and PLAYBACK_RATE_NOT_SUSTAINED fires when they diverge.
  * SUSTAINED_SHORTFALL is the share of the commanded rate the presented one has
  * to hold to count as sustained.
+ *
+ * Sixteen is where a light source still keeps up: 16x of a 720p24 clip is 384
+ * decodes a second, inside what a hardware decoder sustains, while a 1080p or
+ * larger source will present short of it and say so through the warning above.
  */
 export const PLAYBACK_RATE = {
   MIN: 0.25,
-  MAX: 8,
+  MAX: 16,
   SUSTAINED_SHORTFALL: 0.8,
 } as const;
 
