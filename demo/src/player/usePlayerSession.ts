@@ -32,13 +32,13 @@ import {
 } from "../hooks/useDemoRenderer";
 import { readDemoDisplayBox } from "../session/decode-resolution";
 import type { DemoMediaState } from "../session/demo-session-types";
-import { tapFrameTimeline } from "../session/frame-timeline-source";
 import { defaultPlaybackRate } from "../session/playback-rate";
 import {
   defaultDemoRenderQuality,
   getDemoMaxDevicePixelRatio,
 } from "../session/render-quality";
 import { toEngineSource, type PlayerSource } from "./player-source";
+import { tapActiveFrameTimeline } from "./player-frame-timeline";
 
 /** React hears about the renderer at most this often; the timeline and the
  *  timecode read the live readouts, which move every presented frame. */
@@ -171,7 +171,7 @@ export function usePlayerSession(source: PlayerSource): PlayerSessionState {
       try {
         const opened = await createMediaSession({
           container,
-          media: tapFrameTimeline(
+          media: tapActiveFrameTimeline(
             presentedFrameTap.tap(
               createWebVideoEngineMediaRendererSource({
                 display: readDemoDisplayBox(
@@ -181,6 +181,7 @@ export function usePlayerSession(source: PlayerSource): PlayerSessionState {
                 source: toEngineSource(source),
               }),
             ),
+            isActive,
             setFrameTimeline,
           ),
           mode: MediaSessionMode.File,
