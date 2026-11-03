@@ -964,7 +964,7 @@ describe("WebVideoEngine playback rate", () => {
     await engine.dispose();
   });
 
-  it.each([0, -1, 17])(
+  it.each([0, -1, 65])(
     "a rate of %p throws before anything reaches the worker",
     async (rate) => {
       const { engine, clock } = setup();

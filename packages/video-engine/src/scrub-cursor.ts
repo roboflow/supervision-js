@@ -132,6 +132,18 @@ export function idempotentSample(sample: VideoSampleLike): VideoSampleLike {
 
 export type ScrubFrameListener = (frame: ScrubFrame) => void;
 
+/**
+ * A play walk over sync samples. It opens on the frame it was attached at, so
+ * a seek that re-anchors playback still lands on the frame it named; after
+ * that each pull lands on the first keyframe after the later of the one it
+ * handed out last and `playheadS()`, so a walk that falls behind the clock
+ * skips the keyframes it would have shown late rather than decoding its way
+ * back to the playhead.
+ */
+export interface KeyframeWalk {
+  readonly playheadS: () => number;
+}
+
 /** A frame considered for the screen, and what is already on it. */
 export interface ScreenCandidate {
   readonly timestampMs: number;
@@ -355,10 +367,18 @@ export interface ScrubCursor {
   seekToKey(timestamp: Sec): void;
   next(): void;
   /**
-   * Attach a forward-playback iterator anchored at startS. Required for
-   * next() to advance; paused mode keeps no iterator.
+   * Whether attachPlay honours a keyframe walk. A cursor without one walks
+   * every frame whatever it is asked, so a consumer has no other walk to move
+   * a session onto.
    */
-  attachPlay(startS: number): void;
+  readonly walksKeyframes?: boolean;
+  /**
+   * Attach a forward-playback iterator anchored at startS. Required for
+   * next() to advance; paused mode keeps no iterator. With `keyframeWalk`, on
+   * a cursor that `walksKeyframes`, the iterator opens on the frame at startS
+   * and then decodes sync samples only.
+   */
+  attachPlay(startS: number, keyframeWalk?: KeyframeWalk): void;
   /** Detach the forward-playback iterator. */
   detachPlay(): void;
   /**

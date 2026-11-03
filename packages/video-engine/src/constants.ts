@@ -93,6 +93,36 @@
  * PRESENT_CADENCE_HZ is the demand above which frames the pump culled or
  * declined dominate the dropped-frame ledger, so the discarded-frames rule in
  * evaluateWarnings stands down rather than reading a count it cannot attribute.
+ *
+ * The keyframe walk is how a rate past the decoder still lands on the clock.
+ * The full walk decodes every frame, because every frame between two sync
+ * samples is built on the one before it, so rate r costs r x nativeFps decodes
+ * a second whatever the cadence presents. Past what the decoder sustains, the
+ * picture drifts behind the playhead for as long as playback runs. The keyframe
+ * walk decodes sync samples alone, each on its own, so the bill becomes r over
+ * the GOP length: 64x of the horse clip, a sync sample every 0.93s, is about 70
+ * decodes a second against the full walk's 1,920. What it gives up is every
+ * picture between two sync samples, which is why it is the walk a rate falls
+ * back to and never the one it starts on when the full walk can keep up.
+ *
+ * KEYFRAME_WALK_MIN_RATE is the rate below which the full walk is kept however
+ * far behind it runs. Near 1x a viewer is watching motion, and one picture a GOP
+ * is not motion; at 2x a source the decoder cannot follow is better shown on
+ * time than smooth.
+ *
+ * KEYFRAME_WALK_DEMAND_HZ is the decode rate past which the full walk is not
+ * tried at all: 32x of a 30fps source, 16x of a 60fps one. The fastest full
+ * walk measured on this engine held 480 decodes a second (16x of a 1504x2016
+ * HEVC clip on an M-series Mac), so twice that is past any decoder the engine
+ * runs on, and trying it first would only show the drift it is about to cure.
+ *
+ * Below that demand the full walk is tried and the keyframe walk taken only on
+ * evidence: every frame the full walk delivers for KEYFRAME_WALK_EVIDENCE_MS of
+ * wall time arrives more than KEYFRAME_WALK_TRAIL_MS of wall time behind the
+ * clock. Wall time, the media gap over the rate, so the same lag decides at
+ * every rate. A one-off gap is not that: a stretch of network starvation or a
+ * re-anchor's pre-roll recovers through catch-up pulls once it ends, and one
+ * longer than REANCHOR_STALL_MS has the clock pulled back onto the frame.
  */
 export const PLAYBACK = {
   READ_AHEAD_CANVAS: 3,
@@ -101,6 +131,10 @@ export const PLAYBACK = {
   PRESENT_CADENCE_STEP: 0.75,
   PRESENT_CADENCE_SLACK: 0.25,
   PRESENT_CADENCE_HZ: 60,
+  KEYFRAME_WALK_MIN_RATE: 2,
+  KEYFRAME_WALK_DEMAND_HZ: 960,
+  KEYFRAME_WALK_TRAIL_MS: 250,
+  KEYFRAME_WALK_EVIDENCE_MS: 500,
 } as const;
 
 /**
@@ -108,23 +142,24 @@ export const PLAYBACK = {
  * backwards decode strategy the runtime does not have, so zero and negative
  * rates are refused rather than approximated.
  *
- * MAX is an API bound, not a promise that every source plays smoothly there.
- * Sustaining rate r means decoding r x nativeFps frames a second, and the
- * decode-ahead cushion is fixed at PLAYBACK.READ_AHEAD_CANVAS frames (raising it
- * would outrun the CanvasSink pool and tear), so how high a given source really
- * goes is a property of that source's frame size and encode. The engine measures
- * it instead of guessing: DiagnosticsSnapshot carries the commanded rate beside
- * the presented one, and PLAYBACK_RATE_NOT_SUSTAINED fires when they diverge.
+ * MAX is an API bound, not a promise that every source plays every frame
+ * there. Sustaining rate r frame by frame means decoding r x nativeFps frames a
+ * second, so past what a source's frame size and encode allow, playback moves
+ * to the keyframe walk (see PLAYBACK) and keeps the rate by showing sync
+ * samples only. What the walk cannot cure is a GOP so long that one decode per
+ * sync sample is still too many, and the engine measures that rather than
+ * guessing: DiagnosticsSnapshot carries the commanded rate beside the presented
+ * one, and PLAYBACK_RATE_NOT_SUSTAINED fires when they diverge.
  * SUSTAINED_SHORTFALL is the share of the commanded rate the presented one has
  * to hold to count as sustained.
  *
- * Sixteen is where a light source still keeps up: 16x of a 720p24 clip is 384
- * decodes a second, inside what a hardware decoder sustains, while a 1080p or
- * larger source will present short of it and say so through the warning above.
+ * Sixty-four is the keyframe walk's reach on ordinary footage: a sync sample a
+ * second asks for 64 decodes a second, well inside what a hardware decoder
+ * sustains, and a 70s clip passes in about a second.
  */
 export const PLAYBACK_RATE = {
   MIN: 0.25,
-  MAX: 16,
+  MAX: 64,
   SUSTAINED_SHORTFALL: 0.8,
 } as const;
 

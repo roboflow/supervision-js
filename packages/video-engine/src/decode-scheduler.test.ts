@@ -1905,6 +1905,97 @@ describe("DecodeScheduler", () => {
     });
   });
 
+  describe("keyframe walk", () => {
+    /** Pulls until `count` frames have arrived, a tick at a time. */
+    async function pullFrames(
+      scheduler: DecodeScheduler,
+      frames: ScrubFrame[],
+      count: number,
+    ): Promise<void> {
+      for (let i = 0; i < 50 && frames.length < count; i++) {
+        scheduler.next();
+        await tick();
+      }
+    }
+
+    it("opens on its anchor's own frame, then decodes only sync samples", async () => {
+      const { scheduler, sink } = setup({ keyframes: [0, 2, 4, 6, 8] });
+      await scheduler.open();
+      await scheduler.whenSettled();
+      const frames = record(scheduler);
+      frames.length = 0;
+      sink.getCanvasCalls.length = 0;
+      const streamsBefore = sink.canvasesCalls.length;
+
+      scheduler.attachPlay(0.5, { playheadS: () => 0.5 });
+      await pullFrames(scheduler, frames, 5);
+      scheduler.detachPlay();
+
+      // The frame at the anchor is the one a seek during playback waits on.
+      expect(frames.map((f) => f.timestampS)).toEqual([0.5, 2, 4, 6, 8]);
+      expect(frames[0].quality).toBe("exact");
+      expect(sink.getCanvasCalls).toEqual([0.5, 2, 4, 6, 8]);
+      // No frame-by-frame stream was opened to get there.
+      expect(sink.canvasesCalls.length).toBe(streamsBefore);
+      await scheduler.whenSettled();
+    });
+
+    it("skips the sync samples the playhead has already passed", async () => {
+      const { scheduler } = setup({ keyframes: [0, 2, 4, 6, 8] });
+      await scheduler.open();
+      await scheduler.whenSettled();
+      const frames = record(scheduler);
+      frames.length = 0;
+      let playheadS = 0;
+
+      scheduler.attachPlay(0, { playheadS: () => playheadS });
+      await pullFrames(scheduler, frames, 2);
+      // The clock ran on past 4 before the next pull: 4 would arrive late,
+      // so the walk goes straight to the sync sample after the playhead.
+      playheadS = 5;
+      await pullFrames(scheduler, frames, 3);
+      scheduler.detachPlay();
+
+      expect(frames.map((f) => f.timestampS)).toEqual([0, 2, 6]);
+      await scheduler.whenSettled();
+    });
+
+    it("ends at the last sync sample rather than handing one out twice", async () => {
+      const { scheduler, sink } = setup({ keyframes: [0, 2, 4] });
+      await scheduler.open();
+      await scheduler.whenSettled();
+      const frames = record(scheduler);
+      frames.length = 0;
+      sink.getCanvasCalls.length = 0;
+
+      scheduler.attachPlay(3, { playheadS: () => 3 });
+      for (let i = 0; i < 6; i++) {
+        scheduler.next();
+        await tick();
+      }
+      scheduler.detachPlay();
+
+      expect(frames.map((f) => f.timestampS)).toEqual([3, 4]);
+      expect(sink.getCanvasCalls).toEqual([3, 4]);
+      await scheduler.whenSettled();
+    });
+
+    it("a play walk attached without one still walks every frame", async () => {
+      const { scheduler } = setup({ frames: [0, 1, 2, 3] });
+      await scheduler.open();
+      const frames = record(scheduler);
+      frames.length = 0;
+
+      expect(scheduler.walksKeyframes).toBe(true);
+      scheduler.attachPlay(0);
+      await pullFrames(scheduler, frames, 3);
+      scheduler.detachPlay();
+
+      expect(frames.map((f) => f.timestampS)).toEqual([0, 1, 2]);
+      await scheduler.whenSettled();
+    });
+  });
+
   describe("non-zero track origin (T4b)", () => {
     function offsetSetup(): { scheduler: DecodeScheduler; sink: FakeSink } {
       const sink = new FakeSink([]);

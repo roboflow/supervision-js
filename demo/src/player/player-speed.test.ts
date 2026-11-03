@@ -13,7 +13,7 @@ describe("player speed", () => {
       max: PLAYBACK_RATE.MAX,
       min: PLAYBACK_RATE.MIN,
     });
-    expect(PLAYER_SPEED_RANGE.max).toBeGreaterThanOrEqual(16);
+    expect(PLAYER_SPEED_RANGE.max).toBeGreaterThanOrEqual(64);
   });
 
   it("reads typed speeds with or without the trailing x", () => {
@@ -23,7 +23,7 @@ describe("player speed", () => {
   });
 
   it("pulls a speed the engine would refuse back inside its range", () => {
-    expect(parsePlayerSpeed("64")).toBe(PLAYBACK_RATE.MAX);
+    expect(parsePlayerSpeed("500")).toBe(PLAYBACK_RATE.MAX);
     expect(parsePlayerSpeed("0.1")).toBe(PLAYBACK_RATE.MIN);
   });
 

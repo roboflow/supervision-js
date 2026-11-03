@@ -13,18 +13,19 @@ describe("playback rate ladder", () => {
     expect(stepPlaybackRate(2, 1)).toBe(4);
     expect(stepPlaybackRate(4, 1)).toBe(8);
     expect(stepPlaybackRate(8, 1)).toBe(16);
+    expect(stepPlaybackRate(32, 1)).toBe(64);
     expect(stepPlaybackRate(1, -1)).toBe(0.5);
     expect(stepPlaybackRate(0.5, -1)).toBe(0.25);
   });
 
   it("rests at the ends rather than wrapping", () => {
-    expect(stepPlaybackRate(16, 1)).toBe(16);
+    expect(stepPlaybackRate(64, 1)).toBe(64);
     expect(stepPlaybackRate(0.25, -1)).toBe(0.25);
   });
 
   it("wraps when the pill is clicked past the top", () => {
-    expect(cyclePlaybackRate(8)).toBe(16);
-    expect(cyclePlaybackRate(16)).toBe(0.25);
+    expect(cyclePlaybackRate(16)).toBe(32);
+    expect(cyclePlaybackRate(64)).toBe(0.25);
   });
 
   it("starts from the nearest rung to a rate set elsewhere", () => {

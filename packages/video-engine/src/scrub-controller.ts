@@ -52,6 +52,8 @@ export interface RealtimeStats {
   /** Same fact accumulated over the source's lifetime for the pipeline
    *  ledger, so it can sit beside the other monotonic counters. */
   readonly droppedFramesTotal: number;
+  /** Whether the attached play walk decodes sync samples only. */
+  readonly keyframeWalk: boolean;
 }
 
 /**
@@ -197,6 +199,23 @@ export class ScrubController {
    *  a break, which is the only evidence a pipeline can offer that it has room
    *  to spare. */
   private cadenceCushionS = 0;
+  /** Whether the attached walk decodes sync samples only. See PLAYBACK. */
+  private keyframeWalk = false;
+  /** The lowest rate this play session has seen the full walk fall behind at,
+   *  or null until it has. Every rate from it up takes the keyframe walk. Like
+   *  the present share, it belongs to the session that measured it. */
+  private fullWalkShortRate: number | null = null;
+  /** Wall seconds every frame the full walk delivered has arrived further
+   *  behind the clock than PLAYBACK.KEYFRAME_WALK_TRAIL_MS, without a break. */
+  private fullWalkTrailingS = 0;
+  /** Clock reading of the previous late delivery, or null before the first. */
+  private fullWalkLastLateS: number | null = null;
+  /** Media time of the frame the walk delivered last, or null since the walk
+   *  was attached. */
+  private lastDeliveredFrameS: number | null = null;
+  /** Widest gap between two frames the keyframe walk delivered, which is how
+   *  far apart frames legitimately arrive on it. */
+  private keyframeSpanS = 0;
 
   constructor(private readonly deps: ScrubControllerDeps) {
     this.unsub = this.deps.cursor.subscribe((frame) => {
@@ -228,6 +247,8 @@ export class ScrubController {
       this.playQueue.push(frame);
       this.walkDelivered += 1;
       const t = this.deps.clock.now();
+      this.observeFullWalk(frame, t);
+      this.lastDeliveredFrameS = frame.timestampS;
       this.lastDeliveryS = t;
       this.dropFramesTheClockHasPassed(t);
       if (this.playQueue.length < this.readAhead()) {
@@ -271,6 +292,12 @@ export class ScrubController {
     // behind the anchor is a frame it legitimately starts on.
     if (frame.timestampS < this.playAnchorS - this.frameIntervalS())
       return false;
+    if (this.keyframeWalk) {
+      this.keyframeSpanS = Math.max(
+        this.keyframeSpanS,
+        frame.timestampS - (this.lastDeliveredFrameS ?? this.playAnchorS),
+      );
+    }
     return !this.beyondPlayHorizon(frame, this.deps.clock.now());
   }
 
@@ -284,9 +311,119 @@ export class ScrubController {
    */
   private beyondPlayHorizon(frame: ScrubFrame, t: number): boolean {
     return (
-      frame.timestampS >
-      t + (PLAYBACK.READ_AHEAD_CANVAS + 2) * this.frameIntervalS()
+      frame.timestampS > t + (PLAYBACK.READ_AHEAD_CANVAS + 2) * this.walkSpanS()
     );
+  }
+
+  /**
+   * How far apart the walk's frames legitimately arrive: one source frame on
+   * the full walk, and the widest gap between two sync samples it has seen on
+   * the keyframe walk. A cursor that walks every frame even when asked for
+   * keyframes delivers source frames, and then the two figures agree.
+   */
+  private walkSpanS(): number {
+    const intervalS = this.frameIntervalS();
+    return this.keyframeWalk
+      ? Math.max(intervalS, this.keyframeSpanS)
+      : intervalS;
+  }
+
+  /**
+   * Whether the walk is handing out frames further apart than the source's
+   * own. A keyframe walk over a source whose every frame is a sync sample
+   * delivers a full walk's stream, and the present cadence still has a full
+   * walk's surplus to ration.
+   */
+  private sparseWalk(): boolean {
+    return this.keyframeWalk && this.walkSpanS() > this.frameIntervalS() * 1.5;
+  }
+
+  /**
+   * Whether the rate in force calls for the keyframe walk. See PLAYBACK for the
+   * three thresholds: a floor under which motion matters more than the rate, a
+   * demand no decoder follows frame by frame, and the rate the full walk has
+   * been measured falling behind at.
+   */
+  private wantsKeyframeWalk(): boolean {
+    if (!this.deps.cursor.walksKeyframes) return false;
+    const rate = this.deps.clock.rate;
+    if (rate < PLAYBACK.KEYFRAME_WALK_MIN_RATE) return false;
+    if (rate / this.frameIntervalS() > PLAYBACK.KEYFRAME_WALK_DEMAND_HZ) {
+      return true;
+    }
+    return this.fullWalkShortRate !== null && rate >= this.fullWalkShortRate;
+  }
+
+  /**
+   * Prices a full-walk delivery against the clock, and books the rate in force
+   * as one the full walk cannot keep once every delivery for
+   * PLAYBACK.KEYFRAME_WALK_EVIDENCE_MS has arrived further behind than
+   * PLAYBACK.KEYFRAME_WALK_TRAIL_MS. Both are wall time, the media gap over the
+   * rate, so one lag decides at every rate. The opening frame is left out: it
+   * carries the attach's pre-roll, which is not a rate the walk runs at.
+   */
+  private observeFullWalk(frame: ScrubFrame, t: number): void {
+    const rate = this.deps.clock.rate;
+    if (
+      this.keyframeWalk ||
+      !this.paintedSincePlay ||
+      rate < PLAYBACK.KEYFRAME_WALK_MIN_RATE
+    ) {
+      this.fullWalkTrailingS = 0;
+      this.fullWalkLastLateS = null;
+      return;
+    }
+    const trailMs = ((t - frame.timestampS) / rate) * 1000;
+    if (trailMs <= PLAYBACK.KEYFRAME_WALK_TRAIL_MS) {
+      this.fullWalkTrailingS = 0;
+      this.fullWalkLastLateS = null;
+      return;
+    }
+    const previousS = this.fullWalkLastLateS;
+    if (previousS !== null && t > previousS) {
+      this.fullWalkTrailingS += (t - previousS) / rate;
+    }
+    this.fullWalkLastLateS = t;
+    if (this.fullWalkTrailingS * 1000 >= PLAYBACK.KEYFRAME_WALK_EVIDENCE_MS) {
+      this.fullWalkShortRate = Math.min(this.fullWalkShortRate ?? rate, rate);
+    }
+  }
+
+  /** Attaches the walk the rate calls for at startS. */
+  private attachWalk(startS: number): void {
+    this.keyframeWalk = this.wantsKeyframeWalk();
+    this.fullWalkTrailingS = 0;
+    this.fullWalkLastLateS = null;
+    this.lastDeliveredFrameS = null;
+    this.keyframeSpanS = 0;
+    this.deps.cursor.attachPlay(
+      startS,
+      this.keyframeWalk
+        ? { playheadS: () => this.deps.clock.now() }
+        : undefined,
+    );
+  }
+
+  /**
+   * Moves a running session onto the other walk at the clock, when a rate
+   * change or the full walk's own lag calls for it, and reports whether it did.
+   * Nothing the old walk queued belongs to the new one: full-walk frames are
+   * the backlog being abandoned, and keyframes are too sparse to fill a picture
+   * the full walk is about to paint frame by frame.
+   */
+  private switchWalk(t: number): boolean {
+    if (this.wantsKeyframeWalk() === this.keyframeWalk) return false;
+    this.droppedFramesTotal += this.playQueue.length;
+    if (diagnosticsEnabled) this.droppedFrames += this.playQueue.length;
+    this.clearPlayQueue();
+    this.playAnchorS = t;
+    this.lastTickS = t;
+    this.lastDeliveryS = t;
+    this.catchUpBudget = 0;
+    this.resetCadenceTracking();
+    this.attachWalk(t);
+    this.deps.cursor.next();
+    return true;
   }
 
   /**
@@ -479,7 +616,7 @@ export class ScrubController {
     this.clearPlayQueue();
     this.playAnchorS = t;
     this.tryPaintFromCache(t * 1000);
-    this.deps.cursor.attachPlay(t);
+    this.attachWalk(t);
     this.deps.cursor.next();
     return true;
   }
@@ -497,8 +634,9 @@ export class ScrubController {
   private reanchorStarvedWalk(frame: ScrubFrame): void {
     const since = this.lastDeliveryS;
     if (since === null) return;
-    const wallMs =
-      ((this.deps.clock.now() - since) / this.deps.clock.rate) * 1000;
+    const now = this.deps.clock.now();
+    if (frame.timestampS > now) return;
+    const wallMs = ((now - since) / this.deps.clock.rate) * 1000;
     if (wallMs <= PLAYBACK.REANCHOR_STALL_MS) return;
     this.deps.clock.seek(frame.timestampS);
     this.lastTickS = null;
@@ -640,8 +778,10 @@ export class ScrubController {
       this.droppedFrames = 0;
       // What the share had come down to belongs to the source that measured
       // it. A seek re-anchors the walk mid-session and keeps it; the user
-      // putting the picture down and starting again does not.
+      // putting the picture down and starting again does not. The rate the
+      // full walk fell behind at is the same kind of reading.
       this.presentShare = 1;
+      this.fullWalkShortRate = null;
     }
     this.playSessionLive = true;
     this.stoppedAtS = null;
@@ -653,7 +793,7 @@ export class ScrubController {
     this.resetCadenceTracking();
     this.clearPlayQueue();
     this.clearStash();
-    this.deps.cursor.attachPlay(startS);
+    this.attachWalk(startS);
     this.deps.cursor.next();
   }
 
@@ -666,6 +806,7 @@ export class ScrubController {
     this.playSessionLive = this.deps.clock.playing;
     this.stoppedAtS = this.playSessionLive ? null : this.deps.clock.now();
     this.deps.cursor.detachPlay();
+    this.keyframeWalk = false;
     this.lastTickS = null;
     this.lastDeliveryS = null;
     this.catchUpBudget = 0;
@@ -810,6 +951,7 @@ export class ScrubController {
       return;
     }
     if (this.reanchorParkedWalk(t)) return;
+    if (this.switchWalk(t)) return;
     this.catchUpBudget = this.catchUpAllowance(t);
     // Playing: paint at most one buffered frame per rAF, then pull the next.
     // The cursor's nextPending latch holds one pull in flight, so the pump is
@@ -821,7 +963,7 @@ export class ScrubController {
       // output: a stall the user sees as a freeze. The opening buffering
       // window before the first paint is expected, not a stall.
       if (diagnosticsEnabled && this.paintedSincePlay) this.stalls += 1;
-      this.observePresentCadence(t);
+      if (!this.sparseWalk()) this.observePresentCadence(t);
       // Re-prime the pump. beginPlay's single bootstrap pull can be lost --
       // bailing on an in-flight drainSeek, or aimed at an iterator a
       // scrub-during-play already swapped -- which otherwise freezes
@@ -841,18 +983,21 @@ export class ScrubController {
       return;
     }
     this.dropFramesTheClockHasPassed(t);
-    this.observePresentCadence(t);
+    // The cadence rations presents out of a stream with more frames than the
+    // display has ticks. The keyframe walk is already the ration: every frame
+    // it decodes is one the rate needs on screen.
+    if (!this.sparseWalk()) this.observePresentCadence(t);
     const due = this.playQueue[0];
     // Front frame not due yet: keep it queued (the buffer is running ahead of
     // the clock, which is exactly the cushion we want).
     if (due.timestampS > t) return;
     this.playQueue.shift();
-    if (this.skipsForPresentCadence(t)) {
+    if (!this.sparseWalk() && this.skipsForPresentCadence(t)) {
       if (due.kind === "sample") due.sample.close();
       this.droppedFramesTotal += 1;
       if (diagnosticsEnabled) this.droppedFrames += 1;
     } else {
-      if (diagnosticsEnabled && t - due.timestampS > this.frameIntervalS()) {
+      if (diagnosticsEnabled && t - due.timestampS > this.walkSpanS()) {
         this.lateFrames += 1;
       }
       this.lastPresentTickS = t;
@@ -915,6 +1060,7 @@ export class ScrubController {
       endedFired: this.endedFired,
       droppedFrames: this.droppedFrames,
       droppedFramesTotal: this.droppedFramesTotal,
+      keyframeWalk: this.keyframeWalk,
     };
   }
 
