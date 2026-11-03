@@ -104,6 +104,7 @@ export function DemoShell({
           <a href={docsUrl} rel="noreferrer" target="_blank">
             Docs
           </a>
+          <a href="player">Player</a>
           <button
             aria-pressed={mode === DemoViewMode.Benchmarks}
             data-eval={DemoEvalHook.BenchmarksView}

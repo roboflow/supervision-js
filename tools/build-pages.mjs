@@ -66,6 +66,7 @@ async function verifyPagesArtifact() {
   const requiredFiles = [
     "index.html",
     "demo/index.html",
+    "demo/player.html",
     "examples/vanilla/index.html",
   ];
 
@@ -74,8 +75,8 @@ async function verifyPagesArtifact() {
   );
 
   const generatedHtml = await Promise.all(
-    ["demo/index.html", "examples/vanilla/index.html"].map((file) =>
-      readFile(join(pagesDirectory, file), "utf8"),
+    ["demo/index.html", "demo/player.html", "examples/vanilla/index.html"].map(
+      (file) => readFile(join(pagesDirectory, file), "utf8"),
     ),
   );
 

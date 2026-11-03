@@ -1545,7 +1545,7 @@ describe("EngineCore playback rate", () => {
     await engine.dispose();
   });
 
-  it.each([0, -1, -2, 0.1, 16, Number.NaN, Number.POSITIVE_INFINITY])(
+  it.each([0, -1, -2, 0.1, 17, 32, Number.NaN, Number.POSITIVE_INFINITY])(
     "a rate of %p is refused and leaves the running rate alone",
     async (rate) => {
       const clock = new FakeClock();

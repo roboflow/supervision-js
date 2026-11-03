@@ -1145,7 +1145,7 @@ export function createDemoStage(host: HTMLDivElement, onAttached: () => void) {
   };
 }
 
-function createThrottledPublisher<Value>(
+export function createThrottledPublisher<Value>(
   publishValue: (value: Value) => void,
   isActive: () => boolean,
   intervalMs: number,

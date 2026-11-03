@@ -131,6 +131,12 @@ toolbar value is a checked presentation mirror.
   reads like DefinitelyTyped package space. Same-folder imports may stay
   relative when that is clearer.
 - `demo/` is a React + Vite consumer demo.
+- `demo/player.html` is the demo's second page, served at `/player` (and
+  `/demo/player` on the assembled site): the same engine-backed media session,
+  viewport and control bar as the workbench, opened with no detections, plus
+  local file playback and every speed the web video engine accepts. Keep
+  annotation features out of it and reuse workbench components rather than
+  forking them.
 - A fixture may declare a second encode of its media as `media.proxyFile` and
   the demo plays that instead of the source. Two things move every annotation if
   a proxy gets them wrong. Frame count and timestamps must match the source,

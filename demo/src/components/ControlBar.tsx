@@ -1,10 +1,10 @@
-import { memo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { MediaRendererPlaybackState } from "supervision";
 import type {
   FrameTimelineData,
   SourceResidencyDiagnostics,
 } from "supervision/web-video-engine";
-import { formatTime } from "../format";
+import { formatInteger, formatTime } from "../format";
 import {
   useLiveReadoutWriter,
   type LiveReadouts,
@@ -18,10 +18,12 @@ import {
   formatLiveHotBuffer,
   formatLiveTimecode,
   isLiveAtClipEnd,
+  readLivePresentedTime,
   readLiveStatePresentation,
   type PlaybackStatePresentation,
 } from "./live-readout-format";
 import { LiveReadoutText } from "./LiveReadoutText";
+import { readTimelineFrames } from "./timeline-frames";
 import { TimelineView } from "./TimelineView";
 import { Transport } from "./Transport";
 
@@ -29,6 +31,13 @@ const STATE_TOOLTIP =
   "What the transport is doing, and while it plays, the rate the picture is really keeping against the rate you asked for. Amber means the source cannot decode that fast and the picture is running slower than the speed shown.";
 
 interface ControlBarProps {
+  /**
+   * Whether the bar reports on annotations: the detection, hot-buffer and cook
+   * readings and the timeline lanes under the strip. A player with nothing
+   * drawn over the picture leaves them out and reads the frame on screen
+   * instead. Defaults to true.
+   */
+  readonly annotations?: boolean;
   readonly canUseRenderer: boolean;
   readonly duration: number | null;
   readonly frameTimeline: FrameTimelineData | null;
@@ -49,6 +58,7 @@ interface ControlBarProps {
 }
 
 export const ControlBar = memo(function ControlBar({
+  annotations = true,
   canUseRenderer,
   duration,
   frameTimeline,
@@ -96,28 +106,41 @@ export const ControlBar = memo(function ControlBar({
           </span>
         </p>
       </div>
-      <div className="control-bar__ledger">
+      <div
+        className={
+          annotations
+            ? "control-bar__ledger"
+            : "control-bar__ledger control-bar__ledger--bare"
+        }
+      >
         <StateCell />
-        <LedgerCell
-          format={formatLiveDetectionTime}
-          label="Detection"
-          tooltip="The media time of the prediction frame currently on screen. It lags the playhead by up to one frame, and a gap wider than that means the drawn boxes belong to an older frame than the picture."
-        />
-        <LedgerCell
-          format={formatLiveHotBuffer}
-          label="Hot buffer"
-          tooltip="Prediction frames held in memory around the playhead, and the boxes and masks they carry between them. This is what the hot predictions lane spans."
-        />
-        <LedgerCell
-          format={formatLiveCook}
-          label="Cook"
-          tooltip="Mask rasterising right now: workers busy out of workers available, then frames queued behind them. Queued frames climbing while the prepared run shrinks is the picture outrunning the cook."
-        />
+        {annotations ? (
+          <>
+            <LedgerCell
+              format={formatLiveDetectionTime}
+              label="Detection"
+              tooltip="The media time of the prediction frame currently on screen. It lags the playhead by up to one frame, and a gap wider than that means the drawn boxes belong to an older frame than the picture."
+            />
+            <LedgerCell
+              format={formatLiveHotBuffer}
+              label="Hot buffer"
+              tooltip="Prediction frames held in memory around the playhead, and the boxes and masks they carry between them. This is what the hot predictions lane spans."
+            />
+            <LedgerCell
+              format={formatLiveCook}
+              label="Cook"
+              tooltip="Mask rasterising right now: workers busy out of workers available, then frames queued behind them. Queued frames climbing while the prepared run shrinks is the picture outrunning the cook."
+            />
+          </>
+        ) : (
+          <FrameCell frameTimeline={frameTimeline} />
+        )}
       </div>
       <TimelineView
         disabled={!canUseRenderer}
         duration={duration}
         frameTimeline={frameTimeline}
+        lanes={annotations}
         onScrub={onScrub}
         onSeek={onSeek}
         processedRanges={processedRanges}
@@ -217,6 +240,39 @@ function useLiveClipEnd(stopped: boolean) {
   });
 
   return atClipEnd;
+}
+
+/**
+ * The frame on screen, by the container's own frame table: the index a step
+ * lands on, never one rebuilt from an average frame rate.
+ */
+function FrameCell({
+  frameTimeline,
+}: {
+  readonly frameTimeline: FrameTimelineData | null;
+}) {
+  const frames = useMemo(
+    () => readTimelineFrames(frameTimeline),
+    [frameTimeline],
+  );
+  const format = useCallback(
+    (readouts: LiveReadouts) => {
+      const time = readLivePresentedTime(readouts);
+
+      return frames === null || time === null
+        ? "-"
+        : `${formatInteger(frames.indexAtOrBefore(time))} / ${formatInteger(frames.frameCount - 1)}`;
+    },
+    [frames],
+  );
+
+  return (
+    <LedgerCell
+      format={format}
+      label="Frame"
+      tooltip="The index of the frame on screen in the container's own frame table, out of the last frame's index. A step or a scrub lands on exactly one of these."
+    />
+  );
 }
 
 function LedgerCell({
