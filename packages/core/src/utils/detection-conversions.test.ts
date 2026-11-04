@@ -11,7 +11,9 @@ import {
   convertDetectionPolygonToMask,
   mergeDetectionMasks,
   mergeDetectionPolygonsByClass,
+  rasterizePolygonToMask,
 } from "#utils/detection-conversions";
+import { encodeBinaryMask } from "#utils/detection-masks";
 
 describe("detection geometry conversions", () => {
   const box: Detection = {
@@ -46,6 +48,83 @@ describe("detection geometry conversions", () => {
     expect(
       convertDetectionMaskToPolygon(polygonMask).polygon?.points.length,
     ).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each([
+    {
+      height: 8,
+      name: "two rows",
+      on: (x: number, y: number) => y >= 2 && y < 4 && x < 5,
+      width: 8,
+    },
+    {
+      height: 8,
+      name: "one column",
+      on: (x: number, y: number) => x === 3 && y < 6,
+      width: 8,
+    },
+    {
+      height: 12,
+      name: "triangle",
+      on: (x: number, y: number) => x <= y,
+      width: 12,
+    },
+    { height: 10, name: "full frame", on: () => true, width: 10 },
+    { height: 1000, name: "sampled rows", on: () => true, width: 20 },
+    {
+      height: 1000,
+      name: "partly sampled rows",
+      on: (_: number, y: number) => y >= 3 && y < 996,
+      width: 20,
+    },
+    {
+      height: 1000,
+      name: "tapered sampled rows",
+      on: (x: number, y: number) =>
+        y >= 95 && y < 212 && Math.abs(x - 120) <= y - 95,
+      width: 240,
+    },
+  ])(
+    "keeps the extent of a $name mask as a polygon",
+    ({ height, on, width }) => {
+      const raster = Uint8Array.from({ length: width * height }, (_, index) =>
+        on(index % width, Math.floor(index / width)) ? 1 : 0,
+      );
+      const detection: Detection = {
+        id: "mask",
+        mask: encodeBinaryMask(raster, width, height),
+      };
+
+      const polygon = convertDetectionMaskToPolygon(detection);
+
+      expect(convertDetectionPolygonToBox(polygon).rect).toEqual(
+        convertDetectionMaskToBox(detection).rect,
+      );
+      expect(
+        rasterizePolygonToMask(polygon.polygon!.points, { height, width }),
+      ).toEqual(raster);
+    },
+  );
+
+  it("does not stretch a contour to a stray blob between sampled rows", () => {
+    const width = 20;
+    const height = 1000;
+    const raster = Uint8Array.from({ length: width * height }, (_, index) => {
+      const y = Math.floor(index / width);
+      return (y >= 3 && y < 5) || (y >= 500 && y < 600) ? 1 : 0;
+    });
+
+    const polygon = convertDetectionMaskToPolygon({
+      id: "mask",
+      mask: encodeBinaryMask(raster, width, height),
+    });
+
+    expect(convertDetectionPolygonToBox(polygon).rect).toEqual({
+      height: 100,
+      width: 20,
+      x: 10,
+      y: 550,
+    });
   });
 
   it("rasterizes polygons from their top-left bounds", () => {
