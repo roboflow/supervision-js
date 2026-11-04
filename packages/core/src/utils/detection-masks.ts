@@ -263,29 +263,86 @@ export function extractMaskContour(
 ): readonly Point[] | undefined {
   assertMaskDimensions(data, width, height);
   const stride = Math.max(1, Math.floor(height / 100));
-  const leftEdge: Point[] = [];
-  const rightEdge: Point[] = [];
+  const rows: MaskRowSpan[] = [];
 
   for (let y = 0; y < height; y += stride) {
-    let left = -1;
-    let right = -1;
+    const row = readMaskRowSpan(data, width, y);
 
-    for (let x = 0; x < width; x += 1) {
-      if (data[y * width + x]) {
-        left = left === -1 ? x : left;
-        right = x;
-      }
-    }
-
-    if (left !== -1) {
-      leftEdge.push({ x: left, y });
-      rightEdge.push({ x: right, y });
+    if (row) {
+      rows.push(row);
     }
   }
 
-  return leftEdge.length < 2
-    ? undefined
-    : [...leftEdge, ...rightEdge.reverse()];
+  if (rows.length < 2) {
+    return undefined;
+  }
+
+  // Sampled rows can miss the mask's first and last rows, so also add the
+  // unsampled rows that touch them, each with its own span.
+  for (
+    let row = readMaskRowSpan(data, width, rows[0]!.y - 1);
+    row;
+    row = readMaskRowSpan(data, width, row.y - 1)
+  ) {
+    rows.unshift(row);
+  }
+
+  for (
+    let row = readMaskRowSpan(data, width, rows[rows.length - 1]!.y + 1);
+    row;
+    row = readMaskRowSpan(data, width, row.y + 1)
+  ) {
+    rows.push(row);
+  }
+
+  const last = rows[rows.length - 1]!;
+  // Crossing the middle of a row gives its exact span back when rasterized.
+  const closedRows = [
+    rows[0]!,
+    ...rows.map((row) => ({ ...row, y: row.y + 0.5 })),
+    { ...last, y: last.y + 1 },
+  ];
+  const leftEdge = closedRows.map(({ left, y }) => ({ x: left, y }));
+  const rightEdge = closedRows.map(({ right, y }) => ({ x: right, y }));
+
+  return [
+    ...dropVerticalRunInteriors(leftEdge),
+    ...dropVerticalRunInteriors(rightEdge).reverse(),
+  ];
+}
+
+interface MaskRowSpan {
+  readonly left: number;
+  readonly right: number;
+  readonly y: number;
+}
+
+/** Reads a row's outermost foreground span, in pixel-edge coordinates. */
+function readMaskRowSpan(
+  data: Uint8Array,
+  width: number,
+  y: number,
+): MaskRowSpan | undefined {
+  let left = -1;
+  let right = -1;
+
+  for (let x = 0; x < width; x += 1) {
+    if (data[y * width + x]) {
+      left = left === -1 ? x : left;
+      right = x;
+    }
+  }
+
+  // A row outside the mask reads as empty, which ends the walks above.
+  return left === -1 ? undefined : { left, right: right + 1, y };
+}
+
+/** Keeps only the two ends of each run of points on the same vertical line. */
+function dropVerticalRunInteriors(points: readonly Point[]): Point[] {
+  return points.filter(
+    (point, index) =>
+      points[index - 1]?.x !== point.x || points[index + 1]?.x !== point.x,
+  );
 }
 
 export function extractMaskRectRuns(

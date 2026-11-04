@@ -121,6 +121,50 @@ describe("detection mask utilities", () => {
       { height: 2, width: 2, x: 1, y: 0 },
     ]);
   });
+
+  it("extracts contours in pixel-edge coordinates", () => {
+    expect(extractMaskContour(data, 4, 3)).toEqual([
+      { x: 1, y: 0 },
+      { x: 1, y: 2 },
+      { x: 3, y: 2 },
+      { x: 3, y: 0 },
+    ]);
+  });
+
+  it("gives unsampled rows past the sampled ones their own spans", () => {
+    const width = 40;
+    const height = 1000;
+    // Rows 110 and 120 are the only sampled rows with foreground. Thin whiskers
+    // touch them from above and below, and the lower one is off to one side.
+    const raster = Uint8Array.from({ length: width * height }, (_, index) => {
+      const x = index % width;
+      const y = Math.floor(index / width);
+
+      if (y >= 110 && y <= 120) {
+        return x >= 2 && x < 38 ? 1 : 0;
+      }
+
+      return (y >= 101 && y < 110 && x === 5) ||
+        (y > 120 && y < 130 && x === 30)
+        ? 1
+        : 0;
+    });
+
+    expect(extractMaskContour(raster, width, height)).toEqual([
+      { x: 5, y: 101 },
+      { x: 5, y: 109.5 },
+      { x: 2, y: 110.5 },
+      { x: 2, y: 120.5 },
+      { x: 30, y: 121.5 },
+      { x: 30, y: 130 },
+      { x: 31, y: 130 },
+      { x: 31, y: 121.5 },
+      { x: 38, y: 120.5 },
+      { x: 38, y: 110.5 },
+      { x: 6, y: 109.5 },
+      { x: 6, y: 101 },
+    ]);
+  });
 });
 
 /**
