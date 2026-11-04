@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DetectionMaskEncoding } from "../types/detections";
+import { DetectionMaskEncoding, KeypointVisibility } from "../types/detections";
 import { TrackingGeometry } from "../types/post-processing";
 import {
   detectionPostProcessors,
@@ -119,5 +119,97 @@ describe("detectionPostProcessors.tracking", () => {
     expect(
       projectDetectionFrameForTracking(frame, TrackingGeometry.Mask)[0],
     ).not.toHaveProperty("mask");
+  });
+
+  it("excludes NotLabeled keypoints from the keypoint tracking rect", () => {
+    const frame = {
+      detections: [
+        {
+          keypoints: {
+            edges: [],
+            points: [
+              { x: 600, y: 400 },
+              { x: 700, y: 500 },
+              { x: 0, y: 0 },
+            ],
+            visibility: [
+              KeypointVisibility.Visible,
+              KeypointVisibility.Visible,
+              KeypointVisibility.NotLabeled,
+            ],
+          },
+        },
+        {
+          keypoints: {
+            edges: [],
+            points: [
+              { x: 0, y: 0 },
+              { x: 0, y: 0 },
+            ],
+            visibility: [
+              KeypointVisibility.NotLabeled,
+              KeypointVisibility.NotLabeled,
+            ],
+          },
+        },
+      ],
+      mediaTime: 0,
+    };
+
+    expect(
+      projectDetectionFrameForTracking(frame, TrackingGeometry.Keypoints),
+    ).toEqual([
+      {
+        detectionIndex: 0,
+        rect: { height: 100, width: 100, x: 650, y: 450 },
+      },
+    ]);
+  });
+
+  it("skips detections whose labeled keypoints have no extent", () => {
+    const { NotLabeled, Visible } = KeypointVisibility;
+    const frame = {
+      detections: [
+        // All NotLabeled, at real coordinates.
+        {
+          keypoints: {
+            edges: [],
+            points: [
+              { x: 50, y: 60 },
+              { x: 70, y: 80 },
+            ],
+            visibility: [NotLabeled, NotLabeled],
+          },
+        },
+        // One labeled point.
+        {
+          keypoints: {
+            edges: [],
+            points: [
+              { x: 600, y: 400 },
+              { x: 0, y: 0 },
+            ],
+            visibility: [Visible, NotLabeled],
+          },
+        },
+        // Collinear labeled points.
+        {
+          keypoints: {
+            edges: [],
+            points: [
+              { x: 600, y: 400 },
+              { x: 600, y: 500 },
+              { x: 0, y: 0 },
+            ],
+            visibility: [Visible, Visible, NotLabeled],
+          },
+        },
+      ],
+      mediaTime: 0,
+    };
+
+    expect(
+      projectDetectionFrameForTracking(frame, TrackingGeometry.Keypoints),
+    ).toEqual([]);
   });
 });
