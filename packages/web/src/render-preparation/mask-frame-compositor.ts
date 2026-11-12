@@ -6,6 +6,10 @@ import type {
   PreparedMaskScreenStroke,
 } from "#render-preparation/mask-frame-artifact";
 import { traceMaskOutlinePaths } from "#render-preparation/mask-outline-paths";
+import {
+  createPackedInstructionCoverage,
+  readPackedMaskCoverage,
+} from "#render-preparation/packed-mask-coverage";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
@@ -139,6 +143,7 @@ export function compositeMaskFrame(
     ? new Uint8Array(width * height)
     : undefined;
   const strokeKernels = new Map<string, StrokeKernel>();
+  const overlapping = findOverlappingMasks(maskInstructions, width, height);
 
   for (const instruction of maskInstructions) {
     compositeInstruction(
@@ -148,10 +153,44 @@ export function compositeMaskFrame(
       strokeCoverage,
       strokeKernels,
       displayWidth,
+      overlapping.has(instruction.detectionIndex),
     );
   }
 
   return { data, height, width };
+}
+
+/**
+ * Detections that share a pixel with another one. Each of them composites over
+ * what is beneath it instead of replacing it, so a detection under another one
+ * keeps its whole fill and outline.
+ */
+function findOverlappingMasks(
+  instructions: readonly IdMaskInstruction[],
+  width: number,
+  height: number,
+): ReadonlySet<number> {
+  const overlapping = new Set<number>();
+  if (instructions.length < 2) return overlapping;
+  const owners = new Int32Array(width * height);
+
+  for (const { detectionIndex, mask } of instructions) {
+    const owner = detectionIndex + 1;
+
+    forEachMaskPixel(mask, (x, y) => {
+      const offset = y * width + x;
+      const previous = owners[offset]!;
+
+      if (previous !== 0 && previous !== owner) {
+        overlapping.add(previous - 1);
+        overlapping.add(detectionIndex);
+      }
+
+      owners[offset] = owner;
+    });
+  }
+
+  return overlapping;
 }
 
 export function createIdMaskRasterFrame(
@@ -217,9 +256,16 @@ function compositeInstruction(
   strokeCoverage: Uint8Array | undefined,
   strokeKernels: Map<string, StrokeKernel>,
   displayWidth: number | undefined,
+  blendFill: boolean,
 ) {
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
-  const bounds = compositeMaskFill(rgba, canvasWidth, instruction.mask, fill);
+  const bounds = compositeMaskFill(
+    rgba,
+    canvasWidth,
+    instruction.mask,
+    fill,
+    blendFill,
+  );
 
   if (
     instruction.stroke &&
@@ -247,11 +293,18 @@ function compositeInstruction(
   }
 }
 
+/**
+ * Outline contours in raster coordinates. A prepared raster arrives with the
+ * detections it could not keep whole; without one, the overlaps are found while
+ * the raster is built. Each overlapping detection is traced from its own
+ * coverage, so the detection above it does not cut its contour short.
+ */
 export function createMaskScreenStrokes(
   instructions: readonly SerializableMaskInstruction[],
   width: number,
   height: number,
   preparedRaster?: Uint8Array,
+  overlappingDetectionIndices?: readonly number[],
 ): readonly PreparedMaskScreenStroke[] | undefined {
   const outlined = instructions.filter(
     ({ visible, stroke }) =>
@@ -263,6 +316,7 @@ export function createMaskScreenStrokes(
   if (outlined.length === 0) return undefined;
   const raster: Uint8Array | Uint32Array =
     preparedRaster ?? new Uint32Array(width * height);
+  const overlapping = new Set(overlappingDetectionIndices);
   if (!preparedRaster) {
     const masks = materializeMaskInstructions(instructions);
     for (const { detectionIndex, mask } of masks) {
@@ -274,6 +328,11 @@ export function createMaskScreenStrokes(
           for (let pixel = offset; pixel < offset + length; pixel += 1) {
             const x = Math.floor(pixel / mask.height);
             const y = pixel % mask.height;
+            const previous = raster[y * width + x]!;
+            if (previous !== 0 && previous !== detectionIndex + 1) {
+              overlapping.add(previous - 1);
+              overlapping.add(detectionIndex);
+            }
             raster[y * width + x] = detectionIndex + 1;
           }
         }
@@ -285,17 +344,59 @@ export function createMaskScreenStrokes(
     raster,
     width,
     height,
-    new Set(outlined.map(({ detectionIndex }) => detectionIndex + 1)),
+    new Set(
+      outlined
+        .filter(({ detectionIndex }) => !overlapping.has(detectionIndex))
+        .map(({ detectionIndex }) => detectionIndex + 1),
+    ),
   );
-  return outlined.map(({ detectionIndex, stroke }) => ({
-    detectionIndex,
-    alpha: stroke!.alpha,
-    color: stroke!.color,
-    width: stroke!.width,
-    widthUnit: stroke!.widthUnit,
-    alignment: stroke!.alignment,
-    paths: paths.get(detectionIndex + 1) ?? [],
-  }));
+  return outlined.map((instruction) => {
+    const { detectionIndex, stroke } = instruction;
+    return {
+      detectionIndex,
+      alpha: stroke!.alpha,
+      color: stroke!.color,
+      width: stroke!.width,
+      widthUnit: stroke!.widthUnit,
+      alignment: stroke!.alignment,
+      paths: overlapping.has(detectionIndex)
+        ? traceOwnOutlinePaths(instruction, width, height)
+        : (paths.get(detectionIndex + 1) ?? []),
+    };
+  });
+}
+
+/** Traces one detection alone and maps its contours onto the raster grid. */
+function traceOwnOutlinePaths(
+  instruction: SerializableMaskInstruction,
+  width: number,
+  height: number,
+): Float32Array<ArrayBuffer>[] {
+  const coverage = createPackedInstructionCoverage(instruction);
+  if (!coverage) return [];
+  const crop = new Uint8Array(coverage.width * coverage.height);
+  for (let y = 0; y < coverage.height; y += 1) {
+    for (let x = 0; x < coverage.width; x += 1) {
+      if (readPackedMaskCoverage(coverage, coverage.x + x, coverage.y + y))
+        crop[y * coverage.width + x] = 1;
+    }
+  }
+  const scaleX = width / coverage.sourceWidth;
+  const scaleY = height / coverage.sourceHeight;
+  const paths =
+    traceMaskOutlinePaths(
+      crop,
+      coverage.width,
+      coverage.height,
+      new Set([1]),
+    ).get(1) ?? [];
+  for (const path of paths) {
+    for (let index = 0; index < path.length; index += 2) {
+      path[index] = (path[index]! + coverage.x) * scaleX;
+      path[index + 1] = (path[index + 1]! + coverage.y) * scaleY;
+    }
+  }
+  return paths;
 }
 
 function materializeMaskInstructions(
@@ -324,25 +425,47 @@ function materializeMaskInstructions(
     });
 }
 
-/**
- * Compressed RLE counts runs down each column in turn, so a foreground run is
- * a contiguous walk down one column that wraps into the next.
- */
 function compositeMaskFill(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
   mask: IdMaskInstruction["mask"],
   fill: RgbaColor,
+  blend: boolean,
 ): MaskBounds | undefined {
+  let minX = mask.width;
+  let minY = mask.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  forEachMaskPixel(mask, (x, y) => {
+    if (blend) {
+      blendPixel(rgba, canvasWidth, x, y, fill);
+    } else {
+      writePixel(rgba, canvasWidth, x, y, fill);
+    }
+
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  });
+
+  return maxX < minX || maxY < minY ? undefined : { maxX, maxY, minX, minY };
+}
+
+/**
+ * Compressed RLE counts runs down each column in turn, so a foreground run is
+ * a contiguous walk down one column that wraps into the next.
+ */
+function forEachMaskPixel(
+  mask: IdMaskInstruction["mask"],
+  visit: (x: number, y: number) => void,
+) {
   const counts = decodeCompressedRleCounts(mask.counts);
   const maskWidth = mask.width;
   const maskHeight = mask.height;
   const maskArea = maskWidth * maskHeight;
   let maskOffset = 0;
-  let minX = maskWidth;
-  let minY = maskHeight;
-  let maxX = -1;
-  let maxY = -1;
 
   for (let index = 0; index < counts.length; index += 1) {
     const runLength = counts[index] ?? 0;
@@ -362,14 +485,8 @@ function compositeMaskFill(
 
       if (rowMajorOffset < maskArea) {
         const x = rowMajorOffset % maskWidth;
-        const y = (rowMajorOffset - x) / maskWidth;
 
-        writePixel(rgba, canvasWidth, x, y, fill);
-
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
+        visit(x, (rowMajorOffset - x) / maskWidth);
       }
 
       columnY += 1;
@@ -382,8 +499,6 @@ function compositeMaskFill(
 
     maskOffset += runLength;
   }
-
-  return maxX < minX || maxY < minY ? undefined : { maxX, maxY, minX, minY };
 }
 
 interface StrokeKernel {
@@ -569,6 +684,31 @@ function resolveRgbaColor(color: number, alpha: number): RgbaColor {
     green: (color >> 8) & 0xff,
     red: (color >> 16) & 0xff,
   };
+}
+
+/** Source-over on straight-alpha RGBA, so whatever is beneath shows through. */
+function blendPixel(
+  rgba: Uint8ClampedArray,
+  canvasWidth: number,
+  x: number,
+  y: number,
+  color: RgbaColor,
+) {
+  const offset = (y * canvasWidth + x) * 4;
+  const sourceAlpha = color.alpha / 255;
+  const below = (rgba[offset + 3]! / 255) * (1 - sourceAlpha);
+  const alpha = sourceAlpha + below;
+
+  if (alpha <= 0) {
+    return;
+  }
+
+  rgba[offset] = (color.red * sourceAlpha + rgba[offset]! * below) / alpha;
+  rgba[offset + 1] =
+    (color.green * sourceAlpha + rgba[offset + 1]! * below) / alpha;
+  rgba[offset + 2] =
+    (color.blue * sourceAlpha + rgba[offset + 2]! * below) / alpha;
+  rgba[offset + 3] = alpha * 255;
 }
 
 function writePixel(

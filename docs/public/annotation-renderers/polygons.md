@@ -32,6 +32,11 @@ session.setPresentation({
 });
 ```
 
+Overlapping polygons each keep their whole fill and stroke. Where one covers
+part of another, the lower polygon's outline stays complete and its fill shows
+through the translucent polygon above, as if each were drawn on its own in
+detection order.
+
 The basketball fixture keeps its source masks beside deterministic,
 mask-derived polygons. That makes it possible to compare the two layers without
 recovering geometry from rendered pixels.

@@ -62,6 +62,11 @@ appear thinner and move outward. Browser rendering bounds the outline to 16
 mask texels per side; very small fitted media can reach that limit and show a
 narrower outline.
 
+Overlapping masks each keep their whole fill and outline. Where one covers part
+of another, the lower mask's outline stays complete and its fill shows through
+the translucent mask above, as if each were drawn on its own in detection
+order.
+
 Set `annotationAntialiasing: true` to smooth mask boundaries alongside the other
 annotation layers. Use `2` to preserve more mask detail up to the original
 resolution before smoothing. Categorical picking continues to read exact

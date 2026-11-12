@@ -7,6 +7,7 @@ import {
 } from "#types/render-preparation";
 import {
   DetectionMaskEncoding,
+  encodeBinaryMask,
   MAX_ID_MASK_PALETTE_ENTRIES,
 } from "supervision-js-core";
 
@@ -19,6 +20,7 @@ import {
   createMaskFramePreparer,
   PreparedMaskFrameKind,
 } from "./mask-frame-preparer";
+import { readPackedMaskCoverage } from "./packed-mask-coverage";
 
 const maskPreparationJob: MaskFramePreparationJob = {
   instructions: [
@@ -102,6 +104,72 @@ describe("mask frame preparer", () => {
 
     preparer.destroy();
   });
+
+  it.each(["polygon", "mask"] as const)(
+    "hands each overlapping %s its whole coverage beside the id raster",
+    async (geometry) => {
+      const boxes = [
+        // A car, a door box over its corner, and a sign clear of both.
+        [0, 0, 6, 6],
+        [4, 4, 10, 10],
+        [12, 0, 16, 4],
+      ] as const;
+      const preparer = createMaskFramePreparer({
+        renderPreparation: { mode: RenderPreparationMode.MainThread },
+      });
+      const frame = await preparer.prepare({
+        key: "overlap",
+        instructions: boxes.map(([left, top, right, bottom], index) => ({
+          alpha: 0.08,
+          color: 0xff0000,
+          detectionIndex: index,
+          stroke: { alpha: 1, color: 0xff0000, width: 2 },
+          ...(geometry === "mask"
+            ? {
+                mask: encodeBinaryMask(
+                  Uint8Array.from({ length: 16 * 12 }, (_, offset) => {
+                    const x = offset % 16;
+                    const y = Math.floor(offset / 16);
+                    return Number(
+                      x >= left && x < right && y >= top && y < bottom,
+                    );
+                  }),
+                  16,
+                  12,
+                ),
+              }
+            : {
+                polygon: {
+                  height: 12,
+                  width: 16,
+                  points: [
+                    { x: left, y: top },
+                    { x: right, y: top },
+                    { x: right, y: bottom },
+                    { x: left, y: bottom },
+                  ],
+                },
+              }),
+        })),
+      });
+
+      expect(frame?.kind).toBe(PreparedMaskFrameKind.IdMask);
+      expect(
+        frame?.packedMaskCoverage?.map((entry) => entry.detectionIndex),
+      ).toEqual([0, 1]);
+      for (const entry of frame!.packedMaskCoverage!) {
+        const [left, top, right, bottom] = boxes[entry.detectionIndex]!;
+        for (let y = 0; y < 12; y += 1) {
+          for (let x = 0; x < 16; x += 1) {
+            expect(readPackedMaskCoverage(entry, x, y)).toBe(
+              x >= left && x < right && y >= top && y < bottom,
+            );
+          }
+        }
+      }
+      preparer.destroy();
+    },
+  );
 
   it("falls back to a composited RGBA frame past the ID palette", async () => {
     resetMocks();

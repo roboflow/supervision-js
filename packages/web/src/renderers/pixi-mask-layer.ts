@@ -3,6 +3,11 @@ import {
   PACKED_MASK_UNIT_BACKING_BYTES,
 } from "./pixi-ordered-mask-units";
 import { pickPackedMaskAtPoint } from "./packed-mask-picker";
+import {
+  clearPaletteDetections,
+  createPaletteSlotPaint,
+} from "./packed-mask-paint";
+import type { PixiIdMaskPaint } from "./pixi-id-mask-shader";
 import { createPixiMaskScreenStrokeRenderer } from "#renderers/pixi-mask-screen-stroke";
 import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
@@ -270,6 +275,15 @@ export function createPixiMaskLayer(options: {
 }): PixiMaskLayer {
   let currentMaskStyle = options.maskStyle;
   let orderedUnits: ReturnType<typeof createPixiOrderedMaskUnits> | undefined;
+  /**
+   * Draws the detections the dense raster cannot keep whole because another
+   * one overlaps them, each from its own coverage, above the raster.
+   */
+  let overlapUnits: ReturnType<typeof createPixiOrderedMaskUnits> | undefined;
+  const rasterPaintsWithoutOverlaps = new WeakMap<
+    PreparedIdMaskFrame,
+    PixiIdMaskPaint
+  >();
   let activeDetectionFrame: DetectionFrame | undefined;
   let activeViewportScale = 1;
   let mediaHeight = 0;
@@ -306,6 +320,7 @@ export function createPixiMaskLayer(options: {
     maskStyle: options.maskStyle,
     onMaskFrameEvicted(key) {
       orderedUnits?.releaseFrame(key);
+      overlapUnits?.releaseFrame(key);
       destroyTexture(key);
 
       if (key === visibleMaskFrameKey) {
@@ -319,6 +334,7 @@ export function createPixiMaskLayer(options: {
     },
     onMaskFramesCleared() {
       orderedUnits?.clear();
+      overlapUnits?.clear();
       destroyTextures();
       hideSprite();
     },
@@ -379,6 +395,29 @@ export function createPixiMaskLayer(options: {
       }
 
       maskContainer.addChild(maskSprite, idMaskRenderer.mesh);
+
+      if (
+        !orderedUnits &&
+        options.BufferImageSource &&
+        options.Mesh &&
+        options.MeshGeometry &&
+        options.Shader &&
+        options.UniformGroup
+      ) {
+        const overlapContainer = new options.Container();
+        maskContainer.addChild(overlapContainer);
+        overlapUnits = createPixiOrderedMaskUnits({
+          ...options,
+          BufferImageSource: options.BufferImageSource,
+          Mesh: options.Mesh,
+          MeshGeometry: options.MeshGeometry,
+          Shader: options.Shader,
+          UniformGroup: options.UniformGroup,
+          container: overlapContainer,
+          mediaHeight,
+          mediaWidth,
+        });
+      }
 
       return maskContainer;
     },
@@ -545,6 +584,8 @@ export function createPixiMaskLayer(options: {
         isFillVisible
       )
         renderOrderedMasks(activeFrame, activeViewportScale);
+      if (pixelRatio !== previousPixelRatio && isFillVisible)
+        renderOverlapUnits();
       const nextWidth = resolveMaxRasterWidth();
       if (mediaWidth > 0 && previousWidth !== nextWidth) {
         preparedRenderWindow.invalidateRasterSize();
@@ -601,6 +642,7 @@ export function createPixiMaskLayer(options: {
       preparedRenderWindow.destroy();
       destroyTextures();
       orderedUnits?.clear();
+      overlapUnits?.clear();
       idMaskRenderer?.destroy();
       screenStrokeRenderer?.destroy();
       haloRenderer?.destroy();
@@ -652,10 +694,45 @@ export function createPixiMaskLayer(options: {
 
     if (maskFrame.kind === PreparedMaskFrameKind.IdMask && idMaskRenderer) {
       showIdMaskFrame(maskFrame);
+      renderOverlapUnits();
       return;
     }
 
+    overlapUnits?.hide();
     showRgbaMaskFrame(maskFrame);
+  }
+
+  function renderOverlapUnits() {
+    const frame = activeIdMaskFrame;
+    if (!overlapUnits || !frame || !activeDetectionFrame) return;
+    overlapUnits.renderPainted(
+      frame.key,
+      activeDetectionFrame,
+      frame.packedMaskCoverage ?? [],
+      (entry) => ({
+        source: entry.data,
+        paint: (previous) =>
+          createPaletteSlotPaint(frame, entry, maskOpacity, previous),
+      }),
+      rasterDisplay
+        ? resolveDisplayPixelRatio(rasterDisplay) * rasterResolutionScale
+        : 1,
+    );
+  }
+
+  /** The raster leaves the detections its overlap units draw to them. */
+  function resolveRasterPaint(maskFrame: PreparedIdMaskFrame) {
+    const coverage = maskFrame.packedMaskCoverage;
+    if (!overlapUnits || !coverage?.length) return maskFrame;
+    let paint = rasterPaintsWithoutOverlaps.get(maskFrame);
+    if (!paint) {
+      paint = clearPaletteDetections(
+        maskFrame,
+        coverage.map(({ detectionIndex }) => detectionIndex),
+      );
+      rasterPaintsWithoutOverlaps.set(maskFrame, paint);
+    }
+    return paint;
   }
 
   function renderOrderedMasks(
@@ -868,7 +945,7 @@ export function createPixiMaskLayer(options: {
 
     maskSprite.visible = false;
     idMaskRenderer.render(
-      maskFrame,
+      resolveRasterPaint(maskFrame),
       texture,
       rasterDisplay
         ? resolveDisplayPixelRatio(rasterDisplay) * rasterResolutionScale
@@ -884,6 +961,7 @@ export function createPixiMaskLayer(options: {
     idMaskRenderer?.hide();
     screenStrokeRenderer?.hide();
     orderedUnits?.hide();
+    overlapUnits?.hide();
   }
 
   /**
@@ -908,6 +986,7 @@ export function createPixiMaskLayer(options: {
 
     idMaskRenderer?.setOpacity(maskOpacity);
     if (screenStrokeRenderer) screenStrokeRenderer.display.alpha = maskOpacity;
+    if (isFillVisible) renderOverlapUnits();
   }
 
   function destroyTexture(key: string) {

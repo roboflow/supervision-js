@@ -60,3 +60,70 @@ function paint(palette: Float32Array, color: number, alpha: number) {
   palette[6] = (color & 255) / 255;
   palette[7] = Math.max(0, Math.min(1, alpha));
 }
+
+/**
+ * Paint for one id-raster detection drawn on its own: its palette slot moves to
+ * ID 1, and the public mask-style opacity is applied once, as for a styled unit.
+ */
+export function createPaletteSlotPaint(
+  frame: PixiIdMaskPaint,
+  coverage: PreparedPackedMaskCoverage,
+  opacity: number,
+  previous?: PixiIdMaskPaint,
+): PixiIdMaskPaint {
+  const id = coverage.detectionIndex + 1;
+  const fillPalette =
+    previous?.fillPalette ?? new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
+  const strokePalette =
+    previous?.strokePalette ??
+    new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4);
+  const strokeWidths =
+    previous?.strokeWidths ?? new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
+  const strokeAlignments =
+    previous?.strokeAlignments ?? new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES);
+  fillPalette.set(frame.fillPalette.subarray(id * 4, id * 4 + 4), 4);
+  strokePalette.set(frame.strokePalette.subarray(id * 4, id * 4 + 4), 4);
+  fillPalette[7] = fillPalette[7]! * opacity;
+  strokePalette[7] = strokePalette[7]! * opacity;
+  const width = frame.strokeWidths[id] ?? 0;
+  const alignment = frame.strokeAlignments?.[id] ?? 0;
+  strokeWidths[1] = width;
+  strokeAlignments[1] = alignment;
+  return {
+    fillPalette,
+    strokePalette,
+    strokeWidths,
+    strokeAlignments,
+    hasStroke: width > 0 && strokePalette[7]! > 0,
+    height: coverage.height,
+    width: coverage.width,
+    maxStrokeWidth: width * (1 - alignment),
+  };
+}
+
+/** The frame's paint with these detections drawing nothing from the raster. */
+export function clearPaletteDetections(
+  frame: PixiIdMaskPaint,
+  detectionIndices: Iterable<number>,
+): PixiIdMaskPaint {
+  const fillPalette = frame.fillPalette.slice();
+  const strokePalette = frame.strokePalette.slice();
+  const strokeWidths = frame.strokeWidths.slice();
+  for (const detectionIndex of detectionIndices) {
+    const id = detectionIndex + 1;
+    fillPalette[id * 4 + 3] = 0;
+    strokePalette[id * 4 + 3] = 0;
+    strokeWidths[id] = 0;
+  }
+  return {
+    fillPalette,
+    hasStroke: frame.hasStroke,
+    height: frame.height,
+    maxStrokeWidth: frame.maxStrokeWidth,
+    strokeAlignments: frame.strokeAlignments,
+    strokeOverFill: frame.strokeOverFill,
+    strokePalette,
+    strokeWidths,
+    width: frame.width,
+  };
+}

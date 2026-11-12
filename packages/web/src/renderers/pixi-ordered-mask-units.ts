@@ -15,13 +15,20 @@ import {
 } from "./pixi-id-mask-shader";
 
 type ShaderOptions = Parameters<typeof createPixiIdMaskShaderRenderer>[0];
+/** What a unit's texture was uploaded from: a semantic mask or a prepared crop. */
+type UnitSource = DetectionMask | Uint8Array;
 type Unit = {
   readonly renderer: ReturnType<typeof createPixiIdMaskShaderRenderer>;
   readonly texture: Texture;
-  readonly mask: DetectionMask;
+  readonly source: UnitSource;
   paint?: PixiIdMaskPaint;
   frameKey: string;
 };
+
+export interface PackedMaskUnitPaint {
+  readonly source: UnitSource;
+  paint(previous: PixiIdMaskPaint | undefined): PixiIdMaskPaint;
+}
 
 /** Conservative reserve for known per-unit paint, CPU/GPU UBO, geometry and placeholder backing. */
 export const PACKED_MASK_UNIT_BACKING_BYTES = 16 * 1024;
@@ -44,7 +51,7 @@ export function createPixiOrderedMaskUnits(
 ) {
   const units = new Map<number, Unit>();
   options.container.sortableChildren = true;
-  return { render, hide, clear, releaseFrame };
+  return { render, renderPainted, hide, clear, releaseFrame };
 
   function render(
     frameKey: string,
@@ -57,26 +64,58 @@ export function createPixiOrderedMaskUnits(
     opacity: number,
     pixelRatio: number,
   ) {
+    renderPainted(
+      frameKey,
+      frame,
+      coverage,
+      (entry) => {
+        const instruction = resolveInstruction(entry.detectionIndex);
+        // A style can hide a mask without discarding its unchanged active coverage.
+        if (!instruction?.mask) return undefined;
+        return {
+          source: instruction.mask,
+          paint: (previous) =>
+            createPackedMaskPaint(
+              entry,
+              instruction,
+              options.mediaWidth,
+              viewportScale,
+              opacity,
+              previous,
+            ),
+        };
+      },
+      pixelRatio,
+    );
+  }
+
+  function renderPainted(
+    frameKey: string,
+    frame: DetectionFrame,
+    coverage: readonly PreparedPackedMaskCoverage[],
+    resolvePaint: (
+      entry: PreparedPackedMaskCoverage,
+    ) => PackedMaskUnitPaint | undefined,
+    pixelRatio: number,
+  ) {
     const retained = new Set<number>();
     const order = detectionRenderOrder(frame);
     for (const entry of coverage) {
       const detection = frame.detections[entry.detectionIndex];
       if (!detection) continue;
       const key = entry.detectionIndex;
-      const instruction = resolveInstruction(entry.detectionIndex);
+      const resolved = resolvePaint(entry);
       let unit = units.get(key);
-      // A style can hide a mask without discarding its unchanged active coverage.
-      if (!instruction?.mask) {
+      if (!resolved) {
         if (unit) destroyUnit(key, unit);
         continue;
       }
-      const mask = instruction.mask;
-      if (unit && !sameMask(unit.mask, mask)) {
+      if (unit && !sameSource(unit.source, resolved.source)) {
         destroyUnit(key, unit);
         unit = undefined;
       }
       if (!unit) {
-        unit = createUnit(frameKey, entry, mask);
+        unit = createUnit(frameKey, entry, resolved.source);
         units.set(key, unit);
       }
       retained.add(key);
@@ -95,14 +134,7 @@ export function createPixiOrderedMaskUnits(
       );
       mesh.zIndex =
         (order[entry.detectionIndex] ?? entry.detectionIndex) * 2 + 0.5;
-      unit.paint = createPackedMaskPaint(
-        entry,
-        instruction,
-        options.mediaWidth,
-        viewportScale,
-        opacity,
-        unit.paint,
-      );
+      unit.paint = resolved.paint(unit.paint);
       unit.renderer.render(unit.paint, unit.texture, pixelRatio);
     }
     for (const [key, unit] of units) {
@@ -113,7 +145,7 @@ export function createPixiOrderedMaskUnits(
   function createUnit(
     frameKey: string,
     entry: PreparedPackedMaskCoverage,
-    mask: DetectionMask,
+    unitSource: UnitSource,
   ): Unit {
     const source = new options.BufferImageSource({
       autoGenerateMipmaps: false,
@@ -133,7 +165,7 @@ export function createPixiOrderedMaskUnits(
     });
     renderer.mesh.eventMode = "none";
     options.container.addChild(renderer.mesh);
-    return { renderer, texture, mask, frameKey };
+    return { renderer, texture, source: unitSource, frameKey };
   }
 
   function hide() {
@@ -159,10 +191,12 @@ export function createPixiOrderedMaskUnits(
   }
 }
 
-function sameMask(left: DetectionMask, right: DetectionMask) {
+function sameSource(left: UnitSource, right: UnitSource) {
   return (
     left === right ||
-    (left.width === right.width &&
+    (!(left instanceof Uint8Array) &&
+      !(right instanceof Uint8Array) &&
+      left.width === right.width &&
       left.height === right.height &&
       left.counts === right.counts)
   );

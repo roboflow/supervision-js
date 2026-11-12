@@ -136,6 +136,45 @@ describe("mask frame compositor", () => {
     }
   });
 
+  it.each([
+    { raster: "native id", maxWidth: undefined },
+    { raster: "narrower id", maxWidth: 6 },
+    { raster: "no id", maxWidth: 0 },
+  ])(
+    "traces the whole contour of a mask under another one from a $raster raster",
+    ({ maxWidth }) => {
+      const instructions = overlappingBoxes("mask").map((instruction) => ({
+        ...instruction,
+        stroke: { ...instruction.stroke, widthUnit: "screen" as const },
+      }));
+      const frame =
+        maxWidth === 0
+          ? undefined
+          : createIdMaskRasterFrame(instructions, maxWidth)!;
+      const width = frame?.width ?? 12;
+      const height = frame?.height ?? 12;
+      const strokes = createMaskScreenStrokes(
+        instructions,
+        width,
+        height,
+        frame?.data,
+        frame?.overlappingDetectionIndices,
+      )!;
+      const texelArea = (width / 12) * (height / 12);
+
+      for (const [index, area] of [
+        [0, 25],
+        [1, 36],
+      ] as const) {
+        expect(strokes[index]!.paths).toHaveLength(1);
+        expect(strokes[index]!.paths[0]).toHaveLength(8);
+        expect(signedArea(strokes[index]!.paths[0]!)).toBeCloseTo(
+          area * texelArea,
+        );
+      }
+    },
+  );
+
   it("retains disconnected islands at a diagonal pixel contact", () => {
     const instruction = {
       alpha: 1,
@@ -682,6 +721,8 @@ const FALLBACK_LEGEND: Record<
   b: [128, 128, 0, 255],
   c: [128, 0, 128, 128],
   d: [128, 128, 128, 255],
+  // Half-transparent green over the red detection it overlaps.
+  e: [127, 128, 0, 255],
 };
 
 function rectMask(x0: number, x1: number, y0: number, y1: number) {
@@ -696,7 +737,13 @@ function rectMask(x0: number, x1: number, y0: number, y1: number) {
   return encodeBinaryMask(data, FALLBACK_WIDTH, FALLBACK_HEIGHT);
 }
 
-function paintedGrid(frame: CompositedMaskFrame) {
+function paintedGrid(
+  frame: CompositedMaskFrame,
+  legend: Record<
+    string,
+    readonly [number, number, number, number]
+  > = FALLBACK_LEGEND,
+) {
   const rows: string[] = [];
 
   for (let y = 0; y < frame.height; y += 1) {
@@ -705,7 +752,7 @@ function paintedGrid(frame: CompositedMaskFrame) {
     for (let x = 0; x < frame.width; x += 1) {
       const offset = (y * frame.width + x) * 4;
       const pixel = [...frame.data.slice(offset, offset + 4)];
-      const symbol = Object.entries(FALLBACK_LEGEND).find(([, color]) =>
+      const symbol = Object.entries(legend).find(([, color]) =>
         color.every((channel, index) => channel === pixel[index]),
       );
 
@@ -754,6 +801,35 @@ const overlappingStrokedMasks = [
     mask: rectMask(0, 3, 0, 1),
   },
 ] as const;
+
+/** A 5x5 box at (1, 1) under a 6x6 box at (4, 4), each outlined. */
+function overlappingBoxes(geometry: "mask" | "polygon") {
+  return [
+    { color: 0xff0000, rect: [1, 1, 6, 6], stroke: 0x0000ff },
+    { color: 0x00ff00, rect: [4, 4, 10, 10], stroke: 0xffff00 },
+  ].map(({ color, rect: [left, top, right, bottom], stroke }, index) => {
+    const points = [
+      { x: left!, y: top! },
+      { x: right!, y: top! },
+      { x: right!, y: bottom! },
+      { x: left!, y: bottom! },
+    ];
+    const pixels = Uint8Array.from({ length: 12 * 12 }, (_, offset) => {
+      const x = offset % 12;
+      const y = Math.floor(offset / 12);
+      return Number(x >= left! && x < right! && y >= top! && y < bottom!);
+    });
+    return {
+      alpha: 0.25,
+      color,
+      detectionIndex: index,
+      stroke: { alpha: 1, color: stroke, width: 1 },
+      ...(geometry === "mask"
+        ? { mask: encodeBinaryMask(pixels, 12, 12) }
+        : { polygon: { height: 12, points, width: 12 } }),
+    };
+  });
+}
 
 describe("rgba mask fallback", () => {
   it("preserves total CSS width and placement across fitted display sizes", () => {
@@ -832,14 +908,45 @@ describe("rgba mask fallback", () => {
     expect(paintedGrid(compositeMaskFrame(overlappingStrokedMasks)!)).toEqual([
       "4444cc22222c",
       "4444cc22222c",
-      "a0b1cc22222c",
-      "a0b1cc22222c",
+      "a0becc22222c",
+      "a0becc22222c",
       "addddddddddc",
       "ad33333333dc",
       ".d33333333d.",
       ".d33333333d.",
     ]);
   });
+
+  it.each(["polygon", "mask"] as const)(
+    "keeps the whole fill and outline of a %s under another one",
+    (geometry) => {
+      expect(
+        paintedGrid(compositeMaskFrame(overlappingBoxes(geometry))!, {
+          ".": [0, 0, 0, 0],
+          o: [0, 0, 255, 255],
+          r: [255, 0, 0, 64],
+          Y: [255, 255, 0, 255],
+          g: [0, 255, 0, 64],
+          // The lower box's fill and outline, seen through the upper box.
+          x: [109, 146, 0, 112],
+          O: [0, 64, 191, 255],
+        }),
+      ).toEqual([
+        "ooooooo.....",
+        "orrrrro.....",
+        "orrrrro.....",
+        "orrYYYYYYYY.",
+        "orrYxxOgggY.",
+        "orrYxxOgggY.",
+        "oooYOOOgggY.",
+        "...YggggggY.",
+        "...YggggggY.",
+        "...YggggggY.",
+        "...YYYYYYYY.",
+        "............",
+      ]);
+    },
+  );
 
   it("keeps the pixels a run that overruns the plane wraps onto", () => {
     // Six foreground pixels from offset 10 outlast the 4x3 plane, so the run

@@ -198,6 +198,7 @@ export {
   convertDetectionMaskToPolygon,
   convertDetectionPolygonToBox,
   convertDetectionPolygonToMask,
+  forEachRasterPolygonSpan,
   mergeDetectionMasks,
   mergeDetectionPolygonsByClass,
   polygonToRect,

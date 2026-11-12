@@ -1,4 +1,7 @@
-import { createPackedMaskCoverageEntries } from "./packed-mask-coverage";
+import {
+  createOverlapCoverageEntries,
+  createPackedMaskCoverageEntries,
+} from "./packed-mask-coverage";
 import {
   compositeMaskFrame,
   createIdMaskPlane,
@@ -178,17 +181,22 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
     const regionMaskCoverage = createRegionMaskCoverageFrame(
       message.job.instructions,
     );
-    const packedMaskCoverage = message.job.independentMasks
-      ? createPackedMaskCoverageEntries(message.job.instructions)
-      : undefined;
-    const coverageTransfers = [
-      ...getRegionMaskCoverageTransfers(regionMaskCoverage),
-      ...(packedMaskCoverage?.map((entry) => entry.data.buffer) ?? []),
-    ];
     const idMaskFrame = createIdMaskRasterFrame(
       message.job.instructions,
       message.job.maxRasterWidth,
     );
+    const packedMaskCoverage = message.job.independentMasks
+      ? createPackedMaskCoverageEntries(message.job.instructions)
+      : idMaskFrame
+        ? createOverlapCoverageEntries(
+            message.job.instructions,
+            idMaskFrame.overlappingDetectionIndices,
+          )
+        : undefined;
+    const coverageTransfers = [
+      ...getRegionMaskCoverageTransfers(regionMaskCoverage),
+      ...(packedMaskCoverage?.map((entry) => entry.data.buffer) ?? []),
+    ];
 
     if (idMaskFrame) {
       const screenStrokes = createMaskScreenStrokes(
@@ -196,6 +204,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
         idMaskFrame.width,
         idMaskFrame.height,
         idMaskFrame.data,
+        idMaskFrame.overlappingDetectionIndices,
       );
       const strokeTransfers =
         screenStrokes?.flatMap(({ paths }) =>

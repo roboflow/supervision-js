@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { encodeBinaryMask } from "supervision-js-core";
+import { encodeBinaryMask, rasterizePolygonToMask } from "supervision-js-core";
 import {
   createPackedMaskCoverage,
+  createPackedPolygonCoverage,
   readPackedMaskCoverage,
 } from "./packed-mask-coverage";
 
@@ -35,6 +36,42 @@ describe("independent packed mask coverage", () => {
               x < width &&
               y < height &&
               Boolean(pixels[y * width + x]),
+          );
+        }
+      }
+    },
+  );
+
+  it.each([
+    [
+      { x: 4, y: 3 },
+      { x: 30, y: 3 },
+      { x: 30, y: 19 },
+      { x: 4, y: 19 },
+    ],
+    [
+      { x: -6.25, y: 2.75 },
+      { x: 20.5, y: -3 },
+      { x: 41.75, y: 17.25 },
+      { x: 9.5, y: 23.5 },
+    ],
+  ])(
+    "covers exactly the pixels the id raster cooks for polygon %#",
+    (...points) => {
+      const polygon = { height: 22, points, width: 37 };
+      const pixels = rasterizePolygonToMask(points, polygon);
+      const coverage = createPackedPolygonCoverage(polygon, 2)!;
+
+      expect(coverage.detectionIndex).toBe(2);
+      expect(coverage.textureWidth % 4).toBe(0);
+      for (let y = -1; y <= polygon.height; y += 1) {
+        for (let x = -1; x <= polygon.width; x += 1) {
+          expect(readPackedMaskCoverage(coverage, x, y)).toBe(
+            x >= 0 &&
+              y >= 0 &&
+              x < polygon.width &&
+              y < polygon.height &&
+              pixels[y * polygon.width + x] === 1,
           );
         }
       }

@@ -318,11 +318,115 @@ describe("mask order through the media renderer", () => {
   });
 });
 
+describe("overlapping detections in the default mask order", () => {
+  it("draws every overlapping box and mask whole from its own coverage", async () => {
+    resetMocks();
+    const names = ["car", "door", "sign", "person", "bag"];
+    const colorOf = (detection: { id?: unknown }) =>
+      (names.indexOf(String(detection.id)) + 1) * 0x110000;
+    const box = (left: number, top: number, right: number, bottom: number) => ({
+      points: [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ],
+    });
+    const square = (left: number, top: number) =>
+      encodeBinaryMask(
+        Uint8Array.from({ length: 64 * 64 }, (_, offset) => {
+          const x = offset % 64;
+          const y = Math.floor(offset / 64);
+          return Number(x >= left && x < left + 16 && y >= top && y < top + 16);
+        }),
+        64,
+        64,
+      );
+    const renderer = await createRenderer(false, false, {
+      source: createStaticImageMediaSource({
+        width: 64,
+        height: 64,
+        draw() {},
+      }),
+      src: undefined,
+      labelStyle: null,
+      polygonStyle: new BasePolygonStyle({
+        fill: (detection) => ({ alpha: 0.08, color: colorOf(detection) }),
+        stroke: (detection) => ({
+          alpha: 1,
+          color: colorOf(detection),
+          width: 2,
+        }),
+      }),
+      maskStyle: {
+        resolve: (detection) =>
+          detection.mask
+            ? {
+                mask: detection.mask,
+                alpha: 0.08,
+                color: colorOf(detection),
+                stroke: { alpha: 1, color: colorOf(detection), width: 2 },
+              }
+            : undefined,
+      } satisfies MaskStyle,
+      detectionFrames: [
+        {
+          mediaTime: 0,
+          detections: [
+            { id: "car", polygon: box(0, 0, 24, 24) },
+            { id: "door", polygon: box(16, 16, 40, 40) },
+            { id: "sign", polygon: box(48, 0, 64, 8) },
+            { id: "person", mask: square(0, 40) },
+            { id: "bag", mask: square(8, 48) },
+          ],
+        },
+      ],
+      renderPreparation: { mode: RenderPreparationMode.MainThread },
+    });
+    try {
+      // Units hold one detection in slot 1; the polygon raster keeps only the
+      // sign in its own slot, and the mask raster is left with nothing to draw.
+      await vi.waitFor(() =>
+        expect(paintedSlots(names).sort()).toEqual([
+          "bag@1 outline 2",
+          "car@1 outline 2",
+          "door@1 outline 2",
+          "person@1 outline 2",
+          "sign@3 outline 2",
+        ]),
+      );
+      const order = visiblePaints();
+      expect(order.indexOf(0x110000)).toBeLessThan(order.indexOf(0x220000));
+      expect(order.indexOf(0x440000)).toBeLessThan(order.indexOf(0x550000));
+    } finally {
+      renderer.destroy();
+    }
+  });
+});
+
 type Paint = {
   uFillPalette: Float32Array;
   uStrokePalette: Float32Array;
   uStrokePixelRatio: number;
+  uStrokeWidths: Float32Array;
 };
+function paintedSlots(names: readonly string[]) {
+  return pixiMock.meshInstances.flatMap((mesh) => {
+    const display = mesh as Display;
+    const paint = display.shader?.resources.maskUniforms?.uniforms;
+    if (!display.visible || !paint) return [];
+    const slots: string[] = [];
+    for (let id = 1; id * 4 < paint.uFillPalette.length; id += 1) {
+      if (!paint.uFillPalette[id * 4 + 3]) continue;
+      const name = names[Math.round(paint.uFillPalette[id * 4]! * 15) - 1];
+      const outline = paint.uStrokePalette[id * 4 + 3]
+        ? paint.uStrokeWidths[id]
+        : 0;
+      slots.push(`${name}@${id} outline ${outline}`);
+    }
+    return slots;
+  });
+}
 type Display = {
   children?: Display[];
   sortableChildren?: boolean;

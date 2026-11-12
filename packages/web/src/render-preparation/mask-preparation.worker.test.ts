@@ -44,9 +44,13 @@ afterEach(() => {
 });
 
 describe("render-preparation worker", () => {
-  it.each([0, 300])(
-    "transfers independent overlapping coverage beyond palette IDs (%i)",
-    async (index) => {
+  it.each([
+    [0, true],
+    [300, true],
+    [0, false],
+  ])(
+    "transfers independent overlapping coverage at %i (detection order %s)",
+    async (index, independentMasks) => {
       vi.stubGlobal(
         "ImageData",
         class {
@@ -64,7 +68,7 @@ describe("render-preparation worker", () => {
         requestId: 1,
         job: {
           key: "independent",
-          independentMasks: true,
+          independentMasks,
           instructions: [index, index + 1].map((detectionIndex) => ({
             alpha: 0.5,
             color: 0xff0000,

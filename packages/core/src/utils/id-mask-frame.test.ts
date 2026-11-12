@@ -221,6 +221,59 @@ describe("id mask frame artifacts", () => {
     expect(frame!.data.length).toBe(48);
   });
 
+  it("names the detections that share texels and leaves touching ones out", () => {
+    const box = (
+      detectionIndex: number,
+      left: number,
+      top: number,
+      right: number,
+      bottom: number,
+    ): IdPolygonInstruction => ({
+      alpha: 0.08,
+      color: 0xff0000,
+      detectionIndex,
+      polygon: {
+        height: 12,
+        width: 16,
+        points: [
+          { x: left, y: top },
+          { x: right, y: top },
+          { x: right, y: bottom },
+          { x: left, y: bottom },
+        ],
+      },
+      stroke: { alpha: 1, color: 0xff0000, width: 2 },
+    });
+    const frame = createIdMaskFrame([
+      // A car and a door box over its corner.
+      box(0, 0, 0, 6, 6),
+      box(1, 4, 4, 10, 10),
+      // Sharing an edge with the door, but not a texel.
+      box(2, 10, 4, 12, 10),
+      maskInstruction(3, 16, 12, (x, y) => x >= 12 && y < 6),
+      maskInstruction(4, 16, 12, (x, y) => x >= 14 && y >= 4 && y < 8),
+    ])!;
+
+    expect(frame.overlappingDetectionIndices).toEqual([0, 1, 3, 4]);
+    expect(
+      createIdMaskFrame([box(0, 0, 0, 6, 6), box(2, 10, 4, 12, 10)])!
+        .overlappingDetectionIndices,
+    ).toBeUndefined();
+  });
+
+  it("names a detection a narrower raster hands entirely to a later one", () => {
+    const frame = createIdMaskFrame(
+      [
+        maskInstruction(0, 16, 12, (x) => x === 0),
+        maskInstruction(1, 16, 12, (x) => x === 1),
+      ],
+      { maxWidth: 8 },
+    )!;
+
+    expect([...frame.data]).not.toContain(1);
+    expect(frame.overlappingDetectionIndices).toEqual([0, 1]);
+  });
+
   it.each([undefined, 4])(
     "uses integer mask dimensions throughout a raster capped at %s",
     (maxWidth) => {

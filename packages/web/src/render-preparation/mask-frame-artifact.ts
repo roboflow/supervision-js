@@ -61,6 +61,11 @@ export interface PreparedRgbaMaskFrame {
 }
 
 export interface PreparedIdMaskFrame {
+  /**
+   * Detections drawn from their own coverage instead of the raster: every mask
+   * when masks draw in detection order, otherwise each detection that overlaps
+   * another one, since the raster keeps a single detection per texel.
+   */
   readonly packedMaskCoverage?: readonly PreparedPackedMaskCoverage[];
   readonly screenStrokes?: readonly PreparedMaskScreenStroke[];
   readonly fillPalette: Float32Array<ArrayBuffer>;

@@ -2,8 +2,10 @@ import type { SerializableMaskInstruction } from "./mask-preparation-worker-prot
 import {
   computeDetectionMaskRect,
   decodeCompressedRleCounts,
+  forEachRasterPolygonSpan,
   MAX_ID_MASK_STROKE_WIDTH,
   type DetectionMask,
+  type Point,
 } from "supervision-js-core";
 
 /** Independent coverage; eight horizontal pixels per byte, least-significant bit first. */
@@ -27,17 +29,126 @@ export function createPackedMaskCoverage(
 ): PreparedPackedMaskCoverage | undefined {
   const bounds = computeDetectionMaskRect(mask);
   if (!bounds) return undefined;
-  // The existing outline shader scans at most this far outside foreground.
-  const padding = MAX_ID_MASK_STROKE_WIDTH + 1;
-  const x = Math.max(0, bounds.x - bounds.width / 2 - padding);
-  const y = Math.max(0, bounds.y - bounds.height / 2 - padding);
-  const width = Math.min(mask.width, bounds.x + bounds.width / 2 + padding) - x;
-  const height =
-    Math.min(mask.height, bounds.y + bounds.height / 2 + padding) - y;
-  const textureWidth = Math.ceil(Math.ceil(width / 8) / 4) * 4;
-  const data = new Uint8Array(new ArrayBuffer(textureWidth * height));
+  const { coverage, fillRect } = allocatePackedCoverage(
+    {
+      bottom: bounds.y + bounds.height / 2,
+      left: bounds.x - bounds.width / 2,
+      right: bounds.x + bounds.width / 2,
+      top: bounds.y - bounds.height / 2,
+    },
+    mask,
+    detectionIndex,
+  );
   const counts = decodeCompressedRleCounts(mask.counts);
   let offset = 0;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const start = offset;
+    offset = Math.min(mask.width * mask.height, offset + counts[index]!);
+    if (index % 2 === 0 || start >= offset) continue;
+    let column = Math.floor(start / mask.height);
+    const row = start % mask.height;
+    const firstEnd = Math.min(offset, (column + 1) * mask.height);
+    fillRect(column, column + 1, row, row + firstEnd - start);
+    column += 1;
+    const fullColumns = Math.floor((offset - firstEnd) / mask.height);
+    fillRect(column, column + fullColumns, 0, mask.height);
+    column += fullColumns;
+    fillRect(column, column + 1, 0, (offset - firstEnd) % mask.height);
+  }
+
+  return coverage;
+}
+
+/** Fills the same spans the id raster cooks for this polygon. */
+export function createPackedPolygonCoverage(
+  polygon: {
+    readonly height: number;
+    readonly points: readonly Point[];
+    readonly width: number;
+  },
+  detectionIndex: number,
+): PreparedPackedMaskCoverage | undefined {
+  const spans: number[] = [];
+  let left = polygon.width;
+  let right = 0;
+  let top = polygon.height;
+  let bottom = 0;
+
+  forEachRasterPolygonSpan(
+    polygon.points,
+    polygon,
+    (y, spanLeft, spanRight) => {
+      if (spanLeft >= spanRight) return;
+      spans.push(y, spanLeft, spanRight);
+      left = Math.min(left, spanLeft);
+      right = Math.max(right, spanRight);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y + 1);
+    },
+  );
+
+  if (spans.length === 0) return undefined;
+
+  const { coverage, fillRect } = allocatePackedCoverage(
+    { bottom, left, right, top },
+    polygon,
+    detectionIndex,
+  );
+
+  for (let index = 0; index < spans.length; index += 3) {
+    fillRect(
+      spans[index + 1]!,
+      spans[index + 2]!,
+      spans[index]!,
+      spans[index]! + 1,
+    );
+  }
+
+  return coverage;
+}
+
+/** Independent coverage for one visible mask or polygon instruction. */
+export function createPackedInstructionCoverage(
+  instruction: SerializableMaskInstruction,
+): PreparedPackedMaskCoverage | undefined {
+  return instruction.mask
+    ? createPackedMaskCoverage(instruction.mask, instruction.detectionIndex)
+    : createPackedPolygonCoverage(
+        instruction.polygon,
+        instruction.detectionIndex,
+      );
+}
+
+function allocatePackedCoverage(
+  bounds: {
+    readonly bottom: number;
+    readonly left: number;
+    readonly right: number;
+    readonly top: number;
+  },
+  source: { readonly height: number; readonly width: number },
+  detectionIndex: number,
+) {
+  // The existing outline shader scans at most this far outside foreground.
+  const padding = MAX_ID_MASK_STROKE_WIDTH + 1;
+  const x = Math.max(0, bounds.left - padding);
+  const y = Math.max(0, bounds.top - padding);
+  const width = Math.min(source.width, bounds.right + padding) - x;
+  const height = Math.min(source.height, bounds.bottom + padding) - y;
+  const textureWidth = Math.ceil(Math.ceil(width / 8) / 4) * 4;
+  const data = new Uint8Array(new ArrayBuffer(textureWidth * height));
+  const coverage: PreparedPackedMaskCoverage = {
+    data,
+    detectionIndex,
+    height,
+    width,
+    textureWidth,
+    sourceHeight: source.height,
+    sourceWidth: source.width,
+    x,
+    y,
+  };
 
   function fillRect(left: number, right: number, top: number, bottom: number) {
     if (left >= right || top >= bottom) return;
@@ -56,32 +167,7 @@ export function createPackedMaskCoverage(
     }
   }
 
-  for (let index = 0; index < counts.length; index += 1) {
-    const start = offset;
-    offset = Math.min(mask.width * mask.height, offset + counts[index]!);
-    if (index % 2 === 0 || start >= offset) continue;
-    let column = Math.floor(start / mask.height);
-    const row = start % mask.height;
-    const firstEnd = Math.min(offset, (column + 1) * mask.height);
-    fillRect(column, column + 1, row, row + firstEnd - start);
-    column += 1;
-    const fullColumns = Math.floor((offset - firstEnd) / mask.height);
-    fillRect(column, column + fullColumns, 0, mask.height);
-    column += fullColumns;
-    fillRect(column, column + 1, 0, (offset - firstEnd) % mask.height);
-  }
-
-  return {
-    data,
-    detectionIndex,
-    height,
-    width,
-    textureWidth,
-    sourceHeight: mask.height,
-    sourceWidth: mask.width,
-    x,
-    y,
-  };
+  return { coverage, fillRect };
 }
 
 /** Reads mask-space coverage, including holes and masks hidden by later detections. */
@@ -115,6 +201,27 @@ export function createPackedMaskCoverageEntries(
       instruction.mask,
       instruction.detectionIndex,
     );
+    return entry ? [entry] : [];
+  });
+}
+
+/**
+ * Independent coverage for the detections a dense id raster cannot draw whole
+ * because another detection overlaps them, in instruction (draw) order.
+ */
+export function createOverlapCoverageEntries(
+  instructions: readonly SerializableMaskInstruction[],
+  overlappingDetectionIndices: readonly number[] | undefined,
+): readonly PreparedPackedMaskCoverage[] | undefined {
+  if (!overlappingDetectionIndices?.length) return undefined;
+  const overlapping = new Set(overlappingDetectionIndices);
+  return instructions.flatMap((instruction) => {
+    if (
+      instruction.visible === false ||
+      !overlapping.has(instruction.detectionIndex)
+    )
+      return [];
+    const entry = createPackedInstructionCoverage(instruction);
     return entry ? [entry] : [];
   });
 }

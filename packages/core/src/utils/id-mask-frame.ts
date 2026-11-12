@@ -37,6 +37,12 @@ export interface IdMaskFrame {
   readonly height: number;
   /** Largest outside stroke extent in CSS pixels. */
   readonly maxStrokeWidth: number;
+  /**
+   * Detections, ascending, that share a texel with another detection. The
+   * raster keeps only the later one there, so these cannot draw their whole
+   * fill and outline from it. Absent when no detections overlap.
+   */
+  readonly overlappingDetectionIndices?: readonly number[];
   /** Original mask-plane width before optional raster reduction. */
   readonly sourceWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
@@ -101,6 +107,7 @@ export function createIdMaskFrame(
   const strokeAlignments = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
   );
+  const overlapping = new Uint8Array(MAX_ID_MASK_PALETTE_ENTRIES);
   let hasStroke = false;
   let maxStrokeWidth = 0;
 
@@ -146,11 +153,32 @@ export function createIdMaskFrame(
         instruction.polygon,
         detectionMaskId,
         scaledAxes,
+        overlapping,
       );
     } else if (scaledAxes) {
-      writeScaledMaskRuns(data, scaledAxes, instruction.mask, detectionMaskId);
+      writeScaledMaskRuns(
+        data,
+        scaledAxes,
+        instruction.mask,
+        detectionMaskId,
+        overlapping,
+      );
     } else {
-      writeMaskRuns(data, width, instruction.mask, detectionMaskId);
+      writeMaskRuns(
+        data,
+        width,
+        instruction.mask,
+        detectionMaskId,
+        overlapping,
+      );
+    }
+  }
+
+  const overlappingDetectionIndices: number[] = [];
+
+  for (let id = 1; id < overlapping.length; id += 1) {
+    if (overlapping[id]) {
+      overlappingDetectionIndices.push(id - 1);
     }
   }
 
@@ -160,6 +188,9 @@ export function createIdMaskFrame(
     hasStroke,
     height,
     maxStrokeWidth,
+    ...(overlappingDetectionIndices.length > 0
+      ? { overlappingDetectionIndices }
+      : {}),
     sourceWidth: maskWidth,
     strokePalette,
     strokeAlignments,
@@ -174,14 +205,31 @@ function writePolygonSpans(
   polygon: IdPolygonInstruction["polygon"],
   detectionMaskId: number,
   axes: ScaledMaskAxes | undefined,
+  overlapping: Uint8Array,
 ) {
   forEachRasterPolygonSpan(polygon.points, polygon, (y, left, right) => {
     const row = axes ? axes.rows[y]! : y * frameWidth;
     const first = axes ? axes.columns[left]! : left;
     const last = axes ? axes.columns[right - 1]! + 1 : right;
 
+    for (let offset = row + first; offset < row + last; offset += 1) {
+      markOverlap(overlapping, data[offset]!, detectionMaskId);
+    }
+
     data.fill(detectionMaskId, row + first, row + last);
   });
+}
+
+/** Records both detections when one writes over a texel the other holds. */
+function markOverlap(
+  overlapping: Uint8Array,
+  previousId: number,
+  detectionMaskId: number,
+) {
+  if (previousId !== 0 && previousId !== detectionMaskId) {
+    overlapping[previousId] = 1;
+    overlapping[detectionMaskId] = 1;
+  }
 }
 
 /**
@@ -193,6 +241,7 @@ function writeMaskRuns(
   frameWidth: number,
   mask: IdMaskInstruction["mask"],
   detectionMaskId: number,
+  overlapping: Uint8Array,
 ) {
   const counts = decodeCompressedRleCounts(mask.counts);
   const maskWidth = Math.floor(mask.width);
@@ -216,6 +265,7 @@ function writeMaskRuns(
         break;
       }
 
+      markOverlap(overlapping, data[frameOffset]!, detectionMaskId);
       data[frameOffset] = detectionMaskId;
       y += 1;
       frameOffset += frameWidth;
@@ -241,6 +291,7 @@ function writeScaledMaskRuns(
   axes: ScaledMaskAxes,
   mask: IdMaskInstruction["mask"],
   detectionMaskId: number,
+  overlapping: Uint8Array,
 ) {
   const counts = decodeCompressedRleCounts(mask.counts);
   const maskWidth = Math.floor(mask.width);
@@ -278,6 +329,7 @@ function writeScaledMaskRuns(
       const last = axes.rows[y + span - 1];
 
       for (let offset = first; offset <= last; offset += stride) {
+        markOverlap(overlapping, data[offset + column]!, detectionMaskId);
         data[offset + column] = detectionMaskId;
       }
 

@@ -1,4 +1,7 @@
-import { createPackedMaskCoverageEntries } from "./packed-mask-coverage";
+import {
+  createOverlapCoverageEntries,
+  createPackedMaskCoverageEntries,
+} from "./packed-mask-coverage";
 import {
   compositeMaskFrame,
   createIdMaskPlane,
@@ -317,11 +320,15 @@ function createPreparedIdMaskFrame(
       frame.width,
       frame.height,
       frame.data,
+      frame.overlappingDetectionIndices,
     ),
     regionMaskCoverage,
     packedMaskCoverage: job.independentMasks
       ? createPackedMaskCoverageEntries(job.instructions)
-      : undefined,
+      : createOverlapCoverageEntries(
+          job.instructions,
+          frame.overlappingDetectionIndices,
+        ),
     sourceWidth: frame.sourceWidth,
     strokePalette: frame.strokePalette,
     strokeAlignments: frame.strokeAlignments,
