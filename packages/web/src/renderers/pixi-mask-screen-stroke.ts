@@ -44,6 +44,7 @@ export function createPixiMaskScreenStrokeRenderer(options: {
         readonly detectionIndex: number;
         readonly stroke?: MaskStrokeStyle;
       }[],
+      filter?: (detectionIndex: number) => boolean,
     ) {
       let strokes = frame.screenStrokes ?? [];
       if (overrides) {
@@ -77,6 +78,10 @@ export function createPixiMaskScreenStrokeRenderer(options: {
           },
         );
       }
+      if (filter)
+        strokes = strokes.filter(({ detectionIndex }) =>
+          filter(detectionIndex),
+        );
       if (strokes.length === 0) {
         hide();
         return;

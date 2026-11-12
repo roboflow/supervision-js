@@ -69,6 +69,8 @@ let version = 0;
 let count = 2;
 let identityCase = false;
 let ordered = true;
+let masksOnly = false;
+let preparationMode = RenderPreparationMode.MainThread;
 let animatedMasks = false;
 let fillAlpha: number | undefined;
 let strokeAlpha = 1;
@@ -98,6 +100,11 @@ changedGreenPixels[125 * 256 + 125] = 1;
 const changedGreen = encodeBinaryMask(changedGreenPixels, 256, 256);
 function detections(frameIndex = 0): Detection[] {
   const scale = mediaSize / 256;
+  if (masksOnly)
+    return [
+      { id: "red", mask: red },
+      { id: "green", mask: green },
+    ];
   if (identityCase) {
     const rect = (x: number, y: number) => ({ x, y, width: 20, height: 20 });
     const polygon = (x: number, y: number) => ({
@@ -253,7 +260,7 @@ async function open(size: 64 | 256) {
         },
       },
       renderPreparation: {
-        mode: RenderPreparationMode.MainThread,
+        mode: preparationMode,
         maskFrame: { prefetchFrameCount: 0 },
         onDiagnostics: (d) => {
           masksPrepared = d.artifacts.some(
@@ -653,6 +660,66 @@ async function run() {
       stage.querySelectorAll("canvas").length === 0,
     resources: resources(),
   });
+  // A lower mask's outline must be composited before the upper mask's fill.
+  masksOnly = true;
+  onlyRed = false;
+  opacity = 1;
+  fillAlpha = 0.5;
+  strokeAlpha = 1;
+  alignment = StrokeAlignment.Outside;
+  for (const mode of [
+    RenderPreparationMode.MainThread,
+    RenderPreparationMode.Worker,
+  ]) {
+    preparationMode = mode;
+    for (const unit of ["screen", "mask"] as const) {
+      strokeUnit = unit;
+      strokeWidth = 2;
+      const pictures: number[][] = [];
+      for (const useOrder of [true, false]) {
+        ordered = useOrder;
+        masksPrepared = false;
+        await open(256);
+        await session.refresh();
+        const deadline = performance.now() + 10_000;
+        while (!(
+          session.renderer.getPreparedAnnotationWindow()?.playheadPrepared ??
+          masksPrepared
+        )) {
+          if (performance.now() > deadline)
+            throw new Error("overlap preparation timed out");
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+        }
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        const pixels = scene.deref()!.renderer.extract.pixels({
+          target: scene.deref()!.stage,
+          frame: new Rectangle(0, 0, 256, 256),
+          resolution: 1,
+          antialias: false,
+        }).pixels;
+        const samples: number[] = [];
+        for (const x of [166, 167, 168, 169, 170, 171, 172]) {
+          const offset = (110 * 256 + x) * 4;
+          samples.push(...pixels.slice(offset, offset + 3));
+        }
+        pictures.push(samples);
+        session.destroy();
+      }
+      const [reference, dense] = pictures;
+      results.push({
+        name: `overlapping-${unit}-stroke-${mode}`,
+        passed: reference!.every(
+          (value, index) => Math.abs(value - dense![index]!) <= 2,
+        ),
+        reference,
+        dense,
+      });
+    }
+  }
   const passed = results.every((r) => {
     const result = r as {
       passed?: boolean;

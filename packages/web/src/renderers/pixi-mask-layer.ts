@@ -3,6 +3,7 @@ import {
   PACKED_MASK_UNIT_BACKING_BYTES,
 } from "./pixi-ordered-mask-units";
 import { pickPackedMaskAtPoint } from "./packed-mask-picker";
+import { detectionRenderOrder } from "./detection-render-order";
 import {
   clearPaletteDetections,
   createPaletteSlotPaint,
@@ -280,6 +281,11 @@ export function createPixiMaskLayer(options: {
    * one overlaps them, each from its own coverage, above the raster.
    */
   let overlapUnits: ReturnType<typeof createPixiOrderedMaskUnits> | undefined;
+  let overlapContainer: PixiContainer | undefined;
+  const overlapStrokes = new Map<
+    number,
+    ReturnType<typeof createPixiMaskScreenStrokeRenderer>
+  >();
   const rasterPaintsWithoutOverlaps = new WeakMap<
     PreparedIdMaskFrame,
     PixiIdMaskPaint
@@ -335,6 +341,8 @@ export function createPixiMaskLayer(options: {
     onMaskFramesCleared() {
       orderedUnits?.clear();
       overlapUnits?.clear();
+      for (const stroke of overlapStrokes.values()) stroke.destroy();
+      overlapStrokes.clear();
       destroyTextures();
       hideSprite();
     },
@@ -404,7 +412,7 @@ export function createPixiMaskLayer(options: {
         options.Shader &&
         options.UniformGroup
       ) {
-        const overlapContainer = new options.Container();
+        overlapContainer = new options.Container();
         maskContainer.addChild(overlapContainer);
         overlapUnits = createPixiOrderedMaskUnits({
           ...options,
@@ -447,7 +455,11 @@ export function createPixiMaskLayer(options: {
         if (orderedUnits) {
           activeViewportScale = viewportScale;
           renderOrderedMasks(frame, viewportScale);
-        } else screenStrokeRenderer?.render(frame, viewportScale);
+        } else {
+          activeViewportScale = viewportScale;
+          renderScreenStrokes(frame, viewportScale);
+          renderOverlapUnits();
+        }
       }
     },
 
@@ -643,6 +655,8 @@ export function createPixiMaskLayer(options: {
       destroyTextures();
       orderedUnits?.clear();
       overlapUnits?.clear();
+      for (const stroke of overlapStrokes.values()) stroke.destroy();
+      overlapStrokes.clear();
       idMaskRenderer?.destroy();
       screenStrokeRenderer?.destroy();
       haloRenderer?.destroy();
@@ -690,7 +704,7 @@ export function createPixiMaskLayer(options: {
       screenStrokeRenderer.display.alpha = maskOpacity;
       maskContainer?.addChild(screenStrokeRenderer.display);
     }
-    screenStrokeRenderer?.render(maskFrame, viewportScale);
+    renderScreenStrokes(maskFrame, viewportScale);
 
     if (maskFrame.kind === PreparedMaskFrameKind.IdMask && idMaskRenderer) {
       showIdMaskFrame(maskFrame);
@@ -699,6 +713,7 @@ export function createPixiMaskLayer(options: {
     }
 
     overlapUnits?.hide();
+    for (const stroke of overlapStrokes.values()) stroke.hide();
     showRgbaMaskFrame(maskFrame);
   }
 
@@ -717,6 +732,65 @@ export function createPixiMaskLayer(options: {
       rasterDisplay
         ? resolveDisplayPixelRatio(rasterDisplay) * rasterResolutionScale
         : 1,
+    );
+    const indices = new Set(
+      (frame.packedMaskCoverage ?? []).map(
+        ({ detectionIndex }) => detectionIndex,
+      ),
+    );
+    const order = detectionRenderOrder(activeDetectionFrame);
+    for (const [index, renderer] of overlapStrokes) {
+      if (
+        !indices.has(index) ||
+        !frame.screenStrokes?.some((stroke) => stroke.detectionIndex === index)
+      ) {
+        renderer.destroy();
+        overlapStrokes.delete(index);
+      }
+    }
+    if (options.Graphics && overlapContainer) {
+      for (const { detectionIndex } of frame.screenStrokes ?? []) {
+        if (!indices.has(detectionIndex)) continue;
+        let renderer = overlapStrokes.get(detectionIndex);
+        if (!renderer) {
+          renderer = createPixiMaskScreenStrokeRenderer({
+            Graphics: options.Graphics,
+            mediaWidth,
+            mediaHeight,
+          });
+          overlapContainer.addChild(renderer.display);
+          overlapStrokes.set(detectionIndex, renderer);
+        }
+        renderer.display.zIndex =
+          (order[detectionIndex] ?? detectionIndex) * 2 + 1;
+        renderer.display.alpha = maskOpacity;
+        renderer.render(
+          frame,
+          activeViewportScale,
+          undefined,
+          (index) => index === detectionIndex,
+        );
+      }
+    }
+  }
+
+  function renderScreenStrokes(
+    frame: PreparedMaskFrame,
+    viewportScale: number,
+  ) {
+    const indices =
+      frame.kind === PreparedMaskFrameKind.IdMask && overlapUnits
+        ? new Set(
+            (frame.packedMaskCoverage ?? []).map(
+              ({ detectionIndex }) => detectionIndex,
+            ),
+          )
+        : new Set<number>();
+    screenStrokeRenderer?.render(
+      frame,
+      viewportScale,
+      undefined,
+      (index) => !indices.has(index),
     );
   }
 
@@ -962,6 +1036,7 @@ export function createPixiMaskLayer(options: {
     screenStrokeRenderer?.hide();
     orderedUnits?.hide();
     overlapUnits?.hide();
+    for (const stroke of overlapStrokes.values()) stroke.hide();
   }
 
   /**
