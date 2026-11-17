@@ -396,6 +396,12 @@ vi.mock("pixi.js", () => {
     visible = true;
     x = 0;
     y = 0;
+    position = {
+      set: (x: number, y: number) => {
+        this.x = x;
+        this.y = y;
+      },
+    };
 
     constructor() {
       pixiMock.graphicsInstances.push(this);

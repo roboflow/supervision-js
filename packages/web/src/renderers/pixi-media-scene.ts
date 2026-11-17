@@ -838,6 +838,9 @@ export async function createPixiMediaScene(
     options.editingEngine?.subscribeFastTranslate((id, dx, dy) => {
       fastTranslatedDetectionId = id;
       maskLayer?.translateDetection(id, dx, dy);
+      if (options.editingEngine?.getState().preview?.mask) {
+        boxLayer.translateDetection(id, dx, dy);
+      }
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
       heatmapLayer?.translateDetection(id, dx, dy);
@@ -852,14 +855,15 @@ export async function createPixiMediaScene(
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
   };
   const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
-    // The brush paints into the detection's own mask and the overlay previews
-    // no mask, so hiding it would blank the stroke as it is drawn.
+    // Masks keep their source displays: the brush paints their pixels and
+    // dragging translates them. The overlay does not redraw their geometry.
     const nextEditingId =
       (state.kind === AnnotationGestureStateKind.Moving ||
         state.kind === AnnotationGestureStateKind.Resizing ||
         state.kind === AnnotationGestureStateKind.Rotating) &&
       state.activeDetectionId !== null &&
-      state.preview
+      state.preview &&
+      !state.preview.mask
         ? state.activeDetectionId
         : null;
 
@@ -879,6 +883,7 @@ export async function createPixiMediaScene(
       const id = fastTranslatedDetectionId;
       fastTranslatedDetectionId = null;
       maskLayer?.translateDetection(id, 0, 0);
+      boxLayer.translateDetection(id, 0, 0);
       regionLayer.translateDetection(id, 0, 0);
       labelLayer?.translateDetection(id, 0, 0);
       heatmapLayer?.translateDetection(id, 0, 0);

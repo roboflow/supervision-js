@@ -68,7 +68,11 @@ describe("mask order through the media renderer", () => {
     const pixels = new Uint8Array(64 * 64);
     pixels[10 * 64 + 10] = 1;
     const movingMask = encodeBinaryMask(pixels, 64, 64);
-    const detection = { id: "red", mask: movingMask };
+    const detection = {
+      id: "red",
+      mask: movingMask,
+      rect: { x: 10.5, y: 10.5, width: 1, height: 1 },
+    };
     const frame = {
       mediaTime: 0,
       detections: [detection, { id: "green", mask: movingMask }],
@@ -78,6 +82,10 @@ describe("mask order through the media renderer", () => {
       maskOrder: "detection",
       labelStyle: null,
       maskStyle: style(1),
+      boxStyle: new BaseBoxStyle({
+        fill: { color: 0x123456, alpha: 1 },
+        shouldRender: (entry) => entry.id === "red",
+      }),
       detectionFrames: [frame],
       renderPreparation: { mode: RenderPreparationMode.MainThread },
     });
@@ -92,6 +100,10 @@ describe("mask order through the media renderer", () => {
       const initial = meshes.map(
         (mesh) => mesh.position.set.mock.lastCall as [number, number],
       );
+      const box = pixiMock.graphicsInstances.find((graphics) =>
+        graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+      )!;
+      expect(box.visible).toBe(true);
       const point = { x: 10, y: 10 };
       engine.pointerDown(
         { point, timestamp: 0 },
@@ -110,7 +122,11 @@ describe("mask order through the media renderer", () => {
         initial[0]![1] + 15,
       );
       expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(...initial[1]!);
+      expect(box.visible).toBe(true);
+      expect([box.x, box.y]).toEqual([10, 15]);
       engine.cancel();
+      expect(box.visible).toBe(true);
+      expect([box.x, box.y]).toEqual([0, 0]);
       expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(...initial[0]!);
     } finally {
       renderer.destroy();
