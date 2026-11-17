@@ -92,11 +92,15 @@ describe("mask order through the media renderer", () => {
     }
   });
 
-  it.each(["detection", undefined] as const)(
-    "translates only the dragged mask display and restores it on cancellation (%s)",
-    async (maskOrder) => {
+  it.each([
+    ["detection", "cancel"],
+    [undefined, "cancel"],
+    ["detection", "commit"],
+    [undefined, "commit"],
+  ] as const)(
+    "moves attached geometry and resets translation (%s, %s)",
+    async (maskOrder, finish) => {
       resetMocks();
-      const engine = createAnnotationEditingEngine();
       const pixels = new Uint8Array(64 * 64);
       pixels[10 * 64 + 10] = 1;
       const movingMask = encodeBinaryMask(pixels, 64, 64);
@@ -104,11 +108,25 @@ describe("mask order through the media renderer", () => {
         id: "red",
         mask: movingMask,
         rect: { x: 10.5, y: 10.5, width: 1, height: 1 },
+        polygon: {
+          points: [
+            { x: 10, y: 10 },
+            { x: 20, y: 10 },
+            { x: 10, y: 20 },
+          ],
+        },
       };
-      const frame = {
+      let frame: DetectionFrame = {
         mediaTime: 0,
         detections: [detection, { id: "green", mask: movingMask }],
       };
+      let version = 0;
+      const engine = createAnnotationEditingEngine({
+        onCommit: (moved) => {
+          frame = { ...frame, detections: [moved, frame.detections[1]!] };
+          version++;
+        },
+      });
       const renderer = await createRenderer(false, false, {
         editingEngine: engine,
         maskOrder,
@@ -118,7 +136,13 @@ describe("mask order through the media renderer", () => {
           fill: { color: 0x123456, alpha: 1 },
           shouldRender: (entry) => entry.id === "red",
         }),
-        detectionFrames: [frame],
+        polygonStyle: new BasePolygonStyle({
+          fill: { color: 0xabcdef, alpha: 1 },
+        }),
+        detectionSource: {
+          getVersion: () => version,
+          loadFrames: async () => [frame],
+        },
         renderPreparation: { mode: RenderPreparationMode.MainThread },
       });
       try {
@@ -137,6 +161,10 @@ describe("mask order through the media renderer", () => {
         const box = pixiMock.graphicsInstances.find((graphics) =>
           graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
         )!;
+        const polygon = pixiMock.graphicsInstances.find((graphics) =>
+          graphics.fill.mock.calls.some(([fill]) => fill.color === 0xabcdef),
+        )!;
+        expect(polygon.visible).toBe(true);
         expect(box.visible).toBe(true);
         const point = { x: 10, y: 10 };
         engine.pointerDown(
@@ -160,12 +188,32 @@ describe("mask order through the media renderer", () => {
         );
         expect(box.visible).toBe(true);
         expect([box.x, box.y]).toEqual([10, 15]);
-        engine.cancel();
-        expect(box.visible).toBe(true);
-        expect([box.x, box.y]).toEqual([0, 0]);
-        expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
-          ...initial[0]!,
-        );
+        expect(polygon.visible).toBe(true);
+        expect([polygon.x, polygon.y]).toEqual([10, 15]);
+        if (finish === "cancel") {
+          engine.cancel();
+          expect(box.visible).toBe(true);
+          expect([box.x, box.y]).toEqual([0, 0]);
+          expect([polygon.x, polygon.y]).toEqual([0, 0]);
+          expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+            ...initial[0]!,
+          );
+        } else {
+          engine.pointerUp({ point: { x: 20, y: 25 }, timestamp: 32 });
+          await renderer.refresh();
+          await vi.waitFor(() =>
+            expect(polygon.poly).toHaveBeenLastCalledWith(
+              [20, 25, 30, 25, 20, 35],
+              true,
+            ),
+          );
+          expect([polygon.x, polygon.y]).toEqual([0, 0]);
+          expect(frame.detections[0]!.polygon!.points).toEqual([
+            { x: 20, y: 25 },
+            { x: 30, y: 25 },
+            { x: 20, y: 35 },
+          ]);
+        }
       } finally {
         renderer.destroy();
       }

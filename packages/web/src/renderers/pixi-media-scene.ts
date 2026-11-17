@@ -843,6 +843,7 @@ export async function createPixiMediaScene(
       maskLayer?.translateDetection(id, dx, dy);
       if (options.editingEngine?.getState().preview?.mask) {
         boxLayer.translateDetection(id, dx, dy);
+        vectorLayer.translateDetection(id, dx, dy);
       }
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
@@ -887,6 +888,7 @@ export async function createPixiMediaScene(
       fastTranslatedDetectionId = null;
       maskLayer?.translateDetection(id, 0, 0);
       boxLayer.translateDetection(id, 0, 0);
+      vectorLayer.translateDetection(id, 0, 0);
       regionLayer.translateDetection(id, 0, 0);
       labelLayer?.translateDetection(id, 0, 0);
       heatmapLayer?.translateDetection(id, 0, 0);
