@@ -190,8 +190,25 @@ describe("mask order through the media renderer", () => {
         expect([box.x, box.y]).toEqual([10, 15]);
         expect(polygon.visible).toBe(true);
         expect([polygon.x, polygon.y]).toEqual([10, 15]);
+        for (const deltaY of [-100, 50]) {
+          renderer.zoomViewportFromWheel({ x: 32, y: 32 }, deltaY);
+          expect(engine.getState().kind).toBe("moving");
+          expect([box.x, box.y]).toEqual([10, 15]);
+          expect([polygon.x, polygon.y]).toEqual([10, 15]);
+          expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+            initial[0]![0] + 10,
+            initial[0]![1] + 15,
+          );
+        }
+        renderer.setViewportTransform({
+          scale: renderer.getViewportTransform().scale * 1.25,
+        });
+        await renderer.refresh();
+        expect([box.x, box.y]).toEqual([10, 15]);
+        expect([polygon.x, polygon.y]).toEqual([10, 15]);
         if (finish === "cancel") {
           engine.cancel();
+          renderer.zoomViewportFromWheel({ x: 32, y: 32 }, -100);
           expect(box.visible).toBe(true);
           expect([box.x, box.y]).toEqual([0, 0]);
           expect([polygon.x, polygon.y]).toEqual([0, 0]);
@@ -207,6 +224,9 @@ describe("mask order through the media renderer", () => {
               true,
             ),
           );
+          expect([polygon.x, polygon.y]).toEqual([0, 0]);
+          renderer.zoomViewportFromWheel({ x: 32, y: 32 }, -100);
+          expect([box.x, box.y]).toEqual([0, 0]);
           expect([polygon.x, polygon.y]).toEqual([0, 0]);
           expect(frame.detections[0]!.polygon!.points).toEqual([
             { x: 20, y: 25 },

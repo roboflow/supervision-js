@@ -563,7 +563,7 @@ export async function createPixiMediaScene(
       hasPresentedSample ? mediaSprite?.texture : undefined,
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
-      const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
+      const boxState = drawBoxFrame(currentMediaTime);
       const regionState = regionLayer.drawFrame(
         currentMediaTime,
         viewportScale,
@@ -836,10 +836,14 @@ export async function createPixiMediaScene(
           !isUnderEditingGesture(detection),
       })
     : undefined;
-  let fastTranslatedDetectionId: string | number | null = null;
+  let fastTranslatedDetection: {
+    id: string | number;
+    dx: number;
+    dy: number;
+  } | null = null;
   const unsubscribeFastTranslate =
     options.editingEngine?.subscribeFastTranslate((id, dx, dy) => {
-      fastTranslatedDetectionId = id;
+      fastTranslatedDetection = { id, dx, dy };
       maskLayer?.translateDetection(id, dx, dy);
       if (options.editingEngine?.getState().preview?.mask) {
         boxLayer.translateDetection(id, dx, dy);
@@ -850,11 +854,36 @@ export async function createPixiMediaScene(
       heatmapLayer?.translateDetection(id, dx, dy);
       renderNow();
     });
+  // Layer redraws start from committed geometry. Restore the active mask
+  // gesture after each redraw, including viewport and presentation changes.
+  function drawBoxFrame(mediaTime: number) {
+    const drawn = boxLayer.drawFrame(mediaTime, viewportScale);
+    if (
+      fastTranslatedDetection &&
+      options.editingEngine?.getState().preview?.mask
+    ) {
+      const { id, dx, dy } = fastTranslatedDetection;
+      boxLayer.translateDetection(id, dx, dy);
+    }
+    return drawn;
+  }
+
+  function drawVectorFrame(mediaTime: number) {
+    vectorLayer.drawFrame(mediaTime, viewportScale);
+    if (
+      fastTranslatedDetection &&
+      options.editingEngine?.getState().preview?.mask
+    ) {
+      const { id, dx, dy } = fastTranslatedDetection;
+      vectorLayer.translateDetection(id, dx, dy);
+    }
+  }
+
   const redrawDetectionLayers = (id: string | number) => {
     boxLayer.invalidateDetection(id);
     vectorLayer.invalidateDetection(id);
-    boxLayer.drawFrame(currentMediaTime, viewportScale);
-    vectorLayer.drawFrame(currentMediaTime, viewportScale);
+    drawBoxFrame(currentMediaTime);
+    drawVectorFrame(currentMediaTime);
     regionLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
   };
@@ -882,10 +911,10 @@ export async function createPixiMediaScene(
 
     if (
       state.kind === AnnotationGestureStateKind.Idle &&
-      fastTranslatedDetectionId !== null
+      fastTranslatedDetection !== null
     ) {
-      const id = fastTranslatedDetectionId;
-      fastTranslatedDetectionId = null;
+      const { id } = fastTranslatedDetection;
+      fastTranslatedDetection = null;
       maskLayer?.translateDetection(id, 0, 0);
       boxLayer.translateDetection(id, 0, 0);
       vectorLayer.translateDetection(id, 0, 0);
@@ -1333,7 +1362,7 @@ export async function createPixiMediaScene(
     advanceFocus: advanceFocusAnimation,
     drawAnnotationOverlay: (mediaTime) =>
       drawAnnotationOverlay(mediaTime, mediaTime * MILLISECONDS_PER_SECOND),
-    drawBox: (mediaTime) => boxLayer.drawFrame(mediaTime, viewportScale),
+    drawBox: (mediaTime) => drawBoxFrame(mediaTime),
     drawFocus: drawFocusLayer,
     drawInteraction: (mediaTime) => interactionLayer?.drawFrame(mediaTime),
     drawInteractionPresentation: drawInteractionPresentationLayer,
@@ -1341,7 +1370,7 @@ export async function createPixiMediaScene(
     drawMask: drawMaskFrame,
     drawPolygon: drawPolygonFrame,
     drawRegion: (mediaTime) => regionLayer.drawFrame(mediaTime, viewportScale),
-    drawVector: (mediaTime) => vectorLayer.drawFrame(mediaTime, viewportScale),
+    drawVector: (mediaTime) => drawVectorFrame(mediaTime),
   };
 
   const framePresentTargets: FramePresentTargets = {
@@ -1408,7 +1437,7 @@ export async function createPixiMediaScene(
     ...annotationDrawLayers,
     drawBox: (mediaTime) => {
       boxLayer.invalidate();
-      return boxLayer.drawFrame(mediaTime, viewportScale);
+      return drawBoxFrame(mediaTime);
     },
     drawDepth: undefined,
     drawInteraction: undefined,
