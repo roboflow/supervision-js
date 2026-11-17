@@ -600,7 +600,9 @@ export async function createPixiMediaScene(
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: initialMaskPreparationStyle,
         orderedContainer:
-          options.maskOrder === "detection" ? retainedGeometry : undefined,
+          options.editingEngine || options.maskOrder === "detection"
+            ? retainedGeometry
+            : undefined,
         onPreparedWindowChange: handlePreparedWindowChange,
         onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
@@ -835,6 +837,7 @@ export async function createPixiMediaScene(
   const unsubscribeFastTranslate =
     options.editingEngine?.subscribeFastTranslate((id, dx, dy) => {
       fastTranslatedDetectionId = id;
+      maskLayer?.translateDetection(id, dx, dy);
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
       heatmapLayer?.translateDetection(id, dx, dy);
@@ -856,8 +859,7 @@ export async function createPixiMediaScene(
         state.kind === AnnotationGestureStateKind.Resizing ||
         state.kind === AnnotationGestureStateKind.Rotating) &&
       state.activeDetectionId !== null &&
-      state.preview &&
-      !state.preview.mask
+      state.preview
         ? state.activeDetectionId
         : null;
 
@@ -876,6 +878,7 @@ export async function createPixiMediaScene(
     ) {
       const id = fastTranslatedDetectionId;
       fastTranslatedDetectionId = null;
+      maskLayer?.translateDetection(id, 0, 0);
       regionLayer.translateDetection(id, 0, 0);
       labelLayer?.translateDetection(id, 0, 0);
       heatmapLayer?.translateDetection(id, 0, 0);
@@ -2254,7 +2257,9 @@ export async function createPixiMediaScene(
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: preparationStyle,
         orderedContainer:
-          options.maskOrder === "detection" ? retainedGeometry : undefined,
+          options.editingEngine || options.maskOrder === "detection"
+            ? retainedGeometry
+            : undefined,
         onPreparedWindowChange: handlePreparedWindowChange,
         onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,

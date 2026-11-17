@@ -139,6 +139,7 @@ export interface PixiMaskLayerState {
 }
 
 export interface PixiMaskLayer {
+  translateDetection(id: string | number, x: number, y: number): void;
   createSprite(dimensions: {
     width: number;
     height: number;
@@ -330,6 +331,9 @@ export function createPixiMaskLayer(options: {
   });
 
   return {
+    translateDetection(id, x, y) {
+      orderedUnits?.translateDetection(id, x, y);
+    },
     createSprite({ width, height }) {
       mediaWidth = width;
       mediaHeight = height;

@@ -98,3 +98,11 @@ Labels and interaction overlays keep their established positions above it.
 
 This mode retains independent cropped mask coverage and one active texture per
 mask. Omit `maskOrder` to keep the dense mask layer used by existing sessions.
+
+## Moving masks
+
+With an annotation editing engine attached to the renderer, drag an unlocked mask
+with the selection tool to move the entire object. Movement snaps to whole media
+pixels and stops at the mask raster edges, preserving every occupied pixel.
+Cancellation restores the original position. A committed detection contains the
+translated RLE counts and bounds; moving only its rectangle does not move a mask.

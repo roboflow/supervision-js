@@ -3,6 +3,8 @@ import {
   BaseBoxStyle,
   BasePolygonStyle,
   encodeBinaryMask,
+  createAnnotationEditingEngine,
+  DetectionPickTarget,
   StrokeAlignment,
   type DetectionFrame,
   type MaskStyle,
@@ -60,6 +62,61 @@ function style(opacity: number): MaskStyle {
 }
 
 describe("mask order through the media renderer", () => {
+  it("translates only the dragged mask display and restores it on cancellation", async () => {
+    resetMocks();
+    const engine = createAnnotationEditingEngine();
+    const pixels = new Uint8Array(64 * 64);
+    pixels[10 * 64 + 10] = 1;
+    const movingMask = encodeBinaryMask(pixels, 64, 64);
+    const detection = { id: "red", mask: movingMask };
+    const frame = {
+      mediaTime: 0,
+      detections: [detection, { id: "green", mask: movingMask }],
+    };
+    const renderer = await createRenderer(false, false, {
+      editingEngine: engine,
+      maskOrder: "detection",
+      labelStyle: null,
+      maskStyle: style(1),
+      detectionFrames: [frame],
+      renderPreparation: { mode: RenderPreparationMode.MainThread },
+    });
+    try {
+      await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(2));
+      type MovingMaskDisplay = Display & {
+        position: { set: ReturnType<typeof vi.fn> };
+      };
+      const meshes = pixiMock.meshInstances
+        .map((mesh) => mesh as unknown as MovingMaskDisplay)
+        .filter((mesh) => mesh.visible && mesh.shader?.resources.maskUniforms);
+      const initial = meshes.map(
+        (mesh) => mesh.position.set.mock.lastCall as [number, number],
+      );
+      const point = { x: 10, y: 10 };
+      engine.pointerDown(
+        { point, timestamp: 0 },
+        {
+          detection,
+          detectionIndex: 0,
+          frame,
+          mediaTime: 0,
+          point,
+          target: DetectionPickTarget.Mask,
+        },
+      );
+      engine.pointerMove({ point: { x: 20, y: 25 }, timestamp: 16 });
+      expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+        initial[0]![0] + 10,
+        initial[0]![1] + 15,
+      );
+      expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(...initial[1]!);
+      engine.cancel();
+      expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(...initial[0]!);
+    } finally {
+      renderer.destroy();
+    }
+  });
+
   it("updates still-image outlines on display-density changes without another frame or zoom", async () => {
     resetMocks();
     const previousPixelRatio = window.devicePixelRatio;

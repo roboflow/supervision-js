@@ -11,6 +11,11 @@ import {
   type Point,
   type Rect,
 } from "#types/detections";
+import { computeDetectionMaskRect } from "#utils/detection-masks";
+import {
+  decodeCompressedRleCounts,
+  encodeCompressedRleCounts,
+} from "#utils/detection-frames";
 import { distanceToSegment } from "#utils/geometry";
 
 import {
@@ -251,9 +256,32 @@ export function offsetDetection(
   dx: number,
   dy: number,
 ): Detection {
+  let mask = detection.mask;
+  if (mask) {
+    const bounds = computeDetectionMaskRect(mask);
+    if (!bounds) return detection;
+    dx = Math.max(
+      bounds.width / 2 - bounds.x,
+      Math.min(Math.round(dx), mask.width - bounds.width / 2 - bounds.x),
+    );
+    dy = Math.max(
+      bounds.height / 2 - bounds.y,
+      Math.min(Math.round(dy), mask.height - bounds.height / 2 - bounds.y),
+    );
+    if (dx === 0 && dy === 0) return detection;
+    // A clamped integer translation shifts every foreground run by the same
+    // column-major offset. Only the leading/trailing background runs change.
+    const counts = decodeCompressedRleCounts(mask.counts);
+    if (counts.length % 2 === 0) counts.push(0);
+    const shift = dx * mask.height + dy;
+    counts[0] = (counts[0] ?? 0) + shift;
+    counts[counts.length - 1] = counts[counts.length - 1]! - shift;
+    mask = { ...mask, counts: encodeCompressedRleCounts(counts) };
+  }
   const offsetPoint = ({ x, y }: Point) => ({ x: x + dx, y: y + dy });
   return {
     ...detection,
+    ...(mask ? { mask } : {}),
     ...(detection.rect
       ? {
           rect: {

@@ -13,6 +13,7 @@ import {
   createOrientedBoxGeometry,
   getOrientedRectangleGeometry,
 } from "#utils/oriented-rectangle";
+import { computeDetectionMaskRect } from "#utils/detection-masks";
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
 import {
@@ -105,7 +106,7 @@ export function createAnnotationEditingEngine(
       if (input.button !== undefined && input.button !== 0) return;
       if (tool) {
         beginCreation(input);
-      } else if (pick && !pick.detection.locked && !pick.detection.mask) {
+      } else if (pick && !pick.detection.locked) {
         beginMove(pick, input);
       }
     },
@@ -502,8 +503,14 @@ export function createAnnotationEditingEngine(
   ) {
     let dx = input.point.x - active.start.point.x;
     let dy = input.point.y - active.start.point.y;
-    let rect = active.detection.rect;
-    const dimensions = input.mediaDimensions ?? active.start.mediaDimensions;
+    const mask = active.detection.mask;
+    if (mask) {
+      dx = Math.round(dx);
+      dy = Math.round(dy);
+    }
+    let rect = mask ? computeDetectionMaskRect(mask) : active.detection.rect;
+    const dimensions =
+      mask ?? input.mediaDimensions ?? active.start.mediaDimensions;
     if (rect && dimensions) {
       const width = Math.min(rect.width, dimensions.width);
       const height = Math.min(rect.height, dimensions.height);

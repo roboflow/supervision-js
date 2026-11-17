@@ -8,6 +8,9 @@ import {
   createEditableAnnotationFrameSession,
   deleteAnnotationVertex,
   DetectionMaskEncoding,
+  encodeBinaryMask,
+  decodeCompressedRleMask,
+  offsetDetection,
   DetectionPickTarget,
   getAnnotationHandles,
   KeypointVisibility,
@@ -1570,34 +1573,94 @@ describe("annotation editing engine", () => {
     );
   });
 
-  it("does not move a mask by changing only its ancillary bounds", () => {
+  it.each([
+    [8.4, 7.6, 8, 8],
+    [-100, -100, -2, -3],
+    [100, 100, 5, 4],
+  ])(
+    "moves mask pixels with integer, bounded deltas (%s, %s)",
+    (dx, dy, expectedX, expectedY) => {
+      const pixels = new Uint8Array(10 * 10);
+      pixels[3 * 10 + 2] = 1;
+      pixels[5 * 10 + 4] = 1;
+      const detection = {
+        id: "mask-1",
+        mask: encodeBinaryMask(pixels, 10, 10),
+        rect: { x: 3.5, y: 4.5, width: 3, height: 3 },
+      };
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const point = { x: 2, y: 3 };
+      engine.pointerDown(
+        { point, timestamp: 0 },
+        {
+          detection,
+          detectionIndex: 0,
+          frame: { detections: [detection], mediaTime: 0 },
+          mediaTime: 0,
+          point,
+          target: DetectionPickTarget.Mask,
+        },
+      );
+      engine.pointerMove({
+        point: { x: point.x + dx, y: point.y + dy },
+        timestamp: 16,
+      });
+      engine.pointerUp({
+        point: { x: point.x + dx, y: point.y + dy },
+        timestamp: 32,
+      });
+      const moved = onCommit.mock.calls[0]![0];
+      const decoded = decodeCompressedRleMask(moved.mask!).data;
+      const clampedX = Math.min(expectedX, 5);
+      const clampedY = Math.min(expectedY, 4);
+      expect(decoded.reduce((sum, pixel) => sum + pixel, 0)).toBe(2);
+      expect(decoded[(3 + clampedY) * 10 + 2 + clampedX]).toBe(1);
+      expect(decoded[(5 + clampedY) * 10 + 4 + clampedX]).toBe(1);
+      expect(moved.rect).toEqual({
+        ...detection.rect,
+        x: 3.5 + clampedX,
+        y: 4.5 + clampedY,
+      });
+      expect(decodeCompressedRleMask(detection.mask).data).toEqual(pixels);
+      expect(offsetDetection(detection, dx, dy)).toEqual(moved);
+    },
+  );
+
+  it("translates a mask whose final RLE run is foreground", () => {
+    const pixels = new Uint8Array(12);
+    pixels[11] = 1;
+    const mask = encodeBinaryMask(pixels, 4, 3);
+    const moved = offsetDetection({ mask }, -2, -1);
+    const expected = new Uint8Array(12);
+    expected[5] = 1;
+    expect(decodeCompressedRleMask(moved.mask!).data).toEqual(expected);
+    expect(decodeCompressedRleMask(mask).data).toEqual(pixels);
+  });
+
+  it("cancels mask movement without committing or mutating the source", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });
-    const detection = {
-      id: "mask-1",
-      mask: {
-        counts: "04",
-        encoding: DetectionMaskEncoding.CompressedRle,
-        height: 80,
-        width: 120,
+    const pixels = new Uint8Array(100);
+    pixels[22] = 1;
+    const detection = { id: "mask", mask: encodeBinaryMask(pixels, 10, 10) };
+    const point = { x: 2, y: 2 };
+    engine.pointerDown(
+      { point, timestamp: 0 },
+      {
+        detection,
+        detectionIndex: 0,
+        frame: { detections: [detection], mediaTime: 0 },
+        mediaTime: 0,
+        point,
+        target: DetectionPickTarget.Mask,
       },
-      rect: { height: 20, width: 10, x: 20, y: 30 },
-    };
-    const pick = {
-      detection,
-      detectionIndex: 0,
-      frame: { detections: [detection], mediaTime: 0 },
-      mediaTime: 0,
-      point: { x: 20, y: 30 },
-      target: DetectionPickTarget.Mask,
-    };
-
-    engine.pointerDown({ point: pick.point, timestamp: 0 }, pick);
-    engine.pointerMove({ point: { x: 40, y: 50 }, timestamp: 16 });
-    engine.pointerUp({ point: { x: 40, y: 50 }, timestamp: 32 });
-
+    );
+    engine.pointerMove({ point: { x: 8, y: 8 }, timestamp: 16 });
+    engine.cancel();
     expect(engine.getState().kind).toBe("idle");
     expect(onCommit).not.toHaveBeenCalled();
+    expect(decodeCompressedRleMask(detection.mask).data).toEqual(pixels);
   });
 
   it("publishes renderer subscriptions without taking ownership of persistence", () => {

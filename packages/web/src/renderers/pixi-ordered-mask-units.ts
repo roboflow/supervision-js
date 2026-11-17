@@ -19,6 +19,9 @@ type Unit = {
   readonly renderer: ReturnType<typeof createPixiIdMaskShaderRenderer>;
   readonly texture: Texture;
   readonly mask: DetectionMask;
+  detectionId?: string | number;
+  x?: number;
+  y?: number;
   paint?: PixiIdMaskPaint;
   frameKey: string;
 };
@@ -43,8 +46,18 @@ export function createPixiOrderedMaskUnits(
   },
 ) {
   const units = new Map<number, Unit>();
+  const translations = new Map<string | number, { x: number; y: number }>();
   options.container.sortableChildren = true;
-  return { render, hide, clear, releaseFrame };
+  return { render, hide, clear, releaseFrame, translateDetection };
+
+  function translateDetection(id: string | number, x: number, y: number) {
+    if (x === 0 && y === 0) translations.delete(id);
+    else translations.set(id, { x, y });
+    for (const unit of units.values()) {
+      if (unit.detectionId !== id) continue;
+      unit.renderer.mesh.position.set((unit.x ?? 0) + x, (unit.y ?? 0) + y);
+    }
+  }
 
   function render(
     frameKey: string,
@@ -79,15 +92,20 @@ export function createPixiOrderedMaskUnits(
         unit = createUnit(frameKey, entry, mask);
         units.set(key, unit);
       }
+      unit.detectionId = detection.id;
+      const translation =
+        detection.id === undefined ? undefined : translations.get(detection.id);
       retained.add(key);
       unit.frameKey = frameKey;
       // Equal semantic coverage across immutable frame revisions can reuse the GPU
       // upload. Rebind its CPU view so the old prepared frame is not retained.
       unit.texture.source.resource = entry.data;
       const mesh = unit.renderer.mesh;
+      unit.x = (entry.x * options.mediaWidth) / entry.sourceWidth;
+      unit.y = (entry.y * options.mediaHeight) / entry.sourceHeight;
       mesh.position.set(
-        (entry.x * options.mediaWidth) / entry.sourceWidth,
-        (entry.y * options.mediaHeight) / entry.sourceHeight,
+        unit.x + (translation?.x ?? 0),
+        unit.y + (translation?.y ?? 0),
       );
       mesh.scale.set(
         (entry.width * options.mediaWidth) / entry.sourceWidth,
@@ -147,6 +165,7 @@ export function createPixiOrderedMaskUnits(
   }
 
   function clear() {
+    translations.clear();
     for (const [key, unit] of units) destroyUnit(key, unit);
   }
 
