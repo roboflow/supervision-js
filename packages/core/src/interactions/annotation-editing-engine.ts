@@ -504,13 +504,30 @@ export function createAnnotationEditingEngine(
     let dx = input.point.x - active.start.point.x;
     let dy = input.point.y - active.start.point.y;
     const mask = active.detection.mask;
+    const dimensions = input.mediaDimensions ?? active.start.mediaDimensions;
     if (mask) {
-      dx = Math.round(dx);
-      dy = Math.round(dy);
+      const preview = offsetDetection(active.detection, dx, dy, dimensions);
+      const before = computeDetectionMaskRect(mask);
+      const after = computeDetectionMaskRect(preview.mask!);
+      const scaleX = (dimensions?.width ?? mask.width) / mask.width;
+      const scaleY = (dimensions?.height ?? mask.height) / mask.height;
+      return {
+        preview: after
+          ? {
+              ...preview,
+              rect: {
+                x: after.x * scaleX,
+                y: after.y * scaleY,
+                width: after.width * scaleX,
+                height: after.height * scaleY,
+              },
+            }
+          : preview,
+        dx: before && after ? (after.x - before.x) * scaleX : 0,
+        dy: before && after ? (after.y - before.y) * scaleY : 0,
+      };
     }
-    let rect = mask ? computeDetectionMaskRect(mask) : active.detection.rect;
-    const dimensions =
-      mask ?? input.mediaDimensions ?? active.start.mediaDimensions;
+    let rect = active.detection.rect;
     if (rect && dimensions) {
       const width = Math.min(rect.width, dimensions.width);
       const height = Math.min(rect.height, dimensions.height);

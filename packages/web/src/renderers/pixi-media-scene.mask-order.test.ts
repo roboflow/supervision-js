@@ -62,76 +62,115 @@ function style(opacity: number): MaskStyle {
 }
 
 describe("mask order through the media renderer", () => {
-  it("translates only the dragged mask display and restores it on cancellation", async () => {
+  it("keeps default masks below vectors with an editing engine", async () => {
     resetMocks();
-    const engine = createAnnotationEditingEngine();
-    const pixels = new Uint8Array(64 * 64);
-    pixels[10 * 64 + 10] = 1;
-    const movingMask = encodeBinaryMask(pixels, 64, 64);
-    const detection = {
-      id: "red",
-      mask: movingMask,
-      rect: { x: 10.5, y: 10.5, width: 1, height: 1 },
-    };
-    const frame = {
-      mediaTime: 0,
-      detections: [detection, { id: "green", mask: movingMask }],
-    };
     const renderer = await createRenderer(false, false, {
-      editingEngine: engine,
-      maskOrder: "detection",
+      editingEngine: createAnnotationEditingEngine(),
       labelStyle: null,
       maskStyle: style(1),
-      boxStyle: new BaseBoxStyle({
-        fill: { color: 0x123456, alpha: 1 },
-        shouldRender: (entry) => entry.id === "red",
-      }),
-      detectionFrames: [frame],
+      boxStyle: new BaseBoxStyle({ fill: { color: 0x0000ff, alpha: 1 } }),
+      detectionFrames: [
+        {
+          mediaTime: 0,
+          detections: [
+            {
+              id: "box",
+              zIndex: 0,
+              rect: { x: 32, y: 32, width: 64, height: 64 },
+            },
+            { id: "red", zIndex: 1, mask },
+          ],
+        },
+      ],
       renderPreparation: { mode: RenderPreparationMode.MainThread },
     });
     try {
-      await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(2));
-      type MovingMaskDisplay = Display & {
-        position: { set: ReturnType<typeof vi.fn> };
-      };
-      const meshes = pixiMock.meshInstances
-        .map((mesh) => mesh as unknown as MovingMaskDisplay)
-        .filter((mesh) => mesh.visible && mesh.shader?.resources.maskUniforms);
-      const initial = meshes.map(
-        (mesh) => mesh.position.set.mock.lastCall as [number, number],
-      );
-      const box = pixiMock.graphicsInstances.find((graphics) =>
-        graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
-      )!;
-      expect(box.visible).toBe(true);
-      const point = { x: 10, y: 10 };
-      engine.pointerDown(
-        { point, timestamp: 0 },
-        {
-          detection,
-          detectionIndex: 0,
-          frame,
-          mediaTime: 0,
-          point,
-          target: DetectionPickTarget.Mask,
-        },
-      );
-      engine.pointerMove({ point: { x: 20, y: 25 }, timestamp: 16 });
-      expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
-        initial[0]![0] + 10,
-        initial[0]![1] + 15,
-      );
-      expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(...initial[1]!);
-      expect(box.visible).toBe(true);
-      expect([box.x, box.y]).toEqual([10, 15]);
-      engine.cancel();
-      expect(box.visible).toBe(true);
-      expect([box.x, box.y]).toEqual([0, 0]);
-      expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(...initial[0]!);
+      await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(1));
+      expect(visiblePaints().at(-1)).toBe(0x0000ff);
     } finally {
       renderer.destroy();
     }
   });
+
+  it.each(["detection", undefined] as const)(
+    "translates only the dragged mask display and restores it on cancellation (%s)",
+    async (maskOrder) => {
+      resetMocks();
+      const engine = createAnnotationEditingEngine();
+      const pixels = new Uint8Array(64 * 64);
+      pixels[10 * 64 + 10] = 1;
+      const movingMask = encodeBinaryMask(pixels, 64, 64);
+      const detection = {
+        id: "red",
+        mask: movingMask,
+        rect: { x: 10.5, y: 10.5, width: 1, height: 1 },
+      };
+      const frame = {
+        mediaTime: 0,
+        detections: [detection, { id: "green", mask: movingMask }],
+      };
+      const renderer = await createRenderer(false, false, {
+        editingEngine: engine,
+        maskOrder,
+        labelStyle: null,
+        maskStyle: style(1),
+        boxStyle: new BaseBoxStyle({
+          fill: { color: 0x123456, alpha: 1 },
+          shouldRender: (entry) => entry.id === "red",
+        }),
+        detectionFrames: [frame],
+        renderPreparation: { mode: RenderPreparationMode.MainThread },
+      });
+      try {
+        await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(2));
+        type MovingMaskDisplay = Display & {
+          position: { set: ReturnType<typeof vi.fn> };
+        };
+        const meshes = pixiMock.meshInstances
+          .map((mesh) => mesh as unknown as MovingMaskDisplay)
+          .filter(
+            (mesh) => mesh.visible && mesh.shader?.resources.maskUniforms,
+          );
+        const initial = meshes.map(
+          (mesh) => mesh.position.set.mock.lastCall as [number, number],
+        );
+        const box = pixiMock.graphicsInstances.find((graphics) =>
+          graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+        )!;
+        expect(box.visible).toBe(true);
+        const point = { x: 10, y: 10 };
+        engine.pointerDown(
+          { point, timestamp: 0 },
+          {
+            detection,
+            detectionIndex: 0,
+            frame,
+            mediaTime: 0,
+            point,
+            target: DetectionPickTarget.Mask,
+          },
+        );
+        engine.pointerMove({ point: { x: 20, y: 25 }, timestamp: 16 });
+        expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+          initial[0]![0] + 10,
+          initial[0]![1] + 15,
+        );
+        expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(
+          ...initial[1]!,
+        );
+        expect(box.visible).toBe(true);
+        expect([box.x, box.y]).toEqual([10, 15]);
+        engine.cancel();
+        expect(box.visible).toBe(true);
+        expect([box.x, box.y]).toEqual([0, 0]);
+        expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+          ...initial[0]!,
+        );
+      } finally {
+        renderer.destroy();
+      }
+    },
+  );
 
   it("updates still-image outlines on display-density changes without another frame or zoom", async () => {
     resetMocks();

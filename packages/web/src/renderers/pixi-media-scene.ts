@@ -430,6 +430,12 @@ export async function createPixiMediaScene(
     options.editingEngine || options.maskOrder === "detection"
       ? new Container()
       : undefined;
+  const editableMasks =
+    options.editingEngine && options.maskOrder !== "detection"
+      ? new Container()
+      : undefined;
+  const orderedMaskContainer =
+    options.maskOrder === "detection" ? retainedGeometry : editableMasks;
   const boxLayer = createPixiBoxLayer({
     retainByIndex: options.maskOrder === "detection",
     container: retainedGeometry,
@@ -599,10 +605,7 @@ export async function createPixiMediaScene(
         detectionTimeline: options.detectionTimeline,
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: initialMaskPreparationStyle,
-        orderedContainer:
-          options.editingEngine || options.maskOrder === "detection"
-            ? retainedGeometry
-            : undefined,
+        orderedContainer: orderedMaskContainer,
         onPreparedWindowChange: handlePreparedWindowChange,
         onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
@@ -2261,10 +2264,7 @@ export async function createPixiMediaScene(
         detectionTimeline: options.detectionTimeline,
         maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: preparationStyle,
-        orderedContainer:
-          options.editingEngine || options.maskOrder === "detection"
-            ? retainedGeometry
-            : undefined,
+        orderedContainer: orderedMaskContainer,
         onPreparedWindowChange: handlePreparedWindowChange,
         onTextureEvicted: releaseMaskTextureBindings,
         renderPreparation: options.renderPreparation,
@@ -2664,12 +2664,15 @@ export async function createPixiMediaScene(
       return;
     }
 
-    maskSlot.setDisplay(
-      maskLayer.createSprite({
-        height: mediaHeight,
-        width: mediaWidth,
-      }) as PixiContainer,
-    );
+    const display = maskLayer.createSprite({
+      height: mediaHeight,
+      width: mediaWidth,
+    }) as PixiContainer;
+    if (editableMasks) {
+      editableMasks.sortableChildren = true;
+      editableMasks.addChild(display);
+    }
+    maskSlot.setDisplay(editableMasks ?? display);
   }
 
   function ensureFocusLayer(

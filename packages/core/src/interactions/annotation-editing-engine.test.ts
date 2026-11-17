@@ -1627,6 +1627,63 @@ describe("annotation editing engine", () => {
     },
   );
 
+  it.each([
+    [1000, 1000, 103, 37, 100, 40, 10, 4],
+    [1000, 500, 103, 37, 100, 35, 10, 7],
+    [1000, 500, 10000, -10000, 800, -50, 80, -10],
+  ])(
+    "moves scaled masks in media coordinates (%s x %s)",
+    (width, height, dx, dy, expectedDx, expectedDy, rasterDx, rasterDy) => {
+      const pixels = new Uint8Array(100 * 100);
+      for (let y = 10; y < 20; y++)
+        for (let x = 10; x < 20; x++) pixels[y * 100 + x] = 1;
+      const detection = {
+        id: "scaled-mask",
+        mask: encodeBinaryMask(pixels, 100, 100),
+        rect: {
+          x: (15 * width) / 100,
+          y: (15 * height) / 100,
+          width: width / 10,
+          height: height / 10,
+        },
+      };
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const point = { x: detection.rect.x, y: detection.rect.y };
+      const mediaDimensions = { width, height };
+      engine.pointerDown(
+        { point, timestamp: 0, mediaDimensions },
+        {
+          detection,
+          detectionIndex: 0,
+          frame: { mediaTime: 0, detections: [detection] },
+          point,
+          mediaTime: 0,
+          target: DetectionPickTarget.Mask,
+        },
+      );
+      const input = {
+        point: { x: point.x + dx, y: point.y + dy },
+        mediaDimensions,
+        timestamp: 16,
+      };
+      engine.pointerMove(input);
+      expect(engine.getState().preview?.rect).toEqual({
+        ...detection.rect,
+        x: detection.rect.x + expectedDx,
+        y: detection.rect.y + expectedDy,
+      });
+      engine.pointerUp({ ...input, timestamp: 32 });
+      const moved = onCommit.mock.calls[0]![0];
+      expect(moved).toEqual(
+        offsetDetection(detection, dx, dy, mediaDimensions),
+      );
+      const decoded = decodeCompressedRleMask(moved.mask).data;
+      expect(decoded.reduce((sum, pixel) => sum + pixel, 0)).toBe(100);
+      expect(decoded[(10 + rasterDy) * 100 + 10 + rasterDx]).toBe(1);
+    },
+  );
+
   it("translates a mask whose final RLE run is foreground", () => {
     const pixels = new Uint8Array(12);
     pixels[11] = 1;
