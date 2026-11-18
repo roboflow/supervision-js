@@ -3,6 +3,8 @@ import {
   BaseBoxStyle,
   BasePolygonStyle,
   encodeBinaryMask,
+  createAnnotationEditingEngine,
+  DetectionPickTarget,
   StrokeAlignment,
   type DetectionFrame,
   type MaskStyle,
@@ -60,6 +62,234 @@ function style(opacity: number): MaskStyle {
 }
 
 describe("mask order through the media renderer", () => {
+  it("keeps default masks below vectors with an editing engine", async () => {
+    resetMocks();
+    const renderer = await createRenderer(false, false, {
+      editingEngine: createAnnotationEditingEngine(),
+      labelStyle: null,
+      maskStyle: style(1),
+      boxStyle: new BaseBoxStyle({ fill: { color: 0x0000ff, alpha: 1 } }),
+      detectionFrames: [
+        {
+          mediaTime: 0,
+          detections: [
+            {
+              id: "box",
+              zIndex: 0,
+              rect: { x: 32, y: 32, width: 64, height: 64 },
+            },
+            { id: "red", zIndex: 1, mask },
+          ],
+        },
+      ],
+      renderPreparation: { mode: RenderPreparationMode.MainThread },
+    });
+    try {
+      await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(1));
+      expect(visiblePaints().at(-1)).toBe(0x0000ff);
+    } finally {
+      renderer.destroy();
+    }
+  });
+
+  it.each([
+    ["detection", "cancel", "visibility"],
+    [undefined, "cancel", "visibility"],
+    ["detection", "commit", "visibility"],
+    [undefined, "commit", "visibility"],
+    ["detection", "cancel", "style"],
+    [undefined, "commit", "style"],
+    ["detection", "cancel", "mask-layer"],
+    [undefined, "commit", "mask-layer"],
+  ] as const)(
+    "keeps mask geometry through redraws and rebuilds (%s, %s, %s)",
+    async (maskOrder, finish, rebuild) => {
+      resetMocks();
+      const pixels = new Uint8Array(64 * 64);
+      pixels[10 * 64 + 10] = 1;
+      const movingMask = encodeBinaryMask(pixels, 64, 64);
+      const detection = {
+        id: "red",
+        mask: movingMask,
+        rect: { x: 10.5, y: 10.5, width: 1, height: 1 },
+        polygon: {
+          points: [
+            { x: 10, y: 10 },
+            { x: 20, y: 10 },
+            { x: 10, y: 20 },
+          ],
+        },
+      };
+      let frame: DetectionFrame = {
+        mediaTime: 0,
+        detections: [detection, { id: "green", mask: movingMask }],
+      };
+      let version = 0;
+      const engine = createAnnotationEditingEngine({
+        onCommit: (moved) => {
+          frame = { ...frame, detections: [moved, frame.detections[1]!] };
+          version++;
+        },
+      });
+      const presentation = {
+        labelStyle: null,
+        maskStyle: style(1),
+        boxStyle: new BaseBoxStyle({
+          fill: { color: 0x123456, alpha: 1 },
+          shouldRender: (entry) => entry.id === "red",
+        }),
+        polygonStyle: new BasePolygonStyle({
+          fill: { color: 0xabcdef, alpha: 1 },
+        }),
+      };
+      const renderer = await createRenderer(false, false, {
+        editingEngine: engine,
+        maskOrder,
+        ...presentation,
+        detectionSource: {
+          getVersion: () => version,
+          loadFrames: async () => [frame],
+        },
+        renderPreparation: { mode: RenderPreparationMode.MainThread },
+      });
+      const updatePresentation = (
+        next: Parameters<typeof renderer.setPresentation>[0],
+      ) => {
+        renderer.setPresentation({ ...presentation, ...next });
+      };
+      try {
+        await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(2));
+        type MovingMaskDisplay = Display & {
+          position: { set: ReturnType<typeof vi.fn> };
+        };
+        const visibleMeshes = () =>
+          pixiMock.meshInstances
+            .map((mesh) => mesh as unknown as MovingMaskDisplay)
+            .filter(
+              (mesh) =>
+                mesh.visible &&
+                mesh.shader?.resources.maskUniforms?.uniforms.uFillPalette[7],
+            );
+        let meshes = visibleMeshes();
+        const initial = meshes.map(
+          (mesh) => mesh.position.set.mock.lastCall as [number, number],
+        );
+        const box = pixiMock.graphicsInstances.find((graphics) =>
+          graphics.fill.mock.calls.some(([fill]) => fill.color === 0x123456),
+        )!;
+        const polygon = pixiMock.graphicsInstances.find((graphics) =>
+          graphics.fill.mock.calls.some(([fill]) => fill.color === 0xabcdef),
+        )!;
+        expect(polygon.visible).toBe(true);
+        expect(box.visible).toBe(true);
+        const point = { x: 10, y: 10 };
+        engine.pointerDown(
+          { point, timestamp: 0 },
+          {
+            detection,
+            detectionIndex: 0,
+            frame,
+            mediaTime: 0,
+            point,
+            target: DetectionPickTarget.Mask,
+          },
+        );
+        engine.pointerMove({ point: { x: 20, y: 25 }, timestamp: 16 });
+        expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+          initial[0]![0] + 10,
+          initial[0]![1] + 15,
+        );
+        expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(
+          ...initial[1]!,
+        );
+        expect(box.visible).toBe(true);
+        expect([box.x, box.y]).toEqual([10, 15]);
+        expect(polygon.visible).toBe(true);
+        expect([polygon.x, polygon.y]).toEqual([10, 15]);
+        for (const deltaY of [-100, 50]) {
+          renderer.zoomViewportFromWheel({ x: 32, y: 32 }, deltaY);
+          expect(engine.getState().kind).toBe("moving");
+          expect([box.x, box.y]).toEqual([10, 15]);
+          expect([polygon.x, polygon.y]).toEqual([10, 15]);
+          expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+            initial[0]![0] + 10,
+            initial[0]![1] + 15,
+          );
+        }
+        renderer.setViewportTransform({
+          scale: renderer.getViewportTransform().scale * 1.25,
+        });
+        await renderer.refresh();
+        expect([box.x, box.y]).toEqual([10, 15]);
+        expect([polygon.x, polygon.y]).toEqual([10, 15]);
+        if (rebuild === "visibility") {
+          updatePresentation({ visibility: { annotationsHidden: true } });
+          await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(0));
+          updatePresentation({
+            visibility: { annotationsHidden: false },
+          });
+        } else {
+          if (rebuild === "mask-layer") {
+            updatePresentation({ maskStyle: null });
+            await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(0));
+          }
+          updatePresentation({
+            maskStyle: { ...style(1), artifactKey: `rebuilt:${rebuild}` },
+          });
+        }
+        await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(2));
+        meshes = visibleMeshes();
+        expect(engine.getState().kind).toBe("moving");
+        expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+          initial[0]![0] + 10,
+          initial[0]![1] + 15,
+        );
+        expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(
+          ...initial[1]!,
+        );
+        expect([box.x, box.y]).toEqual([10, 15]);
+        expect([polygon.x, polygon.y]).toEqual([10, 15]);
+        if (finish === "cancel") {
+          updatePresentation({ visibility: { annotationsHidden: true } });
+          await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(0));
+          engine.cancel();
+          updatePresentation({
+            visibility: { annotationsHidden: false },
+          });
+          await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(2));
+          meshes = visibleMeshes();
+          renderer.zoomViewportFromWheel({ x: 32, y: 32 }, -100);
+          expect(box.visible).toBe(true);
+          expect([box.x, box.y]).toEqual([0, 0]);
+          expect([polygon.x, polygon.y]).toEqual([0, 0]);
+          expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+            ...initial[0]!,
+          );
+        } else {
+          engine.pointerUp({ point: { x: 20, y: 25 }, timestamp: 32 });
+          await renderer.refresh();
+          await vi.waitFor(() =>
+            expect(polygon.poly).toHaveBeenLastCalledWith(
+              [20, 25, 30, 25, 20, 35],
+              true,
+            ),
+          );
+          expect([polygon.x, polygon.y]).toEqual([0, 0]);
+          renderer.zoomViewportFromWheel({ x: 32, y: 32 }, -100);
+          expect([box.x, box.y]).toEqual([0, 0]);
+          expect([polygon.x, polygon.y]).toEqual([0, 0]);
+          expect(frame.detections[0]!.polygon!.points).toEqual([
+            { x: 20, y: 25 },
+            { x: 30, y: 25 },
+            { x: 20, y: 35 },
+          ]);
+        }
+      } finally {
+        renderer.destroy();
+      }
+    },
+  );
+
   it("updates still-image outlines on display-density changes without another frame or zoom", async () => {
     resetMocks();
     const previousPixelRatio = window.devicePixelRatio;
