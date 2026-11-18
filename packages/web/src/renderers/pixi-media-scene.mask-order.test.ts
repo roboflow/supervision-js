@@ -93,13 +93,17 @@ describe("mask order through the media renderer", () => {
   });
 
   it.each([
-    ["detection", "cancel"],
-    [undefined, "cancel"],
-    ["detection", "commit"],
-    [undefined, "commit"],
+    ["detection", "cancel", "visibility"],
+    [undefined, "cancel", "visibility"],
+    ["detection", "commit", "visibility"],
+    [undefined, "commit", "visibility"],
+    ["detection", "cancel", "style"],
+    [undefined, "commit", "style"],
+    ["detection", "cancel", "mask-layer"],
+    [undefined, "commit", "mask-layer"],
   ] as const)(
-    "moves attached geometry and resets translation (%s, %s)",
-    async (maskOrder, finish) => {
+    "keeps mask geometry through redraws and rebuilds (%s, %s, %s)",
+    async (maskOrder, finish, rebuild) => {
       resetMocks();
       const pixels = new Uint8Array(64 * 64);
       pixels[10 * 64 + 10] = 1;
@@ -127,9 +131,7 @@ describe("mask order through the media renderer", () => {
           version++;
         },
       });
-      const renderer = await createRenderer(false, false, {
-        editingEngine: engine,
-        maskOrder,
+      const presentation = {
         labelStyle: null,
         maskStyle: style(1),
         boxStyle: new BaseBoxStyle({
@@ -139,22 +141,36 @@ describe("mask order through the media renderer", () => {
         polygonStyle: new BasePolygonStyle({
           fill: { color: 0xabcdef, alpha: 1 },
         }),
+      };
+      const renderer = await createRenderer(false, false, {
+        editingEngine: engine,
+        maskOrder,
+        ...presentation,
         detectionSource: {
           getVersion: () => version,
           loadFrames: async () => [frame],
         },
         renderPreparation: { mode: RenderPreparationMode.MainThread },
       });
+      const updatePresentation = (
+        next: Parameters<typeof renderer.setPresentation>[0],
+      ) => {
+        renderer.setPresentation({ ...presentation, ...next });
+      };
       try {
         await vi.waitFor(() => expect(liveMaskPaints()).toHaveLength(2));
         type MovingMaskDisplay = Display & {
           position: { set: ReturnType<typeof vi.fn> };
         };
-        const meshes = pixiMock.meshInstances
-          .map((mesh) => mesh as unknown as MovingMaskDisplay)
-          .filter(
-            (mesh) => mesh.visible && mesh.shader?.resources.maskUniforms,
-          );
+        const visibleMeshes = () =>
+          pixiMock.meshInstances
+            .map((mesh) => mesh as unknown as MovingMaskDisplay)
+            .filter(
+              (mesh) =>
+                mesh.visible &&
+                mesh.shader?.resources.maskUniforms?.uniforms.uFillPalette[7],
+            );
+        let meshes = visibleMeshes();
         const initial = meshes.map(
           (mesh) => mesh.position.set.mock.lastCall as [number, number],
         );
@@ -206,8 +222,42 @@ describe("mask order through the media renderer", () => {
         await renderer.refresh();
         expect([box.x, box.y]).toEqual([10, 15]);
         expect([polygon.x, polygon.y]).toEqual([10, 15]);
+        if (rebuild === "visibility") {
+          updatePresentation({ visibility: { annotationsHidden: true } });
+          await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(0));
+          updatePresentation({
+            visibility: { annotationsHidden: false },
+          });
+        } else {
+          if (rebuild === "mask-layer") {
+            updatePresentation({ maskStyle: null });
+            await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(0));
+          }
+          updatePresentation({
+            maskStyle: { ...style(1), artifactKey: `rebuilt:${rebuild}` },
+          });
+        }
+        await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(2));
+        meshes = visibleMeshes();
+        expect(engine.getState().kind).toBe("moving");
+        expect(meshes[0]!.position.set).toHaveBeenLastCalledWith(
+          initial[0]![0] + 10,
+          initial[0]![1] + 15,
+        );
+        expect(meshes[1]!.position.set).toHaveBeenLastCalledWith(
+          ...initial[1]!,
+        );
+        expect([box.x, box.y]).toEqual([10, 15]);
+        expect([polygon.x, polygon.y]).toEqual([10, 15]);
         if (finish === "cancel") {
+          updatePresentation({ visibility: { annotationsHidden: true } });
+          await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(0));
           engine.cancel();
+          updatePresentation({
+            visibility: { annotationsHidden: false },
+          });
+          await vi.waitFor(() => expect(visibleMeshes()).toHaveLength(2));
+          meshes = visibleMeshes();
           renderer.zoomViewportFromWheel({ x: 32, y: 32 }, -100);
           expect(box.visible).toBe(true);
           expect([box.x, box.y]).toEqual([0, 0]);

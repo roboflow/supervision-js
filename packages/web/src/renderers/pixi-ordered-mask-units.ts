@@ -48,7 +48,14 @@ export function createPixiOrderedMaskUnits(
   const units = new Map<number, Unit>();
   const translations = new Map<string | number, { x: number; y: number }>();
   options.container.sortableChildren = true;
-  return { render, hide, clear, releaseFrame, translateDetection };
+  return {
+    render,
+    hide,
+    clearDisplays,
+    destroy,
+    releaseFrame,
+    translateDetection,
+  };
 
   function translateDetection(id: string | number, x: number, y: number) {
     if (x === 0 && y === 0) translations.delete(id);
@@ -164,9 +171,15 @@ export function createPixiOrderedMaskUnits(
     }
   }
 
-  function clear() {
-    translations.clear();
+  function clearDisplays() {
+    // Prepared artifacts can be rebuilt while a gesture is still active.
+    // Translation ends through translateDetection(id, 0, 0) or teardown.
     for (const [key, unit] of units) destroyUnit(key, unit);
+  }
+
+  function destroy() {
+    clearDisplays();
+    translations.clear();
   }
 
   function destroyUnit(key: number, unit: Unit) {

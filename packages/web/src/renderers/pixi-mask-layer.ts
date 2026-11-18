@@ -319,7 +319,7 @@ export function createPixiMaskLayer(options: {
       }
     },
     onMaskFramesCleared() {
-      orderedUnits?.clear();
+      orderedUnits?.clearDisplays();
       destroyTextures();
       hideSprite();
     },
@@ -604,7 +604,7 @@ export function createPixiMaskLayer(options: {
       isDestroyed = true;
       preparedRenderWindow.destroy();
       destroyTextures();
-      orderedUnits?.clear();
+      orderedUnits?.destroy();
       idMaskRenderer?.destroy();
       screenStrokeRenderer?.destroy();
       haloRenderer?.destroy();
