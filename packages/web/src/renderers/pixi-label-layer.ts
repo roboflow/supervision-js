@@ -582,7 +582,7 @@ function drawInstruction(
     entry.translationY = 0;
     entry.renderedBox = renderedBox;
   }
-  const textStyle = resolveTextStyle(instruction.textStyle, viewportScale);
+  const textStyle = resolveTextStyle(instruction.textStyle);
   const textStyleKey = createTextStyleKey(textStyle);
   const textAlpha = instruction.textStyle?.alpha ?? 1;
 
@@ -596,6 +596,10 @@ function drawInstruction(
     entry.textStyleKey = textStyleKey;
   }
 
+  // Pixi rasterizes text at its font size times its resolution. Keeping the
+  // font at screen size and counter-scaling the zoom keeps the texture at the
+  // on-screen size, so zooming neither blurs nor rerasterizes the label.
+  entry.label.scale.set(1 / viewportScale);
   entry.label.visible = true;
 
   if (entry.labelAlpha !== textAlpha) {
@@ -823,14 +827,11 @@ function drawBackground(
   });
 }
 
-function resolveTextStyle(
-  textStyle: LabelTextStyle | undefined,
-  viewportScale: number,
-) {
+function resolveTextStyle(textStyle: LabelTextStyle | undefined) {
   return {
     fill: textStyle?.color ?? 0xffffff,
     fontFamily: textStyle?.fontFamily ?? "Inter, sans-serif",
-    fontSize: (textStyle?.fontSize ?? 13) / viewportScale,
+    fontSize: textStyle?.fontSize ?? 13,
     fontWeight: textStyle?.fontWeight ?? "600",
   };
 }

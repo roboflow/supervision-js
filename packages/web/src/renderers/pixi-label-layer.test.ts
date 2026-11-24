@@ -598,7 +598,7 @@ describe("pixi label layer", () => {
     expect(previewLabel.visible).toBe(true);
     expect(previewBackground.roundRect).toHaveBeenCalledOnce();
     layer.drawCreationPreview(preview, 1, 2, preview.rect);
-    expect(previewBackground.moveTo).toHaveBeenCalledWith(0, 14);
+    expect(previewBackground.moveTo).toHaveBeenCalledWith(0, 9);
     expect(previewBackground.roundRect).toHaveBeenCalledOnce();
 
     layer.drawCreationPreview(null, 1, 2);
@@ -644,8 +644,35 @@ describe("pixi label layer", () => {
 
     const [background, label] = container.children as [FakeGraphics, FakeText];
 
-    expect(background.y).toBe(16);
-    expect(label.y).toBe(18);
+    expect(background.y).toBe(21);
+    expect(label.y).toBe(23);
+  });
+
+  it("rasterizes label text at its on-screen size at every zoom", () => {
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([firstFrame]),
+      labelStyle: createStableLabelStyle(),
+    });
+    const container = layer.createContainer() as FakeContainer;
+    const preview = { ...firstFrame.detections[0]!, id: "draft-player" };
+
+    for (const viewportScale of [0.25, 1, 8, 32]) {
+      layer.drawFrame(1, viewportScale);
+      layer.drawCreationPreview(preview, 1, viewportScale);
+      const [, label, , previewLabel] = container.children as FakeText[];
+      for (const text of [label!, previewLabel!]) {
+        // The texture holds the requested 14px font and maps 1:1 to the
+        // screen, so its pixels track the display instead of the media.
+        expect(text.style).toMatchObject({ fontSize: 14 });
+        expect(text.scale.x * viewportScale).toBeCloseTo(1);
+        expect(text.scale.y * viewportScale).toBeCloseTo(1);
+        expect(text.height * viewportScale).toBeCloseTo(10);
+        expect(text.styleAssignments).toBe(1);
+      }
+    }
   });
 
   it.each([LabelPlacement.Top, LabelPlacement.InsideBottom])(
@@ -1021,6 +1048,14 @@ class FakeText {
   visible = false;
   x = 0;
   y = 0;
+  readonly scale = {
+    x: 1,
+    y: 1,
+    set(x: number, y = x) {
+      this.x = x;
+      this.y = y;
+    },
+  };
   styleAssignments = 0;
   textAssignments = 0;
 
@@ -1030,7 +1065,7 @@ class FakeText {
   }
 
   get height() {
-    return 10;
+    return 10 * Math.abs(this.scale.y);
   }
 
   get style() {
@@ -1052,7 +1087,7 @@ class FakeText {
   }
 
   get width() {
-    return 20;
+    return 20 * Math.abs(this.scale.x);
   }
 }
 

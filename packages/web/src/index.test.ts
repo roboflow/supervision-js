@@ -1473,10 +1473,11 @@ describe("package entrypoint", () => {
       }),
     );
     expect(pixiMock.textInstances[0]).toMatchObject({
+      scale: { x: 2, y: 2 },
       style: expect.objectContaining({
         fill: 0xffffff,
         fontFamily: "Inter, sans-serif",
-        fontSize: 28,
+        fontSize: 14,
         fontWeight: "600",
       }),
       text: "player 84%",

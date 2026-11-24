@@ -528,6 +528,14 @@ vi.mock("pixi.js", () => {
     alpha = 1;
     destroy = vi.fn();
     height = 16;
+    readonly scale = {
+      x: 1,
+      y: 1,
+      set(x: number, y = x) {
+        this.x = x;
+        this.y = y;
+      },
+    };
     style: unknown;
     visible = true;
     width = 0;
