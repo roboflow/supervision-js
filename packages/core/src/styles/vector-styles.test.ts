@@ -128,4 +128,60 @@ describe("vector presentation styles", () => {
       },
     });
   });
+
+  it("inks an occluded keypoint's cross in the point's own color", () => {
+    const style = new BaseKeypointStyle({
+      definitions: {
+        person: {
+          edges: [],
+          vertices: [
+            { id: 0, name: "a", color: 0xabcdef },
+            { id: 1, name: "b" },
+            { id: 2, name: "c" },
+          ],
+        },
+      },
+      markerFill: { alpha: 0.4, color: 0x22c55e },
+      markerStroke: { alpha: 1, color: 0xffffff, width: 1 },
+      radius: 3.5,
+    });
+    const markers = style.resolve(
+      {
+        className: "person",
+        keypoints: {
+          edges: [],
+          points: [
+            { x: 1, y: 1 },
+            { x: 2, y: 2 },
+            { x: 3, y: 3 },
+          ],
+          visibility: [
+            KeypointVisibility.Occluded,
+            KeypointVisibility.Occluded,
+            KeypointVisibility.Visible,
+          ],
+        },
+      },
+      context,
+    )?.markers;
+
+    // The vertex color, or the marker fill without one; a third of the
+    // marker's diameter wide, so it reads as solidly as a filled point.
+    expect(markers?.[0]?.stroke).toEqual({
+      alpha: 0.4,
+      color: 0xabcdef,
+      width: 7 / 3,
+    });
+    expect(markers?.[1]?.stroke).toEqual({
+      alpha: 0.4,
+      color: 0x22c55e,
+      width: 7 / 3,
+    });
+    // A visible point keeps the contrast ring around its filled disc.
+    expect(markers?.[2]).toMatchObject({
+      fill: { alpha: 0.4, color: 0x22c55e },
+      shape: KeypointMarkerShape.Circle,
+      stroke: { alpha: 1, color: 0xffffff, width: 1 },
+    });
+  });
 });
