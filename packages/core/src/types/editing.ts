@@ -38,6 +38,16 @@ export interface AnnotationHandleDefinition {
   readonly edgeIndex?: number;
   readonly radius: number;
   readonly hitSize: number;
+  /**
+   * Media-space segment the handle also accepts the pointer along, in a band
+   * `hitWidth` wide. Point hit areas are checked first, so corners and
+   * keypoints keep priority over a box side.
+   */
+  readonly span?: {
+    readonly from: Point;
+    readonly to: Point;
+    readonly hitWidth: number;
+  };
   /** Media-space start of the stem drawn toward a rotation control. */
   readonly stemFrom?: Point;
 }
