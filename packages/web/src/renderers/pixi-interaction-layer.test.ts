@@ -15,6 +15,7 @@ import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
 import {
   AnnotationGeometryKind,
   AnnotationGestureStateKind,
+  AnnotationHandleKind,
   createAnnotationEditingEngine,
   createOrientedBoxGeometry,
   DetectionMaskEncoding,
@@ -26,6 +27,7 @@ import {
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type {
   AnnotationEditingEngine,
+  Detection,
   DetectionFrame,
   Point,
   Rect,
@@ -57,6 +59,157 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it("preserves live rotation modifiers across pan and stops reprojecting an interrupted contact", () => {
+    const detection = {
+      id: "rotating",
+      orientedBox: createOrientedBoxGeometry({
+        x: 100,
+        y: 100,
+        width: 100,
+        height: 80,
+      }),
+    } satisfies Detection;
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      resolveRotation: (radians, context) =>
+        context.input.shiftKey ? 0 : radians,
+    });
+    const layer = createPixiInteractionLayer({
+      Container,
+      Rectangle,
+      canInteract: () => true,
+      detectionTimeline: createTimeline({
+        mediaTime: 0,
+        detections: [detection],
+      }),
+      editingEngine: engine,
+      mediaToScreen: (point) => display.toGlobal(point),
+      screenToMedia: (point) => display.toLocal(point),
+      interaction: { mode: MediaInteractionMode.Always },
+    });
+    const display = layer.createDisplay({
+      width: 400,
+      height: 300,
+    }) as Container;
+    layer.drawFrame(0);
+    layer.setSelectedDetection({ detectionId: detection.id });
+    const handle = engine
+      .getHandles(detection)
+      .find((handle) => handle.kind === AnnotationHandleKind.Rotate)!;
+    const send = (type: string, x: number, y: number) =>
+      display.emit(type, {
+        button: 0,
+        buttons: 1,
+        pointerId: 7,
+        getLocalPosition: () => display.toLocal({ x, y }),
+      });
+    send("pointerdown", handle.point.x, handle.point.y);
+    send("globalpointermove", handle.point.x + 30, handle.point.y + 30);
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Rotating);
+    layer.setModifiers({ shiftKey: true });
+    const snapped = engine.getState().preview;
+    display.position.set(-40, -10);
+    layer.viewportChanged();
+    expect(engine.getState().preview).toEqual(snapped);
+    layer.pointerCaptureLost(7, 0, 100);
+    display.position.set(-80, -20);
+    layer.viewportChanged();
+    expect(engine.getState().preview).toEqual(snapped);
+    layer.pointerCancel(7);
+    layer.viewportChanged();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+    expect(onCommit).not.toHaveBeenCalled();
+    layer.destroy();
+  });
+
+  it.each([
+    {
+      shape: "box",
+      detection: {
+        id: "box",
+        rect: { x: 100, y: 100, width: 100, height: 80 },
+      } satisfies Detection,
+    },
+    {
+      shape: "polygon",
+      detection: {
+        id: "polygon",
+        polygon: {
+          points: [
+            { x: 50, y: 60 },
+            { x: 150, y: 60 },
+            { x: 150, y: 140 },
+            { x: 50, y: 140 },
+          ],
+        },
+      } satisfies Detection,
+    },
+  ])(
+    "keeps a dragged $shape handle at the pointer as the viewport pans",
+    ({ detection }) => {
+      const onCommit = vi.fn();
+      const engine = createAnnotationEditingEngine({ onCommit });
+      const layer = createPixiInteractionLayer({
+        Container,
+        Rectangle,
+        canInteract: () => true,
+        detectionTimeline: createTimeline({
+          mediaTime: 0,
+          detections: [detection],
+        }),
+        editingEngine: engine,
+        getViewportScale: () => 2,
+        mediaToScreen: (point) => display.toGlobal(point),
+        screenToMedia: (point) => display.toLocal(point),
+        interaction: { mode: MediaInteractionMode.Always },
+      });
+      const display = layer.createDisplay({
+        width: 400,
+        height: 300,
+      }) as Container;
+      display.scale.set(2);
+      display.position.set(20, 30);
+      layer.drawFrame(0);
+      layer.setSelectedDetection({ detectionId: detection.id });
+      const send = (type: string, x: number, y: number, pointerId = 7) =>
+        display.emit(type, {
+          button: 0,
+          buttons: type === "pointerup" ? 0 : 1,
+          pointerId,
+          timeStamp: 100,
+          getLocalPosition: () => display.toLocal({ x, y }),
+        });
+
+      send("pointerdown", 320, 310);
+      send("globalpointermove", 340, 330);
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Resizing);
+      // A second contact must not replace the stationary dragging pointer.
+      send("globalpointermove", 100, 100, 8);
+      display.position.set(-40, -10);
+      layer.viewportChanged();
+      const preview = engine.getState().preview;
+      const handle =
+        preview?.polygon?.points[2] ??
+        (preview?.rect && {
+          x: preview.rect.x + preview.rect.width / 2,
+          y: preview.rect.y + preview.rect.height / 2,
+        });
+      expect(handle).toEqual({ x: 190, y: 170 });
+      expect(layer.getState().pointerPoint).toEqual(handle);
+      expect(onCommit).not.toHaveBeenCalled();
+      // Reentrant paints and release at the same screen position cannot move it again.
+      layer.viewportChanged();
+      send("pointerup", 340, 330);
+      expect(onCommit).toHaveBeenCalledExactlyOnceWith(preview, detection);
+      display.position.set(-100, -100);
+      layer.viewportChanged();
+      expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      layer.destroy();
+    },
+  );
+
   it.each(["box", "OBB"] as const)(
     "reserves the letterbox around a selected %s for handles and host overrides",
     (geometry) => {
