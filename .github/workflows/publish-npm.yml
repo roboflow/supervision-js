@@ -3,29 +3,247 @@ name: Publish npm package
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: Next version, such as 0.2.18, or patch or minor. Opens a release pull request; merging it publishes. Leave empty to publish this branch as it is.
+        required: false
+        default: ""
+        type: string
       dist_tag:
-        description: Select latest for a stable release; use next only for an explicit prerelease or canary.
+        description: Only used when version is empty. Select latest for a stable release; use next only for an explicit prerelease or canary.
         required: true
         default: latest
         type: choice
         options:
           - next
           - latest
+  # A merged release pull request changes the manifest version. Any other
+  # manifest change resolves to an already-published version and stops there.
+  push:
+    branches:
+      - main
+    paths:
+      - packages/web/package.json
 
 permissions:
   contents: read
 
-concurrency:
-  group: npm-publish
-  cancel-in-progress: false
-
 jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+    name: Open release pull request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Set release version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Release pull requests are prepared from main. ${GITHUB_REF} can only publish its current version: leave version empty." >&2
+            exit 1
+          fi
+
+          previous="$(node -p "require('./packages/web/package.json').version")"
+          npm_latest="$(npm view supervision@latest version 2>/dev/null || true)"
+          node tools/set-release-version.mjs "${REQUESTED_VERSION}"
+          version="$(node -p "require('./packages/web/package.json').version")"
+
+          {
+            echo "### supervision ${previous} → ${version}"
+            echo
+            echo "| | Version |"
+            echo "| --- | --- |"
+            echo "| \`main\` | ${previous} |"
+            echo "| npm \`latest\` | ${npm_latest:-none} |"
+            echo "| Release | ${version} |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${version}" == *-* ]]; then
+            echo "Release pull requests carry stable versions. Publish prerelease ${version} from a release/* branch with the next tag." >&2
+            exit 1
+          fi
+
+          if [[ -n "${npm_latest}" ]] && ! node -e '
+            import("./tools/set-release-version.mjs").then(({ compareVersions }) =>
+              process.exit(compareVersions(process.argv[1], process.argv[2]) > 0 ? 0 : 1));
+          ' "${version}" "${npm_latest}"; then
+            echo "${version} must be greater than npm latest ${npm_latest}." >&2
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "Tag v${version} already exists." >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "previous=${previous}" >> "${GITHUB_OUTPUT}"
+
+      - name: Push release branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release-prep/v${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "${branch}"
+          git commit --all --message "chore: release supervision ${VERSION}"
+          gh auth setup-git --hostname github.com
+          git push origin "HEAD:refs/heads/${branch}"
+
+      - name: Open release pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          set -euo pipefail
+          branch="release-prep/v${VERSION}"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # The same generator writes the GitHub Release after publishing, so
+          # this preview is what the release page will say.
+          notes="$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="v${VERSION}" \
+            -f target_commitish="${GITHUB_SHA}" \
+            --jq .body | sed "s/^## /#### /")"
+
+          body="${RUNNER_TEMP}/release-pull-request.md"
+          cat > "${body}" <<EOF
+          ## Description
+
+          Release \`supervision@${VERSION}\` (from \`${PREVIOUS}\`). Merging publishes it to npm as \`latest\` and creates the \`v${VERSION}\` GitHub Release.
+
+          Opened by [Publish npm package](${run_url}).
+
+          ### Release notes preview
+
+          ${notes}
+
+          ## Type of Change
+
+          - [x] Refactor or maintenance
+
+          ## Validation
+
+          - [x] Version mirrors updated by \`tools/set-release-version.mjs\`.
+          - [ ] \`verify\` passes on this branch.
+
+          ## Notes For Reviewers
+
+          Only release-version values change. Anything that should ship in this release must merge before this pull request.
+          EOF
+
+          if ! gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base main \
+            --head "${branch}" \
+            --title "chore: release supervision ${VERSION}" \
+            --body-file "${body}"; then
+            echo "Could not open the pull request. Allow GitHub Actions to create pull requests in the repository settings, or open it by hand: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${branch}" >&2
+            exit 1
+          fi
+
+      - name: Run CI on the release branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A pull request opened with the automatic token starts no workflows,
+          # so the required verify check would never report. A dispatch is the
+          # one event that token may start, and its check lands on the same
+          # head commit.
+          gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "release-prep/v${VERSION}"
+
+  resolve:
+    if: github.event_name == 'push' || inputs.version == ''
+    name: Resolve release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      dist_tag: ${{ steps.resolve.outputs.dist_tag }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Resolve version and tag
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          publish=true
+
+          if [[ "${EVENT_NAME}" == "push" ]]; then
+            if [[ "${version}" == *-* ]]; then
+              dist_tag=next
+            else
+              dist_tag=latest
+            fi
+
+            if npm view "supervision@${version}" version >/dev/null 2>&1; then
+              echo "supervision@${version} is already published; this push is not a release."
+              publish=false
+            fi
+          else
+            dist_tag="${REQUESTED_DIST_TAG}"
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "dist_tag=${dist_tag}" >> "${GITHUB_OUTPUT}"
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
+
   publish:
+    needs: resolve
     if: >-
-      github.ref == 'refs/heads/main' ||
-      (startsWith(github.ref, 'refs/heads/release/') && inputs.dist_tag == 'next')
+      needs.resolve.outputs.publish == 'true' &&
+      (github.ref == 'refs/heads/main' ||
+      (startsWith(github.ref, 'refs/heads/release/') && needs.resolve.outputs.dist_tag == 'next'))
     name: Verify and publish supervision
     runs-on: ubuntu-latest
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -62,7 +280,7 @@ jobs:
       - name: Publish generated tarball
         shell: bash
         env:
-          DIST_TAG: ${{ inputs.dist_tag }}
+          DIST_TAG: ${{ needs.resolve.outputs.dist_tag }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
@@ -98,7 +316,7 @@ jobs:
       - name: Verify published npm dist-tag
         shell: bash
         env:
-          DIST_TAG: ${{ inputs.dist_tag }}
+          DIST_TAG: ${{ needs.resolve.outputs.dist_tag }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
@@ -135,8 +353,8 @@ jobs:
           exit 1
 
   github-release:
-    needs: publish
-    if: inputs.dist_tag == 'latest'
+    needs: [resolve, publish]
+    if: needs.resolve.outputs.dist_tag == 'latest'
     name: Create GitHub release
     runs-on: ubuntu-latest
     permissions:

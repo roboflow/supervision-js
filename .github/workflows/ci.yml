@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+  # The release workflow dispatches CI on the release pull request branch.
+  workflow_dispatch:
 
 jobs:
   verify:
