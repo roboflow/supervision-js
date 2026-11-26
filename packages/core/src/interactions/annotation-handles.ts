@@ -21,6 +21,8 @@ import {
 const HANDLE_RADIUS = 6;
 const ADD_HANDLE_RADIUS = 3.6;
 const HANDLE_HIT_SIZE = 16;
+/** Screen-pixel width of the strip along each box side that resizes it. */
+const SIDE_HIT_WIDTH = 6;
 
 export function getAnnotationHandles(
   detection: Detection,
@@ -30,6 +32,7 @@ export function getAnnotationHandles(
   if (detection.locked || detection.mask) return [];
   const radius = HANDLE_RADIUS / viewportScale;
   const hitSize = HANDLE_HIT_SIZE / viewportScale;
+  const sideHitWidth = SIDE_HIT_WIDTH / viewportScale;
 
   if (detection.polygon)
     return getPathHandles(detection.polygon.points, true, radius, hitSize);
@@ -58,7 +61,7 @@ export function getAnnotationHandles(
     // The skeleton's box resizes like any box; keypoints come last so a point
     // sitting on the box edge still wins the hit test.
     return [
-      ...getBoxHandles(detection.rect, radius, hitSize),
+      ...getBoxHandles(detection.rect, radius, hitSize, sideHitWidth),
       ...keypointHandles,
     ];
   }
@@ -72,7 +75,8 @@ export function getAnnotationHandles(
       return getOrientedBoxHandles(rectangle, viewportScale, placement);
     }
   }
-  if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
+  if (detection.rect)
+    return getBoxHandles(detection.rect, radius, hitSize, sideHitWidth);
   return [];
 }
 
@@ -95,6 +99,17 @@ export function pickAnnotationHandle(
     // areas; the nearest one is what the pointer is on. Later handles draw on
     // top, so they win exact ties.
     const distance = Math.hypot(dx, dy);
+    if (distance <= pickedDistance) {
+      picked = handle;
+      pickedDistance = distance;
+    }
+  }
+  if (picked) return picked;
+  // A box side resizes from anywhere along it, not only from its midpoint.
+  for (const handle of handles) {
+    if (!handle.span) continue;
+    const distance = distanceToSegment(point, handle.span.from, handle.span.to);
+    if (distance > handle.span.hitWidth / 2) continue;
     if (distance <= pickedDistance) {
       picked = handle;
       pickedDistance = distance;
@@ -301,28 +316,41 @@ export function offsetDetection(
   };
 }
 
-function getBoxHandles(rect: Rect, radius: number, hitSize: number) {
+/** Without `sideHitWidth`, as for oriented boxes, the sides resize from their midpoints only. */
+function getBoxHandles(
+  rect: Rect,
+  radius: number,
+  hitSize: number,
+  sideHitWidth?: number,
+): AnnotationHandleDefinition[] {
   const left = rect.x - rect.width / 2;
   const right = rect.x + rect.width / 2;
   const top = rect.y - rect.height / 2;
   const bottom = rect.y + rect.height / 2;
-  const definitions: readonly [string, Point, string][] = [
-    ["nw", { x: left, y: top }, "nwse-resize"],
-    ["n", { x: rect.x, y: top }, "ns-resize"],
-    ["ne", { x: right, y: top }, "nesw-resize"],
-    ["e", { x: right, y: rect.y }, "ew-resize"],
-    ["se", { x: right, y: bottom }, "nwse-resize"],
-    ["s", { x: rect.x, y: bottom }, "ns-resize"],
-    ["sw", { x: left, y: bottom }, "nesw-resize"],
-    ["w", { x: left, y: rect.y }, "ew-resize"],
+  const topLeft = { x: left, y: top };
+  const topRight = { x: right, y: top };
+  const bottomRight = { x: right, y: bottom };
+  const bottomLeft = { x: left, y: bottom };
+  const definitions: readonly [string, Point, string, [Point, Point]?][] = [
+    ["nw", topLeft, "nwse-resize"],
+    ["n", { x: rect.x, y: top }, "ns-resize", [topLeft, topRight]],
+    ["ne", topRight, "nesw-resize"],
+    ["e", { x: right, y: rect.y }, "ew-resize", [topRight, bottomRight]],
+    ["se", bottomRight, "nwse-resize"],
+    ["s", { x: rect.x, y: bottom }, "ns-resize", [bottomLeft, bottomRight]],
+    ["sw", bottomLeft, "nesw-resize"],
+    ["w", { x: left, y: rect.y }, "ew-resize", [topLeft, bottomLeft]],
   ];
-  return definitions.map(([id, point, cursor]) => ({
+  return definitions.map(([id, point, cursor, side]) => ({
     cursor,
     hitSize,
     id,
     kind: AnnotationHandleKind.Resize,
     point,
     radius,
+    ...(side && sideHitWidth !== undefined
+      ? { span: { from: side[0], to: side[1], hitWidth: sideHitWidth } }
+      : {}),
   }));
 }
 
