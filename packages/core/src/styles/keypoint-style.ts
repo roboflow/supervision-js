@@ -112,27 +112,45 @@ export class BaseKeypointStyle implements KeypointStyle {
         return [];
       }
 
+      const fill = {
+        alpha: markerFill?.alpha ?? 1,
+        color:
+          definition?.vertices[index]?.color ?? markerFill?.color ?? 0x00ff66,
+      };
+      const stroke = resolveStrokeStyle(markerStroke, {
+        alpha: 1,
+        color: 0xffffff,
+        width: 2,
+      });
+
+      if (visibility === KeypointVisibility.Occluded) {
+        // A cross has no area to fill, so its strokes carry the point's
+        // color, a third of the marker's diameter wide.
+        return [
+          {
+            fill,
+            index,
+            point,
+            radius,
+            shape: KeypointMarkerShape.Cross,
+            stroke: {
+              ...stroke,
+              alpha: fill.alpha,
+              color: fill.color,
+              width: (radius * 2) / 3,
+            },
+          },
+        ];
+      }
+
       return [
         {
-          fill: {
-            alpha: markerFill?.alpha ?? 1,
-            color:
-              definition?.vertices[index]?.color ??
-              markerFill?.color ??
-              0x00ff66,
-          },
+          fill,
           index,
           point,
           radius,
-          shape:
-            visibility === KeypointVisibility.Occluded
-              ? KeypointMarkerShape.Cross
-              : KeypointMarkerShape.Circle,
-          stroke: resolveStrokeStyle(markerStroke, {
-            alpha: 1,
-            color: 0xffffff,
-            width: 2,
-          }),
+          shape: KeypointMarkerShape.Circle,
+          stroke,
         },
       ];
     });

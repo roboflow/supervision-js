@@ -138,9 +138,14 @@ export function createAnnotationEditingEngine(
         case "resize": {
           // A click on a handle is not a drag: a keypoint tapped to open its
           // menu must not snap to the pointer, so nothing previews or commits
-          // until the pointer has travelled like a move gesture.
+          // until the pointer travels. A keypoint is placed pixel by pixel, so
+          // any movement drags it; other handles wait for the move threshold.
           const moved =
-            gesture.moved || exceedsMoveThreshold(gesture.start, input);
+            gesture.moved ||
+            (gesture.handle.kind === AnnotationHandleKind.Keypoint
+              ? input.point.x !== gesture.start.point.x ||
+                input.point.y !== gesture.start.point.y
+              : exceedsMoveThreshold(gesture.start, input));
           const active = (gesture = { ...gesture, current: input, moved });
           if (moved) {
             setPreview(resolveHandlePreview(active, input), active);
