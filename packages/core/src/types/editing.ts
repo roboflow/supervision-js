@@ -240,6 +240,39 @@ export interface AnnotationOverlayStyle {
       BoxStrokeStyle,
       AnnotationEditingPreviewStyleContext
     >;
+    /**
+     * Fill of the vertices already placed in a multi-click polygon draft.
+     * Defaults to the preview stroke's color lightened halfway to white.
+     */
+    readonly draftVertexFill?: DetectionStyleValue<
+      BoxFillStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
+    /**
+     * Outline of those vertices, in screen pixels. Defaults to the preview
+     * stroke's color, 1.5 px wide.
+     */
+    readonly draftVertexStroke?: DetectionStyleValue<
+      BoxStrokeStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
+    /**
+     * Segment from a polygon draft's last vertex to the pointer. Defaults to
+     * a dashed, fainter copy of the preview stroke.
+     */
+    readonly draftCursorStroke?: DetectionStyleValue<
+      BoxStrokeStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
+    /**
+     * Segment from the pointer back to the first vertex once three vertices
+     * are placed. Defaults to the same dashed stroke as `draftCursorStroke`;
+     * a transparent stroke hides it.
+     */
+    readonly draftClosingStroke?: DetectionStyleValue<
+      BoxStrokeStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
   };
   readonly selectionHandle?: {
     /**
