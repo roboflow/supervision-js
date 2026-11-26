@@ -794,6 +794,8 @@ export async function createPixiMediaScene(
             }
           },
           getViewportScale: () => viewportScale,
+          mediaToScreen: (point) => mediaPointToScreen(point),
+          screenToMedia: (point) => screenPointToMedia(point),
           getMediaDimensions: () => ({
             height: mediaHeight,
             width: mediaWidth,
@@ -909,7 +911,7 @@ export async function createPixiMediaScene(
       AnnotationGestureStateKind.Rotating
     )
       return;
-    options.editingEngine.setModifiers?.({
+    interactionLayer?.setModifiers({
       shiftKey: event.shiftKey,
       altKey: event.altKey,
       ctrlKey: event.ctrlKey,
@@ -1222,6 +1224,7 @@ export async function createPixiMediaScene(
     focusLayer?.syncViewportBounds();
     regionLayer.syncViewportBounds();
     maskBrushPreview?.setViewportScale(viewportScale);
+    interactionLayer?.viewportChanged();
   };
 
   function resolveViewportBounds() {
@@ -1245,6 +1248,15 @@ export async function createPixiMediaScene(
       x: screenPoint.x + fit.x,
       y: screenPoint.y + fit.y,
     };
+  };
+
+  const screenPointToMedia = (point: Point): Point => {
+    const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
+    const fitPoint = viewport.screenToMedia({
+      x: point.x - fit.x,
+      y: point.y - fit.y,
+    });
+    return { x: fitPoint.x / fit.scale, y: fitPoint.y / fit.scale };
   };
 
   // Pixi's ResizePlugin listens to the window resize event, which does not
@@ -1757,15 +1769,7 @@ export async function createPixiMediaScene(
     },
 
     screenToMedia(point) {
-      const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
-      const fitPoint = viewport.screenToMedia({
-        x: point.x - fit.x,
-        y: point.y - fit.y,
-      });
-      return {
-        x: fitPoint.x / fit.scale,
-        y: fitPoint.y / fit.scale,
-      };
+      return screenPointToMedia(point);
     },
 
     mediaToScreen(point) {

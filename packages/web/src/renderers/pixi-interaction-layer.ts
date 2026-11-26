@@ -22,6 +22,7 @@ import type {
   MediaInteractionOptions,
   AnnotationEditingEngine,
   AnnotationPointerInput,
+  AnnotationModifierKeys,
 } from "supervision-js-core";
 import { DetectionPickTarget, MediaInteractionMode } from "supervision-js-core";
 
@@ -115,6 +116,8 @@ export interface PixiInteractionLayer {
     timeStamp?: number,
   ): void;
   pointerUpFallback(pointerId: number): void;
+  viewportChanged(): void;
+  setModifiers(modifiers: AnnotationModifierKeys): void;
   destroy(): void;
 }
 
@@ -137,6 +140,8 @@ export function createPixiInteractionLayer(options: {
   ) => DetectionPickResult | null;
   readonly editingEngine?: AnnotationEditingEngine;
   readonly getViewportScale?: () => number;
+  readonly mediaToScreen?: (point: DetectionPickPoint) => DetectionPickPoint;
+  readonly screenToMedia?: (point: DetectionPickPoint) => DetectionPickPoint;
   readonly getMediaDimensions?: () => {
     readonly width: number;
     readonly height: number;
@@ -157,6 +162,10 @@ export function createPixiInteractionLayer(options: {
   let marqueeStart: DetectionPickPoint | null = null;
   let marqueeRect: PixiInteractionLayerState["marqueeRect"] = null;
   let pointerPoint: DetectionPickPoint | null = null;
+  let editingPointer: {
+    input: AnnotationPointerInput;
+    screen: DetectionPickPoint;
+  } | null = null;
   const handledPresses = new Map<number | undefined, AnnotationPointerInput>();
   let suppressedTap: AnnotationPointerInput | null = null;
   let defaultPress: {
@@ -168,6 +177,7 @@ export function createPixiInteractionLayer(options: {
   let activeFrame: DetectionFrame | undefined;
   let isDestroyed = false;
   const unsubscribeEditing = options.editingEngine?.subscribe((state) => {
+    if (state.kind === AnnotationGestureStateKind.Idle) editingPointer = null;
     const press = defaultPress;
     if (press?.kind !== "editing") return;
     if (
@@ -306,6 +316,54 @@ export function createPixiInteractionLayer(options: {
       }
     },
     pointerUpFallback: deferPressRetirement,
+    setModifiers(modifiers) {
+      if (editingPointer)
+        editingPointer.input = {
+          ...editingPointer.input,
+          shiftKey: modifiers.shiftKey ?? false,
+          altKey: modifiers.altKey ?? false,
+          ctrlKey: modifiers.ctrlKey ?? false,
+          metaKey: modifiers.metaKey ?? false,
+        };
+      options.editingEngine?.setModifiers?.(modifiers);
+    },
+    viewportChanged() {
+      const engine = options.editingEngine;
+      const state = engine?.getState();
+      if (
+        !container ||
+        !engine ||
+        !editingPointer ||
+        captureReleased ||
+        !canHandleInteraction() ||
+        !state ||
+        ![
+          AnnotationGestureStateKind.Creating,
+          AnnotationGestureStateKind.Resizing,
+          AnnotationGestureStateKind.Rotating,
+        ].includes(state.kind) ||
+        !samePointer(editingPointer.input, {
+          pointerId: state.pointerId ?? undefined,
+        })
+      )
+        return;
+
+      const point =
+        options.screenToMedia?.(editingPointer.screen) ?? editingPointer.screen;
+      const previous = editingPointer.input.point;
+      if (point.x === previous.x && point.y === previous.y) return;
+      // A viewport transform moves the media beneath a stationary pointer.
+      // Reproject the accepted input; never retain Pixi's pooled event.
+      const input = {
+        ...editingPointer.input,
+        point: { x: point.x, y: point.y },
+      };
+      editingPointer.input = input;
+      pointerPoint = input.point;
+      updateCursor(input.point);
+      engine.pointerMove(input);
+      notifyStateChange();
+    },
     destroy() {
       isDestroyed = true;
       handledPresses.clear();
@@ -379,7 +437,9 @@ export function createPixiInteractionLayer(options: {
 
     pointerPoint = getPoint(event);
     updateCursor(pointerPoint);
-    editingEngine.pointerMove(toPointerInput(event, pointerPoint));
+    const input = toPointerInput(event, pointerPoint);
+    rememberEditingPointer(input);
+    editingEngine.pointerMove(input);
     notifyStateChange();
   }
 
@@ -504,6 +564,7 @@ export function createPixiInteractionLayer(options: {
       }
       const press = { kind: "editing" as const, input };
       defaultPress = press;
+      rememberEditingPointer(input);
       if (handle && selected) {
         options.editingEngine.beginHandleDrag(selected, handle, input);
       } else {
@@ -549,7 +610,9 @@ export function createPixiInteractionLayer(options: {
       editingEngine &&
       editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
     ) {
-      editingEngine.pointerUp(toPointerInput(event, getPoint(event)));
+      const input = toPointerInput(event, getPoint(event));
+      rememberEditingPointer(input);
+      editingEngine.pointerUp(input);
       notifyStateChange();
     }
     if (press) releasePress(press);
@@ -636,6 +699,8 @@ export function createPixiInteractionLayer(options: {
     handledPresses.delete(pointerId);
     const press = defaultPress;
     if (press && !samePointer(press.input, { pointerId })) return;
+    if (editingPointer && samePointer(editingPointer.input, { pointerId }))
+      editingPointer = null;
     if (press) defaultPress = null;
     captureReleased = false;
     const tap = suppressedTap;
@@ -970,6 +1035,12 @@ export function createPixiInteractionLayer(options: {
     if (!container) return { x: 0, y: 0 };
     const point = event.getLocalPosition(container);
     return { x: point.x, y: point.y };
+  }
+
+  function rememberEditingPointer(input: AnnotationPointerInput) {
+    if (!container) return;
+    const screen = options.mediaToScreen?.(input.point) ?? input.point;
+    editingPointer = { input, screen: { x: screen.x, y: screen.y } };
   }
 
   function toPointerInput(
