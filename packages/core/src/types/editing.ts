@@ -86,6 +86,15 @@ export interface AnnotationHandleOptions {
   readonly rotationHandle?:
     | AnnotationRotationHandleOptions
     | ((detection: Detection) => AnnotationRotationHandleOptions);
+  /**
+   * Where a polygon or polyline takes the press that inserts a vertex.
+   * `"midpoint"`, the default, takes it only on each edge's midpoint handle,
+   * and only a drag inserts. `"edge"` also takes it anywhere along the edge,
+   * in a band as wide as a box side's, and a click inserts the vertex at the
+   * closest point on the edge. Vertex and midpoint hit areas keep priority.
+   * An engine applies this only while no creation tool is set.
+   */
+  readonly vertexInsertion?: "midpoint" | "edge";
 }
 
 export interface AnnotationRotationContext {
@@ -125,6 +134,15 @@ export interface AnnotationEditingEngineOptions extends AnnotationHandleOptions 
     context: AnnotationRotationContext,
   ) => number;
   readonly viewportScale?: () => number;
+  /**
+   * What a click on a polygon or polyline vertex does: a press released
+   * before it travels the move threshold. `"none"`, the default, leaves the
+   * geometry unchanged. `"delete"` removes the vertex as `deleteVertex()`
+   * does, keeping at least three polygon or two polyline vertices. Keypoints
+   * are not vertices. Applies only while no creation tool is set, so a click
+   * that places a new annotation's point never edits the selected one.
+   */
+  readonly vertexClick?: "none" | "delete";
   readonly onStateChange?: (state: AnnotationEditingState) => void;
   readonly onPreview?: (preview: Detection | null) => void;
   /** Runs before terminal idle subscribers; getState() already reflects completion. */

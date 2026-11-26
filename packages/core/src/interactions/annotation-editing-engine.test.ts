@@ -1574,6 +1574,154 @@ describe("annotation editing engine", () => {
     );
   });
 
+  it("deletes a clicked vertex and inserts one where an edge is clicked when the host opts in", () => {
+    const square = {
+      id: "square",
+      polygon: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 100, y: 0 },
+          { x: 100, y: 100 },
+          { x: 0, y: 100 },
+        ],
+      },
+    };
+    const click = (
+      engine: ReturnType<typeof createAnnotationEditingEngine>,
+      detection: Detection,
+      point: Point,
+      to = point,
+    ) => {
+      const handle = pickAnnotationHandle(engine.getHandles(detection), point);
+      if (!handle) return undefined;
+      engine.beginHandleDrag(detection, handle, {
+        point,
+        timestamp: 0,
+        pointerId: 1,
+        mediaDimensions: { width: 200, height: 200 },
+      });
+      engine.pointerMove({ point: to, timestamp: 16, pointerId: 1 });
+      engine.pointerUp({ point: to, timestamp: 32, pointerId: 1 });
+      return handle;
+    };
+
+    // By default a click changes nothing, and an edge takes a press only at
+    // its midpoint handle.
+    const defaultCommit = vi.fn();
+    const defaults = createAnnotationEditingEngine({ onCommit: defaultCommit });
+    expect(click(defaults, square, { x: 101, y: 1 })?.id).toBe("vertex-1");
+    expect(click(defaults, square, { x: 50, y: 1 })?.id).toBe("add-0");
+    expect(click(defaults, square, { x: 25, y: 1 })).toBeUndefined();
+    expect(defaultCommit).not.toHaveBeenCalled();
+
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({
+      onCommit,
+      vertexClick: "delete",
+      vertexInsertion: "edge",
+    });
+
+    // A click inside a vertex's hit area deletes that vertex.
+    expect(click(engine, square, { x: 101, y: 1 })?.id).toBe("vertex-1");
+    expect(onCommit).toHaveBeenLastCalledWith(
+      {
+        ...square,
+        polygon: {
+          points: [
+            { x: 0, y: 0 },
+            { x: 100, y: 100 },
+            { x: 0, y: 100 },
+          ],
+        },
+      },
+      square,
+    );
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+
+    // A click a quarter of the way along an edge, just off it, inserts a
+    // vertex at the closest point on that edge.
+    expect(click(engine, square, { x: 25, y: 2 })?.id).toBe("add-0");
+    expect(onCommit).toHaveBeenLastCalledWith(
+      {
+        ...square,
+        polygon: {
+          points: [
+            { x: 0, y: 0 },
+            { x: 25, y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: 100 },
+            { x: 0, y: 100 },
+          ],
+        },
+      },
+      square,
+    );
+    // So does a click on the midpoint handle.
+    expect(click(engine, square, { x: 52, y: 101 })?.id).toBe("add-2");
+    expect(onCommit.mock.lastCall?.[0].polygon.points[3]).toEqual({
+      x: 52,
+      y: 100,
+    });
+
+    // Drags keep their meaning: a vertex moves and an edge press inserts a
+    // vertex that follows the pointer.
+    click(engine, square, { x: 1, y: 99 }, { x: 10, y: 120 });
+    expect(onCommit.mock.lastCall?.[0].polygon.points[3]).toEqual({
+      x: 10,
+      y: 120,
+    });
+    click(engine, square, { x: 99, y: 25 }, { x: 130, y: 25 });
+    expect(onCommit.mock.lastCall?.[0].polygon.points).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 130, y: 25 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ]);
+
+    // The band is a few screen pixels wide at any zoom; inside it, the body
+    // still moves.
+    expect(click(engine, square, { x: 25, y: 8 })).toBeUndefined();
+
+    // A triangle keeps its last three vertices, as with deleteVertex().
+    onCommit.mockClear();
+    const triangle = {
+      id: "triangle",
+      polygon: { points: square.polygon.points.slice(0, 3) },
+    };
+    expect(click(engine, triangle, { x: 100, y: 100 })?.id).toBe("vertex-2");
+    expect(onCommit).not.toHaveBeenCalled();
+    const polyline = {
+      id: "polyline",
+      polyline: { points: square.polygon.points.slice(0, 2) },
+    };
+    expect(click(engine, polyline, { x: 0, y: 0 })?.id).toBe("vertex-0");
+    expect(onCommit).not.toHaveBeenCalled();
+
+    // Keypoints are not vertices.
+    const skeleton = {
+      id: "skeleton",
+      keypoints: { edges: [[0, 1]] as const, points: square.polygon.points },
+    };
+    expect(click(engine, skeleton, { x: 0, y: 0 })?.kind).toBe(
+      AnnotationHandleKind.Keypoint,
+    );
+    expect(onCommit).not.toHaveBeenCalled();
+
+    // While a creation tool is set, a click that places a point must not edit
+    // the selected shape: handles edit nothing and edges take no press.
+    engine.setCreationTool({
+      geometry: AnnotationGeometryKind.Polygon,
+      createDetection: (points) => ({
+        polygon: { points: points as Point[] },
+      }),
+    });
+    expect(click(engine, square, { x: 101, y: 1 })?.id).toBe("vertex-1");
+    expect(click(engine, square, { x: 50, y: 1 })?.id).toBe("add-0");
+    expect(click(engine, square, { x: 25, y: 1 })).toBeUndefined();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it("moves a keypoint with the first pixel of movement but keeps box handles still", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });

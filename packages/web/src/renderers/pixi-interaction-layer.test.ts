@@ -1330,6 +1330,68 @@ describe("pixi interaction layer", () => {
     },
   );
 
+  it("routes plain vertex and edge clicks to an engine that edits paths on click", () => {
+    const onCommit = vi.fn();
+    const editingEngine = createAnnotationEditingEngine({
+      onCommit,
+      vertexClick: "delete",
+      vertexInsertion: "edge",
+    });
+    const polygon = {
+      id: "polygon",
+      polygon: {
+        points: [
+          { x: 20, y: 20 },
+          { x: 80, y: 20 },
+          { x: 80, y: 80 },
+          { x: 20, y: 80 },
+        ],
+      },
+    };
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline({ ...frame, detections: [polygon] }),
+      editingEngine,
+      interaction: { mode: MediaInteractionMode.Always, multiSelect: true },
+    });
+    const display = layer.createDisplay({
+      width: 120,
+      height: 100,
+    }) as FakeContainer;
+    layer.drawFrame(frame.mediaTime);
+    layer.setSelectedDetection({ detectionId: "polygon" });
+    const click = (x: number, y: number) => {
+      const input = createPointerEvent(display, x, y, { pointerId: 1 });
+      display.emit("pointerdown", input);
+      display.emit("pointerup", input);
+      display.emit("pointertap", input);
+    };
+
+    display.emit("pointermove", createPointerEvent(display, 35, 21));
+    expect(display.cursor).toBe("copy");
+    click(35, 21);
+    expect(onCommit.mock.lastCall?.[0].polygon.points).toEqual([
+      { x: 20, y: 20 },
+      { x: 35, y: 20 },
+      { x: 80, y: 20 },
+      { x: 80, y: 80 },
+      { x: 20, y: 80 },
+    ]);
+
+    click(81, 79);
+    expect(onCommit.mock.lastCall?.[0].polygon.points).toEqual([
+      { x: 20, y: 20 },
+      { x: 80, y: 20 },
+      { x: 20, y: 80 },
+    ]);
+    expect(onCommit).toHaveBeenCalledTimes(2);
+    expect(
+      layer.getState().selectedPicks.map((pick) => pick.detection.id),
+    ).toEqual(["polygon"]);
+  });
+
   it("releases each multi-click press while retaining the draft and unidentified hover", () => {
     const onCommit = vi.fn();
     const editingEngine = createAnnotationEditingEngine({ onCommit });

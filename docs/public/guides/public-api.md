@@ -415,6 +415,14 @@ Select mode changes selection without starting a move. Shift-click and the
 secondary button still delete an editable polygon/polyline vertex when its
 selected vertex handle is hit; active creation tools keep their gesture priority.
 
+By default a plain click on a vertex or an edge's midpoint handle edits
+nothing: a drag moves the vertex or inserts one. To edit paths on click, pass
+`vertexClick: "delete"` to `createAnnotationEditingEngine()`, which deletes a
+clicked vertex while keeping at least three polygon or two polyline vertices,
+and `vertexInsertion: "edge"`, which lets a press anywhere along an edge insert
+a vertex: a click inserts it at the closest point on the edge, and a drag
+places it under the pointer. Both apply only while no creation tool is set.
+
 Use `interaction.onPointerPress` when a host gesture needs the renderer's
 resolved target before selection or editing begins. It receives normalized
 `input`, the visible composed `pick` (including labels and masks, or `null`
