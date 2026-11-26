@@ -1530,6 +1530,7 @@ describe("annotation editing engine", () => {
     )!;
 
     // A click lands inside the handle's hit area, not on its exact center.
+    // Browsers can report a move that goes nowhere between press and release.
     engine.beginHandleDrag(detection, keypointHandle, {
       point: { x: 17, y: 21 },
       timestamp: 0,
@@ -1537,11 +1538,11 @@ describe("annotation editing engine", () => {
     });
     expect(engine.getState().preview).toBeNull();
     engine.pointerMove({
-      point: { x: 18, y: 22 },
+      point: { x: 17, y: 21 },
       timestamp: 16,
       pointerId: 1,
     });
-    engine.pointerUp({ point: { x: 18, y: 22 }, timestamp: 32, pointerId: 1 });
+    engine.pointerUp({ point: { x: 17, y: 21 }, timestamp: 32, pointerId: 1 });
 
     expect(onPreview).not.toHaveBeenCalled();
     expect(onCommit).not.toHaveBeenCalled();
@@ -1571,6 +1572,62 @@ describe("annotation editing engine", () => {
       }),
       detection,
     );
+  });
+
+  it("moves a keypoint with the first pixel of movement but keeps box handles still", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const detection = {
+      id: "skeleton-1",
+      keypoints: {
+        edges: [[0, 1]] as const,
+        points: [
+          { x: 15, y: 20 },
+          { x: 25, y: 40 },
+        ],
+      },
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const handles = getAnnotationHandles(detection);
+    const keypointHandle = handles.find((handle) => handle.id === "kp-0")!;
+    const boxHandle = handles.find(
+      (handle) => handle.kind === AnnotationHandleKind.Resize,
+    )!;
+
+    // Placing a point precisely takes one-pixel nudges: the point lands under
+    // the pointer as soon as it moves, and the release commits it.
+    engine.beginHandleDrag(detection, keypointHandle, {
+      point: { x: 15, y: 20 },
+      timestamp: 0,
+      pointerId: 1,
+    });
+    engine.pointerMove({
+      point: { x: 16, y: 20 },
+      timestamp: 16,
+      pointerId: 1,
+    });
+    expect(engine.getState().preview?.keypoints?.points[0]).toEqual({
+      x: 16,
+      y: 20,
+    });
+    engine.pointerUp({ point: { x: 16, y: 20 }, timestamp: 32, pointerId: 1 });
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit.mock.calls[0]![0].keypoints.points[0]).toEqual({
+      x: 16,
+      y: 20,
+    });
+
+    // A box handle still needs the click threshold before it resizes.
+    engine.beginHandleDrag(detection, boxHandle, {
+      point: boxHandle.point,
+      timestamp: 100,
+      pointerId: 1,
+    });
+    const nudge = { x: boxHandle.point.x + 1, y: boxHandle.point.y };
+    engine.pointerMove({ point: nudge, timestamp: 116, pointerId: 1 });
+    expect(engine.getState().preview).toBeNull();
+    engine.pointerUp({ point: nudge, timestamp: 132, pointerId: 1 });
+    expect(onCommit).toHaveBeenCalledTimes(1);
   });
 
   it("moves a whole skeleton without changing its shape", () => {

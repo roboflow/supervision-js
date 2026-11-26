@@ -231,8 +231,11 @@ session.setPresentation({
 ```
 
 `BaseKeypointStyle` draws `NotLabeled` points as absent, `Occluded` points as
-crosses, and `Visible` points as circles. Pass `definitions` when class-specific
-skeleton vertices and edges need their own colors.
+crosses, and `Visible` points as circles. A cross is inked in the point's own
+color (its vertex color or `markerFill`), a third of the marker's diameter wide;
+`markerStroke` rings the circles and lends a cross only its cap, join and dash.
+Pass `definitions` when class-specific skeleton vertices and edges need their
+own colors.
 
 A contrast stroke drawn under the line keeps a thin class-colored path readable
 where the media beneath it happens to share that color. `BasePolylineStyle`
