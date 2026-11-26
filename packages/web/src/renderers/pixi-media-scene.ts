@@ -284,6 +284,11 @@ export async function createPixiMediaScene(
   } = pixi;
   // The package build drops side-effect-only imports, so register explicitly.
   extensions.add(PrepareSystem);
+  /* Pixi generates its shader and uniform upload code with `new Function`,
+   * which a Content Security Policy without 'unsafe-eval' blocks. This module
+   * swaps in Pixi's eval-free versions; it is imported dynamically for the same
+   * reason as above. */
+  await import("pixi.js/unsafe-eval");
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
   /**
