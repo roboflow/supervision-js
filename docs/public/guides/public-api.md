@@ -384,7 +384,10 @@ against the live editing preview, so their decorations follow creation, move,
 resize, and rotation gestures. Their style context preserves the detection's
 frame position and visibility; `isCreating` identifies a creation preview.
 `AnnotationOverlayStyle` controls the editable geometry and handles, including
-the oriented-box outline and fill.
+the oriented-box outline and fill. A multi-click polygon draft takes its placed
+vertices from `editingPreview.draftVertexFill` and `draftVertexStroke`, and the
+segments to and from the pointer from `draftCursorStroke` and
+`draftClosingStroke`; each defaults to a variant of `editingPreview.stroke`.
 
 With an editing engine, retained boxes, polygons, polylines, keypoints, and
 shape decorations share detection order: higher `Detection.zIndex` is in front;

@@ -15,6 +15,7 @@ import {
   type BoxFillStyle,
   type BoxStrokeStyle,
   type DetectionFrame,
+  type DetectionStyleValue,
   type Detection,
   type KeypointStyle,
   type Point,
@@ -211,6 +212,11 @@ function drawEditingPreview(
     detection,
     styleContext,
   )!;
+  const resolveDraft = <TValue>(
+    value:
+      | DetectionStyleValue<TValue, AnnotationEditingPreviewStyleContext>
+      | undefined,
+  ) => resolveStyleValue(value, detection, styleContext);
   // Rects coexist with keypoints and OBBs as independent editable geometry.
   // Polygon, polyline and mask rects are derived bounds instead.
   if (
@@ -261,6 +267,12 @@ function drawEditingPreview(
         viewportScale,
         stroke,
         closeZoneStroke,
+        {
+          closingStroke: resolveDraft(style.editingPreview.draftClosingStroke),
+          cursorStroke: resolveDraft(style.editingPreview.draftCursorStroke),
+          vertexFill: resolveDraft(style.editingPreview.draftVertexFill),
+          vertexStroke: resolveDraft(style.editingPreview.draftVertexStroke),
+        },
       );
       return renderedBox;
     }
@@ -327,6 +339,12 @@ function drawCreatingPolygon(
   viewportScale: number,
   stroke: BoxStrokeStyle,
   closeZoneStroke: BoxStrokeStyle,
+  draft: {
+    readonly closingStroke: BoxStrokeStyle | undefined;
+    readonly cursorStroke: BoxStrokeStyle | undefined;
+    readonly vertexFill: BoxFillStyle | undefined;
+    readonly vertexStroke: BoxStrokeStyle | undefined;
+  },
 ) {
   if (points.length < 2) return;
 
@@ -360,24 +378,34 @@ function drawCreatingPolygon(
       dash: [6, 4],
       width: stroke.width * 0.8,
     };
-    drawPixiPath(graphics, [last, cursor], false, ghostStroke, viewportScale);
-    if (placed.length >= 3) {
+    const cursorStroke = draft.cursorStroke ?? ghostStroke;
+    const closingStroke = draft.closingStroke ?? ghostStroke;
+    if (isVisibleStroke(cursorStroke)) {
+      drawPixiPath(
+        graphics,
+        [last, cursor],
+        false,
+        cursorStroke,
+        viewportScale,
+      );
+    }
+    if (placed.length >= 3 && isVisibleStroke(closingStroke)) {
       drawPixiPath(
         graphics,
         [cursor, first],
         false,
-        ghostStroke,
+        closingStroke,
         viewportScale,
       );
     }
   }
 
-  const vertexFill = {
+  const vertexFill = draft.vertexFill ?? {
     alpha: stroke.alpha,
     color: lightenColor(stroke.color, 0.5),
   };
   const vertexStroke = resolvePixiStroke(
-    {
+    draft.vertexStroke ?? {
       alpha: stroke.alpha,
       color: stroke.color,
       width: CREATION_VERTEX_STROKE_WIDTH,
@@ -437,6 +465,10 @@ function drawCreatingPolygon(
       resolveScreenLength(CREATION_CLOSE_DOT_RADIUS, viewportScale),
     )
     .fill({ alpha: 1, color: highlightColor });
+}
+
+function isVisibleStroke(stroke: BoxStrokeStyle) {
+  return stroke.alpha > 0 && stroke.width > 0;
 }
 
 function resolveCloseHighlightColor(
@@ -681,6 +713,18 @@ interface ResolvedAnnotationOverlayStyle {
     readonly closeZoneStroke: NonNullable<
       NonNullable<AnnotationOverlayStyle["editingPreview"]>["closeZoneStroke"]
     >;
+    readonly draftVertexFill?: NonNullable<
+      AnnotationOverlayStyle["editingPreview"]
+    >["draftVertexFill"];
+    readonly draftVertexStroke?: NonNullable<
+      AnnotationOverlayStyle["editingPreview"]
+    >["draftVertexStroke"];
+    readonly draftCursorStroke?: NonNullable<
+      AnnotationOverlayStyle["editingPreview"]
+    >["draftCursorStroke"];
+    readonly draftClosingStroke?: NonNullable<
+      AnnotationOverlayStyle["editingPreview"]
+    >["draftClosingStroke"];
   };
   readonly selectionHandle: {
     readonly fill: NonNullable<

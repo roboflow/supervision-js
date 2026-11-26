@@ -465,6 +465,85 @@ describe("Pixi annotation overlay presentation", () => {
     expect(graphics.moveTo.mock.calls.length).toBeGreaterThan(4);
   });
 
+  it("styles a polygon draft's vertices and pointer segments from the overlay style", () => {
+    const graphics = createGraphicsMock();
+    const placed = [
+      { x: 10, y: 10 },
+      { x: 40, y: 10 },
+      { x: 40, y: 40 },
+    ];
+    const cursor = { x: 60, y: 60 };
+    const preview = {
+      className: "road",
+      id: "draft-polygon",
+      polygon: { points: [...placed, cursor] },
+      rect: { height: 50, width: 50, x: 35, y: 35 },
+    };
+    const engine = {
+      getState: () => ({
+        activeDetectionId: null,
+        activeHandleId: null,
+        kind: AnnotationGestureStateKind.Creating,
+        pointerId: 1,
+        preview,
+      }),
+      hasCreationTool: () => true,
+    };
+    const stroke = { alpha: 1, color: 0xff0056, width: 2 };
+    const draftVertexStroke = vi.fn((detection: Detection) => ({
+      alpha: 1,
+      color: detection.className === "road" ? 0x111827 : 0x000000,
+      width: 1,
+    }));
+    const layer = createPixiAnnotationOverlayLayer(engine as never, {
+      editingPreview: {
+        closeZoneStroke: { alpha: 1, color: 0x22c55e, width: 2 },
+        draftClosingStroke: { ...stroke, alpha: 0 },
+        draftCursorStroke: stroke,
+        draftVertexFill: { alpha: 1, color: 0xffffff },
+        draftVertexStroke,
+        stroke,
+      },
+    });
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame: undefined,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [],
+      viewportScale: 2,
+    });
+
+    // Placed vertices: white with the configured dark outline.
+    expect(graphics.circle).toHaveBeenCalledWith(10, 10, 3);
+    expect(
+      graphics.fill.mock.calls.filter(([fill]) => fill.color === 0xffffff),
+    ).toHaveLength(placed.length);
+    expect(draftVertexStroke).toHaveBeenCalledWith(
+      preview,
+      expect.objectContaining({ viewportScale: 2 }),
+    );
+    expect(graphics.stroke).toHaveBeenCalledWith({
+      alpha: 1,
+      color: 0x111827,
+      width: 0.5,
+    });
+    // The pointer segment is drawn solid, like the placed edges.
+    expect(graphics.moveTo).toHaveBeenCalledWith(40, 40);
+    expect(graphics.lineTo).toHaveBeenCalledWith(60, 60);
+    const classStrokes = graphics.stroke.mock.calls
+      .map(([value]) => value)
+      .filter((value) => value.color === 0xff0056);
+    expect(classStrokes.filter((value) => value.alpha === 1)).toHaveLength(2);
+    // A transparent closing stroke draws no segment back to the first vertex.
+    expect(classStrokes.some((value) => value.alpha === 0)).toBe(false);
+    expect(graphics.lineTo).not.toHaveBeenCalledWith(10, 10);
+  });
+
   it("highlights the first polygon vertex when the cursor can close it", () => {
     const graphics = createGraphicsMock();
     const preview = {
