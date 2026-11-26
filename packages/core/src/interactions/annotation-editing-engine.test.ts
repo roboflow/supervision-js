@@ -4,6 +4,7 @@ import {
   AnnotationHandleKind,
   AnnotationGeometryKind,
   applyAnnotationHandleDrag,
+  createOrientedBoxGeometry,
   createAnnotationEditingEngine,
   createEditableAnnotationFrameSession,
   deleteAnnotationVertex,
@@ -1184,6 +1185,50 @@ describe("annotation editing engine", () => {
     engine.pointerDown({ point: { x: 0, y: 0 }, timestamp: 0 });
     engine.pointerUp({ point: { x: 10, y: 10 }, timestamp: 100 });
     expect(onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("resizes a box from anywhere along a side, not only its midpoint", () => {
+    // left 60, right 140, top 70, bottom 130
+    const rect = { x: 100, y: 100, width: 80, height: 60 };
+    const handles = getAnnotationHandles({ rect }, 1);
+    const pick = (x: number, y: number, scale = 1) =>
+      pickAnnotationHandle(getAnnotationHandles({ rect }, scale), { x, y });
+
+    // A quarter of the way along each side, far from every point handle.
+    expect(pick(75, 71)).toMatchObject({ id: "n", cursor: "ns-resize" });
+    expect(pick(139, 115)).toMatchObject({ id: "e", cursor: "ew-resize" });
+    expect(pick(120, 131)).toMatchObject({ id: "s", cursor: "ns-resize" });
+    expect(pick(59, 85)).toMatchObject({ id: "w", cursor: "ew-resize" });
+    // Corners keep their own diagonal handles.
+    expect(pick(62, 72)).toMatchObject({ id: "nw" });
+    // The side is a thin strip: a few screen pixels inside, the body moves.
+    expect(pick(75, 76)).toBeUndefined();
+    // The strip keeps its screen width at any zoom.
+    expect(pick(75, 70.5, 4)).toMatchObject({ id: "n" });
+    expect(pick(75, 71, 4)).toBeUndefined();
+
+    // A keypoint on the side still wins over the strip.
+    const skeleton = {
+      keypoints: { edges: [], points: [{ x: 75, y: 72 }] },
+      rect,
+    };
+    expect(
+      pickAnnotationHandle(getAnnotationHandles(skeleton), { x: 75, y: 71 }),
+    ).toMatchObject({ kind: AnnotationHandleKind.Keypoint });
+
+    // Oriented boxes keep midpoint-only sides; their edges carry other controls.
+    const oriented = getAnnotationHandles(
+      { orientedBox: createOrientedBoxGeometry(rect, 0) },
+      1,
+    );
+    expect(oriented.some((handle) => handle.span)).toBe(false);
+    expect(pickAnnotationHandle(oriented, { x: 75, y: 71 })).toBeUndefined();
+
+    // Dragging the strip moves only that side.
+    const north = pickAnnotationHandle(handles, { x: 75, y: 71 })!;
+    expect(
+      applyAnnotationHandleDrag({ rect }, north, { x: 75, y: 50 }).rect,
+    ).toEqual({ x: 100, y: 90, width: 80, height: 80 });
   });
 
   it("provides resize, midpoint, and safe vertex deletion handles", () => {
