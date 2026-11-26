@@ -255,6 +255,9 @@ component pattern.
 
 ## Strict CSP Worker Hosting
 
+The package does not evaluate strings as code, so the policy's `script-src`
+needs no `'unsafe-eval'`.
+
 The zero-configuration default requires `worker-src blob:`. If the application's
 Content Security Policy disallows Blob workers, copy the standalone script
 exported at `supervision/render-preparation-worker` into the application's

@@ -7,6 +7,9 @@ import {
 import type { MediaRendererSceneOptions } from "./media-renderer-scene";
 import { MediaRendererFit } from "#types/media-renderer";
 
+/** The order in which Pixi's eval-free module and application inits ran. */
+const pixiSetupOrder = vi.hoisted((): string[] => []);
+
 vi.mock("pixi.js", () => {
   class Container {
     children: unknown[] = [];
@@ -33,7 +36,9 @@ vi.mock("pixi.js", () => {
     canvas = new OwnedElement();
     cancelResize = vi.fn();
     destroy = vi.fn();
-    init = vi.fn(async () => undefined);
+    init = vi.fn(async () => {
+      pixiSetupOrder.push("application init");
+    });
     render = vi.fn();
     renderer = {
       background: { color: 0 },
@@ -82,6 +87,11 @@ vi.mock("pixi.js", () => {
 });
 
 vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
+
+vi.mock("pixi.js/unsafe-eval", () => {
+  pixiSetupOrder.push("eval-free code paths");
+  return {};
+});
 
 class OwnedElement {
   readonly children: OwnedElement[] = [];
@@ -157,6 +167,18 @@ describe("Pixi media scene lifecycle", () => {
     expect(host.children).toEqual([sentinel, host.children.at(-1)]);
     second.destroy();
     expect(host.children).toEqual([sentinel]);
+  });
+
+  it("installs Pixi's eval-free code paths before any application starts", async () => {
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+
+    const scene = await createPixiMediaScene(
+      createOptions(new OwnedElement() as unknown as HTMLElement),
+    );
+    scene.destroy();
+
+    expect(pixiSetupOrder[0]).toBe("eval-free code paths");
+    expect(pixiSetupOrder).toContain("application init");
   });
 });
 
