@@ -34,10 +34,24 @@ export function getAnnotationHandles(
   const hitSize = HANDLE_HIT_SIZE / viewportScale;
   const sideHitWidth = SIDE_HIT_WIDTH / viewportScale;
 
+  const edgeHitWidth =
+    options.vertexInsertion === "edge" ? sideHitWidth : undefined;
   if (detection.polygon)
-    return getPathHandles(detection.polygon.points, true, radius, hitSize);
+    return getPathHandles(
+      detection.polygon.points,
+      true,
+      radius,
+      hitSize,
+      edgeHitWidth,
+    );
   if (detection.polyline)
-    return getPathHandles(detection.polyline.points, false, radius, hitSize);
+    return getPathHandles(
+      detection.polyline.points,
+      false,
+      radius,
+      hitSize,
+      edgeHitWidth,
+    );
   if (detection.keypoints) {
     const keypointHandles = detection.keypoints.points.flatMap(
       (point, geometryIndex) =>
@@ -261,6 +275,22 @@ export function deleteAnnotationVertex(
     : { ...detection, polyline: { points } };
 }
 
+/** Inserts a vertex into a path edge at the edge's closest point to `point`. */
+export function insertAnnotationVertex(
+  detection: Detection,
+  edgeIndex: number,
+  point: Point,
+): Detection | null {
+  const key = detection.polygon ? "polygon" : "polyline";
+  const points = detection[key]?.points;
+  const from = points?.[edgeIndex];
+  const to = points?.[(edgeIndex + 1) % points.length];
+  if (!points || !from || !to) return null;
+  const next = [...points];
+  next.splice(edgeIndex + 1, 0, closestPointOnSegment(point, from, to));
+  return { ...detection, [key]: { points: next } };
+}
+
 export function offsetDetection(
   detection: Detection,
   dx: number,
@@ -354,11 +384,13 @@ function getBoxHandles(
   }));
 }
 
+/** With `edgeHitWidth`, each edge's insertion handle also takes presses along the edge. */
 function getPathHandles(
   points: readonly Point[],
   closed: boolean,
   radius: number,
   hitSize: number,
+  edgeHitWidth?: number,
 ) {
   const handles: AnnotationHandleDefinition[] = points.map(
     (point, geometryIndex) => ({
@@ -383,6 +415,9 @@ function getPathHandles(
       kind: AnnotationHandleKind.AddVertex,
       point: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
       radius: ADD_HANDLE_RADIUS / (HANDLE_RADIUS / radius),
+      ...(edgeHitWidth !== undefined
+        ? { span: { from, to, hitWidth: edgeHitWidth } }
+        : {}),
     });
   }
   return handles;
@@ -456,6 +491,21 @@ function replacePathPoint(
   const points = [...geometry.points];
   points[index] = point;
   return { ...detection, [key]: { points } };
+}
+
+function closestPointOnSegment(point: Point, from: Point, to: Point): Point {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) return { x: from.x, y: from.y };
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - from.x) * dx + (point.y - from.y) * dy) / lengthSquared,
+    ),
+  );
+  return { x: from.x + t * dx, y: from.y + t * dy };
 }
 
 /** Finds the closest path segment, useful for contextual vertex insertion. */

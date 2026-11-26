@@ -19,6 +19,7 @@ import {
   applyAnnotationHandleDrag,
   deleteAnnotationVertex,
   getAnnotationHandles,
+  insertAnnotationVertex,
   offsetDetection,
 } from "#interactions/annotation-handles";
 
@@ -75,7 +76,11 @@ export function createAnnotationEditingEngine(
   return {
     getState: () => state,
     getHandles: (detection, viewportScale = scale()) =>
-      getAnnotationHandles(detection, viewportScale, options),
+      getAnnotationHandles(
+        detection,
+        viewportScale,
+        tool ? { ...options, vertexInsertion: "midpoint" } : options,
+      ),
     setModifiers(modifiers) {
       if (
         gesture?.kind !== "resize" ||
@@ -236,7 +241,12 @@ export function createAnnotationEditingEngine(
         return;
       }
       if (!active.moved) {
-        notifyStateChange(next);
+        const clicked =
+          active.kind === "resize" && !activeTool
+            ? resolveHandleClick(active)
+            : null;
+        if (clicked) commit(clicked, active.detection, next);
+        else notifyStateChange(next);
         return;
       }
       const preview =
@@ -499,6 +509,26 @@ export function createAnnotationEditingEngine(
       ...active.detection,
       orientedBox: createOrientedBoxGeometry(initial, rotation),
     };
+  }
+
+  /** A click edits a path only where the host opted in; otherwise it is a cancelled drag. */
+  function resolveHandleClick(
+    active: Extract<ActiveGesture, { kind: "resize" }>,
+  ): Detection | null {
+    const { detection, handle, start } = active;
+    if (
+      handle.kind === AnnotationHandleKind.Vertex &&
+      handle.geometryIndex !== undefined &&
+      options.vertexClick === "delete"
+    )
+      return deleteAnnotationVertex(detection, handle.geometryIndex);
+    if (
+      handle.kind === AnnotationHandleKind.AddVertex &&
+      handle.edgeIndex !== undefined &&
+      options.vertexInsertion === "edge"
+    )
+      return insertAnnotationVertex(detection, handle.edgeIndex, start.point);
+    return null;
   }
 
   function resolveMovePreview(
