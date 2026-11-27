@@ -82,7 +82,9 @@ pipeline before replaying or revising frames behind its processed frontier.
 - `Box` tracks detections that have `rect` geometry.
 - `Mask` tracks detections that have masks. It reuses `rect` as the cheap mask
   extent when available and decodes RLE bounds only when necessary.
-- `Keypoints` tracks detections that have keypoints using their point bounds.
+- `Keypoints` tracks detections using the bounds of their labeled keypoints.
+  `NotLabeled` points are ignored, and a detection whose remaining points have
+  no width or no height is skipped for that frame.
 
 The geometry choice affects association only. Observed boxes, masks, keypoints,
 and metadata remain exact. When the detector misses a confirmed track, SORT

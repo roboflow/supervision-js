@@ -10,7 +10,7 @@ import {
   type TrackingProjection,
 } from "#types/post-processing";
 import { computeDetectionMaskRect } from "#utils/detection-masks";
-import { getPointsRect } from "#utils/geometry";
+import { getKeypointsRect } from "#utils/geometry";
 
 const DEFAULT_LOST_TRACK_BUFFER = 30;
 const DEFAULT_FRAME_RATE = 30;
@@ -245,7 +245,7 @@ function resolveTrackingRect(
       return detection.rect ?? computeDetectionMaskRect(detection.mask);
     case TrackingGeometry.Keypoints:
       return detection.keypoints
-        ? getPointsRect(detection.keypoints.points)
+        ? getKeypointsRect(detection.keypoints)
         : undefined;
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { KeypointVisibility } from "#types/detections";
 import {
   centerRectToTopLeftRect,
   distanceToSegment,
@@ -81,6 +82,102 @@ describe("geometry utilities", () => {
         },
       }),
     ).toEqual({ height: 10, width: 10, x: 5, y: 5 });
+  });
+
+  it("ignores NotLabeled keypoints when falling back to keypoint bounds", () => {
+    expect(
+      getDetectionRect({
+        keypoints: {
+          edges: [],
+          points: [
+            { x: 600, y: 400 },
+            { x: 700, y: 500 },
+            { x: 0, y: 0 },
+            { x: 650, y: 450 },
+          ],
+          visibility: [
+            KeypointVisibility.Visible,
+            KeypointVisibility.Occluded,
+            KeypointVisibility.NotLabeled,
+            KeypointVisibility.Visible,
+          ],
+        },
+      }),
+    ).toEqual({ height: 100, width: 100, x: 650, y: 450 });
+  });
+
+  it("keeps keypoints that have no visibility entry in the bounds", () => {
+    expect(
+      getDetectionRect({
+        keypoints: {
+          edges: [],
+          points: [
+            { x: 0, y: 0 },
+            { x: 10, y: 20 },
+          ],
+        },
+      }),
+    ).toEqual({ height: 20, width: 10, x: 5, y: 10 });
+  });
+
+  it("has no keypoint bounds when every keypoint is NotLabeled", () => {
+    const keypoints = {
+      edges: [],
+      points: [
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+      ],
+      visibility: [
+        KeypointVisibility.NotLabeled,
+        KeypointVisibility.NotLabeled,
+      ],
+    };
+
+    expect(getDetectionRect({ keypoints })).toBeUndefined();
+    expect(
+      getDetectionRect({
+        keypoints,
+        rect: { height: 4, width: 4, x: 2, y: 2 },
+      }),
+    ).toEqual({ height: 4, width: 4, x: 2, y: 2 });
+  });
+
+  it("has no keypoint bounds when NotLabeled points hold real coordinates", () => {
+    expect(
+      getDetectionRect({
+        keypoints: {
+          edges: [],
+          points: [
+            { x: 50, y: 60 },
+            { x: 70, y: 80 },
+          ],
+          visibility: [
+            KeypointVisibility.NotLabeled,
+            KeypointVisibility.NotLabeled,
+          ],
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("collapses to a zero-size rect when one labeled keypoint remains", () => {
+    expect(
+      getDetectionRect({
+        keypoints: {
+          edges: [],
+          points: [
+            { x: 600, y: 400 },
+            { x: 0, y: 0 },
+            { x: 0, y: 0 },
+          ],
+          visibility: [
+            KeypointVisibility.Visible,
+            KeypointVisibility.NotLabeled,
+            KeypointVisibility.NotLabeled,
+          ],
+        },
+      }),
+    ).toEqual({ height: 0, width: 0, x: 600, y: 400 });
   });
 
   it("uses even-odd polygon containment", () => {

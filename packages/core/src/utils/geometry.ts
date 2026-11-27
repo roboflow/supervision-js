@@ -1,4 +1,11 @@
-import type { Detection, Point, Rect, TopLeftRect } from "#types/detections";
+import {
+  type Detection,
+  type KeypointGeometry,
+  KeypointVisibility,
+  type Point,
+  type Rect,
+  type TopLeftRect,
+} from "#types/detections";
 
 export function centerRectToTopLeftRect(rect: Rect): TopLeftRect {
   return {
@@ -43,13 +50,29 @@ export function getPointsRect(points: readonly Point[]): Rect | undefined {
   };
 }
 
+/**
+ * Bounds of the labeled keypoints. `NotLabeled` points are absent by the
+ * visibility contract: their coordinates may be (0, 0) placeholders or
+ * low-confidence predictions, so neither counts toward the extent.
+ */
+export function getKeypointsRect(
+  keypoints: KeypointGeometry,
+): Rect | undefined {
+  return getPointsRect(
+    keypoints.points.filter(
+      (_, index) =>
+        keypoints.visibility?.[index] !== KeypointVisibility.NotLabeled,
+    ),
+  );
+}
+
 export function getDetectionRect(detection: Detection): Rect | undefined {
   return (
     detection.rect ??
     getPointsRect(detection.polygon?.points ?? []) ??
     getPointsRect(detection.orientedBox?.points ?? []) ??
     getPointsRect(detection.polyline?.points ?? []) ??
-    getPointsRect(detection.keypoints?.points ?? [])
+    (detection.keypoints ? getKeypointsRect(detection.keypoints) : undefined)
   );
 }
 
