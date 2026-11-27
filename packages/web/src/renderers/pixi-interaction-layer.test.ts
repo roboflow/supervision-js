@@ -961,7 +961,7 @@ describe("pixi interaction layer", () => {
       point: [200, 20],
       selection: ["mask"],
       pick: "mask",
-      kind: AnnotationGestureStateKind.Idle,
+      kind: AnnotationGestureStateKind.Moving,
     },
     {
       name: "locked body",

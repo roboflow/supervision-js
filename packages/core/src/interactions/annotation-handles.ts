@@ -11,6 +11,11 @@ import {
   type Point,
   type Rect,
 } from "#types/detections";
+import { computeDetectionMaskRect } from "#utils/detection-masks";
+import {
+  decodeCompressedRleCounts,
+  encodeCompressedRleCounts,
+} from "#utils/detection-frames";
 import { distanceToSegment } from "#utils/geometry";
 
 import {
@@ -295,10 +300,44 @@ export function offsetDetection(
   detection: Detection,
   dx: number,
   dy: number,
+  mediaDimensions?: Pick<Rect, "width" | "height">,
 ): Detection {
+  let mask = detection.mask;
+  if (mask) {
+    const bounds = computeDetectionMaskRect(mask);
+    if (!bounds) return detection;
+    const scaleX = (mediaDimensions?.width ?? mask.width) / mask.width;
+    const scaleY = (mediaDimensions?.height ?? mask.height) / mask.height;
+    const rasterDx = Math.max(
+      bounds.width / 2 - bounds.x,
+      Math.min(
+        Math.round(dx / scaleX),
+        mask.width - bounds.width / 2 - bounds.x,
+      ),
+    );
+    const rasterDy = Math.max(
+      bounds.height / 2 - bounds.y,
+      Math.min(
+        Math.round(dy / scaleY),
+        mask.height - bounds.height / 2 - bounds.y,
+      ),
+    );
+    if (rasterDx === 0 && rasterDy === 0) return detection;
+    // A clamped integer translation shifts every foreground run by the same
+    // column-major offset. Only the leading/trailing background runs change.
+    const counts = decodeCompressedRleCounts(mask.counts);
+    if (counts.length % 2 === 0) counts.push(0);
+    const shift = rasterDx * mask.height + rasterDy;
+    counts[0] = (counts[0] ?? 0) + shift;
+    counts[counts.length - 1] = counts[counts.length - 1]! - shift;
+    mask = { ...mask, counts: encodeCompressedRleCounts(counts) };
+    dx = rasterDx * scaleX;
+    dy = rasterDy * scaleY;
+  }
   const offsetPoint = ({ x, y }: Point) => ({ x: x + dx, y: y + dy });
   return {
     ...detection,
+    ...(mask ? { mask } : {}),
     ...(detection.rect
       ? {
           rect: {

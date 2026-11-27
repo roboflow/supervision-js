@@ -97,4 +97,17 @@ transparent. `preferTopmost` makes pointer picking follow this same stack.
 Labels and interaction overlays keep their established positions above it.
 
 This mode retains independent cropped mask coverage and one active texture per
-mask. Omit `maskOrder` to keep the dense mask layer used by existing sessions.
+mask. Without an editing engine, omitting `maskOrder` keeps the dense mask
+layer. Editable sessions retain independent mask displays so the active mask can
+move on its own; they still draw below vector geometry unless `maskOrder` is set.
+
+## Moving masks
+
+With an annotation editing engine attached to the renderer, drag an unlocked mask
+with the selection tool to move the entire object. Movement snaps to whole mask
+raster pixels and stops at the raster edges, preserving every occupied pixel.
+When the mask resolution differs from the media, movement and bounds are projected
+back into media coordinates. Pass the media dimensions to `offsetDetection` when
+using that helper directly with a scaled mask.
+Cancellation restores the original position. A committed detection contains the
+translated RLE counts and bounds; moving only its rectangle does not move a mask.
